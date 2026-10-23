@@ -34,8 +34,13 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	return func() { cancel(); <-done; manager.Close() }, nil
 }
 
-// runClaudePeerRegistration advertises peers at startup, whenever discovery
-// commits a session change, and every 30 seconds so idle peers age out.
+// claudePeerChangeSettle is how long registration waits after a session
+// change, so a burst of discovery commits is advertised in one pass.
+var claudePeerChangeSettle = time.Second
+
+// runClaudePeerRegistration advertises peers at startup, shortly after
+// discovery commits a session change, and every 30 seconds so idle peers age
+// out.
 func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error, retire func(time.Time)) {
 	changed, watching := d.watchCatalogSessions(ctx)
 	defer func() { <-watching }()
@@ -49,6 +54,15 @@ func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(c
 			return
 		case <-ticker.C:
 		case <-changed:
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(claudePeerChangeSettle):
+			}
+			select {
+			case <-changed:
+			default:
+			}
 		}
 	}
 }
@@ -127,7 +141,8 @@ func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) *c
 // of listing surfaces again, so a failing surface is listed once per
 // discovery pass and stale rows are not proxied.
 func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error) {
-	snapshot, err := d.Registry.CatalogSnapshot()
+	now := time.Now()
+	sessions, err := d.Registry.CatalogActiveSessions(now.Add(-surface.ActiveWindow))
 	if err != nil {
 		d.logRuntimeError("claude-peers:catalog", err)
 		return
@@ -136,9 +151,8 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	for _, adapter := range d.Surfaces {
 		configured[adapter.Name()] = true
 	}
-	now := time.Now()
 	var eligible []surface.Session
-	for _, record := range snapshot.Sessions {
+	for _, record := range sessions {
 		session := record.Session
 		if record.Freshness.Stale || !surface.RecentlyActive(session, now) {
 			continue

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,5 +115,42 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("discovered session waited for the 30 second ticker")
+	}
+}
+
+func TestPeerRegistrationRunsOncePerBurstOfDiscoveryCommits(t *testing.T) {
+	settle := claudePeerChangeSettle
+	claudePeerChangeSettle = 400 * time.Millisecond
+	t.Cleanup(func() { claudePeerChangeSettle = settle })
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reg.Close() })
+	d := newTestDaemon(t, reg, []surface.Surface{&daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	passes := make(chan struct{}, 32)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.runClaudePeerRegistration(ctx, func(context.Context, []surface.Session) map[string]error { return nil }, func(time.Time) { passes <- struct{}{} })
+	}()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-passes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup pass did not run")
+	}
+	for index := range 5 {
+		id := fmt.Sprintf("burst-%d", index)
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: time.Now()}
+		if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(time.Second)
+	if count := len(passes); count != 1 {
+		t.Fatalf("%d passes after a burst of five commits, want one", count)
 	}
 }

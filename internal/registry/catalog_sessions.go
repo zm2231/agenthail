@@ -721,9 +721,11 @@ func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool,
 	return fingerprint, true, nil
 }
 
-const catalogSnapshotQuery = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
+const catalogSessionSelect = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
 		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
+		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
+
+const catalogSnapshotQuery = catalogSessionSelect + `
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`
 
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
@@ -774,6 +776,34 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// CatalogActiveSessions returns the catalog's sessions that are working, or
+// not offline and active since the given time, newest first. It reads only
+// those rows, so a caller that needs no other session skips the full snapshot.
+func (r *Registry) CatalogActiveSessions(since time.Time) ([]CatalogSessionState, error) {
+	// Activity is stored in whole milliseconds, so the first one at or after
+	// since is the bound.
+	sinceMS := since.UnixMilli()
+	if since.After(time.UnixMilli(sinceMS)) {
+		sinceMS++
+	}
+	rows, err := r.read.Query(catalogSessionSelect+`
+		WHERE s.status=? OR (s.status<>? AND s.last_active_ms>=?)
+		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`, string(surface.StatusBusy), string(surface.StatusOffline), sinceMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sessions []CatalogSessionState
+	for rows.Next() {
+		state, err := scanCatalogSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, state)
+	}
+	return sessions, rows.Err()
 }
 
 // CatalogSurfaces returns the last health each surface's discovery recorded.
