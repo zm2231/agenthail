@@ -16,6 +16,7 @@ const (
 	kindChoice kind = iota
 	kindNumber
 	kindColor
+	kindTextColor
 	kindList
 	kindBackground
 	kindVersion
@@ -42,6 +43,14 @@ func number(name, def, doc string, min, max float64) Key {
 
 func color(name, def, doc string, words ...string) Key {
 	return Key{Name: name, Default: def, Doc: doc, kind: kindColor, choices: words}
+}
+
+func textColor(role, doc string, words ...string) Key {
+	def := "default"
+	if len(words) > 0 {
+		def = words[0]
+	}
+	return Key{Name: "color." + role, Default: def, Doc: doc, kind: kindTextColor, choices: append(words, "default")}
 }
 
 // DefaultBackground is what fills the window until ui.conf says otherwise.
@@ -79,6 +88,19 @@ var Keys = []Key{
 	color("scrim.tint", "auto", "Colour of the layer that keeps text readable: auto takes the background's own hue, darkened.", "auto", "black"),
 	number("scrim.feather", "240", "Points over which that layer fades out around text on open areas.", 40, 320),
 	number("contrast.target", "4.5", "Minimum contrast for every text role. Increase contrast raises it to 7.", 4.5, 7),
+
+	textColor("body", "Body text: replies, messages and anything without a role of its own."),
+	textColor("muted", "Secondary text: tool rows, labels and summaries."),
+	textColor("faint", "Quiet text: annotations, hints and tool objects."),
+	textColor("meta", "Timestamps, ages and turn footers."),
+	textColor("link", "Links. accent follows theme.accent.", "accent"),
+	textColor("code", "Code text, inline and in blocks; syntax colours stay the highlighter's."),
+	textColor("working", "Live work: working labels, rings and progress."),
+	textColor("needs-you", "What needs you: questions, approvals and waiting sessions."),
+	textColor("error", "Errors, failures and unavailable sessions."),
+	textColor("done", "Finished work and added diff lines."),
+	textColor("diff.removed", "Removed diff lines."),
+	textColor("peer", "Messages from another agent."),
 
 	choice("titlebar.tabs", "sessions", "Open sessions as tabs in the title bar.", "sessions", "none"),
 	choice("titlebar.tabs.label", "alias-title", "What a tab shows.", "alias-title", "alias", "title"),
@@ -139,6 +161,17 @@ func (k Key) check(value string) (string, string) {
 		}
 		words := append(append([]string{}, k.choices...), "#rrggbb")
 		return "", fmt.Sprintf("%s must be %s", k.Name, strings.Join(words, " or "))
+	case kindTextColor:
+		if contains(k.choices, value) {
+			return value, ""
+		}
+		if pair, ok := parsePair(value); ok {
+			if !strings.Contains(value, "/") {
+				return pair.Dark, ""
+			}
+			return pair.Dark + "/" + pair.Light, ""
+		}
+		return "", fmt.Sprintf("%s must be %s, #rrggbb, or #rrggbb/#rrggbb for dark/light", k.Name, strings.Join(k.choices, " or "))
 	case kindList:
 		if value == "none" {
 			return value, ""

@@ -209,3 +209,39 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	c.read += len(p)
 	return len(p), nil
 }
+
+func TestUIAPIServesTextColoursForTheAskingDevice(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
+
+	var view uiView
+	if code := api.do(http.MethodPost, "/api/v1/ui?class=phone", `{"action":"set","set":["color.faint@phone = #303030/#e0e0e0","color.link = accent","theme.accent = #1b2a6b"]}`, &view); code != http.StatusOK {
+		t.Fatalf("set status=%d", code)
+	}
+	for _, role := range uiconf.TextRoles {
+		if color, ok := view.Colors[role]; !ok || color.Dark == "" || color.Light == "" || color.Increased == nil {
+			t.Fatalf("phone colours lack %s: %+v", role, view.Colors)
+		}
+	}
+	faint := view.Colors["faint"]
+	if faint.Dark == "#303030" || faint.Light == "#e0e0e0" || len(faint.Lifted) == 0 {
+		t.Fatalf("an unreadable phone colour was served as chosen: %+v", faint)
+	}
+	if view.Colors["link"].Dark != view.Colors["accent"].Dark {
+		t.Fatalf("link does not follow the accent: %+v vs %+v", view.Colors["link"], view.Colors["accent"])
+	}
+
+	var mac uiView
+	if code := api.do(http.MethodGet, "/api/v1/ui?class=mac", "", &mac); code != http.StatusOK {
+		t.Fatalf("mac status=%d", code)
+	}
+	if mac.Colors["faint"].Dark == faint.Dark {
+		t.Fatalf("a phone line reached the mac: %+v", mac.Colors["faint"])
+	}
+
+	recorder := httptest.NewRecorder()
+	dashboardRouter(d).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/palette.css", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "--color-body:") || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "text/css") {
+		t.Fatalf("palette.css status=%d type=%q body=%q", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+}
