@@ -25,7 +25,7 @@ func (s gatedStream) PrepareSessionStream(context.Context, *surface.Session) (se
 }
 
 func (p gatedProjects) List(ctx context.Context) ([]Project, error) {
-	return nil, p.gate.wait(ctx, "List")
+	return []Project{}, p.gate.wait(ctx, "List")
 }
 func (p gatedProjects) LeadSession(ctx context.Context, project string) (string, error) {
 	if project == "" {

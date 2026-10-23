@@ -122,6 +122,10 @@ type State struct {
 	AudioProvider  string           `json:"audioProvider,omitempty"`
 	CodingProvider string           `json:"codingProvider,omitempty"`
 	TerminalReason string           `json:"terminalReason,omitempty"`
+	// InputMuted is the phone's last reported microphone state for the call:
+	// muted, or held by the system. InputRevision orders those reports.
+	InputMuted    bool  `json:"inputMuted"`
+	InputRevision int64 `json:"inputRevision,omitempty"`
 }
 
 type Action struct {
@@ -131,6 +135,9 @@ type Action struct {
 	Text      string `json:"text"`
 	MessageID string `json:"messageId"`
 	TargetID  string `json:"targetId"`
+	// Muted and InputRevision carry an input-state report.
+	Muted         *bool `json:"muted,omitempty"`
+	InputRevision int64 `json:"inputRevision,omitempty"`
 }
 
 type diskState struct {
@@ -524,6 +531,19 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		s.state.NativeHeartbeatEnrolled = true
 		s.seen()
 		return nil
+	case "input-state":
+		s.mu.Lock()
+		v := &s.state.State
+		if a.AttemptID == "" || a.AttemptID != v.AttemptID || !s.active() || a.Muted == nil || a.InputRevision <= 0 {
+			s.unlock()
+			return errors.New("input state requires the current call, its mute state and a revision")
+		}
+		if a.InputRevision <= v.InputRevision {
+			s.unlock()
+			return nil
+		}
+		v.InputMuted, v.InputRevision = *a.Muted, a.InputRevision
+		return s.commit()
 	case "connected":
 		s.mu.Lock()
 		v := &s.state.State
@@ -554,7 +574,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		s.unlock()
 		return s.createOperator(ctx)
 	case "select":
-		_, err := s.selectTarget(ctx, a.TargetID, false)
+		_, err := s.selectTarget(ctx, a.TargetID, selectForCall)
 		return err
 	case "transfer":
 		s.mu.Lock()
@@ -563,10 +583,10 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		if !connected {
 			return errors.New("voice transfer requires the current connected call")
 		}
-		_, err := s.selectTarget(ctx, a.TargetID, true)
+		_, err := s.selectTarget(ctx, a.TargetID, transferByPhone)
 		return err
 	case "delegate":
-		return s.delegate(ctx, a)
+		return s.delegate(ctx, a, false)
 	case "target-interrupt":
 		return s.interruptTarget(ctx, a)
 	case "start":
@@ -655,6 +675,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	s.spoken = nil
 	v.Events, v.Truncated = []Event{}, false
 	v.AttemptID, v.Phase, v.SDP, v.Message, v.TerminalReason = a.AttemptID, "starting", "", "", ""
+	v.InputMuted, v.InputRevision = false, 0
 	s.state.NativeHeartbeatEnrolled = false
 	v.AudioProvider = "openai-realtime-via-codex"
 	sessionBound := v.Target != nil
@@ -759,7 +780,7 @@ func (s *Service) text(ctx context.Context, a Action) error {
 	v := &s.state.State
 	if v.Target != nil {
 		s.unlock()
-		return s.delegate(ctx, a)
+		return s.delegate(ctx, a, false)
 	}
 	if a.AttemptID != v.AttemptID || v.Phase != "connected" {
 		s.unlock()
@@ -802,9 +823,27 @@ func (s *Service) text(ctx context.Context, a Action) error {
 // selectTarget routes voice to a session, or back to the orchestrator for an
 // empty request. A transfer moves the connected call; it returns the target's
 // name. The caller holds s.op.
-func (s *Service) selectTarget(ctx context.Context, requested string, transfer bool) (string, error) {
+// targetChange is who moves voice to a target and when.
+type targetChange int
+
+const (
+	// selectForCall chooses the target before a call starts.
+	selectForCall targetChange = iota
+	// transferByPhone moves the current call from the phone's controls.
+	transferByPhone
+	// transferBySpeech moves the current call because the realtime model
+	// called a tool, which a muted call refuses.
+	transferBySpeech
+)
+
+func (s *Service) selectTarget(ctx context.Context, requested string, change targetChange) (string, error) {
+	transfer, spoken := change != selectForCall, change == transferBySpeech
 	s.mu.Lock()
 	v := &s.state.State
+	if spoken && v.InputMuted {
+		s.unlock()
+		return "", errInputMuted
+	}
 	if transfer && (v.Session == nil || !s.active()) {
 		s.unlock()
 		return "", errors.New("voice transfer requires the current call")
@@ -841,6 +880,11 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 			return "", errors.New("voice targets must be existing Codex or Claude sessions")
 		}
 		if err := surface.EnsureWritableSession(callCtx, target.Adapter, target.Session); err != nil {
+			return "", err
+		}
+	}
+	if spoken {
+		if err := s.refuseMuted(); err != nil {
 			return "", err
 		}
 	}
@@ -882,11 +926,12 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 }
 
 // delegate sends one request of the person's to the selected session and
-// follows its reply. The caller holds s.op.
-func (s *Service) delegate(ctx context.Context, a Action) error {
+// follows its reply. A spoken request is refused while the call's input is
+// muted. The caller holds s.op.
+func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	s.mu.Lock()
 	v := &s.state.State
-	if err := s.delegationAllowed(a); err != nil {
+	if err := s.delegationAllowed(a, spoken); err != nil {
 		s.unlock()
 		return err
 	}
@@ -919,7 +964,7 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	waker, ok := target.Adapter.(surface.Waker)
 	woke := ok && waker.NeedsWake(callCtx, target.Session)
 	s.mu.Lock()
-	if err := s.delegationAllowed(a); err != nil || v.Target.ID != targetID {
+	if err := s.delegationAllowed(a, spoken); err != nil || v.Target.ID != targetID {
 		s.unlock()
 		cancelStream()
 		if err == nil {
@@ -1003,10 +1048,13 @@ func (s *Service) sameCall(attemptID, sessionID, targetID string) bool {
 
 // delegationAllowed checks a delegation against the current call. The caller
 // holds s.mu.
-func (s *Service) delegationAllowed(a Action) error {
+func (s *Service) delegationAllowed(a Action, spoken bool) error {
 	v := &s.state.State
 	if a.AttemptID != v.AttemptID || v.Phase != "connected" {
 		return errors.New("delegation requires the current connected voice call")
+	}
+	if spoken && v.InputMuted {
+		return errSpokenWhileMuted
 	}
 	if strings.TrimSpace(a.Text) == "" || len(a.Text) > 16<<10 || a.MessageID == "" || len(a.MessageID) > 128 {
 		return errors.New("delegation text and a unique messageId are required")
@@ -1604,6 +1652,26 @@ func (s *Service) runTool(e Event) {
 	}
 }
 
+// errInputMuted answers a voice tool that would act while the phone's
+// microphone is muted: speech the person did not mean to send must not act.
+// Reading tools stay available.
+var errInputMuted = errors.New("Microphone input is muted. No voice-requested action was taken; unmute or use the call controls.")
+
+var errSpokenWhileMuted = errors.New("microphone input was muted; the request was not sent")
+
+// refuseMuted returns errInputMuted while the call's input is muted. Actions
+// taken by voice check it again just before their irreversible I/O, since a
+// mute can arrive while they are planned. The caller holds no lock.
+func (s *Service) refuseMuted() error {
+	s.mu.Lock()
+	muted := s.state.State.InputMuted
+	s.unlock()
+	if muted {
+		return errInputMuted
+	}
+	return nil
+}
+
 type spokenRequest struct {
 	attemptID, messageID, text string
 }
@@ -1623,6 +1691,10 @@ func (s *Service) queueSpokenTranscript(e Event) {
 		return
 	}
 	messageID := "voice-transcript:" + strconv.FormatInt(e.Sequence, 10)
+	if s.state.State.InputMuted {
+		s.holdSpoken(messageID, errSpokenWhileMuted)
+		return
+	}
 	for _, id := range s.state.Messages {
 		if id == messageID {
 			return
@@ -1663,7 +1735,7 @@ func (s *Service) deliverSpoken() {
 		s.spokenInFlight = next.messageID
 		s.unlock()
 		s.op.Lock()
-		err := s.delegate(s.background, Action{Action: "delegate", AttemptID: next.attemptID, Text: next.text, MessageID: next.messageID})
+		err := s.delegate(s.background, Action{Action: "delegate", AttemptID: next.attemptID, Text: next.text, MessageID: next.messageID}, true)
 		s.op.Unlock()
 		s.mu.Lock()
 		s.spokenInFlight = ""

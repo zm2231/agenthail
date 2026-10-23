@@ -89,6 +89,11 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		value, _ := arguments[key].(string)
 		return strings.TrimSpace(value)
 	}
+	if actsForThePerson(tool) {
+		if err := s.refuseMuted(); err != nil {
+			return "", err
+		}
+	}
 	switch tool {
 	case "voice_transfer":
 		targetID, project := text("targetId"), text("project")
@@ -99,6 +104,9 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		// place among the call's actions.
 		s.op.Lock()
 		defer s.op.Unlock()
+		if err := s.refuseMuted(); err != nil {
+			return "", err
+		}
 		if project != "" {
 			if s.projects == nil {
 				return "", errors.New("project voice targets are unavailable on this host")
@@ -109,14 +117,14 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 			}
 			targetID = id
 		}
-		name, err := s.selectTarget(ctx, targetID, true)
+		name, err := s.selectTarget(ctx, targetID, transferBySpeech)
 		if err != nil {
 			return "", err
 		}
 		return "Voice transferred to " + name + ".", nil
 	case "voice_return_to_orchestrator":
 		s.op.Lock()
-		_, err := s.selectTarget(ctx, "", true)
+		_, err := s.selectTarget(ctx, "", transferBySpeech)
 		s.op.Unlock()
 		if err != nil {
 			return "", err
@@ -148,6 +156,16 @@ func (s *Service) callTool(ctx context.Context, tool string, arguments map[strin
 		return string(data), err
 	}
 	return "", errors.New("unsupported Agenthail voice tool")
+}
+
+// actsForThePerson reports whether a tool acts on the person's behalf, so a
+// muted call refuses it. Reading tools stay available.
+func actsForThePerson(tool string) bool {
+	switch tool {
+	case "voice_transfer", "voice_return_to_orchestrator", "voice_send_to_lead":
+		return true
+	}
+	return false
 }
 
 // leadSendTimeout bounds a send to a project lead, which may relay to a

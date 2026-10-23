@@ -67,6 +67,8 @@ struct VoiceAction: Encodable {
     var text: String? = nil
     var messageId: String? = nil
     var targetId: String? = nil
+    var muted: Bool? = nil
+    var inputRevision: Int? = nil
 }
 
 @MainActor

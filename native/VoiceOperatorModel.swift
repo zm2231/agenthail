@@ -34,6 +34,13 @@ final class VoiceOperatorModel: ObservableObject {
     private var channelOpen = false
     private var connectedReported = false
     private var startSubmitted = false
+    // The host refuses voice-requested actions while the microphone is muted
+    // or held, so the phone reports each change in order once the host has
+    // the call.
+    private var held = false
+    private var hostHasCall = false
+    private var reportedInputMuted = false
+    private var inputRevision = 0
     private var hostHangupAttemptID: String?
     private var closed = false
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
@@ -236,6 +243,7 @@ final class VoiceOperatorModel: ObservableObject {
             attemptID = callID.uuidString
             diagnostics?.begin(id: callID.uuidString)
             appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
+            held = false; hostHasCall = false; reportedInputMuted = false; inputRevision = 0
             audio.configureCall(id: callID, name: committedRoute)
             try await audio.start()
         } catch {
@@ -267,6 +275,8 @@ final class VoiceOperatorModel: ObservableObject {
                     }
                     state = next
                     diagnostics?.mark("host_start_accepted", id: id)
+                    hostHasCall = true
+                    reportInput()
                     startHeartbeat(attempt: id, generation: current)
                 } catch {
                     guard !closed, generation == current else {
@@ -305,7 +315,11 @@ final class VoiceOperatorModel: ObservableObject {
             channelOpen = value == "open"
             if channelOpen, let attemptID { diagnostics?.mark("data_channel_open", id: attemptID) }
             reportConnected()
-        case "mute": muted = value == "true"
+        case "mute": muted = value == "true"; reportInput()
+        case "held":
+            held = value == "true"
+            if let attemptID { diagnostics?.mark("held_\(value)", id: attemptID) }
+            reportInput()
         case "ended":
             if let attemptID { diagnostics?.end(value.isEmpty ? "system_ended" : value, id: attemptID) }
             hangup()
@@ -314,7 +328,7 @@ final class VoiceOperatorModel: ObservableObject {
             error = error ?? value
             hangup()
         default:
-            if let attemptID, ["permission", "activation", "suspended", "held"].contains(type) {
+            if let attemptID, ["permission", "activation", "suspended"].contains(type) {
                 diagnostics?.mark(value.isEmpty ? type : "\(type)_\(value)", id: attemptID)
             }
         }
@@ -335,7 +349,25 @@ final class VoiceOperatorModel: ObservableObject {
         }
     }
 
-    func toggleMute() { muted.toggle(); audio.mute(muted) }
+    func toggleMute() { muted.toggle(); audio.mute(muted); reportInput() }
+
+    private func reportInput() {
+        let inputMuted = muted || held
+        guard hostHasCall, inputMuted != reportedInputMuted, let api, let id = attemptID else { return }
+        reportedInputMuted = inputMuted
+        inputRevision += 1
+        let revision = inputRevision, current = generation
+        Task {
+            do {
+                let next = try await api.action(VoiceAction(action: "input-state", attemptId: id, muted: inputMuted, inputRevision: revision))
+                if !closed, current == generation, revision == inputRevision { state = next }
+            } catch {
+                guard !closed, current == generation else { return }
+                self.error = self.error ?? "Your computer could not record whether the microphone is muted, so the call ended."
+                hangup()
+            }
+        }
+    }
 
     func hangup() {
         generation += 1
