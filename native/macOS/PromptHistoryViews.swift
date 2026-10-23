@@ -163,7 +163,10 @@ private struct KeyWindowOnAppear: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
-            DispatchQueue.main.async { [didBecomeKey] in
+            DispatchQueue.main.async { [weak self, didBecomeKey] in
+                guard let self, self.window === window, window.isVisible, NSApp.isActive else { return }
+                let key = NSApp.keyWindow
+                guard key === window || key === window.parent else { return }
                 window.makeKey()
                 didBecomeKey()
             }
