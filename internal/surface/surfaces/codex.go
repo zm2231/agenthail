@@ -1019,6 +1019,11 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	if uuid == "" {
+		commandsCtx, cancel := context.WithTimeout(ctx, time.Second)
+		c.emitCommands(commandsCtx, sess, onEvent, 1)
+		cancel()
+	}
 	if sess.Transport == codexTransportManaged {
 		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
 	}
@@ -1128,6 +1133,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 	finalEmitted := false
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
+	untargeted, commandsVersion := uuid == "", uint64(1)
 	notifier, _ := client.(codexNotifier)
 	subscribed := notifier != nil && c.subscribeManagedThread(ctx, client, sess.ID)
 	// handle forwards the thread's notifications and reports whether one may
@@ -1138,6 +1144,13 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		}
 		changed := false
 		for _, event := range notifier.DrainNotifications() {
+			if event.Method == "skills/changed" && untargeted {
+				commandsVersion++
+				commandsCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				c.emitCommands(commandsCtx, sess, onEvent, commandsVersion)
+				cancel()
+				continue
+			}
 			if !codexContainsID(event.Params, sess.ID) {
 				continue
 			}
