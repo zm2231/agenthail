@@ -109,7 +109,7 @@ func (f *peerFixture) worker(name string) peerRecord {
 	f.t.Helper()
 	var found []peerRecord
 	for _, record := range f.records() {
-		if record.Name == "agenthail/notion: "+name {
+		if record.Name == "agenthail/notion: "+name || record.Name == "agenthail/notion: @"+name {
 			found = append(found, record)
 		}
 	}
@@ -277,7 +277,7 @@ func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
 	waitUntil(t, "heartbeat to publish the rename", func() bool {
 		var record peerRecord
 		data, err := os.ReadFile(f.recordPath(older.PID))
-		return err == nil && json.Unmarshal(data, &record) == nil && record.Name == "agenthail/notion: renamed"
+		return err == nil && json.Unmarshal(data, &record) == nil && record.Name == "agenthail/notion: @renamed"
 	})
 
 	controls := f.controlSockets(older.PID)
@@ -774,7 +774,7 @@ func (f *peerFixture) workerNames() []string {
 	f.t.Helper()
 	var names []string
 	for _, record := range f.records() {
-		names = append(names, strings.TrimPrefix(record.Name, "agenthail/notion: "))
+		names = append(names, strings.TrimPrefix(strings.TrimPrefix(record.Name, "agenthail/notion: "), "@"))
 	}
 	sort.Strings(names)
 	return names

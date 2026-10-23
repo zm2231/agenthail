@@ -590,6 +590,22 @@ func SourceSessionID(ctx context.Context) string {
 	return id
 }
 
+type replyTargetContextKey struct{}
+
+// WithReplyTarget carries how the target's host addresses the sender, so a
+// surface can name the sender in a form a reply reaches.
+func WithReplyTarget(ctx context.Context, target string) context.Context {
+	return context.WithValue(ctx, replyTargetContextKey{}, target)
+}
+
+func ReplyTarget(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	target, _ := ctx.Value(replyTargetContextKey{}).(string)
+	return target
+}
+
 type personNameContextKey struct{}
 
 // WithPersonName names the person a message is from, for the route that
