@@ -138,6 +138,7 @@ struct ToolActivityRow: View {
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
             .accessibilityHint("Show recorded input and output")
+            .contextMenu { CopyCallID(item: call) }
             if expanded {
                 VStack(alignment: .leading, spacing: 12) {
                     ToolContentView(item: call)
@@ -156,9 +157,6 @@ struct ToolActivityRow: View {
                         if result.truncated { shortened }
                     }
                     if call.truncated { shortened }
-                    if let id = call.callId {
-                        Text("Call \(id)").font(.caption2.monospaced()).foregroundStyle(.tertiary).textSelection(.enabled)
-                    }
                     Button { expanded = false } label: {
                         Label("Collapse tool", systemImage: "chevron.up")
                             .font(.footnote.weight(.medium))

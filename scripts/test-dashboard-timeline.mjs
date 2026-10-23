@@ -98,6 +98,21 @@ for (const expected of ["Read the report", "report.md", "report contents", 'data
 for (const debug of ["Title: ", "Call: ", "Status: ", "2026-10-04T12:00:03Z", "Body reference", "blob://body-1"]) {
   assert(!html.includes(debug), `timeline shows debug metadata ${debug}`);
 }
+for (const item of [
+  { kind: "message", role: "user", text: "typed" },
+  { kind: "message", role: "assistant", text: "reply" },
+  { kind: "message", role: "peer", sender: "@peer", text: "note" },
+  { kind: "instructions", text: "context" },
+  { kind: "attachment", text: "A chart", attachment: { id: "attachment-2", mediaType: "image/png" } },
+  { kind: "notice", title: "Usage limit", text: "Paused" },
+  { kind: "toolCall", title: "Read", text: "report.md" },
+  { kind: "toolResult", title: "Read result", text: "contents" },
+  { kind: "reasoning", text: "thinking" },
+  { kind: "futureEvent", title: "Future", text: "body" },
+]) {
+  const rendered = context.renderTimeline([{ id: `short-${item.kind}-${item.role || ""}`, truncated: true, ...item }], session);
+  assert(rendered.includes("Shortened by the host"), `a shortened ${item.kind} ${item.role || ""} record omits the note`);
+}
 assert(html.includes("<details"), "tool and reasoning items should be collapsible");
 assert(html.includes('data-copy-text="report contents"'), "tool results should offer their raw text for copying");
 assert.equal((html.match(/class="soft-button copy-output"/g) || []).length, 1, "only tool results with text offer Copy output");

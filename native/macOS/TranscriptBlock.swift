@@ -14,6 +14,7 @@ struct TranscriptBlock: Identifiable, Equatable {
 
     let id: String
     let kind: Kind
+    var truncated = false
 
     static func build(_ items: [TimelineItem]) -> [TranscriptBlock] {
         var blocks: [TranscriptBlock] = []
@@ -27,7 +28,7 @@ struct TranscriptBlock: Identifiable, Equatable {
             if item.isInstructions {
                 flushTools()
                 if !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .instructions(item.text)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .instructions(item.text), truncated: item.truncated))
                 }
                 continue
             }
@@ -38,32 +39,32 @@ struct TranscriptBlock: Identifiable, Equatable {
                 guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { continue }
                 if item.role == "user" {
                     let (text, images) = stripImageMarkers(item.text)
-                    if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text, files: files))) }
+                    if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text, files: files), truncated: item.truncated)) }
                     if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
                 } else if item.isPeerMessage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text), truncated: item.truncated))
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text), truncated: item.truncated))
                 }
             case "attachment":
                 flushTools()
                 if let attachment = item.attachment, attachment.isImage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment), truncated: item.truncated))
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached"), truncated: item.truncated))
                 }
             case "notice":
                 flushTools()
                 let text = item.noticeText
-                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text))) }
+                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text), truncated: item.truncated)) }
             case "event" where item.title == "Turn duration":
                 flushTools()
-                blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)")))
+                blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)"), truncated: item.truncated))
             case "event":
                 flushTools()
                 let title = [item.title, item.status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)")))
+                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)"), truncated: item.truncated))
             case "context", "goal", "done", "phase":
                 continue
             default:
@@ -88,7 +89,9 @@ func stripImageMarkers(_ text: String) -> (text: String, images: Int) {
 
 enum TimelineMetadata {
     /// Titles, call ids, statuses and raw timestamps are for debugging; a reader only needs to know the host shortened a record.
+    static let shortened = "Shortened by the host"
+
     static func note(_ item: TimelineItem) -> String? {
-        item.truncated ? "Shortened by the host" : nil
+        item.truncated ? shortened : nil
     }
 }

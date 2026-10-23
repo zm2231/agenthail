@@ -54,6 +54,21 @@ struct SessionFactsTest {
         expect(TimelineMetadata.note(detailed) == "Shortened by the host", "a shortened record says so and nothing else")
         expect(TimelineMetadata.note(item("toolResult", title: "Bash", timestamp: "2026-10-18T06:00:00Z", callId: "call_synthetic", status: "completed", bodyRef: "body/synthetic")) == nil, "titles, call ids, statuses, timestamps and body references are not shown")
 
+        let shortenedRecords = [
+            item("message", role: "user", truncated: true),
+            item("message", role: "assistant", truncated: true),
+            item("message", role: "peer", truncated: true),
+            item("instructions", truncated: true),
+            item("attachment", truncated: true),
+            item("notice", truncated: true),
+            item("event", title: "Turn duration", truncated: true),
+            item("event", title: "Hook", truncated: true),
+        ]
+        for record in shortenedRecords {
+            let blocks = TranscriptBlock.build([record])
+            expect(!blocks.isEmpty && blocks.allSatisfy(\.truncated), "a shortened \(record.kind) \(record.role ?? "") record keeps its note in the transcript")
+        }
+
         expect(AgenthailAPIError.userMessage(URLError(.cannotConnectToHost)) == AgenthailAPIError.disconnectedGuidance, "connection failures become reconnect guidance")
         expect(AgenthailAPIError.userMessage(AgenthailAPIError.request(409, "synthetic conflict")) == "synthetic conflict", "other errors keep their message")
         let unknown = AgenthailAPIError.outcomeUnknown(AgenthailAPIError.userMessage(URLError(.networkConnectionLost)))

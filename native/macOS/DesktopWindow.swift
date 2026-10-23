@@ -1032,16 +1032,34 @@ struct TranscriptBlockView: View {
     var onEdit: ((String) -> Void)? = nil
     @State private var expanded = false
 
+    private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
+
     var body: some View {
         switch block.kind {
         case .user(let text, let files):
-            UserBubble(text: text, receipt: nil, files: files, onEdit: onEdit)
+            UserBubble(text: text, receipt: note, files: files, onEdit: onEdit)
         case .assistant(let text):
-            AssistantReply(text: text)
+            AssistantReply(text: text, note: note)
         case .peer(let sender, let text):
-            UserBubble(text: text, receipt: nil, sender: sender)
+            UserBubble(text: text, receipt: note, sender: sender)
         case .tools(let items):
             ToolRunView(items: items, expanded: $expanded)
+        default:
+            VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                record
+                if let note {
+                    Text(note)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.muted)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var record: some View {
+        switch block.kind {
+        case .user, .assistant, .peer, .tools:
+            EmptyView()
         case .annotation(let text):
             Text(text)
                 .font(.system(size: DesktopType.meta))
@@ -1279,15 +1297,23 @@ struct AttachedFileChip: View {
 
 struct AssistantReply: View {
     let text: String
+    var note: String? = nil
     @State private var hovering = false
 
     var body: some View {
-        StructuredText(markdown: text)
-            .font(.system(size: DesktopType.prose))
-            .lineSpacing(DesktopType.proseLineSpacing)
-            .foregroundStyle(DesktopPalette.text)
-            .textual.textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+            StructuredText(markdown: text)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
+                .foregroundStyle(DesktopPalette.text)
+                .textual.textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note)
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.muted)
+            }
+        }
             .overlay(alignment: .bottomLeading) {
                 MessageActions(text: text, revealed: hovering)
                     .offset(y: MessageActions.height)

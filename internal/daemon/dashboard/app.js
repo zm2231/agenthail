@@ -1463,7 +1463,7 @@ function renderTimelineItem(item, session) {
   if (kind === "notice") {
     const resets = Date.parse(item.resetsAt || "");
     const until = resets ? ` Resets ${new Date(resets).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
-    return `<p class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}</p>`;
+    return `<div class="timeline-item timeline-notice" role="status" ${attributes}><strong>${escape(item.title || "Notice")}</strong> ${escape(item.text || "")}${escape(until)}${metadata}</div>`;
   }
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
