@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -495,9 +496,11 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			f := claudehosttest.New(t, "")
 			ctx := testContext(t)
-			// Its Claudes close their output a while before they exit, so a stop
-			// can find the session ended while its Claude still runs.
-			old := f.StartProtocol2Host(t, "0.2.50", "FAKE_CLAUDE_LINGER_MS=1500")
+			// Its Claudes close their output and keep running until the test
+			// releases them, so a stop finds the session ended while its Claude
+			// still runs.
+			lingering := filepath.Join(t.TempDir(), "linger-release")
+			old := f.StartProtocol2Host(t, "0.2.50", "FAKE_CLAUDE_LINGER_RELEASE="+lingering)
 			if old.Protocol != 2 {
 				t.Fatalf("shipped host hello = %+v, want protocol 2", old)
 			}
@@ -524,12 +527,24 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 				t.Fatalf("Ensure after the update = %v", err)
 			}
 			// The host retires the idle session as it drains, and its Claude
-			// exits once the linger ends; a stop that comes later finds it closed.
+			// lingers after closing its output; a stop must still end it.
+			claudehosttest.WaitFor(t, "the retired session's Claude to close its output and linger", func() bool {
+				_, err := os.Stat(lingering + "." + strconv.Itoa(exiting.PID))
+				return err == nil
+			})
+			if !claudehosttest.Alive(exiting.PID) {
+				t.Fatalf("Claude %d exited before its retired session was stopped", exiting.PID)
+			}
 			if err := client.Close(ctx, retired); err != nil && !claudehost.IsCode(err, "not_open") {
 				t.Fatalf("stopping a session the protocol 2 host retired = %v", err)
 			}
 			if claudehosttest.Alive(exiting.PID) {
 				t.Fatalf("Claude %d still runs after its retired session was stopped", exiting.PID)
+			}
+			// The rest of the update needs its Claudes to exit when their input
+			// closes, as Claude does.
+			if err := os.WriteFile(lingering, nil, 0o600); err != nil {
+				t.Fatal(err)
 			}
 			if hello, err := client.Hello(ctx); err != nil || hello.Protocol != claudehost.Protocol || hello.PID == old.PID {
 				t.Fatalf("hello after the update = %+v, %v", hello, err)

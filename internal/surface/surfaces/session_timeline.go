@@ -18,7 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const timelineReadBudget = 16 << 20
+var timelineReadBudget int64 = 16 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 

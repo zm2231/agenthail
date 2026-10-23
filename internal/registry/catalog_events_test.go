@@ -107,10 +107,18 @@ func TestRepeatedDiscoveryFailurePublishesOnlyTheStaleTransition(t *testing.T) {
 func TestCatalogEventRetentionKeepsNewestWindow(t *testing.T) {
 	r := openTestRegistry(t)
 	total := catalogEventRetention + 25
+	// One transaction, so the window is checked rather than 4121 commits.
+	tx, err := r.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 1; i <= total; i++ {
-		if _, _, err := r.AppendCatalogEvent(CatalogEvent{DedupeKey: fmt.Sprintf("retention:%d", i), Type: "session.upserted", EntityID: "s", Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("retention:%d", i), Type: "session.upserted", EntityID: "s", Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	var count, earliest, latest int
 	if err := r.db.QueryRow(`SELECT COUNT(*),MIN(seq),MAX(seq) FROM catalog_events`).Scan(&count, &earliest, &latest); err != nil {

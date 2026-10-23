@@ -28,6 +28,14 @@ type Registry struct {
 	now        func() time.Time
 	busyPolicy func() (deliverypolicy.Mode, error)
 	seen       deviceSeen
+	// retryBackoff is QueueRetryBackoff unless SetRetryBackoff changed it.
+	retryBackoff time.Duration
+}
+
+// SetRetryBackoff sets how long this handle's failed or deferred messages
+// wait before their next attempt, in place of QueueRetryBackoff.
+func (r *Registry) SetRetryBackoff(backoff time.Duration) {
+	r.retryBackoff = backoff
 }
 
 // SetBusyPolicy sets the live busy-delivery policy. A queued message records
@@ -209,7 +217,7 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, path: path, now: time.Now}, nil
+	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
 func (r *Registry) Path() string { return r.path }
@@ -2691,7 +2699,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 		if shift > 6 {
 			shift = 6
 		}
-		available = now.Add(QueueRetryBackoff * time.Duration(1<<shift))
+		available = now.Add(r.retryBackoff * time.Duration(1<<shift))
 	}
 	message := ""
 	if cause != nil {
@@ -2752,7 +2760,7 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, er
 	if began {
 		refusal++
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(QueueRetryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(r.retryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
 	if err != nil {
 		return 0, err
 	}
