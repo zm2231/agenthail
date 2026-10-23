@@ -1,7 +1,7 @@
 # Speak to an existing Agenthail session through Codex Voice
 
 The iPhone companion has a conversational Codex Voice operator backed by one
-persistent Codex Desktop thread on your Mac. It receives the packaged Agenthail
+persistent Codex Desktop thread on the paired computer. It receives the packaged Agenthail
 Operations skill before its first turn. You can discuss a plan, ask about live
 agents, create a new agent, or ask it to send work and read back the result.
 There is no on-device speech recognition, command grammar, separate TTS service,
@@ -15,7 +15,8 @@ distinction between automated checks, real Codex evaluation, and phone testing.
 ## Setup and first call
 
 1. Run the matching Agenthail host build. Have Codex Desktop signed in to an
-   account with working native Voice access. Agenthail uses the account and
+   account with working native Voice access. Codex Desktop runs only on macOS,
+   so a Linux host offers no voice. Agenthail uses the account and
    permission configuration of that Desktop app-server, not a second login.
 2. Ensure the existing Desktop bridge is available. `agenthail doctor --json`
    checks the configured surfaces. For first-time Desktop setup,
@@ -35,7 +36,7 @@ distinction between automated checks, real Codex evaluation, and phone testing.
    delivery evidence, and the actual reply.
 
 Only audio and WebRTC negotiation go to Codex's realtime service. The phone sends
-control requests to the paired Mac over HTTPS. Codex's existing authenticated
+control requests to the paired computer over HTTPS. Codex's existing authenticated
 client creates the realtime call. On iPhone the media peer is native WebRTC
 running under CallKit; it never receives the paired token or Codex credentials.
 The Mac and the web dashboard run the same peer program in WebKit or the

@@ -1288,7 +1288,7 @@ function renderSurfaceHealth() {
       : /cookie bridge/i.test(rawDetail)
       ? "Claude Code needs to reconnect to your signed-in account."
       : /notion.*(?:401|context)/i.test(rawDetail)
-        ? "Notion is not signed in on this Mac."
+        ? "Notion is not signed in on this computer."
         : /reachable but not supervised/i.test(rawDetail)
           ? "The Codex background service will stop after a restart."
           : rawDetail;

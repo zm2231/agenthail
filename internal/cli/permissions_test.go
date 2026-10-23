@@ -33,6 +33,7 @@ func permissionsCLIFixture(t *testing.T, running bool) (*App, *[]string) {
 		}
 	}))
 	t.Cleanup(server.Close)
+	withPrivacyGrants(t, true)
 	app.catalogDaemonRunning = func() bool { return running }
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
 		return &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}, nil
@@ -82,6 +83,33 @@ func TestPermissionsNeedTheDaemonToReadItsOwnGrants(t *testing.T) {
 	_, err := captureStdout(t, func() error { return app.Run([]string{"permissions"}) })
 	if err == nil || !strings.Contains(err.Error(), "only it can read its own grants") || len(*calls) != 0 {
 		t.Fatalf("err=%v calls=%v", err, *calls)
+	}
+}
+
+func withPrivacyGrants(t *testing.T, exist bool) {
+	t.Helper()
+	previous := privacyGrantsExist
+	privacyGrantsExist = exist
+	t.Cleanup(func() { privacyGrantsExist = previous })
+}
+
+func TestPermissionsOffMacOSSayGrantsAreAMacOSSettingWithoutTheDaemon(t *testing.T) {
+	app, calls := permissionsCLIFixture(t, false)
+	withPrivacyGrants(t, false)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"permissions"}) })
+	if err != nil || !strings.Contains(output, "privacy grants are a macOS setting; this system has none") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	output, err = captureStdout(t, func() error { return app.Run([]string{"permissions", "--json"}) })
+	var report permissions.Report
+	if err != nil || json.Unmarshal([]byte(output), &report) != nil || report.Supported || len(report.Grants) != 0 {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"permissions", "request"}) }); err == nil || !strings.Contains(err.Error(), "none to request") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("calls=%v", *calls)
 	}
 }
 

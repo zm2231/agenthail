@@ -520,8 +520,9 @@ AgentHail has four distinct completion behaviors:
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
 3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages wait until the target can take them.
-4. Daemon notifications alert the human through the AgentHail Mac app and,
-   when paired, the optional iPhone app.
+4. Daemon notifications alert the human through the AgentHail Mac app on
+   macOS and, when paired, the optional iPhone app. A Linux host has no
+   desktop notifications; only a paired iPhone is alerted.
 
 Persistent agent-to-agent subscription:
 
@@ -555,7 +556,9 @@ agenthail daemon notify settings
 agenthail daemon notify off
 ```
 
-Mac notifications require System Settings authorization. iPhone notifications
+`daemon notify` drives macOS desktop notifications only; on Linux it reports
+them as unsupported. Mac notifications require System Settings authorization.
+iPhone notifications, from a macOS or Linux host,
 require pairing the phone from Operations and allowing notifications on iOS.
 They are not agent-to-agent relays. When a host session waits on an approval or
 a single question, its notification offers buttons that answer it, and a

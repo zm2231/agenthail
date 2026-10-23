@@ -60,7 +60,7 @@ machine_paths() {
   fi
   PLACEHOLDER_USERS="$placeholder_users" PLACEHOLDER_VOLUMES="$placeholder_volumes" perl -0 -e '
       my ($users, $volumes) = @ENV{qw(PLACEHOLDER_USERS PLACEHOLDER_VOLUMES)};
-      my $pattern = qr{(?i:/(?:Users|home)/(?!(?:$users)(?![A-Za-z0-9._-]))[a-z][a-z0-9._-]*)|/Volumes/(?!(?:$volumes)(?:/|\x27|"|$)|\*\))|/persist/|\btail[0-9a-f]{4,}\.ts\.net|\b[A-Z][a-z]+(?:\x27s |\xe2\x80\x99s |s-)(?:Mac|MacBook|iPhone|iPad)\b|session_[[:alnum:]]{12,}};
+      my $pattern = qr{(?i:/(?:Users|home)/(?!(?:$users)(?![A-Za-z0-9._-]))[a-z][a-z0-9._-]*)|/Volumes/(?!(?:$volumes)(?:/|\x27|"|$)|\*\))|/persist/|\btail[0-9a-f]{4,}\.ts\.net|\b[A-Z][a-z]+(?:\x27s |\xe2\x80\x99s |s-)(?:Mac|MacBook|iPhone|iPad)\b|session_[[:alnum:]]{12,}|\b(?:forge-agents|mini-?2|vps2)\b|\bzains-};
       my $found = 0;
       while (my $file = <>) {
         chomp $file;
@@ -83,7 +83,7 @@ machine_paths() {
 }
 
 if matches machine_paths; then
-	echo "Public source contains a personal home path, machine path, tailnet name, device name, or session value." >&2
+	echo "Public source contains a personal home path, machine path, machine name, tailnet name, device name, or session value." >&2
 	exit 1
 fi
 
