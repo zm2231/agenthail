@@ -213,7 +213,7 @@ struct RecentOutcomesSection: View {
 
 struct BrowserAccessSection: View {
     let remote: RemoteAccessState
-    let createLink: () async -> String?
+    let createLink: @MainActor () async -> String?
     @State private var qrLink: String?
     @State private var hideTask: Task<Void, Never>?
     @State private var copied = false

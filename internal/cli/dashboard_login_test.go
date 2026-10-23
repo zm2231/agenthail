@@ -104,6 +104,7 @@ func TestNoDashboardCommandPrintsTheDashboardToken(t *testing.T) {
 		{"dashboard", "status"},
 		{"dashboard", "enable"},
 		{"dashboard", "remote", "--no-open", "--tailscale", fixture.tailscale},
+		{"dashboard", "remote", "on", "--no-open", "--tailscale", fixture.tailscale},
 		{"dashboard", "remote", "--json", "--tailscale", fixture.tailscale},
 		{"dashboard", "remote", "status", "--tailscale", fixture.tailscale},
 		{"dashboard", "remote", "status", "--json", "--tailscale", fixture.tailscale},
