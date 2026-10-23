@@ -12,6 +12,7 @@ struct HoldTranscriptPlace: Equatable {
 
 extension EnvironmentValues {
     @Entry var holdTranscriptPlace = HoldTranscriptPlace()
+    @Entry var transcriptOverhang: CGFloat = 0
 }
 
 struct TranscriptFollow<ID: Equatable>: ViewModifier {

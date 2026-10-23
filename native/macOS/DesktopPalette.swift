@@ -132,6 +132,17 @@ enum DesktopColumns {
     static let sidebar = (min: CGFloat(248), ideal: CGFloat(300), max: CGFloat(340))
     static let detail = (min: CGFloat(340), ideal: CGFloat(892))
     static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
+    static let reading: CGFloat = 880
+    static let wide: CGFloat = 1120
+    static let gutter: CGFloat = 32
+
+    /// The transcript's column in a pane this wide, and how far a tool run
+    /// may reach past its right edge into the gutter.
+    static func transcript(pane: CGFloat) -> (column: CGFloat, overhang: CGFloat) {
+        let column = max(min(pane - 2 * gutter, reading), 0)
+        let spare = max((pane - 2 * gutter - column) / 2, 0)
+        return (column, min(spare, wide - reading))
+    }
 }
 
 enum ColumnFit {
