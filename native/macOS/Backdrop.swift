@@ -84,10 +84,6 @@ struct BackdropStop: Equatable, Sendable {
 struct BackdropImage: @unchecked Sendable {
     let image: CGImage
     let size: CGSize
-    /// The highest tint opacity in each pane, which keeps text readable
-    /// anywhere in it while a resize outruns the image.
-    let paneMaxima: [String: Float]
-    let paneTint: BackdropRGB
 }
 
 enum BackdropRenderer {
@@ -147,7 +143,6 @@ enum BackdropRenderer {
             : ScrimField.openOpacity(need: openNeed, width: pw, height: ph, feather: spec.feather, minimum: 0)
 
         var paneAlpha = [Float](repeating: 0, count: pw * ph)
-        var maxima: [String: Float] = [:]
         for pane in spec.panes {
             let r = rect(outward: pane.rect).clamped(width: pw, height: ph)
             guard r.width > 0, r.height > 0 else { continue }
@@ -174,7 +169,6 @@ enum BackdropRenderer {
                     paneAlpha[i] = max(paneAlpha[i], alpha[y * r.width + x])
                 }
             }
-            maxima[pane.id] = alpha.max() ?? pane.minimum
         }
 
         let pixels = CGSize(width: w, height: h)
@@ -190,7 +184,7 @@ enum BackdropRenderer {
         ])
         let shown = panes.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: open, kCIInputMaskImageKey: paneMask])
         guard let image = context.createCGImage(shown, from: full, format: .RGBA8, colorSpace: srgb) else { return nil }
-        return BackdropImage(image: image, size: spec.size, paneMaxima: maxima, paneTint: BackdropRGB(paneTint.0, paneTint.1, paneTint.2))
+        return BackdropImage(image: image, size: spec.size)
     }
 
     private static func bitmap(_ width: Int, _ height: Int, gray: Bool = false) -> CGContext? {

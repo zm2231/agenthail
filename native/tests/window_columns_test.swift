@@ -74,10 +74,15 @@ struct WindowColumnsTest {
         hosting.sizingOptions = [.minSize]
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = hosting
+        // A person keeps dragging while the columns settle, so keep asking
+        // for the width until the window reaches it or stops moving.
         func resize(_ width: CGFloat) -> CGFloat {
-            window.setContentSize(NSSize(width: width, height: 700))
-            hosting.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            let deadline = Date().addingTimeInterval(3)
+            repeat {
+                window.setContentSize(NSSize(width: width, height: 700))
+                hosting.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+            } while window.contentLayoutRect.width != width && Date() < deadline
             return window.contentLayoutRect.width
         }
         check(resize(1400) == 1400 && live.inspectorDocks, "a 1400 pt window docks the inspector")
