@@ -37,8 +37,8 @@ func TestALimitStopHoldsTheQueueUntilItIsReleased(t *testing.T) {
 	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetLimitResumeState(session.ID, "u1", LimitResumeReleased, now); err != nil {
-		t.Fatal(err)
+	if released, err := r.ReleaseLimitStop(session.ID, "u1", []LimitResumeState{LimitResumeWaiting}, "", "", now); err != nil || !released {
+		t.Fatalf("released=%v err=%v", released, err)
 	}
 	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
@@ -61,11 +61,11 @@ func TestANewRefusalStartsANewStopAndAClearedStopIsGone(t *testing.T) {
 	if err := r.RecordLimitStop(session, "", first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetLimitResumeState(session.ID, "u1", LimitResumeReleased, time.Unix(2000, 0)); err != nil {
-		t.Fatal(err)
+	if released, err := r.ReleaseLimitStop(session.ID, "u1", []LimitResumeState{LimitResumeWaiting}, "", "", time.Unix(2000, 0)); err != nil || !released {
+		t.Fatalf("released=%v err=%v", released, err)
 	}
-	if err := r.SetLimitResumeState(session.ID, "other", LimitResumeCanceled, time.Unix(2000, 0)); err != nil {
-		t.Fatal(err)
+	if moved, err := r.TransitionLimitResume(session.ID, "other", []LimitResumeState{LimitResumeReleased}, LimitResumeCanceled, time.Unix(2000, 0)); err != nil || moved {
+		t.Fatalf("moved=%v err=%v", moved, err)
 	}
 	if resumes, _ := r.LimitResumes(); resumes[0].State != LimitResumeReleased {
 		t.Fatalf("a state change for another turn applied: %+v", resumes)
@@ -102,8 +102,8 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
-	if found, err := r.CancelLimitResume(session.ID); err != nil || !found {
-		t.Fatalf("found=%v err=%v", found, err)
+	if moved, err := r.TransitionLimitResume(session.ID, "u1", []LimitResumeState{LimitResumeWaiting}, LimitResumeCanceled, time.Unix(2000, 0)); err != nil || !moved {
+		t.Fatalf("moved=%v err=%v", moved, err)
 	}
 	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
@@ -111,8 +111,11 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 	if resumes, _ := r.LimitResumes(); resumes[0].State != LimitResumeCanceled {
 		t.Fatalf("a canceled resume came back: %+v", resumes)
 	}
-	if found, err := r.CancelLimitResume("absent"); err != nil || found {
-		t.Fatalf("found=%v err=%v", found, err)
+	if released, err := r.ReleaseLimitStop(session.ID, "u1", []LimitResumeState{LimitResumeWaiting}, "notice", "k", time.Unix(3000, 0)); err != nil || released {
+		t.Fatalf("a canceled stop was released as if it waited: released=%v err=%v", released, err)
+	}
+	if count := r.QueueCount(session.ID); count != 0 {
+		t.Fatalf("a refused release queued its notice: %d", count)
 	}
 }
 
@@ -144,5 +147,40 @@ func TestALaterResetOnAnAccountMovesEveryWaitingSessionOnIt(t *testing.T) {
 		if !resume.ResetsAt.Equal(want) {
 			t.Fatalf("%s resets at %s, want %s", resume.SessionID, resume.ResetsAt, want)
 		}
+	}
+}
+
+func TestReleasingAStopQueuesTheNoticeOnlyWhenNothingElseIs(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, id := range []string{"idle", "busy"} {
+		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RecordLimitStop(session, "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.QueueMessageWithKey("busy", "next step", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"idle", "busy"} {
+		if released, err := r.ReleaseLimitStop(id, "u1", []LimitResumeState{LimitResumeWaiting}, "notice", "limit-resume:"+id, time.Unix(2000, 0)); err != nil || !released {
+			t.Fatalf("%s: released=%v err=%v", id, released, err)
+		}
+	}
+	rows, err := r.ListQueue(false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := map[string][]string{}
+	for _, row := range rows {
+		messages[row.SessionID] = append(messages[row.SessionID], row.Message)
+	}
+	if len(messages["idle"]) != 1 || messages["idle"][0] != "notice" || len(messages["busy"]) != 1 || messages["busy"][0] != "next step" {
+		t.Fatalf("queued=%v", messages)
+	}
+	if resume, _, _ := r.LimitResumeFor("idle"); resume.Attempts != 1 || resume.State != LimitResumeReleased {
+		t.Fatalf("resume=%+v", resume)
 	}
 }

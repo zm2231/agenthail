@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -76,19 +77,62 @@ func (r *Registry) ClearLimitStop(sessionID, turnID string) error {
 	return err
 }
 
-// SetLimitResumeState moves the stop of turnID to state and counts a release
-// as an attempt. A stop that has moved on to another refused turn is left as
-// it is.
-func (r *Registry) SetLimitResumeState(sessionID, turnID string, state LimitResumeState, now time.Time) error {
-	_, err := r.db.Exec(`UPDATE limit_resumes SET state=?, attempts=attempts+CASE WHEN ?='released' THEN 1 ELSE 0 END, updated_at_ms=?
-		WHERE session_id=? AND turn_id=?`, state, state, now.UnixMilli(), sessionID, turnID)
-	return err
+// TransitionLimitResume moves the stop of turnID to state when it is still
+// in one of from, and counts a release as an attempt. It reports whether the
+// stop moved: a stop another caller moved first, or one that has moved on to
+// another refused turn, is left as it is.
+func (r *Registry) TransitionLimitResume(sessionID, turnID string, from []LimitResumeState, state LimitResumeState, now time.Time) (bool, error) {
+	return transitionLimitResume(r.db, sessionID, turnID, from, state, now)
 }
 
-// CancelLimitResume keeps the session from being resumed for its current
-// stop. It reports whether the session had one.
-func (r *Registry) CancelLimitResume(sessionID string) (bool, error) {
-	result, err := r.db.Exec(`UPDATE limit_resumes SET state='canceled', updated_at_ms=? WHERE session_id=?`, time.Now().UnixMilli(), sessionID)
+// ReleaseLimitStop releases the stop of turnID when it is still in one of
+// from. When notice is set and the session has nothing queued, the notice is
+// queued under deliveryKey in the same transaction, so a message queued at
+// the same moment is never joined by a notice. It reports whether the stop
+// was released.
+func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResumeState, notice, deliveryKey string, now time.Time) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	released, err := transitionLimitResume(tx, sessionID, turnID, from, LimitResumeReleased, now)
+	if err != nil || !released {
+		return false, err
+	}
+	var queueID int64
+	if notice != "" {
+		var queued int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&queued); err != nil {
+			return false, err
+		}
+		if queued == 0 {
+			if queueID, _, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, false); err != nil {
+				return false, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if queueID != 0 {
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: queueID, Message: notice})
+	}
+	return true, nil
+}
+
+func transitionLimitResume(db interface {
+	Exec(string, ...any) (sql.Result, error)
+}, sessionID, turnID string, from []LimitResumeState, state LimitResumeState, now time.Time) (bool, error) {
+	if len(from) == 0 {
+		return false, nil
+	}
+	args := []any{state, state, now.UnixMilli(), sessionID, turnID}
+	for _, previous := range from {
+		args = append(args, previous)
+	}
+	result, err := db.Exec(`UPDATE limit_resumes SET state=?, attempts=attempts+CASE WHEN ?='released' THEN 1 ELSE 0 END, updated_at_ms=?
+		WHERE session_id=? AND turn_id=? AND state IN (?`+strings.Repeat(",?", len(from)-1)+`)`, args...)
 	if err != nil {
 		return false, err
 	}

@@ -266,8 +266,8 @@ func TestACanceledResumeIsNotSent(t *testing.T) {
 	resetsAt := refusedAt.Add(time.Minute)
 	f.refused("worker", "/roots/work", "u1", refusedAt, resetsAt)
 	f.pass(refusedAt.Add(time.Second))
-	if _, err := f.r.CancelLimitResume("worker"); err != nil {
-		t.Fatal(err)
+	if moved, err := f.r.TransitionLimitResume("worker", "u1", limitWaiting, registry.LimitResumeCanceled, time.Now()); err != nil || !moved {
+		t.Fatalf("moved=%v err=%v", moved, err)
 	}
 	f.pass(resetsAt.Add(limitResumeGrace))
 	if state := f.state("worker"); state != registry.LimitResumeCanceled {
@@ -351,5 +351,37 @@ func TestTheResumeAfterLimitSettingIsSaved(t *testing.T) {
 	}
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"resume-after-limit","resumeAfterLimit":true}`); response.Code != http.StatusOK || !f.d.resumeAfterLimitEnabled() {
 		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
+	f := newLimitFixture(t, "worker")
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	resetsAt := refusedAt.Add(time.Minute)
+	f.refused("worker", "/roots/work", "u1", refusedAt, resetsAt)
+	f.pass(refusedAt.Add(time.Second))
+	read, err := f.r.LimitResumes()
+	if err != nil || len(read) != 1 || read[0].State != registry.LimitResumeWaiting {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	handler := dashboardRouter(f.d)
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
+	}
+	f.d.resumeAccount("/roots/work", read, true, resetsAt.Add(limitResumeGrace))
+	if state := f.state("worker"); state != registry.LimitResumeCanceled {
+		t.Fatalf("the pass released a canceled stop: %q", state)
+	}
+	if queued := f.queued("worker"); len(queued) != 0 {
+		t.Fatalf("queued=%q", queued)
+	}
+	read[0].ResetsAt = time.Time{}
+	read[0].Attempts = limitProbeTries
+	f.d.resumeAccount("/roots/work", read, true, resetsAt.Add(limitResumeGrace))
+	if state := f.state("worker"); state != registry.LimitResumeCanceled {
+		t.Fatalf("the pass lapsed a canceled stop: %q", state)
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusConflict {
+		t.Fatalf("canceling a canceled stop: status=%d body=%s", response.Code, response.Body.String())
 	}
 }

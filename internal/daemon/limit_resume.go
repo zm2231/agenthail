@@ -167,7 +167,7 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 			continue
 		}
 		if !stop.ResetsAt.IsZero() && now.After(stop.ResetsAt.Add(limitResumeLapse)) || stop.ResetsAt.IsZero() && stop.Attempts >= limitProbeTries {
-			d.logLimitResume(d.setLimitResume(stop, registry.LimitResumeLapsed, now))
+			d.logLimitResume(d.setLimitResume(stop, limitWaiting, registry.LimitResumeLapsed, now))
 			continue
 		}
 		waiting = append(waiting, stop)
@@ -190,7 +190,7 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	if !enabled {
 		if due || resetsAt.IsZero() {
 			for _, stop := range waiting {
-				d.logLimitResume(d.setLimitResume(stop, registry.LimitResumeReleased, now))
+				d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, false, now))
 			}
 		}
 		return
@@ -203,35 +203,53 @@ func (d *Daemon) resumeAccount(account string, stops []registry.LimitResume, ena
 	if last, ok := d.limitResumes.released(account); ok && now.Sub(last) < limitResumeSpacing {
 		return
 	}
-	d.logLimitResume(d.releaseLimitStop(waiting[0], now))
+	d.logLimitResume(d.releaseLimitStop(waiting[0], limitWaiting, true, now))
 }
 
-// releaseLimitStop lets a stopped session go. Its queued messages resume it
-// when it has any; otherwise Agenthail's resume notice does.
-func (d *Daemon) releaseLimitStop(stop registry.LimitResume, now time.Time) error {
-	if d.Registry.QueueCount(stop.SessionID) == 0 {
-		if _, err := d.Registry.QueueMessageWithKey(stop.SessionID, surface.LimitResumeNotice(), "limit-resume:"+stop.SessionID+":"+stop.TurnID); err != nil {
-			return fmt.Errorf("queue resume of %s: %w", d.resolveDisplay(stop.SessionID), err)
-		}
+var (
+	limitWaiting = []registry.LimitResumeState{registry.LimitResumeWaiting}
+	limitHeld    = []registry.LimitResumeState{registry.LimitResumeWaiting, registry.LimitResumeCanceled, registry.LimitResumeLapsed}
+)
+
+// releaseLimitStop lets a stopped session go if it is still in one of from.
+// Its queued messages resume it when it has any; otherwise, when notice is
+// set, Agenthail's resume notice does. It reports whether the stop was let go.
+func (d *Daemon) releaseLimitStop(stop registry.LimitResume, from []registry.LimitResumeState, notice bool, now time.Time) (bool, error) {
+	text, key := "", ""
+	if notice {
+		text, key = surface.LimitResumeNotice(), "limit-resume:"+stop.SessionID+":"+stop.TurnID
 	}
-	if err := d.setLimitResume(stop, registry.LimitResumeReleased, now); err != nil {
-		return err
+	released, err := d.Registry.ReleaseLimitStop(stop.SessionID, stop.TurnID, from, text, key, now)
+	if err != nil {
+		return false, fmt.Errorf("resume %s after its usage limit: %w", d.resolveDisplay(stop.SessionID), err)
+	}
+	if !released {
+		return false, nil
 	}
 	d.limitResumes.noteRelease(stop.AccountKey, now)
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "limit-resume", SessionID: stop.SessionID, Result: "resumed after usage limit"})
-	return nil
+	d.limitResumeChanged(stop.SessionID)
+	return true, nil
 }
 
-func (d *Daemon) setLimitResume(stop registry.LimitResume, state registry.LimitResumeState, now time.Time) error {
-	if err := d.Registry.SetLimitResumeState(stop.SessionID, stop.TurnID, state, now); err != nil {
-		return fmt.Errorf("set usage-limit resume of %s: %w", d.resolveDisplay(stop.SessionID), err)
+// setLimitResume moves a stop that is still in one of from to state.
+func (d *Daemon) setLimitResume(stop registry.LimitResume, from []registry.LimitResumeState, state registry.LimitResumeState, now time.Time) (bool, error) {
+	moved, err := d.Registry.TransitionLimitResume(stop.SessionID, stop.TurnID, from, state, now)
+	if err != nil {
+		return false, fmt.Errorf("set usage-limit resume of %s: %w", d.resolveDisplay(stop.SessionID), err)
 	}
-	d.publishEvent("state.changed", stop.SessionID, map[string]string{"source": "limit-resume"})
-	d.requestObservation()
-	return nil
+	if moved {
+		d.limitResumeChanged(stop.SessionID)
+	}
+	return moved, nil
 }
 
-func (d *Daemon) logLimitResume(err error) {
+func (d *Daemon) limitResumeChanged(sessionID string) {
+	d.publishEvent("state.changed", sessionID, map[string]string{"source": "limit-resume"})
+	d.requestObservation()
+}
+
+func (d *Daemon) logLimitResume(_ bool, err error) {
 	if err != nil {
 		d.log.Printf("%s", err)
 	}
@@ -348,13 +366,18 @@ func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resu
 		http.Error(w, "this session is not stopped by a usage limit", http.StatusConflict)
 		return
 	}
+	var moved bool
 	if resume {
-		err = d.releaseLimitStop(stop, time.Now())
+		moved, err = d.releaseLimitStop(stop, limitHeld, true, time.Now())
 	} else {
-		err = d.setLimitResume(stop, registry.LimitResumeCanceled, time.Now())
+		moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !moved {
+		http.Error(w, "the session's usage-limit stop changed; check it again", http.StatusConflict)
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
