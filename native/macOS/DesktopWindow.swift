@@ -1536,7 +1536,6 @@ struct ComposerView: View {
     @State private var dropTargeted = false
     @State private var dismissedSlash: String?
     @State private var modeChanged = false
-    @State private var lastEscape: Date?
     @State private var showingSent = false
     @State private var searchingSent = false
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -1605,23 +1604,6 @@ struct ComposerView: View {
                 VStack(spacing: 0) {
                     ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt) { submit(alternate: false) }
                         .id(session.id)
-                        .popover(isPresented: $showingSent, arrowEdge: .top) {
-                            SentPromptsList(prompts: draft.sent, canFork: SessionOperationAvailability.fork(session)) { prompt in
-                                draft.restore(prompt.text)
-                                showingSent = false
-                                focused = true
-                            } fork: { prompt in
-                                showingSent = false
-                                pane.fork(session, before: prompt)
-                            }
-                        }
-                        .popover(isPresented: $searchingSent, arrowEdge: .top) {
-                            PromptSearchPanel(model: model, sessionID: session.id) { text in
-                                draft.restore(text)
-                                searchingSent = false
-                                focused = true
-                            }
-                        }
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
                         .padding(.bottom, DesktopSpace.xs)
@@ -1744,6 +1726,23 @@ struct ComposerView: View {
         .padding(.bottom, DesktopSpace.xl)
         .frame(maxWidth: .infinity)
         .backdropFade(DesktopPalette.window, paneID: "content", solidFrom: 0.38)
+        .popover(isPresented: $showingSent, arrowEdge: .top) {
+            SentPromptsList(prompts: draft.sent, canFork: SessionOperationAvailability.fork(session)) { prompt in
+                draft.restore(prompt.text)
+                showingSent = false
+                focused = true
+            } fork: { prompt in
+                showingSent = false
+                pane.fork(session, before: prompt)
+            }
+        }
+        .popover(isPresented: $searchingSent, arrowEdge: .top) {
+            PromptSearchPanel(model: model, sessionID: session.id) { text in
+                draft.restore(text)
+                searchingSent = false
+                focused = true
+            }
+        }
         .onAppear { focused = true }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
     }
@@ -1789,20 +1788,15 @@ struct ComposerView: View {
         case .interrupt:
             if !slashSuggestions.isEmpty {
                 dismissedSlash = draft.text
-                lastEscape = nil
+                draft.escapeHandled()
                 return true
             }
             if session.isWorking && session.capabilities.interrupt && !session.isReadOnly {
                 pane.interrupt()
-                lastEscape = nil
+                draft.escapeHandled()
                 return true
             }
-            if let lastEscape, Date().timeIntervalSince(lastEscape) < 0.6 {
-                self.lastEscape = nil
-                if !draft.clearIntoHistory() { showingSent = true }
-                return true
-            }
-            lastEscape = Date()
+            if draft.escapePressed(), !draft.clearIntoHistory() { showingSent = true }
             return true
         case .stash:
             return draft.toggleStash()

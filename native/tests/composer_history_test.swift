@@ -59,6 +59,15 @@ struct ComposerHistoryTest {
         history.text = "  \n"
         check(!history.clearIntoHistory(), "Esc Esc on an empty draft clears nothing, so it can list the prompts instead")
 
+        let escapes = ComposerDraft()
+        let start = Date()
+        check(!escapes.escapePressed(at: start, within: 0.5), "one Esc does nothing yet")
+        check(escapes.escapePressed(at: start.addingTimeInterval(0.3), within: 0.5), "a second Esc soon after is Esc Esc")
+        check(!escapes.escapePressed(at: start.addingTimeInterval(0.4), within: 0.5), "a third Esc starts over")
+        check(!escapes.escapePressed(at: start.addingTimeInterval(1.5), within: 0.5), "an Esc long after the last one starts over")
+        escapes.escapeHandled()
+        check(!escapes.escapePressed(at: start.addingTimeInterval(1.6), within: 0.5), "an Esc that dismissed or interrupted something does not count toward Esc Esc")
+
         let page = try! JSONDecoder().decode(PromptsPage.self, from: Data(#"{"prompts":[{"sessionId":"s","itemId":"i","turnId":"t","ts":"2026-10-20T10:00:00.25Z","text":"hi"},{"sessionId":"s","itemId":"j","ts":"2026-10-20T10:00:00Z","text":"yo"}],"nextBefore":""}"#.utf8))
         check(page.prompts.count == 2 && page.prompts[1].turnId == nil, "prompts decode with and without a turn")
         check(page.prompts[0].sentAt.map { $0 > page.prompts[1].sentAt! } == true, "fractional and whole-second times both parse and order")

@@ -1163,6 +1163,7 @@ final class ComposerDraft: ObservableObject {
     @Published private(set) var stash: ComposerStash?
     @Published private(set) var sent: [PromptItem] = []
     private(set) var cleared: [String] = []
+    private var lastEscape: Date?
     var history = PromptHistory()
 
     var isEmpty: Bool { ComposerAttachments.isEmpty(text: text, attachments: attachments) }
@@ -1191,6 +1192,18 @@ final class ComposerDraft: ObservableObject {
         attachments = held.attachments
         stash = nil
     }
+
+    /// True on the second Esc within the system double-click interval.
+    func escapePressed(at now: Date = Date(), within interval: TimeInterval = NSEvent.doubleClickInterval) -> Bool {
+        if let lastEscape, now.timeIntervalSince(lastEscape) < interval {
+            self.lastEscape = nil
+            return true
+        }
+        lastEscape = now
+        return false
+    }
+
+    func escapeHandled() { lastEscape = nil }
 
     @discardableResult
     func clearIntoHistory() -> Bool {

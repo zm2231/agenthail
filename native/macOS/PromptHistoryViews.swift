@@ -51,6 +51,7 @@ struct SentPromptsList: View {
             }
         }
         .frame(width: 440)
+        .background(KeyWindowOnAppear {})
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sent in this session")
     }
@@ -126,7 +127,7 @@ struct PromptSearchPanel: View {
         }
         .padding(DesktopSpace.m)
         .frame(width: 480)
-        .onAppear { fieldFocused = true }
+        .background(KeyWindowOnAppear { fieldFocused = true })
         .task(id: "\(scope.rawValue)\u{0}\(query)") {
             searching = true
             try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 200))
@@ -137,6 +138,35 @@ struct PromptSearchPanel: View {
             results = found.prompts.filter { seen.insert($0.text).inserted }
             problems = found.problems
             searching = false
+        }
+    }
+}
+
+/// A popover opened from the keyboard does not become key, so keys would keep
+/// going to the composer under it.
+private struct KeyWindowOnAppear: NSViewRepresentable {
+    let didBecomeKey: () -> Void
+
+    func makeNSView(context _: Context) -> KeyView { KeyView(didBecomeKey: didBecomeKey) }
+    func updateNSView(_: KeyView, context _: Context) {}
+
+    final class KeyView: NSView {
+        let didBecomeKey: () -> Void
+
+        init(didBecomeKey: @escaping () -> Void) {
+            self.didBecomeKey = didBecomeKey
+            super.init(frame: .zero)
+        }
+
+        required init?(coder _: NSCoder) { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            DispatchQueue.main.async { [didBecomeKey] in
+                window.makeKey()
+                didBecomeKey()
+            }
         }
     }
 }
