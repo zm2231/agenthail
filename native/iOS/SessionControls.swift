@@ -80,46 +80,50 @@ struct QueueListView: View {
 
     var body: some View {
         List {
-            Picker("Inbox scope", selection: $showHistory) {
-                Text("Current").tag(false)
-                Text("History").tag(true)
-            }.pickerStyle(.segmented).listRowSeparator(.hidden)
-            if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote) }
-            if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.secondary).font(.footnote) }
-            let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
-            if !problems.isEmpty {
-                Section("Delivery problems") {
-                    ForEach(problems) { problem in
-                        deliveryProblemRow(problem)
+            Group {
+                Picker("Inbox scope", selection: $showHistory) {
+                    Text("Current").tag(false)
+                    Text("History").tag(true)
+                }.pickerStyle(.segmented).listRowSeparator(.hidden)
+                if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote) }
+                if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.secondary).font(.footnote) }
+                let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+                if !problems.isEmpty {
+                    Section("Delivery problems") {
+                        ForEach(problems) { problem in
+                            deliveryProblemRow(problem)
+                        }
                     }
                 }
+                if loading && items.isEmpty { ProgressView("Loading deliveries") }
+                if !showHistory {
+                    let review = current.filter { $0.status == "dead" }
+                    let pending = current.filter { $0.status != "dead" }
+                    if !review.isEmpty {
+                        Section {
+                            ForEach(review, id: \.listID) { item in queueRow(item) }
+                        } header: { Text("Review delivery") }
+                        footer: { Text("Unconfirmed instructions may already have reached the agent. Check the session before sending again.") }
+                    }
+                    if !pending.isEmpty {
+                        Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
+                    }
+                    if !loading && error == nil && model.connectionError == nil && current.isEmpty {
+                        ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Older outcomes are in History."))
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
+                    if history.isEmpty && !loading {
+                        ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
+                            .listRowSeparator(.hidden)
+                    }
+                    ForEach(history.reversed(), id: \.listID) { item in queueRow(item) }
+                }
             }
-            if loading && items.isEmpty { ProgressView("Loading deliveries") }
-            if !showHistory {
-                let review = current.filter { $0.status == "dead" }
-                let pending = current.filter { $0.status != "dead" }
-                if !review.isEmpty {
-                    Section {
-                        ForEach(review, id: \.listID) { item in queueRow(item) }
-                    } header: { Text("Review delivery") }
-                    footer: { Text("Unconfirmed instructions may already have reached the agent. Check the session before sending again.") }
-                }
-                if !pending.isEmpty {
-                    Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
-                }
-                if !loading && error == nil && model.connectionError == nil && current.isEmpty {
-                    ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Older outcomes are in History."))
-                        .listRowSeparator(.hidden)
-                }
-            } else {
-                if history.isEmpty && !loading {
-                    ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
-                        .listRowSeparator(.hidden)
-                }
-                ForEach(history.reversed(), id: \.listID) { item in queueRow(item) }
-            }
+            .listRowBackground(GlassRowBackground(selected: false))
         }
         .listStyle(.insetGrouped)
+        .phoneBackdrop(.pane)
         .navigationTitle(sessionID == nil ? "Inbox" : "Session inbox")
         .task { await reload() }
         .refreshable { _ = await model.refresh(fresh: true); await reload() }

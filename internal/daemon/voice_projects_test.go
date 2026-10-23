@@ -26,32 +26,49 @@ type toolVoice struct {
 	pending []voice.Batch
 	answers map[string]toolAnswer
 	asked   int
+	asking  chan struct{}
 }
 
 func (c *toolVoice) Create(_ context.Context, cwd, _ string) (*surface.Session, error) {
 	return &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
 }
 
-func (c *toolVoice) Cursor(context.Context) (voice.Cursor, error) {
+func (c *toolVoice) Cursor(context.Context, *surface.Session) (voice.Cursor, error) {
 	return voice.Cursor{Source: "fixture", Position: 10}, nil
 }
 
-func (c *toolVoice) Poll(_ context.Context, after voice.Cursor, _ string) (voice.Batch, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.polled {
-		c.polled = true
-		return voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 20}, Events: []voice.Event{
-			{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}},
-			{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}},
-		}}, nil
+func (c *toolVoice) Poll(ctx context.Context, after voice.Cursor, _ string, wait time.Duration) (voice.Batch, error) {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	for {
+		c.mu.Lock()
+		if !c.polled {
+			c.polled = true
+			c.mu.Unlock()
+			return voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 20}, Events: []voice.Event{
+				{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}},
+				{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}},
+			}}, nil
+		}
+		if len(c.pending) > 0 {
+			batch := c.pending[0]
+			c.pending = c.pending[1:]
+			c.mu.Unlock()
+			return batch, nil
+		}
+		if c.asking == nil {
+			c.asking = make(chan struct{})
+		}
+		asking := c.asking
+		c.mu.Unlock()
+		select {
+		case <-asking:
+		case <-timer.C:
+			return voice.Batch{Cursor: after}, nil
+		case <-ctx.Done():
+			return voice.Batch{Cursor: after}, ctx.Err()
+		}
 	}
-	if len(c.pending) == 0 {
-		return voice.Batch{Cursor: after}, nil
-	}
-	batch := c.pending[0]
-	c.pending = c.pending[1:]
-	return batch, nil
 }
 
 func (c *toolVoice) Request(context.Context, *surface.Session, string, map[string]any) error {
@@ -59,6 +76,7 @@ func (c *toolVoice) Request(context.Context, *surface.Session, string, map[strin
 }
 
 func (c *toolVoice) Interrupt(context.Context, *surface.Session) error { return nil }
+func (c *toolVoice) Release(string, voice.Cursor)                      {}
 
 func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	c.mu.Lock()
@@ -75,6 +93,10 @@ func (c *toolVoice) ask(tool string, arguments map[string]any) string {
 	c.pending = append(c.pending, voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 30}, Events: []voice.Event{
 		{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": arguments}},
 	}})
+	if c.asking != nil {
+		close(c.asking)
+		c.asking = nil
+	}
 	return id
 }
 

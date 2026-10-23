@@ -41,6 +41,19 @@ struct SessionPreview: View {
         _model = StateObject(wrappedValue: model)
     }
     var body: some View {
+        AppearanceScope(appearance: model.appearance) { previewBody }
+            .onAppear { if let config = Self.previewAppearance { model.appearance.preview(config) } }
+    }
+
+    static var previewAppearance: UIConfig? {
+        guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-backdrop") else { return nil }
+        let arguments = ProcessInfo.processInfo.arguments
+        let background = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
+        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "values": ["background": background, "theme": "system"]]) else { return nil }
+        return try? JSONDecoder().decode(UIConfig.self, from: json)
+    }
+
+    @ViewBuilder private var previewBody: some View {
         if ProcessInfo.processInfo.arguments.contains("--preview-app") {
             MainTabs(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
@@ -234,6 +247,14 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}]}"#
         case "/api/v1/models":
             body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
+        case "/api/v1/session-commands":
+            body = #"{"commands":[{"name":"review","description":"Review the current changes","argumentHint":"","insert":"/review"},{"name":"compact","description":"Summarize the conversation so far","argumentHint":"[instructions]","insert":"/compact"},{"name":"fieldnotes","description":"Write up today's notes","argumentHint":"","insert":"$fieldnotes"}],"unavailable":""}"#
+        case "/api/v1/session-files":
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "q" })?.value ?? ""
+            let files = [("Sources", true), ("Sources/Notebook.swift", false), ("Sources/NoteStore.swift", false), ("README.md", false)]
+                .filter { query.isEmpty || $0.0.localizedCaseInsensitiveContains(query) }
+                .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
+            body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#

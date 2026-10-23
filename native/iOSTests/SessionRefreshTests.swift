@@ -74,6 +74,98 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingBackToACachedSessionResumesItsStreamWithoutReadingAPage() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        await model.loadSession("computer::other")
+        let pages = SessionRefreshProtocol.state.detailFetches
+        let streams = SessionRefreshProtocol.state.streamURLs.count
+
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.dropFirst(streams).contains { $0.contains("id=demo") } }
+
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, pages)
+        let resumed = try XCTUnwrap(SessionRefreshProtocol.state.streamURLs.dropFirst(streams).first { $0.contains("id=demo") })
+        XCTAssertTrue(resumed.contains("after=10"), resumed)
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::demo")
+        XCTAssertFalse(model.loadingSession)
+    }
+
+    @MainActor
+    func testACachedSessionReopensListingEverySubagentItShowed() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        model.showAllClaudeSubagents()
+        await model.loadSession("computer::other")
+        let metadataReads = SessionRefreshProtocol.state.metadataURLs.count
+
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.metadataURLs.dropFirst(metadataReads).contains { $0.contains("id=demo") } }
+
+        XCTAssertTrue(model.showsAllClaudeSubagents)
+        let reopened = SessionRefreshProtocol.state.metadataURLs.dropFirst(metadataReads).filter { $0.contains("id=demo") }
+        XCTAssertTrue(reopened.allSatisfy { $0.contains("subagents=all") }, "\(reopened)")
+    }
+
+    @MainActor
+    func testASessionWhoseSourceResetWhileShownReadsAPageWhenReopened() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        model.applySessionStreamEvent(try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":11,"type":"item","data":{"itemId":"source","version":1,"kind":"source-error","op":"reset","ts":"2026-10-03T12:00:00Z","reason":"upstream unavailable","truncated":false}}"#.utf8)))
+        await model.loadSession("computer::other")
+        let pages = SessionRefreshProtocol.state.detailFetches
+
+        await model.loadSession("computer::demo")
+
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, pages + 1)
+    }
+
+    @MainActor
+    func testACachedSessionItsComputerNoLongerListsIsDropped() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::other")
+        await model.loadSession("computer::demo")
+        model.store.commandsStreamed(RuntimeCommands(commands: [], unavailable: ""), for: "computer::other")
+        XCTAssertNotNil(model.store.peek("computer::other"))
+
+        await model.refresh()
+
+        XCTAssertNil(model.store.peek("computer::other"))
+        XCTAssertNil(model.store.commands["computer::other"])
+        XCTAssertNotNil(model.store.peek("computer::demo") ?? model.selectedDetail)
+    }
+
+    @MainActor
+    func testTheSessionListFollowsEachCatalogChange() async {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        await model.refresh()
+        func running() -> [String] { model.sessionTree(scope: .running, search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
+        XCTAssertTrue(running().contains("computer::demo"))
+
+        SessionRefreshProtocol.state.set(snapshotStatus: "idle")
+        await model.refresh()
+
+        XCTAssertFalse(running().contains("computer::demo"))
+        XCTAssertEqual(model.sessionTree(scope: .running, search: "zzz-no-match").projects.count, 0)
+    }
+
+    @MainActor
     func testSnapshotStatusReachesOpenSession() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -325,7 +417,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0; fields = "{}"
+                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []
                 condition.broadcast()
             }
         }
@@ -339,7 +431,12 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         var streamRequests: Int { condition.withLock { streams } }
         func set(snapshotCanStream value: Bool) { condition.withLock { canStream = value } }
         func set(streamUnsupported value: Bool) { condition.withLock { unsupported = value } }
-        func streamRequested() { condition.withLock { streams += 1 } }
+        private var streamPaths: [String] = []
+        var streamURLs: [String] { condition.withLock { streamPaths } }
+        func streamRequested(_ url: URL?) { condition.withLock { streams += 1; streamPaths.append(url?.absoluteString ?? "") } }
+        private var metadataPaths: [String] = []
+        var metadataURLs: [String] { condition.withLock { metadataPaths } }
+        func metadataRequested(_ url: URL?) { condition.withLock { metadataPaths.append(url?.absoluteString ?? "") } }
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
         func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
@@ -413,9 +510,10 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             }
             return
         case "/api/v1/session-metadata":
+            Self.state.metadataRequested(request.url)
             body = Self.metadata
         case "/api/v1/session-stream":
-            Self.state.streamRequested()
+            Self.state.streamRequested(request.url)
             if Self.state.streamUnsupported {
                 status = 409
                 body = #"{"error":{"code":"stream_unsupported","message":"no stream"}}"#

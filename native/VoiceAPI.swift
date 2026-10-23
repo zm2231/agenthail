@@ -67,6 +67,8 @@ struct VoiceAction: Encodable {
     var text: String? = nil
     var messageId: String? = nil
     var targetId: String? = nil
+    var muted: Bool? = nil
+    var inputRevision: Int? = nil
 }
 
 @MainActor
@@ -89,7 +91,7 @@ final class VoiceAPI: VoiceServiceClient {
 #if os(macOS)
             throw AgenthailAPIError.unavailable("Voice requires Agenthail's loopback address or an HTTPS address.")
 #else
-            throw AgenthailAPIError.unavailable("Voice requires the paired Mac's secure HTTPS address.")
+            throw AgenthailAPIError.unavailable("Voice requires the paired computer's secure HTTPS address.")
 #endif
         }
         self.endpoint = endpoint

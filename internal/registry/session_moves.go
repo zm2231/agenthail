@@ -329,7 +329,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 		err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, alias).Scan(&holder)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			if err := setAliasTx(tx, alias, session.ID); err != nil {
+			if err := setAliasTx(tx, alias, session.ID, r.now()); err != nil {
 				return nil, err
 			}
 		case err != nil:

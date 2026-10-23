@@ -32,17 +32,23 @@ func (c *voiceCall) Create(_ context.Context, cwd, _ string) (*surface.Session, 
 	return &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, nil
 }
 
-func (c *voiceCall) Cursor(context.Context) (voice.Cursor, error) {
+func (c *voiceCall) Cursor(context.Context, *surface.Session) (voice.Cursor, error) {
 	return voice.Cursor{Source: "fixture", Position: 10}, nil
 }
 
-func (c *voiceCall) Poll(_ context.Context, after voice.Cursor, _ string) (voice.Batch, error) {
+func (c *voiceCall) Poll(ctx context.Context, after voice.Cursor, _ string, wait time.Duration) (voice.Batch, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.polled {
-		return voice.Batch{Cursor: after}, nil
-	}
+	polled := c.polled
 	c.polled = true
+	c.mu.Unlock()
+	if polled {
+		select {
+		case <-time.After(wait):
+			return voice.Batch{Cursor: after}, nil
+		case <-ctx.Done():
+			return voice.Batch{Cursor: after}, ctx.Err()
+		}
+	}
 	return voice.Batch{Cursor: voice.Cursor{Source: "fixture", Position: 20}, Events: []voice.Event{
 		{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}},
 		{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}},
@@ -59,6 +65,7 @@ func (c *voiceCall) Request(_ context.Context, _ *surface.Session, method string
 }
 
 func (c *voiceCall) Interrupt(context.Context, *surface.Session) error { return nil }
+func (c *voiceCall) Release(string, voice.Cursor)                      {}
 
 func (c *voiceCall) said(text string) bool {
 	c.mu.Lock()
@@ -234,5 +241,39 @@ func TestVoiceTargetAcceptsTheFromSessionOfAPeerMessage(t *testing.T) {
 	target, err := d.resolveVoiceTarget(context.Background(), surface.PeerUUID(registered.Surface, registered.ID))
 	if err != nil || target.Session.ID != registered.ID {
 		t.Fatalf("target=%+v err=%v", target, err)
+	}
+}
+
+func TestTheVoiceAliasFollowsTheCurrentOperatorButIsNeverTakenFromAnotherSession(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	operator := func(id string) surface.Session {
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: "managed", Cwd: "/home/user/.agenthail/voice/operator", Status: surface.StatusIdle}
+		fake.sessions[id] = session
+		return session
+	}
+	ctx := context.Background()
+	if err := d.registerVoiceOperator(ctx, operator("operator-1")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != "operator-1" {
+		t.Fatalf("@voice=%q", owner)
+	}
+	if err := d.registerVoiceOperator(ctx, operator("operator-2")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != "operator-2" {
+		t.Fatalf("@voice did not move to the new operator: %q", owner)
+	}
+	if err := r.RemoveAlias("voice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("voice", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.registerVoiceOperator(ctx, operator("operator-3")); err != nil {
+		t.Fatal(err)
+	}
+	if owner, _ := r.LookupAlias("voice"); owner != from.ID {
+		t.Fatalf("@voice was taken from a session someone named: %q", owner)
 	}
 }

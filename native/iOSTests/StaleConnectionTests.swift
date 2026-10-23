@@ -135,8 +135,80 @@ final class StaleConnectionTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertEqual(model.selectedSessionID, "hsrv::demo")
         XCTAssertEqual(model.selectedDetail?.session.status, "new")
-        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("old"), ["/api/v1/session"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("old").sorted(), ["/api/v1/session", "/api/v1/session-commands"])
         XCTAssertTrue(ServedSessionProtocol.state.sessionRequests("new").contains("/api/v1/session-stream"))
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
+    func testReconnectingAComputerKeepsOnlyTheCommandsItsReplacementLists() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        ServedSessionProtocol.state.hold("old", ["/api/v1/session-commands"])
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSession("hsrv::demo")
+        for _ in 0..<150 where !ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ServedSessionProtocol.state.holding)
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        for _ in 0..<150 where model.store.commands["hsrv::demo"] == nil { try await Task.sleep(for: .milliseconds(20)) }
+        ServedSessionProtocol.state.release()
+        for _ in 0..<150 where ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.store.commands["hsrv::demo"]?.commands.map(\.name), ["new"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("new").filter { $0 == "/api/v1/session-commands" }.count, 1)
+        model.forgetHost("hsrv")
+        XCTAssertNil(model.store.commands["hsrv::demo"])
+    }
+
+    @MainActor
+    func testMentionFilesComeFromTheComputerThatRunsTheSession() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://srv.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let files = await model.sessionFiles("hsrv::demo", query: "read me")
+        XCTAssertEqual(files, [SessionFile(path: "srv/demo/read me", dir: false)])
+        let unknown = await model.sessionFiles("hgone::demo", query: "x")
+        XCTAssertNil(unknown)
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
+    func testMentionFilesFromAComputerReplacedMidRequestAreDropped() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        ServedSessionProtocol.state.hold("old", ["/api/v1/session-files"])
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let request = Task { await model.sessionFiles("hsrv::demo", query: "a") }
+        for _ in 0..<150 where !ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ServedSessionProtocol.state.holding)
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        ServedSessionProtocol.state.release()
+        let stale = await request.value
+        XCTAssertNil(stale)
+        var current: [SessionFile]?
+        for _ in 0..<150 where current == nil {
+            current = await model.sessionFiles("hsrv::demo", query: "a")
+            if current == nil { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        XCTAssertEqual(current, [SessionFile(path: "new/demo/a", dir: false)])
         model.forgetHost("hsrv")
     }
 
@@ -226,10 +298,15 @@ final class StaleConnectionTests: XCTestCase {
         let ownBytes = await model.sessionAttachment(for: item, sessionID: parent.id)
         XCTAssertEqual(ownBytes, Data("own".utf8))
         let revision = model.fetchedSubagents.revision(parent.id)
+        for _ in 0..<150 where model.store.commands[parent.id] == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.store.commands[parent.id]?.commands.map(\.name), ["own"])
 
         ServedSessionProtocol.state.takeOffline("own")
         for _ in 0..<200 where model.selectedDetail?.session.status != "mirror" { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(model.selectedDetail?.session.status, "mirror")
+        for _ in 0..<150 where model.store.commands[parent.id]?.commands.first?.name != "mirror" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.store.commands[parent.id]?.commands.map(\.name), ["mirror"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("mirror").filter { $0 == "/api/v1/session-commands" }.count, 1)
         XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), revision)
         XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).isEmpty)
         let mirrorBytes = await model.sessionAttachment(for: item, sessionID: parent.id)
@@ -573,6 +650,19 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             DispatchQueue.global().async { [self] in
                 Self.state.waitIfHeld(host, path)
                 respond(#"{"permissionMode":"\#(host)","requests":[]}"#)
+            }
+        case "/api/v1/session-commands":
+            DispatchQueue.global().async { [self] in
+                Self.state.waitIfHeld(host, path)
+                respond(#"{"commands":[{"name":"\#(host)","description":"","argumentHint":"","insert":"/\#(host)"}],"unavailable":""}"#)
+            }
+        case "/api/v1/session-files":
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let id = items.first { $0.name == "id" }?.value ?? ""
+            let query = items.first { $0.name == "q" }?.value ?? ""
+            DispatchQueue.global().async { [self] in
+                Self.state.waitIfHeld(host, path)
+                respond(#"{"files":[{"path":"\#(host)/\#(id)/\#(query)","dir":false}],"truncated":false}"#)
             }
         case "/api/v1/session-stream":
             Self.state.open(host, self)

@@ -14,7 +14,8 @@ struct MetadataOverlay {
     private(set) var settled = false
     private var streamed: Set<String> = []
 
-    init(seed detail: SessionDetail? = nil) {
+    init(seed detail: SessionDetail? = nil, allClaudeSubagents: Bool = false) {
+        self.allClaudeSubagents = allClaudeSubagents
         context = detail?.context
         goal = detail?.goal
         model = detail?.model

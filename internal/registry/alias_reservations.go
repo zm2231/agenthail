@@ -38,7 +38,7 @@ func (r *Registry) ReserveAlias(name string, until time.Time) (AliasReservation,
 		return AliasReservation{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM alias_reservations WHERE expires_at_ms<=?`, time.Now().UnixMilli()); err != nil {
+	if _, err := tx.Exec(`DELETE FROM alias_reservations WHERE expires_at_ms<=?`, r.now().UnixMilli()); err != nil {
 		return AliasReservation{}, err
 	}
 	if coordinated, err := coordinatorNamedTx(tx, name); err != nil {
@@ -54,7 +54,7 @@ func (r *Registry) ReserveAlias(name string, until time.Time) (AliasReservation,
 	if !errors.Is(err, sql.ErrNoRows) {
 		return AliasReservation{}, err
 	}
-	if err := aliasReservedTx(tx, name, ""); err != nil {
+	if err := aliasReservedTx(tx, name, "", r.now()); err != nil {
 		return AliasReservation{}, err
 	}
 	reservation := AliasReservation{Name: name, Token: uuid.NewString(), Until: until}
@@ -75,17 +75,17 @@ func (r *Registry) BindReservedAlias(reservation AliasReservation, sessionID str
 		return err
 	}
 	defer tx.Rollback()
-	if err := bindReservedAliasTx(tx, reservation, sessionID); err != nil {
+	if err := bindReservedAliasTx(tx, reservation, sessionID, r.now()); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func bindReservedAliasTx(tx *sql.Tx, reservation AliasReservation, sessionID string) error {
+func bindReservedAliasTx(tx *sql.Tx, reservation AliasReservation, sessionID string, now time.Time) error {
 	if err := releaseAliasReservationTx(tx, reservation); err != nil {
 		return err
 	}
-	return setAliasTx(tx, reservation.Name, sessionID)
+	return setAliasTx(tx, reservation.Name, sessionID, now)
 }
 
 // ReleaseAliasReservation leaves a reservation another start took over after
@@ -103,10 +103,10 @@ func releaseAliasReservationTx(tx *sql.Tx, reservation AliasReservation) error {
 	return err
 }
 
-func aliasReservedTx(tx *sql.Tx, name, token string) error {
+func aliasReservedTx(tx *sql.Tx, name, token string, now time.Time) error {
 	var holder string
 	var until int64
-	err := tx.QueryRow(`SELECT token,expires_at_ms FROM alias_reservations WHERE name=? AND expires_at_ms>?`, name, time.Now().UnixMilli()).Scan(&holder, &until)
+	err := tx.QueryRow(`SELECT token,expires_at_ms FROM alias_reservations WHERE name=? AND expires_at_ms>?`, name, now.UnixMilli()).Scan(&holder, &until)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && holder == token {
 		return nil
 	}

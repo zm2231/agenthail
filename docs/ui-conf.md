@@ -1,6 +1,6 @@
 # Appearance with ui.conf
 
-The Mac app's look comes from one text file, `ui.conf`, kept on the computer that runs Agenthail at `~/.agenthail/ui/ui.conf`. You can edit it by hand, change it with `agenthail ui`, or ask an agent to change it. The app picks up a change within a few seconds of it being saved.
+The look of the Mac and iPhone apps comes from one text file, `ui.conf`, kept on the computer that runs Agenthail, macOS or Linux, at `~/.agenthail/ui/ui.conf`. You can edit it by hand, change it with `agenthail ui`, or ask an agent to change it. The Mac app picks up a change within a few seconds of it being saved.
 
 `~/.agenthail/ui` is a git repository. Every change is a commit that records who made it (you, or the agent that ran `agenthail ui`) and why, so any change can be listed, compared and undone.
 
@@ -26,6 +26,8 @@ glass@device:Studio = off
 
 The device kinds are `mac`, `phone`, `tablet` and `web`. `device:<name>` matches a computer by its name; the Mac app uses the name in System Settings > General > Sharing. For each device, `key@device:<name>` beats `key@<kind>`, which beats `key`, which beats the default. When the same key and device appear twice, the later line wins.
 
+The iPhone and iPad app reads `ui.conf` from the first computer it paired with, as kind `phone` or `tablet`. iOS gives apps the name `iPhone` or `iPad` rather than the name you chose, so `device:iPhone` matches every iPhone. `desktop` has nothing to show through on a phone and means `none` there.
+
 A line Agenthail can't use, such as an unknown key or a value of the wrong kind, is skipped and reported with its line number; the rest of the file still applies. A number outside its range is reported and set to the nearest allowed value.
 
 ## Settings
@@ -37,7 +39,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `version` | `1` | File format version. |
 | `theme` | `system` | `system`, `dark`, `light`. |
 | `theme.accent` | `system` | Accent for links, focus and working state: `system` or `#rrggbb`. |
-| `background` | `art: tide` | What fills the window. See [Backgrounds](#backgrounds). |
+| `background` | `art: field` | What fills the window. See [Backgrounds](#backgrounds). |
 | `background.fit` | `cover` | How an image fills the window: `cover`, `contain`, `center`, `tile`. |
 | `background.position` | `center` | Which part of an image stays in view: `center`, `top`, `bottom`, `left`, `right`. |
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
@@ -70,7 +72,7 @@ Whatever the background, text keeps at least `contrast.target` contrast: the app
 
 - `none`: the plain window colour.
 - `desktop`: the desktop picture shows through.
-- `art: <name>`: a built-in picture: `tide`, `aurora`, `dawn` or `field`. Each has a dark and a light version, and the app shows the one that matches its appearance.
+- `art: <name>`: a built-in picture: `field`, `tide`, `aurora` or `dawn`. Each has a dark and a light version, and the app shows the one that matches its appearance.
 - `image: <path>`: a PNG, JPEG, HEIC or WebP image under 30 MB. `agenthail ui set` copies an image from anywhere into `~/.agenthail/ui/backgrounds/` and writes that path, so the image is versioned with the file. The Mac app's Appearance settings upload a chosen or dropped image the same way, also to a remote computer.
 - `gradient: <preset>`: one of `dusk`, `slate`, `forest`, `ember`, `violet`, `mono`. Each has a dark and a light version, like the built-in pictures.
 - `gradient: <angle>deg, <colour> <pos>%, <colour> <pos>%, ...`: a linear gradient with at least two stops, for example `gradient: 135deg, #1b2230 0%, #4a2c8a 100%`.

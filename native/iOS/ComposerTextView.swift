@@ -9,6 +9,8 @@ struct IOSComposerTextView: UIViewRepresentable {
     let label: String
     let lines: ClosedRange<Int>
     let pasteAttachments: ((PastedAttachments) -> Void)?
+    var editor: IOSComposerEditor? = nil
+    var onCaret: ((Int) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -18,11 +20,14 @@ struct IOSComposerTextView: UIViewRepresentable {
         view.accessibilityIdentifier = "composer-input"
         view.text = text
         context.coordinator.sync = ComposerTextSync(text)
+        editor?.textView = view
         return view
     }
 
     func updateUIView(_ view: ComposerUITextView, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onCaret = onCaret
+        editor?.textView = view
         view.show(bound: text, sync: context.coordinator.sync)
         view.placeholder = placeholder
         view.accessibilityLabel = label
@@ -38,6 +43,7 @@ struct IOSComposerTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var text: Binding<String>
         var sync: ComposerTextSync
+        var onCaret: ((Int) -> Void)?
 
         init(text: Binding<String>) {
             self.text = text
@@ -47,6 +53,16 @@ struct IOSComposerTextView: UIViewRepresentable {
         func textViewDidChange(_ view: UITextView) {
             sync.viewChanged(to: view.text) { if text.wrappedValue != $0 { text.wrappedValue = $0 } }
             (view as? ComposerUITextView)?.refreshPlaceholder()
+            caretMoved(view)
+        }
+
+        func textViewDidChangeSelection(_ view: UITextView) { caretMoved(view) }
+
+        // The text view also moves the caret while SwiftUI updates the view,
+        // and state can't change during an update.
+        private func caretMoved(_ view: UITextView) {
+            let caret = view.selectedRange.location
+            DispatchQueue.main.async { [self] in onCaret?(caret) }
         }
     }
 }
@@ -123,5 +139,20 @@ final class ComposerUITextView: UITextView {
         } else {
             super.paste(sender)
         }
+    }
+}
+
+/// Replaces part of the composer's text through the text view, so the edit
+/// joins its undo and the caret lands after it.
+@MainActor
+final class IOSComposerEditor {
+    weak var textView: UITextView?
+
+    func replace(_ range: NSRange, with text: String, caret: Int) {
+        guard let textView, NSMaxRange(range) <= (textView.text as NSString).length else { return }
+        if textView.markedTextRange != nil { textView.unmarkText() }
+        textView.selectedRange = range
+        textView.insertText(text)
+        textView.selectedRange = NSRange(location: min(caret, (textView.text as NSString).length), length: 0)
     }
 }
