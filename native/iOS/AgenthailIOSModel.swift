@@ -289,6 +289,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         cancelSessionReload()
         unsupportedRefreshTask?.cancel()
         sessionMetadataTask?.cancel()
+        store.rereadCommands(id)
         sessionStreamCursor = 0
         sessionStreamUnsupported = false
         sessionRequests = nil

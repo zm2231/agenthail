@@ -253,10 +253,15 @@ final class StaleConnectionTests: XCTestCase {
         let ownBytes = await model.sessionAttachment(for: item, sessionID: parent.id)
         XCTAssertEqual(ownBytes, Data("own".utf8))
         let revision = model.fetchedSubagents.revision(parent.id)
+        for _ in 0..<150 where model.store.commands[parent.id] == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.store.commands[parent.id]?.commands.map(\.name), ["own"])
 
         ServedSessionProtocol.state.takeOffline("own")
         for _ in 0..<200 where model.selectedDetail?.session.status != "mirror" { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(model.selectedDetail?.session.status, "mirror")
+        for _ in 0..<150 where model.store.commands[parent.id]?.commands.first?.name != "mirror" { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.store.commands[parent.id]?.commands.map(\.name), ["mirror"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("mirror").filter { $0 == "/api/v1/session-commands" }.count, 1)
         XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), revision)
         XCTAssertTrue(model.fetchedSubagents.children(of: parent.id).isEmpty)
         let mirrorBytes = await model.sessionAttachment(for: item, sessionID: parent.id)

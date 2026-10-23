@@ -94,6 +94,11 @@ struct SessionStoreTest {
         let flaky = commanded.beginCommandsRead("D")!
         commanded.commandsRead(nil, for: "D", read: flaky, retry: true)
         check(commanded.beginCommandsRead("D") != nil, "a read that failed for another reason is tried again on the next open")
+        commanded.rereadCommands("B")
+        let reread = commanded.beginCommandsRead("B")
+        check(reread != nil && commanded.commands["B"] == remote, "a session moved to another route reads its commands again and keeps showing the old list until then")
+        commanded.commandsRead(listed, for: "B", read: reread!)
+        check(commanded.commands["B"] == listed, "the new route's commands replace the old ones")
         var commandRekeys = SessionRekeys()
         commandRekeys.record(["A": "conversation-a"])
         commanded.carry(commandRekeys)

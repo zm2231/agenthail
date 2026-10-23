@@ -116,6 +116,12 @@ final class SessionStore: ObservableObject {
         if commands[id] != value { commands[id] = value }
     }
 
+    /// Lets a session's commands be read again from the route that now
+    /// serves it; the current list stays until that read answers.
+    func rereadCommands(_ id: String) {
+        commandReads.removeValue(forKey: id)
+    }
+
     func commandsStreamed(_ value: RuntimeCommands, for id: String) {
         commandRevision &+= 1
         commandReads[id] = commandRevision
