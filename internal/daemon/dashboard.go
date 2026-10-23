@@ -1294,7 +1294,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			// holding its name, until discovery finds it at its location.
 			pend := func(location *surface.Location, detail string) {
 				if location == nil || *location == (surface.Location{}) {
-					d.writeAcceptedLaunch(w, request.Launcher, location, detail, unkeptName(alias))
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail, untracked(alias))
 					return
 				}
 				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
@@ -1302,7 +1302,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					if detail != "" {
 						failure = detail + "; " + failure
 					}
-					d.writeAcceptedLaunch(w, request.Launcher, location, failure, unkeptName(alias))
+					d.writeAcceptedLaunch(w, request.Launcher, location, failure, untracked(alias))
 					return
 				}
 				keepReservation = true
@@ -1335,7 +1335,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if session == nil {
 				if location == nil {
-					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved", unkeptName(alias))
+					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved", untracked(alias))
 					return
 				}
 				pend(location, "")
@@ -1348,7 +1348,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
 			if err := d.Registry.RegisterSession(*session); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err), strings.TrimSpace("Agenthail couldn't record it yet; it appears in the sidebar once found. "+unkeptName(alias)))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err), untracked(alias))
 				return
 			}
 			if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {
@@ -2502,6 +2502,12 @@ func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, loc
 		body["location"] = location
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+// untracked is the notice for a launch Agenthail holds no record of; the
+// session is registered only when discovery finds it.
+func untracked(alias string) string {
+	return strings.TrimSpace("It appears in the sidebar once Agenthail finds it. " + unkeptName(alias))
 }
 
 func unkeptName(alias string) string {
