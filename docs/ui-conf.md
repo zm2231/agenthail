@@ -26,6 +26,8 @@ glass@device:Studio = off
 
 The device kinds are `mac`, `phone`, `tablet` and `web`. `device:<name>` matches a computer by its name; the Mac app uses the name in System Settings > General > Sharing. For each device, `key@device:<name>` beats `key@<kind>`, which beats `key`, which beats the default. When the same key and device appear twice, the later line wins.
 
+The iPhone and iPad app reads `ui.conf` from the first computer it paired with, as kind `phone` or `tablet`. iOS gives apps the name `iPhone` or `iPad` rather than the name you chose, so `device:iPhone` matches every iPhone. `desktop` has nothing to show through on a phone and means `none` there.
+
 A line Agenthail can't use, such as an unknown key or a value of the wrong kind, is skipped and reported with its line number; the rest of the file still applies. A number outside its range is reported and set to the nearest allowed value.
 
 ## Settings
