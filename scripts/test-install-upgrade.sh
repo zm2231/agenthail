@@ -31,6 +31,10 @@ SOURCE_DATA="$SOURCE_HOME/data"
 SOURCE_GOCACHE="$(go env GOCACHE)"
 SOURCE_GO_BIN="$(dirname "$(command -v go)")"
 SOURCE_GOMODCACHE="$(go env GOMODCACHE)"
+node_dist="$("$ROOT/scripts/fetch-node.sh" --dist "$(uname -s | tr '[:upper:]' '[:lower:]')" "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')")"
+export AGENTHAIL_BUILD_CACHE="$TMP/build cache odd\" dollar\$ back\\slash"
+mkdir -p "$AGENTHAIL_BUILD_CACHE"
+cp "$node_dist.tar.gz" "$AGENTHAIL_BUILD_CACHE/"
 
 cleanup() {
 	[ -z "$OTHER_HOME_DAEMON" ] || kill "$OTHER_HOME_DAEMON" 2>/dev/null || true

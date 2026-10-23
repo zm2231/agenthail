@@ -28,7 +28,7 @@ prepare() {
 	remove_tmp
 	tmp="$(mktemp -d "${user_tmp}XXXX")"
 	echo "$tmp" >"$marker"
-	mkdir -p "$home" "$cache/go-build" "$cache/go-mod" "$cache/npm"
+	mkdir -p "$home" "$cache/go-build" "$cache/go-mod" "$cache/npm" "$cache/agenthail-build"
 	cat <<EOF
 HOME=$home
 CFFIXED_USER_HOME=$home
@@ -37,6 +37,7 @@ GOTMPDIR=$tmp
 GOCACHE=$cache/go-build
 GOMODCACHE=$cache/go-mod
 npm_config_cache=$cache/npm
+AGENTHAIL_BUILD_CACHE=$cache/agenthail-build
 EOF
 }
 

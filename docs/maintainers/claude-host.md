@@ -445,13 +445,21 @@ if a native module appears. Every install ships Node 22 as
 the cookie bridge with that file only, never a `node` from `PATH`.
 `scripts/fetch-node.sh` pins the version and checksums and stages it for the
 Mac package, the release archives and `install.sh`; run it with no arguments
-in a checkout for source builds and tests. `AGENTHAIL_CLAUDE_HOST` overrides
-the script path.
+in a checkout for source builds and tests. It keeps the verified archive in
+`AGENTHAIL_BUILD_CACHE` (default `~/Library/Caches/agenthail-build` on a Mac,
+`~/.cache/agenthail-build` elsewhere), downloads from
+`AGENTHAIL_NODE_DIST_URL` (default `https://nodejs.org/dist`) into a fresh file
+for each of up to four attempts, and keeps a download only when its SHA-256
+matches the pin; a failed attempt prints the checksum it got.
+`scripts/test-fetch-node.sh` serves it a dropped transfer and corrupt bodies
+through a cache path with a quote, a dollar and a backslash.
+`AGENTHAIL_CLAUDE_HOST` overrides the script path.
 
 ## Tests
 
 ```bash
 scripts/fetch-node.sh
+scripts/test-fetch-node.sh
 npm ci --prefix claude-host --omit=optional
 npm test --prefix claude-host
 go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon/ -run 'Host|Ensure|Subscribe|Client' -race

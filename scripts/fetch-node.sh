@@ -48,21 +48,36 @@ dist="$cache/$name"
 
 checksum() {
 	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$1" | cut -d' ' -f1
+		sha256sum <"$1" | cut -d' ' -f1
 	else
-		shasum -a 256 "$1" | cut -d' ' -f1
+		shasum -a 256 <"$1" | cut -d' ' -f1
 	fi
 }
 
 mkdir -p "$cache"
 if [ ! -f "$archive" ] || [ "$(checksum "$archive")" != "$sha" ]; then
 	rm -f "$archive"
-	curl -fsSL --retry 3 --retry-all-errors -o "$archive.part" "https://nodejs.org/dist/v$VERSION/$name.tar.gz"
-	mv "$archive.part" "$archive"
-fi
-if [ "$(checksum "$archive")" != "$sha" ]; then
-	echo "error: $archive does not match the pinned checksum" >&2
-	exit 1
+	url="${AGENTHAIL_NODE_DIST_URL:-https://nodejs.org/dist}/v$VERSION/$name.tar.gz"
+	attempts=4
+	download=""
+	trap 'rm -f "$download"' EXIT
+	for attempt in $(seq "$attempts"); do
+		download="$(mktemp "$cache/$name.XXXXXX")"
+		status=0
+		curl -fsSL --connect-timeout 20 -o "$download" "$url" || status=$?
+		got="$(checksum "$download")"
+		if [ "$status" -eq 0 ] && [ "$got" = "$sha" ]; then
+			mv "$download" "$archive"
+			break
+		fi
+		rm -f "$download"
+		echo "fetch-node: attempt $attempt of $attempts for $url failed (curl exit $status, got $got, want $sha)" >&2
+		if [ "$attempt" -eq "$attempts" ]; then
+			echo "error: no download of $url matched the pinned checksum $sha" >&2
+			exit 1
+		fi
+		sleep "$attempt"
+	done
 fi
 # Only the archive is verified, so every run unpacks it afresh.
 unpacked="$(mktemp -d "$cache/unpack.XXXXXX")"

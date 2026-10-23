@@ -137,8 +137,14 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
+      - name: Shipped Node download test
+        run: scripts/test-fetch-node.sh
       - name: Race tests
         run: go test ./... -race -count=1 -timeout 25m
       - name: Build Linux archives
@@ -168,6 +174,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
+      - uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+      - name: Shipped Node download test
+        run: PATH="$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/bin:/bin" scripts/test-fetch-node.sh
       - name: Install and upgrade test
         run: |
           scripts/test-pkg-component-plist.sh
@@ -185,6 +197,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Build package
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
