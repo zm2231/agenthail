@@ -85,7 +85,7 @@ struct TranscriptBlockTest {
         check(TranscriptBlock.gap(above: user, after: nil) == 0, "the first block sits on the top padding")
         let within = [TranscriptBlock.gap(above: tools, after: reply), TranscriptBlock.gap(above: reply, after: tools), TranscriptBlock.gap(above: reply, after: reply)]
         let opening = TranscriptBlock.gap(above: reply, after: user)
-        let turn = [TranscriptBlock.gap(above: user, after: reply), TranscriptBlock.gap(above: peer, after: tools)]
+        let turn = [TranscriptBlock.gap(above: user, after: reply), TranscriptBlock.gap(above: peer, after: tools), TranscriptBlock.gap(above: user, after: user)]
         check(Set(within).count == 1, "the agent's text and tool runs within a turn share one gap: \(within)")
         check(within[0] < opening && opening < turn.min()!, "within a turn is tighter than after a message, which is tighter than before one: \(within[0]) \(opening) \(turn)")
     }

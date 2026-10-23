@@ -967,12 +967,12 @@ struct TranscriptView: View {
                     TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
                         .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
                 }
-                ForEach(sends) { send in
+                ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
                         if send.failure != nil { model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
-                    .padding(.top, blocks.isEmpty ? 0 : DesktopSpace.xl)
+                    .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
                 if session.isWaitingOnBackground, let background = session.backgroundTasks {
                     HStack(spacing: DesktopSpace.s) {
