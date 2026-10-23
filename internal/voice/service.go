@@ -208,17 +208,11 @@ type Service struct {
 	speechTimeout           time.Duration
 	logf                    func(format string, args ...any)
 	briefer                 Briefer
-	// follow follows the selected session for the current call.
-	follow *follower
-	// replies are replies to typed input waiting for a pause; replying is
-	// set while one is spoken.
-	replies  []queuedReply
-	replying bool
-	// rewait is set when the poll in flight is ended so its wait is computed
-	// again for a queued reply, not because it failed.
-	rewait bool
-	// lastSpeech is when the call last carried speech, and listening is set
-	// while the person is mid-utterance.
+	follow                  *follower
+	replies                 []queuedReply
+	replying                bool
+	// rewait marks a poll ended to recompute its wait, so it is not reported as failed.
+	rewait     bool
 	lastSpeech time.Time
 	listening  bool
 }
@@ -969,120 +963,6 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 	return target.Session.Name, s.commit()
 }
 
-// delegate sends one request of the person's to the selected session and
-// follows its reply. A spoken request is refused while the call's input is
-// muted. The caller holds s.op.
-func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
-	s.mu.Lock()
-	v := &s.state.State
-	if err := s.delegationAllowed(a, spoken); err != nil {
-		s.unlock()
-		return err
-	}
-	targetID := v.Target.ID
-	callCtx, cancel := s.callContext(ctx)
-	defer cancel()
-	s.unlock()
-	target, err := s.target(callCtx, targetID)
-	if err != nil {
-		return err
-	}
-	if target == nil || target.Session == nil || target.Adapter == nil {
-		return errors.New("selected target is no longer available")
-	}
-	if !target.Adapter.Capabilities().Stream {
-		return errors.New("selected target cannot return correlated voice updates")
-	}
-	s.mu.Lock()
-	f := s.follow
-	s.unlock()
-	if f == nil || f.target.ID != targetID {
-		return errors.New("voice is not following the selected session's replies")
-	}
-	select {
-	case <-f.ready:
-	case <-callCtx.Done():
-		return callCtx.Err()
-	}
-	if f.err != nil {
-		return fmt.Errorf("voice cannot follow the selected session: %w", f.err)
-	}
-	waker, ok := target.Adapter.(surface.Waker)
-	woke := ok && waker.NeedsWake(callCtx, target.Session)
-	s.mu.Lock()
-	if err := s.delegationAllowed(a, spoken); err != nil || v.Target.ID != targetID || s.follow != f {
-		s.unlock()
-		if err == nil {
-			err = errors.New("the voice target changed before the request was sent")
-		}
-		return err
-	}
-	s.state.Messages = append(s.state.Messages, a.MessageID)
-	attemptID, sourceID := v.AttemptID, v.Session.ID
-	if woke {
-		v.Message = "Waking up " + target.Session.Name + "."
-	}
-	f.pending++
-	s.stage()
-	s.unlock()
-	if err := s.flush(); err != nil {
-		s.mu.Lock()
-		s.settleDelegation(f, a.MessageID, "", "")
-		s.unlock()
-		return err
-	}
-	addressed := *target.Session
-	receipt, err := s.dispatcher.DeliverWithoutQueue(callCtx, target.Adapter, target.Session, a.Text, "voice:"+attemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: sourceID, Author: surface.AuthorPerson})
-	s.mu.Lock()
-	// A delegation is the person speaking, so it is sent as their turn. The
-	// follower follows the session as addressed, so voice speaks a reply only
-	// when the send kept that identity and the route it took carries turns.
-	held := ""
-	switch {
-	case err != nil:
-	case (receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted) &&
-		(target.Session.ID != addressed.ID || surface.RouteFor(target.Adapter, target.Session, surface.AuthorPerson).TransportOnly()):
-		held = "Sent to " + addressed.Name + ". Voice cannot follow this session's reply; read it in the session transcript."
-	case receipt.Evidence != surface.EvidenceDelivered:
-		held = "Target is " + string(receipt.Evidence) + "; no uncorrelated reply will be spoken."
-	case receipt.TurnID == "" || receipt.TurnID == target.Session.ID:
-		held = "Target did not provide an authoritative turn ID; no uncorrelated reply will be spoken."
-	}
-	switch {
-	case err != nil:
-		s.settleDelegation(f, a.MessageID, "", "")
-	case held != "":
-		s.settleDelegation(f, a.MessageID, "", a.Text)
-	default:
-		s.settleDelegation(f, a.MessageID, receipt.TurnID, "")
-	}
-	if !s.sameCall(attemptID, sourceID, targetID) {
-		s.unlock()
-		if err == nil {
-			err = errors.New("the call ended or moved before the request's reply could be followed")
-		}
-		return err
-	}
-	if target.Session.ID != addressed.ID {
-		v.Target = target.Session
-		s.followTarget(target.Session)
-	}
-	if err != nil {
-		s.unlock()
-		return err
-	}
-	if held != "" {
-		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
-		v.Message = held
-		return s.commit()
-	}
-	if woke {
-		v.Message = "Woke " + addressed.Name + " and sent the request."
-	}
-	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
-	return s.commit()
-}
-
 // sameCall reports whether the connected call is still the one an action did
 // its I/O for: the same attempt and operator, and, when targetID is given, the
 // same selected target. The caller holds s.mu.
@@ -1092,30 +972,6 @@ func (s *Service) sameCall(attemptID, sessionID, targetID string) bool {
 		return false
 	}
 	return targetID == "" || (v.Target != nil && v.Target.ID == targetID)
-}
-
-// delegationAllowed checks a delegation against the current call. The caller
-// holds s.mu.
-func (s *Service) delegationAllowed(a Action, spoken bool) error {
-	v := &s.state.State
-	if a.AttemptID != v.AttemptID || v.Phase != "connected" {
-		return errors.New("delegation requires the current connected voice call")
-	}
-	if spoken && v.InputMuted {
-		return errSpokenWhileMuted
-	}
-	if strings.TrimSpace(a.Text) == "" || len(a.Text) > 16<<10 || a.MessageID == "" || len(a.MessageID) > 128 {
-		return errors.New("delegation text and a unique messageId are required")
-	}
-	if v.Target == nil || s.target == nil {
-		return errors.New("select a target session before delegating")
-	}
-	for _, id := range s.state.Messages {
-		if id == a.MessageID {
-			return errors.New("message already submitted; inspect its outcome before sending again")
-		}
-	}
-	return nil
 }
 
 func (s *Service) interruptTarget(ctx context.Context, a Action) error {
@@ -1206,53 +1062,6 @@ func (s *Service) spawn(task func()) bool {
 		task()
 	}()
 	return true
-}
-
-// delegatedSpeechTimeout bounds how long a target update waits for the Codex
-// write lock, so a busy Codex delays the update rather than the call.
-const delegatedSpeechTimeout = 15 * time.Second
-
-// speakDelegation hands an update of the target's turn to the call. ctx is the
-// follower's, so a target change cancels an update not yet handed over.
-func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
-	s.mu.Lock()
-	v := &s.state.State
-	if v.AttemptID != attemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID || v.Session == nil {
-		s.unlock()
-		return
-	}
-	session := *v.Session
-	s.unlock()
-	ctx, done := context.WithTimeout(ctx, s.speechTimeout)
-	defer done()
-	err := s.provider.Request(ctx, &session, "thread/realtime/appendText", map[string]any{"threadId": session.ID, "text": text, "role": "developer"})
-	s.mu.Lock()
-	if !s.sameCall(attemptID, session.ID, target.ID) {
-		s.unlock()
-		return
-	}
-	if err != nil {
-		v.Message = "Correlated " + stage + " update could not be handed to realtime audio: " + err.Error()
-		s.appendDelegationEvent(messageID, target, &delivery.Receipt{Evidence: surface.EvidenceFailed, SessionID: target.ID, TurnID: turnID}, stage+"-failed")
-	} else {
-		s.appendDelegationEvent(messageID, target, &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: target.ID, TurnID: turnID}, stage)
-	}
-	_ = s.commit()
-}
-
-func (s *Service) recordDelegationFailure(attemptID, messageID, targetID string, err error) {
-	s.mu.Lock()
-	if s.state.State.Session == nil || !s.sameCall(attemptID, s.state.State.Session.ID, targetID) {
-		s.unlock()
-		return
-	}
-	s.state.State.Message = "Correlated target update ended without a final spoken result: " + err.Error()
-	s.state.State.Events = append(s.state.State.Events, Event{Method: "voice/delegation/failed", Params: map[string]any{"messageId": messageID, "targetId": targetID, "error": err.Error()}})
-	_ = s.commit()
-}
-
-func (s *Service) appendDelegationEvent(messageID string, target *surface.Session, receipt *delivery.Receipt, stage string) {
-	s.appendEvent(Event{Method: "voice/delegation/" + stage, Params: map[string]any{"messageId": messageID, "targetId": target.ID, "turnId": receipt.TurnID, "evidence": receipt.Evidence}})
 }
 
 // appendEvent records an event of the call's own, keeping the latest 100.

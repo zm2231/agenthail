@@ -13,8 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-// targetJournal is the session journal of a targetFixture: it replays the
-// reply the fixture scripts for each turn sent to it as journal events.
+// targetJournal replays a targetFixture's scripted replies as journal events.
 type targetJournal struct {
 	mu        sync.Mutex
 	target    *targetFixture
@@ -66,8 +65,6 @@ func (j *targetJournal) emit(e sessionstream.Event) {
 	}
 }
 
-// replay journals the prompt that started turnID, then the fixture's
-// scripted reply, ending the turn.
 func (j *targetJournal) replay(session surface.Session, turnID, prompt string) {
 	j.emit(sessionstream.Event{ItemID: "prompt-" + turnID, Version: 1, Kind: "message", Role: "user", TurnID: turnID, Body: prompt})
 	ctx, stop := context.WithCancel(context.Background())
@@ -130,7 +127,6 @@ func followedTarget(t *testing.T, briefer Briefer) (*voiceFixture, *targetFixtur
 	return f, target
 }
 
-// typeTurn journals a turn the person typed in the session itself.
 func typeTurn(j *targetJournal, turnID, prompt, reply string) {
 	j.emit(sessionstream.Event{ItemID: "prompt-" + turnID, Version: 1, Kind: "message", Role: "user", TurnID: turnID, Body: prompt})
 	j.emit(sessionstream.Event{ItemID: "reply-" + turnID, Version: 1, Kind: "text", Role: "assistant", TurnID: turnID, Body: reply, Final: true})

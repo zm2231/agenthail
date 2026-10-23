@@ -34,11 +34,10 @@ type fixtureProvider struct {
 	interrupts   int
 	speaking     chan struct{}
 	speakingText string
-	// unspoken counts held speech whose request was cancelled.
-	unspoken   int
-	respondErr error
-	releases   []string
-	gate       *gate
+	unspoken     int
+	respondErr   error
+	releases     []string
+	gate         *gate
 	// ticks releases one Poll each, as its wait running out would; arrived
 	// releases one as Codex sending an event would.
 	ticks   <-chan time.Time
@@ -139,8 +138,6 @@ func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message st
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 }
 
-// journalReply journals the scripted reply to turnID when the fixture is its
-// own session journal.
 func (f *targetFixture) journalReply(turnID, prompt string) {
 	if f.journal != nil {
 		go f.journal.replay(f.session, turnID, prompt)

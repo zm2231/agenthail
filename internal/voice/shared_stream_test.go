@@ -13,10 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-// journalStreamFixture is a session journal whose events a test supplies.
-// prepared and cancelled close at the first subscription and its cancel; a
-// later subscription, as voice makes after a source error, reads the same
-// events.
+// A later subscription, as after a source error, reads the same events.
 type journalStreamFixture struct {
 	events          chan sessionstream.Event
 	prepared        chan struct{}
