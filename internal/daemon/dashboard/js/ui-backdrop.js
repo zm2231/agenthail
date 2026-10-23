@@ -55,6 +55,10 @@ const FIT = {
 };
 const POSITION = { center: "center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
+function channels(colour) {
+  return colour.map((v) => Math.round(v * 255)).join(" ");
+}
+
 export function hex(colour) {
   return `#${colour.map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("")}`;
 }
@@ -128,18 +132,19 @@ export function textureStyle(texture, strength, spacing) {
   return null;
 }
 
-function solveScrim(visit, roles, polarity, target, ground) {
+function solveScrim(visit, roles, polarity, target, tint, start = 0) {
   const limit = boundary(roles, polarity, target);
-  const [gr, gg, gb] = ground;
+  const [tr, tg, tb] = tint;
   const colour = [0, 0, 0];
-  let alpha = 0;
+  let alpha = start;
+  if (alpha >= 1) return 1;
   visit((r, g, b) => {
-    const shown = 0.2126 * linear(r + (gr - r) * alpha) + 0.7152 * linear(g + (gg - g) * alpha) + 0.0722 * linear(b + (gb - b) * alpha);
+    const shown = 0.2126 * linear(r + (tr - r) * alpha) + 0.7152 * linear(g + (tg - g) * alpha) + 0.0722 * linear(b + (tb - b) * alpha);
     if (passes(shown, limit, polarity)) return true;
     colour[0] = r;
     colour[1] = g;
     colour[2] = b;
-    alpha = Math.max(alpha, blendFloor(colour, ground, polarity, limit));
+    alpha = Math.max(alpha, blendFloor(colour, tint, polarity, limit));
     return alpha < 1;
   });
   return alpha;
@@ -151,7 +156,7 @@ export function pageScrim(samples, roles, polarity, target, ground) {
   }, roles, polarity, target, ground);
 }
 
-export function scrimForColours(colours, { strength, dim, ground, polarity, texture, textureStrength, roles, target }) {
+function visitShown(colours, { strength, dim, ground, polarity, texture, textureStrength }) {
   const veil = polarity === "dark" ? 0 : 1;
   const shown = (byte, i) => {
     const over = ground[i] + (byte / 255 - ground[i]) * strength;
@@ -160,7 +165,7 @@ export function scrimForColours(colours, { strength, dim, ground, polarity, text
   const grain = texture === "grain" && textureStrength > 0 ? textureStrength * 0.5 : 0;
   const lines = texture === "scanlines" && textureStrength > 0 && polarity === "light" ? textureStrength : 0;
   const lift = polarity === "light" ? (v) => v + (Math.max(2 * v - 1, 0) - v) * grain : (v) => v + (Math.min(2 * v, 1) - v) * grain;
-  return solveScrim((check) => {
+  return (check) => {
     for (let k = 0; k < colours.length; k++) {
       const n = colours[k];
       const r = shown((n >> 16) & 255, 0);
@@ -170,7 +175,28 @@ export function scrimForColours(colours, { strength, dim, ground, polarity, text
       if (grain && !check(lift(r), lift(g), lift(b))) return;
       if (lines && !check(r * (1 - lines), g * (1 - lines), b * (1 - lines))) return;
     }
-  }, roles, polarity, target, ground);
+  };
+}
+
+export function scrimForColours(colours, look) {
+  return solveScrim(visitShown(colours, look), look.roles, look.polarity, look.target, look.ground);
+}
+
+export function paneAlphas(colours, look, page) {
+  const { ground, glass } = look;
+  const under = visitShown(colours, look);
+  const out = {};
+  for (const [pane, floor] of Object.entries(glass.panes)) {
+    out[pane] = solveScrim(
+      (check) => under((r, g, b) => check(r + (ground[0] - r) * page, g + (ground[1] - g) * page, b + (ground[2] - b) * page)),
+      look.roles,
+      look.polarity,
+      look.target,
+      glass.tint,
+      floor,
+    );
+  }
+  return out;
 }
 
 export function imageRect(imageWidth, imageHeight, width, height, fit, position) {
@@ -248,11 +274,16 @@ export function createBackdrop({ document, measure }) {
     return element.toDataURL();
   };
 
+  const html = document.documentElement;
+  const setPanes = (panes) => {
+    for (const [pane, alpha] of Object.entries(panes)) html.style.setProperty(`--glass-${pane}`, String(alpha));
+  };
+
   const render = async (look) => {
     const mine = ++generation;
     const { spec, fit, position, strength, dim, texture, textureStrength, textureSpacing, polarity, ground, readable, width, height } = look;
     const style = pictureStyle(spec, fit, position, spec?.kind === "mesh" ? meshURL(spec, width, height) : null);
-    document.documentElement.toggleAttribute("data-backdrop", Boolean(style));
+    html.toggleAttribute("data-backdrop", Boolean(style));
     Object.assign(layers.picture.style, { backgroundImage: "", backgroundSize: "", backgroundRepeat: "", backgroundPosition: "" }, style || {});
     layers.picture.style.opacity = String(strength);
     layers.dim.style.background = polarity === "dark" ? "black" : "white";
@@ -260,9 +291,20 @@ export function createBackdrop({ document, measure }) {
     const textureLook = style ? textureStyle(texture, textureStrength, textureSpacing) : null;
     Object.assign(layers.texture.style, { backgroundImage: "", backgroundSize: "", opacity: "0", mixBlendMode: "normal" }, textureLook || {});
     if (textureLook && texture === "grain") Object.assign(layers.texture.style, { backgroundImage: `url("${grain()}")`, backgroundSize: "256px 256px" });
+    const glass = style && look.glass?.on ? look.glass : null;
+    html.toggleAttribute("data-panes", Boolean(glass));
+    html.toggleAttribute("data-glass-gap", Boolean(glass && glass.gutter > 0));
+    if (glass) {
+      html.style.setProperty("--glass-tint", channels(glass.tint));
+      html.style.setProperty("--glass-edge", channels(glass.edge));
+      html.style.setProperty("--glass-blur", `${glass.blur}px`);
+      html.style.setProperty("--glass-border", String(glass.border));
+      html.style.setProperty("--glass-gutter", `${glass.gutter}px`);
+      setPanes(glass.panes);
+    }
     if (!style || !readable) {
       layers.scrim.style.opacity = "0";
-      return 0;
+      return { page: 0, panes: glass ? glass.panes : {} };
     }
     let measured = null;
     try {
@@ -271,10 +313,12 @@ export function createBackdrop({ document, measure }) {
       measured = null;
     }
     if (mine !== generation) return null;
-    const alpha = measured ?? 1;
+    const page = measured?.page ?? 1;
+    const panes = (glass && measured?.panes) || (glass ? glass.panes : {});
     layers.scrim.style.background = hex(ground);
-    layers.scrim.style.opacity = String(alpha);
-    return alpha;
+    layers.scrim.style.opacity = String(page);
+    if (glass) setPanes(panes);
+    return { page, panes };
   };
 
   return { root, layers, render };

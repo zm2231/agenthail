@@ -1,4 +1,4 @@
-import { backgroundURL, distinctColours, gradientLine, hex, imageRect, meshPixels, meshSize, scrimForColours } from "./ui-backdrop.js";
+import { backgroundURL, distinctColours, gradientLine, hex, imageRect, meshPixels, meshSize, paneAlphas, scrimForColours } from "./ui-backdrop.js";
 
 export function sampleSize({ width, height, scale }) {
   return { width: Math.max(Math.round(width * (scale || 1)), 1), height: Math.max(Math.round(height * (scale || 1)), 1) };
@@ -55,7 +55,8 @@ export function createSampler({ makeCanvas, loadImage }) {
         if (!colours) return null;
         cached = { key, colours };
       }
-      return scrimForColours(cached.colours, look);
+      const page = scrimForColours(cached.colours, look);
+      return { page, panes: look.glass?.on ? paneAlphas(cached.colours, look, page) : {} };
     },
   };
 }

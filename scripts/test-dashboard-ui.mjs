@@ -494,17 +494,17 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
     roles: [ink],
     target: 4.5,
   };
-  const full = await sampler.measure(look);
+  const full = (await sampler.measure(look)).page;
   assert.ok(full > 0, "a bright pixel needs a scrim");
   assert.deepEqual(made[0], [1600, 1200], "a high-density display is sampled at its own pixels");
   assert.deepEqual(sampleSize({ width: 390, height: 844, scale: 3 }), { width: 1170, height: 2532 });
-  assert.equal(await sampler.measure(look), full);
+  assert.equal((await sampler.measure(look)).page, full);
   assert.deepEqual([reads, loads], [1, 1], "the same background, size and ground are drawn once");
-  const softer = await sampler.measure({ ...look, strength: 0.3, texture: "grain", textureStrength: 0.2, target: 7 });
+  const softer = (await sampler.measure({ ...look, strength: 0.3, texture: "grain", textureStrength: 0.2, target: 7 })).page;
   assert.ok(softer < full, "strength, texture and target re-solve from the cached colours");
   assert.equal(reads, 1, "without drawing again");
   bright = [10, 10, 10];
-  assert.equal(await sampler.measure({ ...look, width: 801 }), 0, "a new size draws again");
+  assert.equal((await sampler.measure({ ...look, width: 801 })).page, 0, "a new size draws again");
   assert.equal(reads, 2);
   assert.equal(await sampler.measure({ ...look, spec: { kind: "image", path: "missing.png" } }), null, "a picture that fails to load gives no measurement");
   assert.equal(await sampler.measure({ ...look, spec: { kind: "none" } }), null);
@@ -532,19 +532,20 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
     return node;
   };
   const attributes = new Set();
+  const properties = {};
   const document = {
     createElement: element,
     body: { prepend() {} },
-    documentElement: { toggleAttribute: (name, on) => (on ? attributes.add(name) : attributes.delete(name)) },
+    documentElement: { style: { setProperty: (name, value) => (properties[name] = value) }, toggleAttribute: (name, on) => (on ? attributes.add(name) : attributes.delete(name)) },
   };
   const answers = [];
   const view = backdrop.createBackdrop({ document, measure: () => new Promise((resolve, reject) => answers.push({ resolve, reject })) });
   const look = { spec: { kind: "linear", angle: 90, stops: [{ colour: [0, 0, 0], location: 0 }, { colour: [1, 1, 1], location: 1 }] }, fit: "cover", position: "center", strength: 1, dim: 0, texture: "none", textureStrength: 0, textureSpacing: 3, polarity: "dark", ground: [0.1, 0.1, 0.1], readable: true, width: 800, height: 600 };
   const older = view.render(look);
   const newer = view.render(look);
-  answers[1].resolve(0.3);
-  answers[0].resolve(0.9);
-  assert.deepEqual([await older, await newer], [null, 0.3]);
+  answers[1].resolve({ page: 0.3, panes: {} });
+  answers[0].resolve({ page: 0.9, panes: {} });
+  assert.deepEqual([await older, (await newer).page], [null, 0.3]);
   assert.equal(view.layers.scrim.style.opacity, "0.3", "a slower, older measurement never replaces a newer one");
   const failed = view.render(look);
   answers[2].resolve(null);
@@ -555,6 +556,22 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   await thrown;
   assert.equal(view.layers.scrim.style.opacity, "1");
   assert.equal(attributes.has("data-backdrop"), true);
+  assert.equal(attributes.has("data-panes"), false, "without glass in the look, panes stay as they are");
+
+  const glass = { on: true, tint: [0.1, 0.1, 0.1], edge: [1, 1, 1], panes: { content: 0.18, sidebar: 0.45, chrome: 0, float: 0.5 }, blur: 30, border: 0.08, gutter: 8 };
+  const glassy = view.render({ ...look, glass });
+  assert.equal(properties["--glass-sidebar"], "0.45", "configured opacities apply at once");
+  assert.deepEqual([properties["--glass-tint"], properties["--glass-blur"], properties["--glass-gutter"]], ["26 26 26", "30px", "8px"]);
+  assert.equal(attributes.has("data-panes") && attributes.has("data-glass-gap"), true);
+  answers[4].resolve({ page: 0.4, panes: { content: 0.6, sidebar: 0.45, chrome: 0.2, float: 0.5 } });
+  await glassy;
+  assert.deepEqual([properties["--glass-content"], properties["--glass-chrome"]], ["0.6", "0.2"], "and rise where text needs them");
+  const blind = view.render({ ...look, glass });
+  answers[5].resolve(null);
+  await blind;
+  assert.equal(properties["--glass-content"], "0.18", "with no measurement, panes keep their settings over a solid scrim");
+  view.render({ ...look, glass: { ...glass, on: false } });
+  assert.equal(attributes.has("data-panes"), false, "glass off draws solid panes");
 }
 
 {
@@ -587,6 +604,49 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   windowListeners[0][1]();
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(renders.length, count + 1, "and a burst of resizes remeasures once");
+}
+
+{
+  const ground = [0.97, 0.96, 0.95];
+  const texts = [[0.2, 0.2, 0.2], [0.35, 0.34, 0.33], [0.42, 0.41, 0.4]];
+  const navy = [0.1, 0.15, 0.4];
+  const lifted = contrast.readableSurface(navy, texts, ground, 4.5);
+  for (const text of texts) assert.ok(textRatio(text, lifted) >= 4.5, "a tint too dark for dark text is moved toward the ground until every role reads on it");
+  assert.equal(contrast.readableSurface(ground, texts, ground, 4.5), ground, "a tint that already carries the text is kept");
+
+  const roles = texts.map(contrast.luminance);
+  const colours = Uint32Array.from([0xffffff, 0xeeddcc, 0x203040, 0x808080]);
+  const look = { strength: 1, dim: 0, ground, polarity: "light", texture: "none", textureStrength: 0, roles, target: 4.5 };
+  const page = backdrop.scrimForColours(colours, look);
+  const floors = { content: 0.18, sidebar: 0.45, chrome: 0, float: 0.5 };
+  assert.deepEqual(backdrop.paneAlphas(colours, { ...look, glass: { tint: ground, panes: floors } }, page), floors, "a ground tint over the readable background needs nothing beyond its setting");
+  const tint = contrast.readableSurface([0.75, 0.55, 0.5], texts, ground, 4.5 + contrast.MARGIN);
+  const unscrimmed = 0;
+  const panes = backdrop.paneAlphas(colours, { ...look, glass: { tint, panes: floors } }, unscrimmed);
+  assert.ok(panes.chrome > 0 && panes.content > floors.content, "over a background that misses the target, a pane's tint rises above its setting");
+  for (const [pane, alpha] of Object.entries(panes)) {
+    assert.ok(alpha >= floors[pane], `${pane} never drops below its setting`);
+    const shown = (a) => [...colours].map((n) => [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v, i) => { const over = v / 255 + (ground[i] - v / 255) * unscrimmed; return over + (tint[i] - over) * a; }));
+    const worst = (a) => Math.min(...shown(a).flatMap((c) => roles.map((role) => contrast.ratio(role, contrast.luminance(c)))));
+    assert.ok(worst(alpha) >= 4.5, `${pane}: every role reads on the tinted pane (${worst(alpha).toFixed(2)})`);
+    assert.ok(alpha === floors[pane] || worst(alpha - 1 / 255) < 4.5 + contrast.MARGIN, `${pane}: and the tint rises no further than it needs`);
+  }
+}
+
+{
+  const colours = { "var(--paper)": [0.09, 0.094, 0.102], "var(--ink)": [0.93, 0.92, 0.9], "var(--muted)": [0.75, 0.73, 0.7], "var(--quiet)": [0.6, 0.58, 0.56], "var(--accent)": [0.95, 0.45, 0.3] };
+  const base = { sessionOpen: false, highContrast: false, reducedTransparency: false, colourOf: (v) => colours[v], width: 1440, height: 900 };
+  const values = { background: "none", glass: "on", "glass.tint": "ground", "glass.opacity": 0.18, "glass.sidebar.opacity": 0.45, "glass.chrome.opacity": 0, "glass.composer.opacity": 0.1, "glass.blur": 30, "glass.border": 0.08, "glass.gutter": 8 };
+  const look = backdropLook(values, "dark", base).glass;
+  assert.equal(look.on, true);
+  assert.deepEqual(look.tint, colours["var(--paper)"], "the ground tint is the page's own ground");
+  assert.deepEqual(look.panes, { content: 0.18, sidebar: 0.45, chrome: 0, float: 0.2 }, "floating glass keeps at least 0.2 while readability is on");
+  assert.equal(backdropLook({ ...values, "glass.readability": "off" }, "dark", base).glass.panes.float, 0.1, "readability off uses the settings exactly");
+  assert.equal(backdropLook({ ...values, glass: "off" }, "dark", base).glass.on, false);
+  assert.equal(backdropLook(values, "dark", { ...base, reducedTransparency: true }).glass.on, false, "reduced transparency draws solid panes");
+  const accent = backdropLook({ ...values, "glass.tint": "accent" }, "dark", base).glass.tint;
+  for (const token of ["var(--ink)", "var(--muted)", "var(--quiet)"]) assert.ok(textRatio(colours[token], accent) >= 4.5 + contrast.MARGIN, "an accent tint is darkened toward the ground until light text reads on it, with the solver's margin");
+  assert.deepEqual(backdropLook({ ...values, "glass.tint": "#000000" }, "dark", base).glass.tint, [0, 0, 0], "a colour that carries the text is used as it is");
 }
 
 console.log("dashboard ui ok");
