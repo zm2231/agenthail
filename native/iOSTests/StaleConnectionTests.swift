@@ -135,7 +135,7 @@ final class StaleConnectionTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertEqual(model.selectedSessionID, "hsrv::demo")
         XCTAssertEqual(model.selectedDetail?.session.status, "new")
-        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("old"), ["/api/v1/session"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("old").sorted(), ["/api/v1/session", "/api/v1/session-commands"])
         XCTAssertTrue(ServedSessionProtocol.state.sessionRequests("new").contains("/api/v1/session-stream"))
         model.forgetHost("hsrv")
     }

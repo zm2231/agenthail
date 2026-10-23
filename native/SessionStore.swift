@@ -86,10 +86,14 @@ final class SessionStore: ObservableObject {
     }
 
     func prune(keeping known: Set<String>) {
-        for id in order where !known.contains(id) { forget(id) }
-        let gone = commands.keys.filter { !known.contains($0) }
+        prune { !known.contains($0) }
+    }
+
+    func prune(removing removed: (String) -> Bool) {
+        for id in order where removed(id) { forget(id) }
+        let gone = commands.keys.filter(removed)
         if !gone.isEmpty { gone.forEach { commands.removeValue(forKey: $0) } }
-        commandReads = commandReads.filter { known.contains($0.key) }
+        commandReads = commandReads.filter { !removed($0.key) }
     }
 
     /// Starts the one read of a session's commands; nil when it was read.

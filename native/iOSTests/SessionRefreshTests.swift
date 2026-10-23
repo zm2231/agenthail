@@ -96,6 +96,41 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testASessionWhoseSourceResetWhileShownReadsAPageWhenReopened() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        model.applySessionStreamEvent(try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":11,"type":"item","data":{"itemId":"source","version":1,"kind":"source-error","op":"reset","ts":"2026-10-03T12:00:00Z","reason":"upstream unavailable","truncated":false}}"#.utf8)))
+        await model.loadSession("computer::other")
+        let pages = SessionRefreshProtocol.state.detailFetches
+
+        await model.loadSession("computer::demo")
+
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, pages + 1)
+    }
+
+    @MainActor
+    func testACachedSessionItsComputerNoLongerListsIsDropped() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::other")
+        await model.loadSession("computer::demo")
+        model.store.commandsStreamed(RuntimeCommands(commands: [], unavailable: ""), for: "computer::other")
+        XCTAssertNotNil(model.store.peek("computer::other"))
+
+        await model.refresh()
+
+        XCTAssertNil(model.store.peek("computer::other"))
+        XCTAssertNil(model.store.commands["computer::other"])
+        XCTAssertNotNil(model.store.peek("computer::demo") ?? model.selectedDetail)
+    }
+
+    @MainActor
     func testSnapshotStatusReachesOpenSession() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()

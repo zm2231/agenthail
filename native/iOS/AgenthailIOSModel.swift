@@ -149,6 +149,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     /// Rows streamed while a page read is in flight, so a page read before
     /// some of them arrived can be brought up to date.
     private var rowsDuringPageRead: [SessionStreamEvent] = []
+    /// Set when the stream changed what a page would show in a way the shown
+    /// detail does not hold, so its position cannot be cached until a page read.
+    private var streamOutranPage = false
     private(set) lazy var store: SessionStore = {
         let store = SessionStore(limits: .phone)
         store.pinned = { [unowned self] id in id == selectedSessionID || drafts[id]?.isEmpty == false }
@@ -234,6 +237,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
+        let listedSessions = Set(catalog.sessions.map(\.id))
+        let loadedHosts = ordered.filter { $0.snapshot != nil }.map { $0.id + HostCatalog.separator }
+        store.carry(rekeys)
+        store.prune { id in !listedSessions.contains(id) && loadedHosts.contains { id.hasPrefix($0) } }
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
@@ -926,6 +933,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             unsupportedRefreshTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
+            streamOutranPage = false
             sessionMetadata = MetadataOverlay()
             sessionStreamUnsupported = false
             composer = drafts[id] ?? ""
@@ -998,7 +1006,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func keepSelectedSession() {
         guard let id = selectedSessionID, let detail = selectedDetail, detail.session.id == id else { return }
-        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: sessionStreamCursor > 0 ? sessionStreamCursor : nil), for: id)
+        let cursor = sessionStreamCursor > 0 && !streamOutranPage && detail.timeline != nil ? sessionStreamCursor : nil
+        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: cursor), for: id)
     }
 
     func refreshSession(_ id: String) async {
@@ -1033,6 +1042,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 selectedSessionStateSeq = seq
             }
             selectedDetail = merged
+            streamOutranPage = false
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
                 for row in rowsDuringPageRead where row.seq > journalSeq {
@@ -1728,6 +1738,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
+            streamOutranPage = true
             return
         }
         guard var timeline = detail.timeline else { return }
