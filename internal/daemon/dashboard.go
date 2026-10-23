@@ -3,13 +3,14 @@ package daemon
 import (
 	"context"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -40,6 +41,9 @@ var dashboardJS []byte
 
 //go:embed dashboard/tokens.css
 var dashboardCSS []byte
+
+//go:embed dashboard/js/*.js
+var dashboardModules embed.FS
 
 //go:embed dashboard/logo.png
 var dashboardLogo []byte
@@ -302,6 +306,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
+	mux.Handle("/js/", dashboardModuleHandler())
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
 	mux.HandleFunc("/logo.png", dashboard.asset("image/png", dashboardLogo))
 	mux.HandleFunc("/favicon.png", dashboard.asset("image/png", dashboardFavicon))
@@ -735,6 +740,27 @@ func (dashboard *dashboardServer) asset(contentType string, body []byte) http.Ha
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(body)
 	}
+}
+
+func dashboardModuleHandler() http.Handler {
+	modules, err := fs.Sub(dashboardModules, "dashboard/js")
+	if err != nil {
+		panic(err)
+	}
+	files := http.StripPrefix("/js/", http.FileServerFS(modules))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, ".js") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		files.ServeHTTP(w, r)
+	})
 }
 
 func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
