@@ -81,6 +81,14 @@ final class NewSessionDraft: ObservableObject {
         error = nil
     }
 
+    func place(host: String?, folder: String) {
+        _ = hosts.select(host ?? "")
+        form.switchHost(to: hosts.hostQuery, folder: folder)
+        form.folder = folder
+        modelError = nil
+        error = nil
+    }
+
     func loadOptions() async {
         let generation = hosts.generation
         do {

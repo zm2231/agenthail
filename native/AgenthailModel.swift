@@ -805,15 +805,63 @@ final class AgenthailModel: ObservableObject {
         projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
     }
 
-    func addProject(path: String) {
-        projectAction("project-add", path: path)
+    var projects: [ProjectState] { snapshot?.projects ?? [] }
+
+    func addProject(path: String, title: String? = nil, host: String? = nil) async -> ProjectChange {
+        await projectChange {
+            let (project, created) = try await $0.addProject(path: path, title: title, host: host)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
     }
 
-    private func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) {
+    func renameProject(_ projectID: String, to title: String) async -> ProjectChange {
+        await projectChange {
+            try await $0.renameProject(projectID, title: title)
+            return "Renamed to \(title)."
+        }
+    }
+
+    func removeProject(_ projectID: String) async -> ProjectChange {
+        await projectChange {
+            try await $0.projectAction("project-remove", projectID: projectID)
+            return "Project removed."
+        }
+    }
+
+    func clearLead(of project: ProjectState) async -> ProjectChange {
+        await projectChange {
+            try await $0.clearLead(projectID: project.id)
+            return "\(project.displayName) has no lead now."
+        }
+    }
+
+    func makeLead(_ sessionID: String, replace: Bool = false) async -> ProjectChange {
+        await projectChange {
+            let lead = try await $0.makeLead(sessionID: sessionID, replace: replace)
+            return "@\(lead.name) leads \(lead.projectRoot)."
+        }
+    }
+
+    func startLead(of project: ProjectState, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool = false) async -> ProjectChange {
+        await projectChange {
+            let lead = try await $0.startLead(surface: surface, folder: checkout.rootPath, host: ProjectMenu.host(of: checkout), name: name, replace: replace)
+            return "@\(lead.name) leads \(project.displayName); its first message starts it."
+        }
+    }
+
+    private func projectChange(_ body: (AgenthailAPI) async throws -> String) async -> ProjectChange {
+        guard let api else { return .failed(AgenthailAPIError.disconnectedGuidance) }
+        let change = await ProjectChange.run { try await body(api) }
+        _ = await refresh(fresh: true)
+        return change
+    }
+
+    private func projectAction(_ action: String, projectID: String) {
         guard let api else { return }
         Task {
             do {
-                _ = try await api.projectAction(action, projectID: projectID, path: path)
+                try await api.projectAction(action, projectID: projectID)
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)

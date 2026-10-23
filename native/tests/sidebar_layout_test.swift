@@ -17,7 +17,7 @@ struct Window: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                SessionSidebarHeader(model: model, counts: counts, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil)
+                SessionSidebarHeader(model: model, counts: counts, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil, addProject: {})
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.header = $0 }
                 List { Text("Fixture session") }
             }
@@ -44,7 +44,7 @@ struct SidebarLayoutTest {
 
         for width in [DesktopColumns.sidebar.min, 264, DesktopColumns.sidebar.ideal, DesktopColumns.sidebar.max] {
             let measured = Measured()
-            let column = SessionSidebarHeader(model: model, counts: many, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil)
+            let column = SessionSidebarHeader(model: model, counts: many, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil, addProject: {})
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.header = $0 }
                 .frame(width: width)
             let hosting = NSHostingView(rootView: column)

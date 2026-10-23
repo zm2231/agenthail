@@ -17,6 +17,11 @@ struct PairedHostStatus: Identifiable, Equatable {
     var build: AgenthailBuild? = nil
 }
 
+struct ListedProject: Equatable {
+    let state: ProjectState
+    let hostID: String
+}
+
 @MainActor
 final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     static func shouldRefreshSnapshot(for eventType: String) -> Bool {
@@ -36,6 +41,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
     @Published private(set) var hosts: [PairedHostStatus] = []
     @Published private(set) var creationHosts: [CreationHost] = []
+    @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published var selectedDetail: SessionDetail?
     @Published var sessionRequests: SessionRequests?
@@ -218,6 +224,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                              peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
                              person: connection.snapshot?.person, build: connection.build)
         }
+        var listed: [String: ListedProject] = [:]
+        for connection in ordered {
+            for project in connection.snapshot?.projects ?? [] {
+                let id = HostCatalog.qualify(connection.id, project.id)
+                if listed[id] == nil { listed[id] = ListedProject(state: project, hostID: connection.id) }
+            }
+        }
+        if projects != listed { projects = listed }
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
         }
@@ -547,6 +561,104 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let known = Set((snapshot?.sessions ?? []).map(\.id))
         let qualified = item.hostID.map { HostCatalog.qualify($0, item.sessionId) }
         return rekeys.resolve(qualified.flatMap { known.contains($0) ? $0 : nil } ?? item.sessionId)
+    }
+
+    func addProject(path: String, title: String?, host: String?) async -> ProjectChange {
+        await projectChange(refreshing: host) {
+            let (api, target) = try self.reach(host)
+            let (project, created) = try await api.addProject(path: path, title: title, host: target.remote)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
+    }
+
+    func addFolder(of session: SessionState) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            let (connection, _) = try self.resolveServer(session.id)
+            let owner = HostCatalog.owner(of: session.id)
+            let (project, created) = try await connection.api.addProject(path: session.cwd ?? "", host: owner == connection.id ? nil : owner)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
+    }
+
+    func makeLead(_ sessionID: String, replace: Bool) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            let (api, route) = try self.resolve(sessionID)
+            let lead = try await api.makeLead(sessionID: route.sessionID, replace: replace)
+            return "@\(lead.name) leads \(lead.projectRoot)."
+        }
+    }
+
+    func renameProject(_ project: ListedProject, to title: String) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).renameProject(project.state.id, title: title)
+            return "Renamed to \(title)."
+        }
+    }
+
+    func removeProject(_ projectID: String, of project: ListedProject) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).projectAction("project-remove", projectID: projectID)
+            return "Project removed."
+        }
+    }
+
+    func clearLead(of project: ListedProject) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).clearLead(projectID: project.state.id)
+            return "\(project.state.displayName) has no lead now."
+        }
+    }
+
+    func startLead(of project: ListedProject, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            let lead = try await self.listingAPI(project).startLead(surface: surface, folder: checkout.rootPath, host: ProjectMenu.host(of: checkout), name: name, replace: replace)
+            return "@\(lead.name) leads \(project.state.displayName); its first message starts it."
+        }
+    }
+
+    func listed(_ state: ProjectState) -> ListedProject? {
+        projects.values.first { $0.state == state }
+    }
+
+    func canAddFolder(_ session: SessionState) -> Bool {
+        ProjectMenu.canAddFolder(session) && catalog.route(for: session.id) != nil
+    }
+
+    func canMakeLead(_ session: SessionState) -> Bool {
+        guard ProjectMenu.canMakeLead(session, projects: []), catalog.route(for: session.id) != nil else { return false }
+        return !projects.values.contains { listed in
+            listed.state.leads.contains { lead in
+                guard let sessionID = lead.sessionId else { return false }
+                let owner = lead.host.map { $0.state == "local" ? listed.hostID : $0.id } ?? listed.hostID
+                return HostCatalog.qualify(owner, sessionID) == session.id
+            }
+        }
+    }
+
+    func settle(_ change: ProjectChange) {
+        switch change {
+        case .done: operationError = nil
+        case .confirmReplace(let message), .failed(let message): operationError = message
+        }
+    }
+
+    func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
+        ProjectMenu.host(of: checkout) ?? project.hostID
+    }
+
+    private func listingAPI(_ project: ListedProject) throws -> AgenthailAPI {
+        guard let connection = connections[project.hostID], connection.reachable else {
+            throw AgenthailAPIError.unavailable("\(connections[project.hostID]?.name ?? "That computer") can't be reached.")
+        }
+        return connection.api
+    }
+
+    private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
+        let change = await ProjectChange.run(body)
+        if let hostID, connections[hostID] != nil { await refresh(host: hostID) } else { _ = await refresh(fresh: true) }
+        return change
     }
 
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
@@ -1193,7 +1305,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             }
             let (api, target) = try reach(owner)
             let id = target.remote == nil ? String(projectID.dropFirst(owner.count + HostCatalog.separator.count)) : projectID
-            _ = try await api.projectAction(action, projectID: id)
+            try await api.projectAction(action, projectID: id)
             operationError = nil
             await refresh(host: target.hostID)
         } catch {
@@ -1211,7 +1323,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         for hostID in reachable {
             guard let connection = connections[hostID] else { continue }
             do {
-                _ = try await connection.api.projectAction(action, projectID: projectID)
+                try await connection.api.projectAction(action, projectID: projectID)
             } catch {
                 failures.append("\(connection.name): \(AgenthailAPIError.userMessage(error))")
             }

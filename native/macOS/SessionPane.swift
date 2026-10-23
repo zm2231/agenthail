@@ -42,6 +42,8 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var sidebarOverlay = false
     @Published var renamingSession: SessionState?
     @Published var adoptingSession: SessionState?
+    @Published var projectSheet: ProjectSheet?
+    @Published var projectConfirmation: ProjectConfirmation?
     @Published private(set) var forking = false
     @Published private(set) var controlPending = false
     @Published private(set) var requests: SessionRequests?
@@ -190,6 +192,30 @@ final class SessionPane: ObservableObject, Identifiable {
         if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if let message { newSession?.take(message) }
         clearSelection()
+    }
+
+    func openNewSession(host: String?, folder: String) {
+        openNewSession()
+        newSession?.place(host: host, folder: folder)
+    }
+
+    func changeProject(_ change: @escaping (_ replace: Bool) async -> ProjectChange) {
+        Task { settle(await change(false)) { await change(true) } }
+    }
+
+    func settle(_ change: ProjectChange, replace: @escaping () async -> ProjectChange) {
+        switch change {
+        case .done:
+            model.operationError = nil
+        case .confirmReplace(let message):
+            projectConfirmation = ProjectConfirmation(message: message, action: "Replace") { await replace() }
+        case .failed(let message):
+            model.operationError = message
+        }
+    }
+
+    func confirm(_ confirmation: ProjectConfirmation) {
+        Task { settle(await confirmation.run()) { await confirmation.run() } }
     }
 
     /// Shows a session started from New Session, in the tab New Session

@@ -36,6 +36,7 @@ let package = Package(
                 "ComposerAttachment.swift",
                 "ComposerTextSync.swift",
                 "SessionSelection.swift",
+                "ProjectActions.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "EventRetryBackoff.swift",
