@@ -1100,7 +1100,7 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 }
 
 func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T) {
-	p := StartParams("operator", "call", "offer", false)
+	p := StartParams("operator", "call", "offer", false, "")
 	if p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
 	}
@@ -1123,7 +1123,7 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 	if _, ok := p["prompt"]; ok || p["includeStartupContext"] != true {
 		t.Fatalf("an orchestrator call replaced Codex's realtime prompt: %v", p)
 	}
-	bound := StartParams("operator", "call", "offer", true)
+	bound := StartParams("operator", "call", "offer", true, "")
 	prompt, _ := bound["prompt"].(string)
 	if !strings.Contains(prompt, "never do the work, hand it to anyone else") || bound["includeStartupContext"] != false || bound["initialItems"] != nil {
 		t.Fatalf("a session-bound call must replace Codex's delegating prompt: %v", bound)

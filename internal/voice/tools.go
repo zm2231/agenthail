@@ -188,6 +188,14 @@ func (s *Service) SetLog(logf func(format string, args ...any)) {
 	s.logf = logf
 }
 
+// SetBriefer gives session-bound calls the reader of their session's brief.
+// The daemon calls it once, before the service handles events.
+func (s *Service) SetBriefer(briefer Briefer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.briefer = briefer
+}
+
 func (s *Service) toolsOutdated() bool {
 	return s.state.State.Session != nil && s.state.State.ToolsDigest != ToolsDigest() && !s.state.ToolsNoticeShown
 }
