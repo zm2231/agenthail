@@ -140,8 +140,6 @@ enum ColumnFit {
     static let inspectorDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min + DesktopColumns.inspector.ideal
     /// The same for the sidebar, once the inspector has collapsed.
     static let sidebarDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min
-    /// The narrowest window, with both side columns collapsed.
-    static let windowMinimum: CGFloat = 420
 }
 
 enum DesktopRadius {

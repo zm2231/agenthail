@@ -43,11 +43,13 @@ struct DesktopWindow: View {
         .onDisappear { model.windowDisappeared() }
     }
 
-    private var splitView: some View {
-        NavigationSplitView(columnVisibility: Binding(get: { pane.sidebarDocks ? .all : .detailOnly }, set: { _ in })) {
+    @ViewBuilder private var splitView: some View {
+        // The sidebar collapses to a column of no width rather than through
+        // the split view's visibility: hiding and showing a column there
+        // resizes the window to keep the conversation's width.
+        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
+        NavigationSplitView {
             Group {
-                // A hidden sidebar column stays in the window, so it must not
-                // keep reporting its glass and text to the backdrop.
                 if pane.sidebarDocks {
                     SessionSidebar(model: model, pane: pane)
                         .belowWindowChrome()
@@ -56,13 +58,12 @@ struct DesktopWindow: View {
                 }
             }
             .toolbar(removing: .sidebarToggle)
-            .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
+            .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
-                .frame(minWidth: pane.sidebarDocks ? nil : ColumnFit.windowMinimum)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .overlay(alignment: .trailing) {
                     if !pane.inspectorDocks && pane.inspectorOverlay && pane.displayedSession != nil {

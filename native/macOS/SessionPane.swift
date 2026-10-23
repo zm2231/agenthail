@@ -120,6 +120,10 @@ final class SessionPane: ObservableObject, Identifiable {
             sidebarDocks = sidebar
             sidebarOverlay = false
         }
+        if restoresSelection {
+            UserDefaults.standard.set(inspectorDocks, forKey: Self.inspectorDocksKey)
+            UserDefaults.standard.set(sidebarDocks, forKey: Self.sidebarDocksKey)
+        }
     }
 
     init(model: AgenthailModel, restoresSelection: Bool) {
@@ -127,6 +131,10 @@ final class SessionPane: ObservableObject, Identifiable {
         self.restoresSelection = restoresSelection
         if restoresSelection, let data = UserDefaults.standard.data(forKey: Self.tabsKey), let saved = try? JSONDecoder().decode(SessionTabs.self, from: data) {
             tabs = saved
+        }
+        if restoresSelection {
+            inspectorDocks = UserDefaults.standard.object(forKey: Self.inspectorDocksKey) as? Bool ?? true
+            sidebarDocks = UserDefaults.standard.object(forKey: Self.sidebarDocksKey) as? Bool ?? true
         }
         observeDraft()
     }
@@ -141,6 +149,11 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private static let tabsKey = "sessionTabs"
+    /// The window reopens at the size it closed at, so it reopens with the
+    /// same columns docked: docked columns' minimum widths would otherwise
+    /// force a window that closed narrow to open wide.
+    static let inspectorDocksKey = "inspectorDocks"
+    static let sidebarDocksKey = "sidebarDocks"
 
     var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
 

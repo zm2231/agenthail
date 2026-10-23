@@ -12,13 +12,13 @@ struct Columns: View {
     let measured: Measured
 
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(pane.sidebarDocks ? .all : .detailOnly)) {
+        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
+        NavigationSplitView {
             Color.red
-                .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
+                .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             Color.gray
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.detail = $0 }
-                .frame(minWidth: pane.sidebarDocks ? nil : ColumnFit.windowMinimum)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .inspector(isPresented: .constant(pane.inspectorDocks && pane.inspectorVisible)) {
                     Color.blue.inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
@@ -95,9 +95,26 @@ struct WindowColumnsTest {
         check(narrower == 500 && !live.sidebarDocks, "with the sidebar collapsed the window narrows to 500 pt, got \(narrower), sidebar docked \(live.sidebarDocks)")
         check(measured.detail.minX >= -0.5 && measured.detail.maxX <= narrower + 0.5, "the conversation fills the 500 pt window, got \(measured.detail)")
         let floor = resize(300)
-        check(floor == ColumnFit.windowMinimum, "the window stops at \(ColumnFit.windowMinimum) pt, got \(floor)")
+        check(floor > 300 - 0.5 && floor <= DesktopColumns.detail.min, "the window stops at the conversation's minimum, got \(floor)")
+        check(measured.detail.minX >= -0.5 && measured.detail.maxX <= floor + 0.5, "the conversation fills the narrowest window, got \(measured.detail)")
         let wide = resize(1200)
         check(wide == 1200 && live.inspectorDocks && live.sidebarDocks, "widening to 1200 pt docks both columns again")
+
+        UserDefaults.standard.set(false, forKey: SessionPane.inspectorDocksKey)
+        UserDefaults.standard.set(false, forKey: SessionPane.sidebarDocksKey)
+        let reopened = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: true)
+        check(!reopened.inspectorDocks && !reopened.sidebarDocks, "the main window reopens with the columns it closed with")
+        let reopenedHosting = NSHostingView(rootView: Columns(pane: reopened, measured: Measured()))
+        reopenedHosting.sizingOptions = [.minSize]
+        let reopenedWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        reopenedWindow.contentView = reopenedHosting
+        reopenedHosting.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        check(reopenedWindow.contentLayoutRect.width == 500, "a window that closed narrow reopens at its width, got \(reopenedWindow.contentLayoutRect.width)")
+        reopened.fitWindow(width: 1400)
+        check(UserDefaults.standard.bool(forKey: SessionPane.inspectorDocksKey) && UserDefaults.standard.bool(forKey: SessionPane.sidebarDocksKey), "docking again is remembered")
+        UserDefaults.standard.removeObject(forKey: SessionPane.inspectorDocksKey)
+        UserDefaults.standard.removeObject(forKey: SessionPane.sidebarDocksKey)
 
         if failures > 0 { exit(1) }
         print("window columns: the inspector, then the sidebar, collapse before they pin the window, and come back when there is room")
