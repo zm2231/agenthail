@@ -5,6 +5,9 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -55,7 +58,7 @@ func TestFillerStaysWithVoiceAndIsLoggedWhileRequestsReachTheSession(t *testing.
 	f.observe(filler)
 	f.observe(filler)
 	f.observe(Event{Sequence: 41, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Um, okay, thanks."}})
-	waitFor(t, "the request to reach the session", func() bool { return len(target.sends()) == 1 })
+	testkit.Eventually(t, "the request to reach the session", 5*time.Second, func() bool { return len(target.sends()) == 1 })
 	f.service.Close()
 	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"Um, okay, thanks."}) {
 		t.Fatalf("sends=%q", sends)
@@ -100,7 +103,7 @@ func TestHeldFillerLeavesTheCallsTextBudgetAlone(t *testing.T) {
 	}
 	f.observe(events...)
 	f.observe(Event{Sequence: 300, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "um 2"}})
-	waitFor(t, "the request with a number to reach the session", func() bool { return len(target.sends()) == 1 })
+	testkit.Eventually(t, "the request with a number to reach the session", 5*time.Second, func() bool { return len(target.sends()) == 1 })
 	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"um 2"}) {
 		t.Fatalf("sends=%q", sends)
 	}
