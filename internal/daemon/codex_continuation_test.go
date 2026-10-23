@@ -106,8 +106,7 @@ func TestARevertedCodexThreadCatchesUpFromItsContinuationAfterARestart(t *testin
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
-	defer manager.shutdown()
+	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -159,8 +158,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
-	defer manager.shutdown()
+	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -200,8 +198,7 @@ func TestARevertWhoseLineageCannotBeProvenReloadsFromTheNewRolloutWithANotice(t 
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
-	defer manager.shutdown()
+	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -282,8 +279,7 @@ func TestARevertBeforeTheSeededWindowJournalsItsRetainedHistoryWithNoOlderCursor
 		t.Fatal(err)
 	}
 	adapter := providers.NewCodex("http://127.0.0.1:1")
-	manager := newSessionSourceManager(reg)
-	defer manager.shutdown()
+	manager := newTestSourceManager(t, reg)
 	seeded, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
 		t.Fatal(err)
