@@ -258,6 +258,16 @@ tool or `noProcess` changed, or `lastProgressAt` moved by a minute or more
 iOS and web clients add `no activity for 12 min · running Bash since 10:02`
 (or `· no Claude process`) to Working, as plain secondary text.
 
+A Codex session carries the same `activity`, read from its rollout by the
+discovery and status passes alike. `busySince` is the open turn's
+`task_started` record, `lastProgressAt` its newest record (or the rollout's
+last write when records carry no timestamp), and `tool` its newest
+`function_call` or `custom_tool_call` without a matching output. The rollout
+alone counts a turn as busy only within 15 minutes of its last write; past
+that a session the runtime still reports busy keeps the turn's activity, so a
+hung Codex turn reads as quiet the same way. `noProcess` is never set for
+Codex: a turn the runtime does not report running is not working.
+
 ## Background tasks
 
 A turn can end with work still running: a Bash call run in the background, an
