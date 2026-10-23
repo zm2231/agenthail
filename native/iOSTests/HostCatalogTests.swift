@@ -73,6 +73,18 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.sessions.first?.project?.id, "hlaptop::p1")
     }
 
+    func testARepositoryProjectKeepsOneIDOnEveryComputer() {
+        var onLaptop = local("s1")
+        onLaptop.project = ProjectIdentity(id: "repo:github.com/acme/widget", displayName: "widget", rootPath: "/w", kind: "git")
+        var onServer = local("s2")
+        onServer.project = ProjectIdentity(id: "repo:github.com/acme/widget", displayName: "widget", rootPath: "/srv/w", kind: "git")
+        let catalog = HostCatalog(hosts: [
+            host("hlaptop", "laptop", reachable: true, sessions: [onLaptop]),
+            host("hserver", "server", reachable: true, sessions: [onServer]),
+        ])
+        XCTAssertEqual(Set(catalog.sessions.compactMap(\.project?.id)), ["repo:github.com/acme/widget"])
+    }
+
     func testDeliveryProblemsAndAttentionNameTheirComputer() {
         var snapshot = Self.snapshot([local("s1")])
         snapshot.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "m", reason: "r", status: nil, at: "now")]
