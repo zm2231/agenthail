@@ -16,14 +16,49 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var testRegistryTemplate struct {
+	once sync.Once
+	data []byte
+	err  error
+}
+
+// openTestRegistry opens a new registry copied from one migrated once per test
+// process. The copy gets its own host epoch when it is opened.
 func openTestRegistry(t *testing.T) *Registry {
 	t.Helper()
-	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
+	testRegistryTemplate.once.Do(func() { testRegistryTemplate.data, testRegistryTemplate.err = buildTestRegistryTemplate() })
+	if testRegistryTemplate.err != nil {
+		t.Fatal(testRegistryTemplate.err)
+	}
+	path := filepath.Join(t.TempDir(), "registry.db")
+	if err := os.WriteFile(path, testRegistryTemplate.data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
 	return r
+}
+
+func buildTestRegistryTemplate() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "registry-template")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	_, deleteErr := r.db.Exec(`DELETE FROM catalog_state; DELETE FROM host_identity`)
+	_, checkpointErr := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	if err := errors.Join(deleteErr, checkpointErr, r.Close()); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {

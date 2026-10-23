@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -297,7 +298,7 @@ func (f *daemonSurface) ContextUsage(context.Context, *surface.Session) (*surfac
 
 func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, surface.Session, surface.Session) {
 	t.Helper()
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

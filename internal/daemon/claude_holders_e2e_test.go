@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -96,7 +97,7 @@ func TestConversationResumedInASecondTerminalIsNeverSentToOneOfThemSilently(t *t
 	first := fixture.Holder(conversation, cwd)
 	later := fixture.Holder(started, cwd)
 	recordNativeSender(t, fixture.Root, "sender-native")
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

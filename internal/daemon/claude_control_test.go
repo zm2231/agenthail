@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -38,7 +38,7 @@ func busyRemoteControlClaude(t *testing.T, onPost func(payload map[string]any)) 
 	transcript := process.Transcript("conversation-control", process.Home)
 	process.RecordStatus("conversation-control", process.Home, "session_control", "busy", "", time.Time{})
 	appendClaudeRecords(t, transcript, `{"type":"user","uuid":"turn-active","timestamp":"2026-10-19T10:00:00Z","message":{"content":"Refactor the parser"}}`)
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestARemoteControlSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) 
 	transcript := process.Transcript("conversation-race", process.Home)
 	process.RecordStatus("conversation-race", process.Home, "session_race", "busy", "", time.Time{})
 	appendClaudeRecords(t, transcript, `{"type":"user","uuid":"turn-active","timestamp":"2026-10-19T10:00:00Z","message":{"content":"Refactor the parser"}}`)
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

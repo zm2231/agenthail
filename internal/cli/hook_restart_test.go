@@ -6,13 +6,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -39,7 +39,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 	claude.Listen()
 	transcript := claude.Transcript(restartConversation, claude.Home)
 	claude.RecordStatus(restartConversation, claude.Home, "session_question", "waiting", "input needed", time.Now())
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

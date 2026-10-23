@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -47,7 +48,7 @@ func dashboardActionRequestWithKey(body, key string) *http.Request {
 
 func openActionTestRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
@@ -252,7 +252,7 @@ type runningDaemon struct {
 func startRunningDaemon(t *testing.T, agent *scriptedAgent) *runningDaemon {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

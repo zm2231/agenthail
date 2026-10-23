@@ -2,12 +2,12 @@ package daemon
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -29,7 +29,7 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+			store, err := registry.Open(registrytest.Path(t))
 			if err != nil {
 				t.Fatal(err)
 			}

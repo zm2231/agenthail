@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 )
 
 func TestSendDevicePushUsesBoundedCapabilityPayload(t *testing.T) {
@@ -140,7 +140,7 @@ func TestNotifyPairedDevicesRetiresOnlyTerminalTargets(t *testing.T) {
 
 func registryTestRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

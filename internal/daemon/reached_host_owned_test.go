@@ -10,6 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -58,7 +59,7 @@ func newReachedHostOwnedFixture(t *testing.T) (*orphanFixture, string) {
 
 func TestDiscoveringLiveProcessOfHostOwnedConversationLeavesTheHostRow(t *testing.T) {
 	fixture := claudetest.New(t)
-	r, err := registry.Open(t.TempDir() + "/registry.db")
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,13 +3,13 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -31,7 +31,7 @@ func newHeadlessCodexFixture(t *testing.T, desktopURL string) *headlessCodexFixt
 		}
 		return nil
 	})
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

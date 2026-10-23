@@ -3,13 +3,13 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -63,7 +63,7 @@ func (h *runningDaemon) catalogRow(id string) (dashboardSession, bool) {
 func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *testing.T) {
 	home := codextest.Home(t)
 	lifecycle := codextest.InstallLifecycle(t, home, func(string, map[string]any) map[string]any { return nil })
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
