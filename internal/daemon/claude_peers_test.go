@@ -122,15 +122,29 @@ func TestPeerRegistrationRunsOncePerBurstOfDiscoveryCommits(t *testing.T) {
 	changed := make(chan struct{}, 1)
 	tick := make(chan time.Time)
 	settling := make(chan chan time.Time)
-	passes := make(chan struct{})
+	passes := make(chan chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		settleChanges(ctx, changed, tick, func() <-chan time.Time {
 			settled := make(chan time.Time)
-			settling <- settled
+			select {
+			case settling <- settled:
+			case <-ctx.Done():
+			}
 			return settled
-		}, func() { passes <- struct{}{} })
+		}, func() {
+			resume := make(chan struct{})
+			select {
+			case passes <- resume:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-resume:
+			case <-ctx.Done():
+			}
+		})
 	}()
 	defer func() { cancel(); <-done }()
 	signal := func() {
@@ -139,18 +153,18 @@ func TestPeerRegistrationRunsOncePerBurstOfDiscoveryCommits(t *testing.T) {
 		default:
 		}
 	}
-	<-passes
+	close(<-passes)
 	signal()
 	settled := <-settling
 	for range 4 {
 		signal()
 	}
 	close(settled)
-	<-passes
-	select {
-	case tick <- time.Now():
-	case <-settling:
-		t.Fatal("a change made while the burst settled started a second pass")
+	resume := <-passes
+	if len(changed) != 0 {
+		t.Fatal("a change made while the burst settled is left for a second pass")
 	}
-	<-passes
+	close(resume)
+	tick <- time.Now()
+	close(<-passes)
 }
