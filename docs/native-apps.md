@@ -99,6 +99,8 @@ On iPhone the call is a system call: it shows in the status bar and the
 Lock Screen call controls, and it keeps going when you close the Voice screen,
 switch apps or lock the phone. **Return to call** reopens it. Hang up in the app
 or with the system call controls; force-quitting the app ends the call.
+While the microphone is muted or the call is on hold, nothing you say is sent
+as a request and the operator cannot move the call or message a coordinator.
 
 The Mac asks for microphone access on the first call. If access is off, the Voice
 window says so and **Open System Settings** goes to Privacy & Security >

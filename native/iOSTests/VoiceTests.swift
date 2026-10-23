@@ -54,6 +54,41 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testMuteAndHoldAreReportedInOrderOnceTheHostHasTheCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        model.toggleMute()
+        XCTAssertFalse(api.actions.contains { $0.action == "input-state" })
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "input-state" }) { await Task.yield() }
+        audio.onMessage?("held", "true")
+        model.toggleMute()
+        audio.onMessage?("held", "false")
+        for _ in 0..<1000 where api.actions.filter({ $0.action == "input-state" }).count < 2 { await Task.yield() }
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        let reports = api.actions.filter { $0.action == "input-state" }
+        XCTAssertEqual(reports.map(\.muted), [true, false])
+        XCTAssertEqual(reports.map(\.inputRevision), [1, 2])
+        XCTAssertTrue(reports.allSatisfy { $0.attemptId == start.attemptId })
+        model.close()
+    }
+
+    @MainActor
+    func testAMuteTheHostCannotRecordEndsTheCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
+        api.inputStateError = AgenthailAPIError.request(409, "input state requires the current call")
+        model.toggleMute()
+        for _ in 0..<1000 where audio.ends == 0 { await Task.yield() }
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertEqual(model.error, "Your computer could not record whether the microphone is muted, so the call ended.")
+    }
+
+    @MainActor
     func testHostThatCannotConfirmTheCurrentCallEndsLocalAudio() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
@@ -418,12 +453,14 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     var actions: [VoiceAction] = []
     var snapshot: VoiceState?
     var stopError: Error?
+    var inputStateError: Error?
     private var ready: VoiceState { try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","events":[],"occupied":false,"truncated":false}"#.utf8)) }
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     func state() async throws -> VoiceState { snapshot ?? ready }
     func action(_ action: VoiceAction) async throws -> VoiceState {
         actions.append(action)
         if action.action == "stop", let stopError { throw stopError }
+        if action.action == "input-state", let inputStateError { throw inputStateError }
         if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "stop" && holdStop) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }
         }
