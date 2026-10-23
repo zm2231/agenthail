@@ -26,15 +26,16 @@ type CatalogPresenceRead struct {
 
 // CatalogPresenceRows reads, in one transaction with the listing, the local
 // catalog rows and only the session fields presence and archive activity
-// depend on. A row's projection text is read when the row was written after
-// clock in hostEpoch, or when known does not hold the row at its generation.
-func (r *Registry) CatalogPresenceRows(hostEpoch string, clock int64, known func(id string, generation int64) bool) (CatalogPresenceRead, error) {
+// depend on, into rows' storage. A row's projection text is read when the row
+// was written after clock in hostEpoch, or when known does not hold the row at
+// its generation.
+func (r *Registry) CatalogPresenceRows(rows []CatalogPresenceRow, hostEpoch string, clock int64, known func(id string, generation int64) bool) (CatalogPresenceRead, error) {
 	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogPresenceRead{}, err
 	}
 	defer tx.Rollback()
-	read := CatalogPresenceRead{Rows: []CatalogPresenceRow{}}
+	read := CatalogPresenceRead{Rows: rows[:0]}
 	err = tx.QueryRow(`SELECT host_epoch,projection_clock FROM catalog_state WHERE id=1`).Scan(&read.HostEpoch, &read.Clock)
 	if err != nil && err != sql.ErrNoRows {
 		return CatalogPresenceRead{}, err
@@ -43,38 +44,37 @@ func (r *Registry) CatalogPresenceRows(hostEpoch string, clock int64, known func
 	if err == sql.ErrNoRows || read.HostEpoch != hostEpoch {
 		after = -1
 	}
-	rows, err := tx.Query(`SELECT s.id,s.name,s.surface,s.status,s.runtime_kind,s.last_active_ms,cs.projection_generation,
+	result, err := tx.Query(`SELECT s.id,s.name,s.surface,s.status,s.runtime_kind,s.last_active_ms,cs.projection_generation,
 		CASE WHEN cs.projection_generation>? THEN cs.projection_fingerprint END
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=''`, after)
 	if err != nil {
 		return CatalogPresenceRead{}, err
 	}
 	var unknown []int
-	for rows.Next() {
-		var row CatalogPresenceRow
-		var kind, status string
-		var lastActiveMS int64
-		var fingerprint sql.NullString
-		if err := rows.Scan(&row.Session.ID, &row.Session.Name, &kind, &status, &row.Session.RuntimeKind, &lastActiveMS, &row.Generation, &fingerprint); err != nil {
-			rows.Close()
+	var id, name, kind, status, runtimeKind string
+	var lastActiveMS, generation int64
+	var fingerprint sql.NullString
+	for result.Next() {
+		if err := result.Scan(&id, &name, &kind, &status, &runtimeKind, &lastActiveMS, &generation, &fingerprint); err != nil {
+			result.Close()
 			return CatalogPresenceRead{}, err
 		}
-		row.Session.Surface = surface.SurfaceKind(kind)
-		row.Session.Status = surface.SessionStatus(status)
+		row := CatalogPresenceRow{Generation: generation, ProjectionFingerprint: fingerprint.String, FingerprintRead: fingerprint.Valid}
+		row.Session.ID, row.Session.Name, row.Session.RuntimeKind = id, name, surface.RuntimeKind(runtimeKind)
+		row.Session.Surface, row.Session.Status = surface.SurfaceKind(kind), surface.SessionStatus(status)
 		if lastActiveMS > 0 {
 			row.Session.LastActive = time.UnixMilli(lastActiveMS)
 		}
-		row.ProjectionFingerprint, row.FingerprintRead = fingerprint.String, fingerprint.Valid
-		if !row.FingerprintRead && !known(row.Session.ID, row.Generation) {
+		if !row.FingerprintRead && !known(id, generation) {
 			unknown = append(unknown, len(read.Rows))
 		}
 		read.Rows = append(read.Rows, row)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	if err := result.Err(); err != nil {
+		result.Close()
 		return CatalogPresenceRead{}, err
 	}
-	if err := rows.Close(); err != nil {
+	if err := result.Close(); err != nil {
 		return CatalogPresenceRead{}, err
 	}
 	for _, index := range unknown {
