@@ -38,6 +38,8 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published var inspectorVisible = true
     @Published private(set) var inspectorDocks = true
     @Published private(set) var inspectorOverlay = false
+    @Published private(set) var sidebarDocks = true
+    @Published private(set) var sidebarOverlay = false
     @Published var renamingSession: SessionState?
     @Published var adoptingSession: SessionState?
     @Published private(set) var forking = false
@@ -95,14 +97,29 @@ final class SessionPane: ObservableObject, Identifiable {
         if inspectorDocks { inspectorVisible.toggle() } else { inspectorOverlay.toggle() }
     }
 
-    /// A window too narrow to dock the inspector shows it over the
+    func toggleSidebar() {
+        guard !sidebarDocks else { return }
+        sidebarOverlay.toggle()
+    }
+
+    func closeSidebarOverlay() {
+        if sidebarOverlay { sidebarOverlay = false }
+    }
+
+    /// A window too narrow to dock a side column shows it over the
     /// conversation on request instead, and forgets that request once it
-    /// can dock again.
+    /// can dock again. The inspector collapses first, then the sidebar.
     func fitWindow(width: CGFloat) {
-        let docks = width >= ColumnFit.inspectorDocks
-        guard docks != inspectorDocks else { return }
-        inspectorDocks = docks
-        inspectorOverlay = false
+        let inspector = width >= ColumnFit.inspectorDocks
+        if inspector != inspectorDocks {
+            inspectorDocks = inspector
+            inspectorOverlay = false
+        }
+        let sidebar = width >= ColumnFit.sidebarDocks
+        if sidebar != sidebarDocks {
+            sidebarDocks = sidebar
+            sidebarOverlay = false
+        }
     }
 
     init(model: AgenthailModel, restoresSelection: Bool) {

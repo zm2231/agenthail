@@ -30,6 +30,21 @@ private struct BelowWindowChrome: ViewModifier {
     }
 }
 
+/// Shows the sidebar over the conversation when the window is too narrow
+/// to dock it.
+struct SidebarToggle: View {
+    @ObservedObject var pane: SessionPane
+
+    var body: some View {
+        Button { pane.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+            .buttonStyle(.plain)
+            .foregroundStyle(pane.sidebarOverlay ? DesktopPalette.text : DesktopPalette.text2)
+            .font(.system(size: DesktopType.body))
+            .help(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+            .accessibilityLabel(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+    }
+}
+
 struct TitleBarStrip: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
@@ -44,6 +59,7 @@ struct TitleBarStrip: View {
     var body: some View {
         let tree = model.sessionTree
         HStack(spacing: DesktopSpace.s) {
+            if !pane.sidebarDocks { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
                 let tabs = pane.tabs.tabs
                 let fits = max(Int(geometry.size.width / Self.minimumTab), 1)

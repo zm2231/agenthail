@@ -44,16 +44,25 @@ struct DesktopWindow: View {
     }
 
     private var splitView: some View {
-        NavigationSplitView {
-            SessionSidebar(model: model, pane: pane)
-                .belowWindowChrome()
-                .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
+        NavigationSplitView(columnVisibility: Binding(get: { pane.sidebarDocks ? .all : .detailOnly }, set: { _ in })) {
+            Group {
+                // A hidden sidebar column stays in the window, so it must not
+                // keep reporting its glass and text to the backdrop.
+                if pane.sidebarDocks {
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                } else {
+                    Color.clear
+                }
+            }
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
+                .frame(minWidth: pane.sidebarDocks ? nil : ColumnFit.windowMinimum)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .overlay(alignment: .trailing) {
                     if !pane.inspectorDocks && pane.inspectorOverlay && pane.displayedSession != nil {
@@ -72,6 +81,21 @@ struct DesktopWindow: View {
                         .inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
                 }
         }
+        .overlay(alignment: .leading) {
+            if !pane.sidebarDocks && pane.sidebarOverlay {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { pane.closeSidebarOverlay() }
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                        .frame(width: DesktopColumns.sidebar.ideal)
+                        .shadow(color: .black.opacity(0.18), radius: 16, x: 4)
+                        .transition(.move(edge: .leading))
+                }
+            }
+        }
+        .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
+        .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
     }
 }
@@ -90,6 +114,14 @@ private struct WindowChromeLayout<Content: View>: View {
                 .overlay(alignment: .top) {
                     if tabs {
                         TitleBarStrip(model: model, pane: pane, interface: interface)
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if !tabs && !pane.sidebarDocks {
+                        SidebarToggle(pane: pane)
+                            .frame(height: ConversationHeader.height)
+                            .padding(.leading, TitleBarStrip.buttonsWidth)
                             .ignoresSafeArea(.container, edges: .top)
                     }
                 }
@@ -627,6 +659,7 @@ struct ConversationPane: View {
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     @EnvironmentObject private var voice: VoiceController
+    @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -634,7 +667,7 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -748,6 +781,8 @@ struct ConversationHeader: View {
     var onFocusTerminal: () -> Void = {}
     var onCall: (() -> Void)?
 
+    static let height: CGFloat = 52
+
     var body: some View {
         HStack(spacing: DesktopSpace.m) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -806,7 +841,7 @@ struct ConversationHeader: View {
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 14)
-        .frame(height: 52)
+        .frame(height: Self.height)
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 }

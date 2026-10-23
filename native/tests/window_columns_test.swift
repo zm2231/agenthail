@@ -12,12 +12,13 @@ struct Columns: View {
     let measured: Measured
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(pane.sidebarDocks ? .all : .detailOnly)) {
             Color.red
                 .navigationSplitViewColumnWidth(min: DesktopColumns.sidebar.min, ideal: DesktopColumns.sidebar.ideal, max: DesktopColumns.sidebar.max)
         } detail: {
             Color.gray
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.detail = $0 }
+                .frame(minWidth: pane.sidebarDocks ? nil : ColumnFit.windowMinimum)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .inspector(isPresented: .constant(pane.inspectorDocks && pane.inspectorVisible)) {
                     Color.blue.inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
@@ -53,6 +54,19 @@ struct WindowColumnsTest {
         check(pane.inspectorShown && pane.inspectorOverlay && pane.inspectorVisible, "toggling in a narrow window shows the inspector over the conversation")
         pane.fitWindow(width: 1400)
         check(pane.inspectorDocks && !pane.inspectorOverlay && pane.inspectorShown, "widening docks the inspector again and drops the overlay")
+        pane.toggleSidebar()
+        check(!pane.sidebarOverlay, "a docked sidebar has no overlay to toggle")
+        pane.fitWindow(width: 800)
+        check(pane.sidebarDocks, "the sidebar stays docked while only the inspector has collapsed")
+        pane.fitWindow(width: 600)
+        check(!pane.sidebarDocks && !pane.inspectorDocks, "a window narrower than sidebar and conversation collapses the sidebar too")
+        pane.toggleSidebar()
+        check(pane.sidebarOverlay, "toggling a collapsed sidebar shows it over the conversation")
+        pane.closeSidebarOverlay()
+        check(!pane.sidebarOverlay, "the sidebar overlay closes")
+        pane.toggleSidebar()
+        pane.fitWindow(width: 900)
+        check(pane.sidebarDocks && !pane.sidebarOverlay, "widening docks the sidebar again and drops its overlay")
 
         let live = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
         let measured = Measured()
@@ -72,10 +86,15 @@ struct WindowColumnsTest {
         let narrow = resize(700)
         check(narrow == 700, "with the inspector collapsed the window narrows to 700 pt, got \(narrow)")
         check(measured.detail.maxX <= narrow + 0.5 && measured.detail.width >= DesktopColumns.detail.min - 40, "the conversation fits the narrow window, got \(measured.detail)")
+        let narrower = resize(500)
+        check(narrower == 500 && !live.sidebarDocks, "with the sidebar collapsed the window narrows to 500 pt, got \(narrower), sidebar docked \(live.sidebarDocks)")
+        check(measured.detail.minX >= -0.5 && measured.detail.maxX <= narrower + 0.5, "the conversation fills the 500 pt window, got \(measured.detail)")
+        let floor = resize(300)
+        check(floor == ColumnFit.windowMinimum, "the window stops at \(ColumnFit.windowMinimum) pt, got \(floor)")
         let wide = resize(1200)
-        check(wide == 1200 && live.inspectorDocks, "widening to 1200 pt docks the inspector again")
+        check(wide == 1200 && live.inspectorDocks && live.sidebarDocks, "widening to 1200 pt docks both columns again")
 
         if failures > 0 { exit(1) }
-        print("window columns: the inspector collapses before it pins the window, and comes back when there is room")
+        print("window columns: the inspector, then the sidebar, collapse before they pin the window, and come back when there is room")
     }
 }
