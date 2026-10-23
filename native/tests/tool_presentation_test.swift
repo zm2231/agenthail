@@ -29,7 +29,13 @@ struct ToolPresentationTest {
         check(applied.verb == "Edit" && applied.object.text == "a.go, b.go", "a patch names its files")
         check(ToolPresentation(name: "apply_patch", text: patch).changes.count == 2, "a raw patch is read too")
 
-        check(FileChange.merged([FileChange(path: "a", added: 1, removed: 0), FileChange(path: "b", added: 2, removed: 2), FileChange(path: "a", added: 0, removed: 3)]) == [FileChange(path: "a", added: 1, removed: 3), FileChange(path: "b", added: 2, removed: 2)], "chips merge per file in first-touched order")
+        let merged = FileDiff.merged([
+            FileDiff(path: "a", hunks: [TextDiff(before: "", after: "1")]),
+            FileDiff(path: "b", hunks: [TextDiff(before: "x\ny", after: "X\nY")]),
+            FileDiff(path: "a", hunks: [TextDiff(before: "1\n2\n3", after: "")]),
+        ])
+        check(merged.map(\.change) == [FileChange(path: "a", added: 1, removed: 3), FileChange(path: "b", added: 2, removed: 2)], "chips merge per file in first-touched order")
+        check(merged[0].hunks.count == 2, "each call's change to a file stays its own hunk")
 
         let grep = ToolPresentation(name: "Grep", text: json(["pattern": "Collapse activity", "path": "/work/native"]))
         check(grep.verb == "Search" && grep.object.text == "Collapse activity", "a search names its pattern, not its folder")

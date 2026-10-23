@@ -104,47 +104,11 @@ struct FileChange: Equatable {
 
     var name: String { (path as NSString).lastPathComponent }
 
-    /// One entry per file, in first-touched order, summing every call that changed it.
-    static func merged(_ changes: [FileChange]) -> [FileChange] {
-        var merged: [FileChange] = []
-        for change in changes {
-            if let index = merged.firstIndex(where: { $0.path == change.path }) {
-                merged[index].added += change.added
-                merged[index].removed += change.removed
-            } else {
-                merged.append(change)
-            }
-        }
-        return merged
-    }
-
-    static func lineCounts(before: String, after: String) -> (added: Int, removed: Int) {
-        let difference = lines(after).difference(from: lines(before))
-        return (difference.insertions.count, difference.removals.count)
-    }
-
     /// The text's lines; a final newline ends the last line rather than starting another.
     static func lines(_ text: String) -> [Substring] {
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var lines = text.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r\n" }
         if lines.last?.isEmpty == true { lines.removeLast() }
         return lines
-    }
-
-    /// Reads a patch in the `*** Begin Patch` format some agents send instead of edit arguments.
-    static func patch(_ text: String) -> [FileChange] {
-        var changes: [FileChange] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if let path = ["*** Update File: ", "*** Add File: ", "*** Delete File: "].lazy.compactMap({ line.hasPrefix($0) ? String(line.dropFirst($0.count)) : nil }).first {
-                changes.append(FileChange(path: path.trimmingCharacters(in: .whitespaces), added: 0, removed: 0))
-            } else if line.hasPrefix("*** ") {
-                continue
-            } else if line.hasPrefix("+"), !changes.isEmpty {
-                changes[changes.count - 1].added += 1
-            } else if line.hasPrefix("-"), !changes.isEmpty {
-                changes[changes.count - 1].removed += 1
-            }
-        }
-        return changes
     }
 }
 
@@ -192,25 +156,26 @@ extension ToolPresentation {
     }
 
     /// Files the call changed, with line counts, for edits, writes and patches.
-    var changes: [FileChange] {
+    var changes: [FileChange] { diffs.map(\.change) }
+
+    /// What the call changed in each file, for edits, writes and patches.
+    var diffs: [FileDiff] {
         switch content {
         case .edit(let path, let before, let after):
-            let counts = FileChange.lineCounts(before: before, after: after)
-            return [FileChange(path: path, added: counts.added, removed: counts.removed)]
+            return [FileDiff(path: path, hunks: [TextDiff(before: before, after: after)])]
         case .raw:
             let input = Self.input(rawText)
             let path = input?["file_path"] as? String ?? input?["path"] as? String
             switch name {
             case "Write", "write_file":
                 guard let path, let content = input?["content"] as? String else { return [] }
-                return [FileChange(path: path, added: FileChange.lines(content).count, removed: 0)]
+                return [FileDiff(path: path, hunks: [TextDiff(before: "", after: content)])]
             case "MultiEdit":
                 guard let path, let edits = input?["edits"] as? [[String: Any]] else { return [] }
-                let counts = edits.map { FileChange.lineCounts(before: $0["old_string"] as? String ?? "", after: $0["new_string"] as? String ?? "") }
-                return [FileChange(path: path, added: counts.reduce(0) { $0 + $1.added }, removed: counts.reduce(0) { $0 + $1.removed })]
+                return [FileDiff(path: path, hunks: edits.map { TextDiff(before: $0["old_string"] as? String ?? "", after: $0["new_string"] as? String ?? "") })]
             case "apply_patch":
                 let patch = input?["input"] as? String ?? input?["patch"] as? String ?? rawText
-                return FileChange.patch(patch)
+                return FileDiff.patch(patch)
             default:
                 return []
             }

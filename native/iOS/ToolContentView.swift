@@ -3,19 +3,16 @@ import SwiftUI
 struct ToolContentView: View {
     let item: TimelineItem
     var body: some View {
+        let presentation = ToolPresentation(name: item.title, text: item.text)
+        let diffs = presentation.diffs
         VStack(alignment: .leading, spacing: 12) {
-            switch ToolPresentation(name: item.title, text: item.text).content {
+            switch presentation.content {
             case .command(let command, let directory):
                 if let directory { Label(directory, systemImage: "folder").font(.caption).textSelection(.enabled) }
                 code(command)
                 rawInput
-            case .edit(let path, let before, let after):
-                Label(path, systemImage: "doc.text").font(.callout).textSelection(.enabled)
-                Label("Removed", systemImage: "minus.circle").font(.caption.weight(.semibold))
-                code(before).padding(8).background(Color.red.opacity(0.08))
-                Label("Added", systemImage: "plus.circle").font(.caption.weight(.semibold))
-                code(after).padding(8).background(Color.green.opacity(0.08))
-                rawInput
+            case .edit:
+                changes(diffs)
             case .plan(let steps):
                 ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
                     Label {
@@ -27,10 +24,23 @@ struct ToolContentView: View {
                 }
                 rawInput
             case .raw:
-                code(item.text.isEmpty ? "No additional details were recorded." : item.text)
+                if diffs.isEmpty {
+                    code(item.text.isEmpty ? "No additional details were recorded." : item.text)
+                } else {
+                    changes(diffs)
+                }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    @ViewBuilder
+    private func changes(_ diffs: [FileDiff]) -> some View {
+        ForEach(diffs, id: \.path) { file in
+            Label(file.path, systemImage: "doc.text").font(.callout).textSelection(.enabled)
+            DiffView(id: item.id + ":" + file.path, hunks: file.hunks)
+        }
+        rawInput
+    }
+
     private var rawInput: some View {
         DisclosureGroup("Full recorded input") { code(item.text).padding(.top, 8) }.font(.footnote)
     }

@@ -11,9 +11,9 @@ enum ToolRunEntry: Identifiable {
         }
     }
 
-    var changes: [FileChange] {
+    var diffs: [FileDiff] {
         if case .call(let call, let results) = self, !results.contains(where: ToolRunSummary.isFailure) {
-            return ToolPresentation(name: call.title, text: call.text).changes
+            return ToolPresentation(name: call.title, text: call.text).diffs
         }
         return []
     }
