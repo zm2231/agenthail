@@ -378,3 +378,97 @@ func TestInstallMovesAgenthailsHookOutOfAMatcherThatNarrowsIt(t *testing.T) {
 		t.Fatalf("status after install = %q", got)
 	}
 }
+
+type remoteControlCLISurface struct {
+	*cliSurface
+	available bool
+}
+
+func (s remoteControlCLISurface) RemoteControlAvailable() bool { return s.available }
+
+func TestHooksInstallSetsRemoteControlAtStartupInEveryRootOnlyWhenAsked(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	second := filepath.Join(home, "claude-work")
+	for _, dir := range []string{filepath.Join(home, ".claude"), second, filepath.Join(home, ".agenthail")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "config.json"), []byte(`{"claudeConfigDirs":["`+second+`"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	primary := filepath.Join(home, ".claude", "settings.json")
+	if err := os.WriteFile(primary, []byte(cmuxSettings), 0640); err != nil {
+		t.Fatal(err)
+	}
+	claude := remoteControlCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, available: true}
+	app, _ := cliFixture(t, claude.cliSurface)
+	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: claude}}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		return captureStdout(t, func() error { return app.Run(append([]string{"hooks"}, args...)) })
+	}
+
+	output, err := run("install")
+	if err != nil || !strings.Contains(output, "--remote-control on") || gjson.GetBytes(mustRead(t, primary), "remoteControlAtStartup").Exists() {
+		t.Fatalf("install without the flag: err=%v output=%s", err, output)
+	}
+	if output, err = run("install", "--remote-control", "on"); err != nil {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	for _, path := range []string{primary, filepath.Join(second, "settings.json")} {
+		if value := gjson.GetBytes(mustRead(t, path), "remoteControlAtStartup"); value.Type != gjson.True {
+			t.Fatalf("%s: remoteControlAtStartup=%s", path, value.Raw)
+		}
+	}
+	data := mustRead(t, primary)
+	if gjson.GetBytes(data, "model").String() != "opus" || gjson.GetBytes(data, "permissions.allow.0").String() != "Bash(ls)" || gjson.GetBytes(data, "hooks.Stop.0.hooks.0.command").String() != "notify-done" {
+		t.Fatalf("other settings were lost: %s", data)
+	}
+	if info, err := os.Stat(primary); err != nil || info.Mode().Perm() != 0640 {
+		t.Fatalf("mode=%v err=%v", info.Mode().Perm(), err)
+	}
+	if output, err = run("install"); err != nil || strings.Contains(output, "--remote-control on") {
+		t.Fatalf("a set root still gets the hint: %s", output)
+	}
+	if output, err = run("install", "--remote-control", "off"); err != nil || gjson.GetBytes(mustRead(t, primary), "remoteControlAtStartup").Type != gjson.False {
+		t.Fatalf("off: err=%v output=%s", err, output)
+	}
+	if output, err = run("status"); err != nil || strings.Count(output, "Remote Control at startup off") != 2 {
+		t.Fatalf("status: err=%v output=%s", err, output)
+	}
+
+	broken := `{"model": "opus",`
+	if err := os.WriteFile(primary, []byte(broken), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("install", "--remote-control", "on"); err == nil || !strings.Contains(err.Error(), "not a JSON object") {
+		t.Fatalf("a broken settings file: err=%v", err)
+	}
+	if string(mustRead(t, primary)) != broken {
+		t.Fatalf("a broken settings file was overwritten: %s", mustRead(t, primary))
+	}
+
+	claude.available = false
+	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: claude}}
+	if err := os.WriteFile(primary, []byte(cmuxSettings), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("install", "--remote-control", "on"); err == nil || !strings.Contains(err.Error(), "no Claude Remote Control") {
+		t.Fatalf("an install without Remote Control: err=%v", err)
+	}
+	if output, err = run("install"); err != nil || strings.Contains(output, "--remote-control") {
+		t.Fatalf("an install without Remote Control offers it: err=%v output=%s", err, output)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
