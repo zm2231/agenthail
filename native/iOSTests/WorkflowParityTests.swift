@@ -301,6 +301,19 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(model.composer, "second")
     }
 
+    @MainActor
+    func testArchivingARepositoryProjectUsesItsSharedID() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"s1","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        XCTAssertEqual(model.snapshot?.sessions.first?.project?.id, "repo:github.com/acme/widget")
+        await model.setProjectArchived("repo:github.com/acme/widget", true)
+        XCTAssertNil(model.operationError)
+        let archived = try XCTUnwrap(ParityProtocol.state.actions.last)
+        XCTAssertEqual(archived["action"] as? String, "project-archive")
+        XCTAssertEqual(archived["projectId"] as? String, "repo:github.com/acme/widget")
+    }
+
     private static let codexSessionSnapshot = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#
 
     @MainActor

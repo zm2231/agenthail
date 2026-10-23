@@ -37,12 +37,16 @@ struct HostCatalog {
     private var servers: [String: String] = [:]
     private var targets: [String: HostTarget] = [:]
 
+    /// Names the same project on every computer, so it is never qualified.
+    static let repositoryPrefix = "repo:"
+
     static func qualify(_ hostID: String, _ sessionID: String) -> String {
-        sessionID.contains(separator) ? sessionID : hostID + separator + sessionID
+        hostID.isEmpty || sessionID.isEmpty || sessionID.contains(separator) || sessionID.hasPrefix(repositoryPrefix) ? sessionID : hostID + separator + sessionID
     }
 
     static func owner(of sessionID: String) -> String? {
-        sessionID.range(of: separator).map { String(sessionID[..<$0.lowerBound]) }
+        guard !sessionID.hasPrefix(repositoryPrefix), let range = sessionID.range(of: separator), range.lowerBound > sessionID.startIndex else { return nil }
+        return String(sessionID[..<range.lowerBound])
     }
 
     static func merge(_ row: SessionState, servedBy hostID: String, ownerName: (String) -> String?, reachable: Bool) -> (row: SessionState, local: Bool) {

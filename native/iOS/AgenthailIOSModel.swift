@@ -1176,16 +1176,40 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func setProjectArchived(_ projectID: String, _ archived: Bool) async {
+        let action = archived ? "project-archive" : "project-unarchive"
         do {
-            guard let owner = HostCatalog.owner(of: projectID) else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+            guard let owner = HostCatalog.owner(of: projectID) else {
+                try await setRepositoryArchived(projectID, action: action)
+                operationError = nil
+                return
+            }
             let (api, target) = try reach(owner)
             let id = target.remote == nil ? String(projectID.dropFirst(owner.count + HostCatalog.separator.count)) : projectID
-            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: id)
+            _ = try await api.projectAction(action, projectID: id)
             operationError = nil
             await refresh(host: target.hostID)
         } catch {
             operationError = error.localizedDescription
         }
+    }
+
+    // A repository project has one id on every computer; each computer that
+    // serves one of its sessions archives its own checkout.
+    private func setRepositoryArchived(_ projectID: String, action: String) async throws {
+        let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
+        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.reachable == true }
+        guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        var failures: [String] = []
+        for hostID in reachable {
+            guard let connection = connections[hostID] else { continue }
+            do {
+                _ = try await connection.api.projectAction(action, projectID: projectID)
+            } catch {
+                failures.append("\(connection.name): \(AgenthailAPIError.userMessage(error))")
+            }
+            await refresh(host: hostID)
+        }
+        if !failures.isEmpty { throw AgenthailAPIError.unavailable(failures.joined(separator: "\n")) }
     }
 
     func removeHost(_ hostID: String) {
