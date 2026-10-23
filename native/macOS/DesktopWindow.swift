@@ -43,25 +43,61 @@ struct DesktopWindow: View {
         .onDisappear { model.windowDisappeared() }
     }
 
-    private var splitView: some View {
+    @ViewBuilder private var splitView: some View {
+        // The sidebar collapses to a column of no width rather than through
+        // the split view's visibility: hiding and showing a column there
+        // resizes the window to keep the conversation's width.
+        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
         NavigationSplitView {
-            SessionSidebar(model: model, pane: pane)
-                .belowWindowChrome()
-                .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
+            Group {
+                if pane.sidebarDocks {
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                } else {
+                    Color.clear
+                }
+            }
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
-                .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
+                .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
+                .overlay(alignment: .trailing) {
+                    if !pane.inspectorDocks && pane.inspectorOverlay && pane.displayedSession != nil {
+                        SessionInspector(model: model, pane: pane)
+                            .frame(width: DesktopColumns.inspector.ideal)
+                            .belowWindowChrome()
+                            .ignoresSafeArea(.container, edges: .top)
+                            .shadow(color: .black.opacity(0.18), radius: 16, x: -4)
+                            .transition(.move(edge: .trailing))
+                    }
+                }
+                .inspector(isPresented: Binding(get: { pane.inspectorDocks && pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.inspectorDocks && pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
                     SessionInspector(model: model, pane: pane)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
-                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
+                        .inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
                 }
         }
+        .overlay(alignment: .leading) {
+            if !pane.sidebarDocks && pane.sidebarOverlay {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { pane.closeSidebarOverlay() }
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                        .frame(width: DesktopColumns.sidebar.ideal)
+                        .shadow(color: .black.opacity(0.18), radius: 16, x: 4)
+                        .transition(.move(edge: .leading))
+                }
+            }
+        }
+        .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
+        .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
     }
 }
 
@@ -79,6 +115,14 @@ private struct WindowChromeLayout<Content: View>: View {
                 .overlay(alignment: .top) {
                     if tabs {
                         TitleBarStrip(model: model, pane: pane, interface: interface)
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if !tabs && !pane.sidebarDocks {
+                        SidebarToggle(pane: pane)
+                            .frame(height: ConversationHeader.height)
+                            .padding(.leading, TitleBarStrip.buttonsWidth)
                             .ignoresSafeArea(.container, edges: .top)
                     }
                 }
@@ -101,85 +145,18 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
-    @FocusState private var searchFocused: Bool
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
-            HStack(spacing: DesktopSpace.m) {
-                ForEach(SessionFilter.allCases) { filter in
-                    Button {
-                        model.sessionFilter = filter
-                    } label: {
-                        HStack(spacing: DesktopSpace.xs) {
-                            Text(filter.rawValue)
-                                .fontWeight(model.sessionFilter == filter ? .semibold : .regular)
-                                .foregroundStyle(model.sessionFilter == filter ? DesktopPalette.text : DesktopPalette.text2)
-                            Text("\(tree.counts[filter] ?? 0)")
-                                .font(.system(size: DesktopType.caption))
-                                .foregroundStyle(DesktopPalette.text2)
-                        }
-                        .lineLimit(1)
-                        .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .help(shortcuts.help("\(SessionFacts.filterSummary(filter, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", filter.command))
-                }
-                Spacer()
-                SessionRefinementMenu(model: model)
-                Button {
-                    model.openNewSession()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .help(shortcuts.help("New session", .newSession))
-                .accessibilityLabel("New session")
-            }
-            .font(.system(size: DesktopType.body))
-            .padding(.horizontal, DesktopSpace.l)
-            .padding(.top, DesktopSpace.xs)
-            .padding(.bottom, DesktopSpace.s)
-            .scrimText("sidebar-filters")
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-                TextField("Search sessions", text: Binding(get: { model.searchQuery }, set: { model.search($0) }))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: DesktopType.body))
-                    .focused($searchFocused)
-                    .onKeyPress(.escape) {
-                        model.search("")
-                        searchFocused = false
-                        return .handled
-                    }
-                if !model.searchQuery.isEmpty {
-                    Button {
-                        model.search("")
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.muted)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            .padding(.horizontal, DesktopSpace.m)
-            .padding(.bottom, 10)
-            .scrimText("sidebar-search")
-            .background {
-                Button("") { searchFocused = true }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
-                    .hidden()
-            }
+            SessionSidebarHeader(
+                model: model,
+                counts: tree.counts,
+                help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
+                newSessionHelp: shortcuts.help("New session", .newSession),
+                findShortcut: shortcuts.keyboardShortcut(.findSession)
+            )
             SessionRefinementBar(model: model)
                 .scrimText("sidebar-refinement")
 
@@ -693,6 +670,7 @@ struct ConversationPane: View {
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     @EnvironmentObject private var voice: VoiceController
+    @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -700,7 +678,7 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -814,6 +792,8 @@ struct ConversationHeader: View {
     var onFocusTerminal: () -> Void = {}
     var onCall: (() -> Void)?
 
+    static let height: CGFloat = 52
+
     var body: some View {
         HStack(spacing: DesktopSpace.m) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -874,7 +854,7 @@ struct ConversationHeader: View {
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 14)
-        .frame(height: 52)
+        .frame(height: Self.height)
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 }

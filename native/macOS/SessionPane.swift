@@ -36,6 +36,10 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var loadingOlder = false
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
+    @Published private(set) var inspectorDocks = true
+    @Published private(set) var inspectorOverlay = false
+    @Published private(set) var sidebarDocks = true
+    @Published private(set) var sidebarOverlay = false
     @Published var renamingSession: SessionState?
     @Published var adoptingSession: SessionState?
     @Published private(set) var forking = false
@@ -86,11 +90,51 @@ final class SessionPane: ObservableObject, Identifiable {
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
 
+    /// Whether the inspector is on screen, docked or over the conversation.
+    var inspectorShown: Bool { inspectorDocks ? inspectorVisible : inspectorOverlay }
+
+    func toggleInspector() {
+        if inspectorDocks { inspectorVisible.toggle() } else { inspectorOverlay.toggle() }
+    }
+
+    func toggleSidebar() {
+        guard !sidebarDocks else { return }
+        sidebarOverlay.toggle()
+    }
+
+    func closeSidebarOverlay() {
+        if sidebarOverlay { sidebarOverlay = false }
+    }
+
+    /// A window too narrow to dock a side column shows it over the
+    /// conversation on request instead, and forgets that request once it
+    /// can dock again. The inspector collapses first, then the sidebar.
+    func fitWindow(width: CGFloat) {
+        let inspector = width >= ColumnFit.inspectorDocks
+        if inspector != inspectorDocks {
+            inspectorDocks = inspector
+            inspectorOverlay = false
+        }
+        let sidebar = width >= ColumnFit.sidebarDocks
+        if sidebar != sidebarDocks {
+            sidebarDocks = sidebar
+            sidebarOverlay = false
+        }
+        if restoresSelection {
+            UserDefaults.standard.set(inspectorDocks, forKey: Self.inspectorDocksKey)
+            UserDefaults.standard.set(sidebarDocks, forKey: Self.sidebarDocksKey)
+        }
+    }
+
     init(model: AgenthailModel, restoresSelection: Bool) {
         self.model = model
         self.restoresSelection = restoresSelection
         if restoresSelection, let data = UserDefaults.standard.data(forKey: Self.tabsKey), let saved = try? JSONDecoder().decode(SessionTabs.self, from: data) {
             tabs = saved
+        }
+        if restoresSelection {
+            inspectorDocks = UserDefaults.standard.object(forKey: Self.inspectorDocksKey) as? Bool ?? true
+            sidebarDocks = UserDefaults.standard.object(forKey: Self.sidebarDocksKey) as? Bool ?? true
         }
         observeDraft()
     }
@@ -105,6 +149,11 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private static let tabsKey = "sessionTabs"
+    /// The window reopens at the size it closed at, so it reopens with the
+    /// same columns docked: docked columns' minimum widths would otherwise
+    /// force a window that closed narrow to open wide.
+    static let inspectorDocksKey = "inspectorDocks"
+    static let sidebarDocksKey = "sidebarDocks"
 
     var tabsEnabled: Bool { restoresSelection && model.interface.config.tabs }
 

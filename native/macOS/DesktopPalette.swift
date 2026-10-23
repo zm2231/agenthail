@@ -128,6 +128,20 @@ enum DesktopSpace {
     static let xxxl: CGFloat = 32
 }
 
+enum DesktopColumns {
+    static let sidebar = (min: CGFloat(248), ideal: CGFloat(300), max: CGFloat(340))
+    static let detail = (min: CGFloat(340), ideal: CGFloat(892))
+    static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
+}
+
+enum ColumnFit {
+    /// Narrower than this, a docked inspector would pin the window at the
+    /// columns' minimum widths, so it stops docking before the window does.
+    static let inspectorDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min + DesktopColumns.inspector.ideal
+    /// The same for the sidebar, once the inspector has collapsed.
+    static let sidebarDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min
+}
+
 enum DesktopRadius {
     static let control: CGFloat = 6
     static let card: CGFloat = 10

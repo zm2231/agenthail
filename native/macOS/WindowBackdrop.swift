@@ -31,6 +31,9 @@ final class WindowBackdrop: ObservableObject {
     private var config = UIConfig.defaults
     private var wallpaper: WallpaperImage?
     private var renderTask: Task<Void, Never>?
+    private(set) var rendering = false
+    private var pending = false
+    private var generation = 0
     private var rendered: BackdropSpec?
     private weak var window: NSWindow?
     nonisolated(unsafe) private var accessibilityObserver: NSObjectProtocol?
@@ -50,6 +53,7 @@ final class WindowBackdrop: ObservableObject {
     func configure(_ config: UIConfig, wallpaper: WallpaperImage?) {
         self.config = config
         self.wallpaper = wallpaper
+        generation += 1
         let wanted = Self.wallpaper(config, image: wallpaper) != nil
         if active != wanted { active = wanted }
         if desktop != (config.background == .desktop) { desktop = config.background == .desktop }
@@ -102,20 +106,40 @@ final class WindowBackdrop: ObservableObject {
         }
     }
 
+    /// While the window is being resized the backdrop keeps up at one
+    /// point per pixel, one render at a time, so it never shows an image
+    /// laid out for another size for longer than a render takes; the full
+    /// resolution follows when the resize ends.
     private func schedule() {
         guard active else { return }
+        if rendering {
+            pending = true
+            return
+        }
         renderTask?.cancel()
         renderTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            while self?.window?.inLiveResize == true {
-                try? await Task.sleep(for: .milliseconds(100))
-                if Task.isCancelled { return }
-            }
-            guard !Task.isCancelled, let self, let spec = self.spec(), spec != self.rendered else { return }
-            let image = await Task.detached(priority: .userInitiated) { BackdropRenderer.render(spec) }.value
-            guard !Task.isCancelled, let image else { return }
-            self.rendered = spec
+            let live = self?.window?.inLiveResize == true
+            try? await Task.sleep(for: .milliseconds(live ? 16 : 120))
+            guard !Task.isCancelled, let self else { return }
+            await self.render(live: live)
+        }
+    }
+
+    private func render(live: Bool) async {
+        guard var spec = spec() else { return }
+        if live { spec.scale = min(spec.scale, 1) }
+        guard spec != rendered else { return }
+        rendering = true
+        let started = generation
+        let image = await Task.detached(priority: .userInitiated) { BackdropRenderer.render(spec) }.value
+        rendering = false
+        if let image, started == generation, active {
+            rendered = spec
             self.image = image
+        }
+        if pending {
+            pending = false
+            schedule()
         }
     }
 
@@ -457,12 +481,7 @@ struct BackdropSlice: View {
                 }
             }
             .overlay {
-                if backdrop.active, let rendered = backdrop.image {
-                    if rendered.size != backdrop.windowSize, let paneID, let alpha = rendered.paneMaxima[paneID] {
-                        Color(red: Double(rendered.paneTint.x), green: Double(rendered.paneTint.y), blue: Double(rendered.paneTint.z))
-                            .opacity(Double(alpha))
-                    }
-                } else {
+                if !backdrop.active || backdrop.image == nil {
                     fallback
                 }
             }

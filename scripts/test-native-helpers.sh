@@ -61,6 +61,8 @@ SOURCES=(
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift
   macOS/SessionPane.swift
+  macOS/SessionRefinementMenu.swift
+  macOS/SessionSidebarHeader.swift
   macOS/SessionTabs.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
