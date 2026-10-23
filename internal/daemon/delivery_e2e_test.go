@@ -824,3 +824,11 @@ func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 		t.Fatalf("queued %d messages for sessions nothing reads", count)
 	}
 }
+
+func TestAnActionReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
+	agent := newScriptedAgent("target")
+	h := startRunningDaemon(t, agent)
+	settle()
+	h.action(map[string]any{"action": "send", "sessionId": surface.PeerUUID(surface.KindCodex, "target"), "message": "replying to your message"})
+	eventually(t, "the reply delivered", func() bool { return len(agent.deliveredTo("target")) == 1 })
+}
