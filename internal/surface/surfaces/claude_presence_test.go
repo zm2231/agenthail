@@ -143,22 +143,11 @@ func TestARecordWithoutProcStartIsLiveOnlyForTheProcessThatWroteIt(t *testing.T)
 }
 
 func TestARecordWrittenInTheMillisecondItsProcessStartedIsLive(t *testing.T) {
-	process := exec.Command("sleep", "60")
-	if err := process.Start(); err != nil {
-		t.Fatal(err)
+	started := time.UnixMilli(1_792_000_000_123).Add(456 * time.Microsecond)
+	if !claudeProcessStartedBy(started, started.UnixMilli()) {
+		t.Fatalf("a record written in the millisecond its process started (%s) predates it", started.Format(time.StampMicro))
 	}
-	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
-	started, err := processStartedAt(process.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid := float64(process.Process.Pid)
-	sameMillisecond := map[string]any{"pid": pid, "startedAt": float64(started.UnixMilli())}
-	if !claudeRecordLive(sameMillisecond) {
-		t.Fatalf("a record written in the millisecond its process started (%s) is not live", started.Format(time.StampMicro))
-	}
-	earlier := map[string]any{"pid": pid, "startedAt": float64(started.Add(-time.Second).UnixMilli())}
-	if claudeRecordLive(earlier) {
-		t.Fatal("a record written before its process started is live, so a reused pid would pass")
+	if claudeProcessStartedBy(started, started.UnixMilli()-1) {
+		t.Fatal("a record written the millisecond before its process started is live, so a reused pid would pass")
 	}
 }
