@@ -88,10 +88,14 @@ func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voi
 	if d.Registry == nil {
 		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
 	}
-	if host, _, routeErr := d.routeSession(requested); routeErr == nil && host != nil {
+	host, routed, routeErr := d.routeSession(requested)
+	if routeErr == nil && host != nil {
 		return nil, fmt.Errorf("voice is not available for sessions on another host yet; %s is on host %s", requested, host.record.Name)
 	}
-	id, err := d.Registry.ExactTarget("", requested)
+	if routeErr != nil {
+		routed = requested
+	}
+	id, err := d.Registry.ExactTarget("", routed)
 	if err != nil {
 		return nil, fmt.Errorf("resolve voice target %q by alias or exact session ID: %w", requested, err)
 	}

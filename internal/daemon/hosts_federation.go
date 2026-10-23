@@ -281,10 +281,17 @@ func (d *Daemon) routeSession(ref string) (*pairedHost, string, error) {
 	ref = strings.TrimSpace(ref)
 	if hostRef, target, qualified := hosts.Split(ref); qualified {
 		if d.isLocalHostRef(hostRef) {
-			if owner, err := d.Registry.SessionHost(target); err == nil && owner != "" {
-				return nil, "", registry.SessionOwnedError{SessionID: target, HostID: owner}
+			id, owner, found, err := d.Registry.CanonicalSession(target)
+			if err != nil {
+				return nil, "", err
 			}
-			return nil, target, nil
+			if !found {
+				return nil, target, nil
+			}
+			if owner != "" {
+				return nil, "", registry.SessionOwnedError{SessionID: id, HostID: owner}
+			}
+			return nil, id, nil
 		}
 		host, found := d.pairedHost(hostRef)
 		if !found {
@@ -295,15 +302,21 @@ func (d *Daemon) routeSession(ref string) (*pairedHost, string, error) {
 	if ref == "" {
 		return nil, ref, nil
 	}
-	owner, err := d.Registry.SessionHost(ref)
-	if err != nil || owner == "" {
+	id, owner, found, err := d.Registry.CanonicalSession(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	if !found || owner == "" {
+		if found {
+			ref = id
+		}
 		return nil, ref, nil
 	}
-	host, found := d.pairedHost(owner)
-	if !found {
+	host, paired := d.pairedHost(owner)
+	if !paired {
 		return nil, "", fmt.Errorf("%w %q", errUnknownHost, owner)
 	}
-	return host, ref, nil
+	return host, id, nil
 }
 
 func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted bool) {
