@@ -64,8 +64,9 @@ final class VoiceOperatorUITests: XCTestCase {
         XCTAssertTrue(activity.waitForExistence(timeout: 10))
         activity.tapWhenReady()
         let request = app.staticTexts["The build fails after reconnecting. Trace it, fix it, and keep a regression test."]
-        let tools = app.buttons["activity-3"]
+        let tools = app.buttons["tool-3"]
         XCTAssertTrue(tools.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["activity-3"].exists, "a short run shows its lines without a summary")
         XCTAssertTrue(request.exists)
         XCTAssertLessThan(request.frame.minY, tools.frame.minY)
         // Expanded activity can open below the call controls; bring the row
@@ -74,6 +75,6 @@ final class VoiceOperatorUITests: XCTestCase {
         for _ in 0..<4 where tools.frame.maxY > controls.frame.minY { app.scrollViews.firstMatch.swipeUp() }
         XCTAssertLessThan(tools.frame.maxY, controls.frame.minY)
         tools.tapWhenReady()
-        XCTAssertTrue(app.buttons["collapse-activity-3"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["collapse-tool-3"].waitForExistence(timeout: 5))
     }
 }
