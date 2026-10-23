@@ -91,6 +91,7 @@ agenthail ui diff [<rev>]
 agenthail ui undo [<rev>]
 agenthail ui show-defaults [--docs]
 agenthail ui path
+agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--name <device>] <out.png>
 ```
 
 - `get` prints the file; `--resolved` prints the value of every key for one device after overrides and defaults.
@@ -100,6 +101,7 @@ agenthail ui path
 - `log` lists changes, newest first, with who made each one. `diff` shows what a change did, or what changed since the last one.
 - `undo` reverts the last change, or the one you name, as a new change. If a later change edited the same lines, it says so and changes nothing.
 - `path` prints where `ui.conf` is.
+- `snapshot` saves a PNG of the Mac app's main window, so you or an agent can see the result of a change. See [Snapshots](#snapshots).
 
 An edit made by hand in a text editor is committed as your change once you save the file.
 
@@ -113,3 +115,15 @@ Apps read and change `ui.conf` through the daemon, with the same checks as `agen
 - `GET /api/v1/ui/presets` (`read` scope) lists the built-in pictures and gradient presets, each with the `value` to write and what it draws in dark and light.
 - `GET /api/v1/ui/background?path=<path>` (`read` scope) returns an image from `background`, including the built-in pictures under `art/`.
 - `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`. A name that is not an image, or a `Content-Length` over 30 MB, is refused before the body is read.
+
+## Snapshots
+
+`agenthail ui snapshot <out.png>` asks the Mac app connected to the daemon for a picture of its main window and writes it to `out.png`. The app answers without bringing anything to the front or changing its windows, and an occluded window is captured whole. The picture is what the window server composites, so glass, blur and the background look exactly as they do on screen.
+
+- With no options it captures the main window as it is now. If the main window is closed or minimized, it draws the session the main window last showed, at the main window's size or 1440x900 points if it has none.
+- `--session <id>` and `--size <W>x<H>` draw a separate copy of the main window, in points, that nobody sees. The window you are using keeps its session, size and layout. A size below the window's minimum is widened to that minimum, as the real window would be.
+- `--name <device>` picks the Mac by its name when more than one Mac app is connected. Otherwise the first app to answer is used.
+- The command waits up to 20 seconds and says so if no app answered.
+
+The API behind it is `POST /api/v1/ui/snapshot` with an optional JSON body `{"session", "width", "height", "device"}`; the response is the PNG. It needs the `read` scope. A snapshot can show any session visible in the window, so anything allowed to read sessions can take one. Connected apps receive the request as a `ui.snapshot.requested` event and answer with `POST /api/v1/ui/snapshot/<id>`; requests are held only in memory and expire after 20 seconds.
+

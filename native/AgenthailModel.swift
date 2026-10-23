@@ -63,6 +63,7 @@ final class AgenthailModel: ObservableObject {
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     weak var mainWindow: NSWindow?
+    var onSnapshotRequest: ((SnapshotRequest, AgenthailAPI) -> Void)?
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
     private var connectionTask: Task<Void, Never>?
@@ -1153,7 +1154,7 @@ final class AgenthailModel: ObservableObject {
         if event.type == "ui.snapshot.requested" {
             lastEventID = max(lastEventID, event.id)
             if let request = event.snapshot, !request.expired, let api {
-                WindowSnapshot.answer(request, model: self, api: api)
+                onSnapshotRequest?(request, api)
             }
             return
         }

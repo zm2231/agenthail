@@ -162,6 +162,9 @@ final class WindowBackdrop: ObservableObject {
         }
     }
 
+    /// Whether the published image matches what the window shows now, so a snapshot can wait for it.
+    var current: Bool { !active || (rendered != nil && spec() == rendered) }
+
     private func spec() -> BackdropSpec? {
         remeasure()
         guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }

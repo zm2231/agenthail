@@ -6,19 +6,20 @@ import UniformTypeIdentifiers
 struct DesktopWindow: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
-    private let snapshot: Bool
+    private let snapshot: SnapshotProbe?
 
-    /// A snapshot pane draws an offscreen copy that leaves the person's window, focus and saved layout alone.
-    init(model: AgenthailModel, snapshotPane: SessionPane? = nil) {
+    /// A snapshot draws an offscreen copy that leaves the person's window, focus and saved layout alone.
+    init(model: AgenthailModel, snapshot: SnapshotProbe? = nil) {
         self.model = model
-        self.pane = snapshotPane ?? model.mainPane
-        self.snapshot = snapshotPane != nil
+        self.pane = snapshot?.pane ?? model.mainPane
+        self.snapshot = snapshot
     }
 
     var body: some View {
         WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
             splitView
         }
+        .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
         .environmentObject(model)
@@ -42,9 +43,9 @@ struct DesktopWindow: View {
             }
         }
         .focusedSceneObject(pane)
-        .background { if !snapshot { MainWindowReader(model: model) } }
-        .onAppear { if !snapshot { model.windowAppeared() } }
-        .onDisappear { if !snapshot { model.windowDisappeared() } }
+        .background { if snapshot == nil { MainWindowReader(model: model) } }
+        .onAppear { if snapshot == nil { model.windowAppeared() } }
+        .onDisappear { if snapshot == nil { model.windowDisappeared() } }
     }
 
     @ViewBuilder private var splitView: some View {
