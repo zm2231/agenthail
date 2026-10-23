@@ -31,10 +31,14 @@ type claudeBackground struct {
 
 // backgroundCommand runs claude against one config root; "" is the primary.
 // Only a root other than the primary is named in the command's environment.
+// A command that names no folder runs in the home folder.
 func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
+	}
+	if cwd == "" {
+		cwd = c.home
 	}
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
@@ -43,7 +47,8 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	if dir := surface.ClaudeLaunchConfigDir(c.home, root); dir != "" {
 		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+dir)
 	}
-	return cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
+	return output, startFailure(cmd, err)
 }
 
 // claudeCommandEnv is the environment of every Claude Agenthail launches.
@@ -230,7 +235,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			}
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
 		}
-		output, err := c.backgroundCommand(ctx, root, record.Cwd, action, record.ID)
+		output, err := c.backgroundCommand(ctx, root, "", action, record.ID)
 		if err != nil {
 			var path *fs.PathError
 			if surface.IsDeliveryUnavailable(err) || errors.As(err, &path) {

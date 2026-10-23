@@ -271,7 +271,8 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 
 // TakeMovedSession makes an arrived conversation a local session of this
 // host and records its move as resumed, in one transaction. The row the
-// source host mirrored here is taken over; a row another host owns is not.
+// source host mirrored here is taken over; a row another host owns is taken
+// only once that host no longer serves it.
 // The source's alias is bound here when it is free.
 func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, origin *SessionOrigin) ([]CatalogEvent, error) {
 	tx, err := r.db.Begin()
@@ -298,8 +299,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	switch {
-	case err == nil && owner == move.PeerHost:
+	if err == nil && owner == move.PeerHost {
 		var fingerprint string
 		if err := tx.QueryRow(`SELECT projection_fingerprint FROM catalog_sessions WHERE session_id=?`, session.ID).Scan(&fingerprint); err == nil {
 			entity := projectionID(fingerprint, session.ID)
@@ -320,8 +320,6 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 		if _, err := tx.Exec(`UPDATE sessions SET host_id='',updated_at=datetime('now') WHERE id=?`, session.ID); err != nil {
 			return nil, err
 		}
-	case err == nil && owner != "":
-		return nil, SessionOwnedError{SessionID: session.ID, HostID: owner}
 	}
 	if err := registerSessionTx(tx, session); err != nil {
 		return nil, err
@@ -438,6 +436,9 @@ func (r *Registry) CompleteMoveOut(moveID string, placeholder MovePlaceholder) (
 			held[item.ID] = HeldSend{QueueID: item.ID, Key: key, Request: request}
 		}
 		events, retry, err := r.completeMoveOutTx(move, items, held, placeholder)
+		if err == nil && !retry && len(held) > 0 {
+			r.signalChange(ChangeHostDeliveries)
+		}
 		if err != nil || !retry {
 			return events, err
 		}

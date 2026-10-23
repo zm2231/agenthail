@@ -443,6 +443,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var limitResume: LimitResumeState? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -467,6 +468,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
     /// Between turns with background tasks still running: not finished yet.
     var isWaitingOnBackground: Bool { !isWorking && backgroundTasks?.running == true }
+    /// What a usage limit did to the session: when it resumes, or that it stays stopped.
+    var limitLabel: String? { limitResume?.label ?? usageLimit?.label }
     var isReadOnly: Bool { readOnly == true }
     var remoteHostName: String? {
         guard let host, host.state != "local" else { return nil }
@@ -603,6 +606,23 @@ struct UsageLimitState: Codable, Hashable {
     var label: String {
         guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit reached" }
         return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
+    }
+}
+
+/// A session a usage limit stopped, as its computer resumes it: waiting for
+/// the reset, or kept stopped (canceled, or its reset passed long ago).
+struct LimitResumeState: Codable, Hashable {
+    var state: String
+    var refusedAt: String? = nil
+    var resetsAt: String? = nil
+
+    var isWaiting: Bool { state == "waiting" }
+
+    var label: String {
+        guard isWaiting else { return "Stopped by usage limit" }
+        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit, resumes when it lifts" }
+        let time = Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        return "Usage limit, resumes \(time)"
     }
 }
 
@@ -1128,6 +1148,7 @@ struct ExchangeState: Decodable, Identifiable {
         case "peer": return sender.map { "From \($0)" } ?? "From an agent"
         case "task-notification": return "Task notification"
         case "auto-continuation": return "Continued"
+        case "agenthail-notice": return "Agenthail"
         default: return origin ?? "You"
         }
     }
@@ -1210,6 +1231,7 @@ struct SessionDetail: Decodable {
     var session: RawSession
     let journalSeq: UInt64?
     var alias: String?
+    var limitResume: LimitResumeState?
     let exchanges: [ExchangeState]
     var capabilities: Capabilities
     var readOnly: Bool
@@ -1233,17 +1255,18 @@ struct SessionDetail: Decodable {
     var waitingPlace: WaitingPlace? {
         session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
     }
+    var limitLabel: String? { limitResume?.label ?? session.usageLimit?.label }
 
     var liveState: SessionLiveState {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
-            (session.waitingOn, session.backgroundTasks, session.usageLimit) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume)
         }
     }
 }
@@ -1265,19 +1288,21 @@ struct SessionLiveState: Equatable {
     var waitingOn: WaitingState?
     var backgroundTasks: BackgroundTasks?
     var usageLimit: UsageLimitState?
+    var limitResume: LimitResumeState?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
-         capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?) {
+         capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
+         limitResume: LimitResumeState?) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
-        (self.waitingOn, self.backgroundTasks, self.usageLimit) = (waitingOn, backgroundTasks, usageLimit)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume) = (waitingOn, backgroundTasks, usageLimit, limitResume)
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume)
     }
 }
 
@@ -1367,6 +1392,7 @@ struct DashboardConfigState: Decodable {
     let listen: String
     let codexRecentHours: Int
     let busyDelivery: String
+    var resumeAfterLimit: Bool? = nil
 }
 
 /// `set` is false while the name is the host account's own.

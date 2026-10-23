@@ -182,7 +182,40 @@ struct ComposerTextViewTest {
         check(ComposerReturn.continuation(in: "🙂\\", caret: 3) == NSRange(location: 2, length: 1), "the caret counts UTF-16 units")
         check(ComposerReturn.continuation(in: "", caret: 0) == nil, "an empty draft has no continuation")
 
+        outsideTextEndsComposition()
         print("composer text view: ok")
+    }
+
+    @MainActor
+    static func outsideTextEndsComposition() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        let textView = ComposerNSTextView.make()
+        window.contentView = textView
+        window.makeFirstResponder(textView)
+        textView.string = "draft "
+        textView.setSelectedRange(NSRange(location: 6, length: 0))
+        let sync = ComposerTextSync("draft ")
+        var bound = "draft "
+        let echo = TextEcho { text in sync.viewChanged(to: text) { bound = $0 } }
+        textView.delegate = echo
+
+        textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: textView.selectedRange())
+        check(textView.hasMarkedText() && sync.textToShow(bound: bound) == nil, "composing changes nothing from outside")
+        bound = "draft \n\nshared from another app"
+        textView.show(bound: bound, sync: sync)
+        check(!textView.hasMarkedText() && textView.string == "draft \n\nshared from another app" && bound == textView.string, "text from outside ends the composition and stays: \(textView.string.debugDescription) \(bound.debugDescription)")
+        textView.insertText("!", replacementRange: textView.selectedRange())
+        check(bound == "draft \n\nshared from another app!", "typing afterwards continues from it: \(bound.debugDescription)")
+        withExtendedLifetime(echo) {}
+    }
+}
+
+private final class TextEcho: NSObject, NSTextViewDelegate {
+    let changed: (String) -> Void
+    init(_ changed: @escaping (String) -> Void) { self.changed = changed }
+    func textDidChange(_ notification: Notification) {
+        guard let textView = notification.object as? NSTextView else { return }
+        MainActor.assumeIsolated { changed(textView.string) }
     }
 }
 

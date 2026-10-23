@@ -101,7 +101,7 @@ func TestALateRemovalOfTheReplacedFileKeepsTheNewWatch(t *testing.T) {
 	}
 	// The old file's removal, as the platform can report it after the reader
 	// already watches the new file.
-	w.notify(path, true)
+	w.notify(path, true, false)
 	drain(wake)
 	appendLine(t, path, "appended to the new file")
 	awaitWake(t, wake, "append to the replacement after the old file's removal")
@@ -230,5 +230,51 @@ func TestRefusalMemoryStaysWithinTheWatcherLimit(t *testing.T) {
 	}
 	if len(w.files) != 0 || len(w.refused) > 2 {
 		t.Fatalf("files=%d refused=%d", len(w.files), len(w.refused))
+	}
+}
+
+func TestANewEntryWakesTheDirectoryButAWriteToAnExistingOneDoesNot(t *testing.T) {
+	w := New(DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = w.Close() })
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "100.json")
+	appendLine(t, existing, "{}")
+	other := t.TempDir()
+	wake := w.FollowDir(dir)
+	defer wake.Release()
+	if wake.C() == nil {
+		t.Fatal("directory not watched")
+	}
+	appendLine(t, existing, "{}")
+	appendLine(t, filepath.Join(other, "elsewhere.json"), "{}")
+	select {
+	case <-wake.C():
+		t.Fatal("a write to an existing entry, or a file in another directory, woke the directory")
+	case <-time.After(300 * time.Millisecond):
+	}
+	appendLine(t, filepath.Join(dir, "200.json"), "{}")
+	awaitWake(t, wake, "a new entry")
+	drain(wake)
+	staged := filepath.Join(other, "staged.json")
+	appendLine(t, staged, "{}")
+	if err := os.Rename(staged, filepath.Join(dir, "300.json")); err != nil {
+		t.Fatal(err)
+	}
+	awaitWake(t, wake, "an entry moved in")
+}
+
+func TestAFileAndItsDirectoryAreFollowedApart(t *testing.T) {
+	w := New(DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = w.Close() })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	appendLine(t, path, "first")
+	file, folder := w.Follow(path), w.FollowDir(dir)
+	defer file.Release()
+	folder.Release()
+	appendLine(t, path, "second")
+	awaitWake(t, file, "an append after the directory reader left")
+	if !w.Watched(path) {
+		t.Fatal("releasing the directory dropped the file's watch")
 	}
 }

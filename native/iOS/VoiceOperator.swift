@@ -24,6 +24,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
+    @State private var position = ScrollPosition()
     let openSession: (String) -> Void
 
     init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
@@ -100,7 +101,10 @@ struct AgenthailVoiceOperatorSheet: View {
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
+                .environment(\.revealRow) { position.scrollTo(y: $0) }
+                .coordinateSpace(.named(TimelineGroup.contentSpace))
                 }
+                .scrollPosition($position)
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
                 .onScrollPhaseChange { _, phase in

@@ -13,7 +13,7 @@ enum SessionFacts {
 
     static func presenceLabel(_ session: SessionState) -> String {
         if let place = session.waitingPlace { return place.label }
-        if let limit = session.usageLimit { return limit.label }
+        if let limit = session.limitLabel { return limit }
         if session.isWaitingOnBackground { return "Waiting on background work" }
         switch session.currentReason {
         case "working": return "Working"

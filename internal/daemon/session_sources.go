@@ -35,35 +35,41 @@ var (
 	sessionPageHandoffGrace        = 5 * time.Second
 	ErrSessionSourceManagerClosed  = errors.New("session source manager is closed")
 	sessionTranscriptMoveCheck     = 2 * time.Second
-	errTranscriptReplaced          = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
+	// sessionStreamRestartPause is how long a source waits before it streams
+	// again when it does not restart at once: after a failure, or after a
+	// short stream that read nothing or followed another quick restart.
+	sessionStreamRestartPause = time.Second
+	errTranscriptReplaced     = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
 )
 
 type sessionJournalPayload struct {
-	Context          *surface.ContextUsage  `json:"context,omitempty"`
-	Goal             *surface.GoalState     `json:"goal"`
-	Role             string                 `json:"role,omitempty"`
-	Origin           string                 `json:"origin,omitempty"`
-	Sender           string                 `json:"sender,omitempty"`
-	Title            string                 `json:"title,omitempty"`
-	Status           string                 `json:"status,omitempty"`
-	ResetsAt         string                 `json:"resetsAt,omitempty"`
-	ItemID           string                 `json:"itemId"`
-	ProviderKey      string                 `json:"providerKey,omitempty"`
-	Version          uint64                 `json:"version"`
-	Op               string                 `json:"op"`
-	Kind             string                 `json:"kind"`
-	TurnID           string                 `json:"turnId,omitempty"`
-	CallID           string                 `json:"callId,omitempty"`
-	Final            bool                   `json:"final,omitempty"`
-	TS               string                 `json:"ts"`
-	Body             string                 `json:"body,omitempty"`
-	Truncated        bool                   `json:"truncated"`
-	TruncationReason string                 `json:"truncationReason,omitempty"`
-	BodyRef          string                 `json:"bodyRef,omitempty"`
-	Reason           string                 `json:"reason,omitempty"`
-	Attachment       *surface.Attachment    `json:"attachment,omitempty"`
-	Files            []surface.AttachedFile `json:"files,omitempty"`
-	Turn             *surface.TurnMetadata  `json:"turn,omitempty"`
+	Context          *surface.ContextUsage    `json:"context,omitempty"`
+	Goal             *surface.GoalState       `json:"goal"`
+	Commands         []surface.RuntimeCommand `json:"commands,omitempty"`
+	Unavailable      string                   `json:"unavailable,omitempty"`
+	Role             string                   `json:"role,omitempty"`
+	Origin           string                   `json:"origin,omitempty"`
+	Sender           string                   `json:"sender,omitempty"`
+	Title            string                   `json:"title,omitempty"`
+	Status           string                   `json:"status,omitempty"`
+	ResetsAt         string                   `json:"resetsAt,omitempty"`
+	ItemID           string                   `json:"itemId"`
+	ProviderKey      string                   `json:"providerKey,omitempty"`
+	Version          uint64                   `json:"version"`
+	Op               string                   `json:"op"`
+	Kind             string                   `json:"kind"`
+	TurnID           string                   `json:"turnId,omitempty"`
+	CallID           string                   `json:"callId,omitempty"`
+	Final            bool                     `json:"final,omitempty"`
+	TS               string                   `json:"ts"`
+	Body             string                   `json:"body,omitempty"`
+	Truncated        bool                     `json:"truncated"`
+	TruncationReason string                   `json:"truncationReason,omitempty"`
+	BodyRef          string                   `json:"bodyRef,omitempty"`
+	Reason           string                   `json:"reason,omitempty"`
+	Attachment       *surface.Attachment      `json:"attachment,omitempty"`
+	Files            []surface.AttachedFile   `json:"files,omitempty"`
+	Turn             *surface.TurnMetadata    `json:"turn,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -300,6 +306,7 @@ func (s *sessionSource) run() {
 		return
 	}
 	followDelay := sessionSeedRetryDelay
+	var restartedAt time.Time
 	for {
 		current := s.session
 		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
@@ -340,7 +347,12 @@ func (s *sessionSource) run() {
 		} else {
 			close(watched)
 		}
-		streamErr := s.adapter.Stream(streamContext, &current, "", s.append, 30*time.Minute)
+		started := time.Now()
+		var streamed atomic.Bool
+		streamErr := s.adapter.Stream(streamContext, &current, "", func(event surface.StreamEvent) {
+			streamed.Store(true)
+			s.append(event)
+		}, 30*time.Minute)
 		stopStream()
 		<-watched
 		if moved.Load() {
@@ -372,9 +384,22 @@ func (s *sessionSource) run() {
 		if s.ctx.Err() != nil || !hasHolders {
 			break
 		}
+		// A stream that ended cleanly after reading something, as a managed
+		// Codex stream does when its turn completes, is followed again at once
+		// so the next turn is not read late, at most once per pause so streams
+		// that keep ending at once cannot spin. A stream that ran for the pause
+		// is followed again at once as well.
+		clean := streamErr == nil || errors.Is(streamErr, surface.ErrStreamWindow)
+		if clean && time.Since(started) >= sessionStreamRestartPause {
+			continue
+		}
+		if clean && streamed.Load() && time.Since(restartedAt) >= sessionStreamRestartPause {
+			restartedAt = time.Now()
+			continue
+		}
 		select {
 		case <-s.ctx.Done():
-		case <-time.After(time.Second):
+		case <-time.After(sessionStreamRestartPause):
 		}
 	}
 }
@@ -1243,6 +1268,9 @@ func mergeSeedField(target *string, value string) {
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {
+	if event.Kind == "commands" && s.commandsStored(event.Commands) {
+		return
+	}
 	if event.Context != nil {
 		current := s.session
 		if refreshed, err := s.manager.registry.Session(s.session.ID); err == nil {
@@ -1385,7 +1413,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if strings.HasPrefix(event.ProviderKey, "renderer:") {
 		itemID = s.epoch + ":" + itemID
 	}
-	if event.Kind == "context" || event.Kind == "goal" {
+	if event.Kind == "context" || event.Kind == "goal" || event.Kind == "commands" {
 		itemID = "state:" + event.Kind
 		providerKey = itemID
 	}
@@ -1421,7 +1449,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
 }
 
 // prepareStream waits under ctx for the session journal to be seeded, then
@@ -1498,4 +1526,32 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 		}
 	}()
 	return sessionstream.Subscription{Cursor: window.LatestSeq, Events: events, Cancel: cancel}, nil
+}
+
+func commandsOf(commands *surface.RuntimeCommands) []surface.RuntimeCommand {
+	if commands == nil {
+		return nil
+	}
+	return commands.Commands
+}
+
+func unavailableOf(commands *surface.RuntimeCommands) string {
+	if commands == nil {
+		return ""
+	}
+	return commands.Unavailable
+}
+
+// Each stream starts its commands over, so a list already in the journal is
+// left as it is.
+func (s *sessionSource) commandsStored(commands *surface.RuntimeCommands) bool {
+	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, "state:commands")
+	if err != nil || !found {
+		return false
+	}
+	var stored sessionJournalPayload
+	if json.Unmarshal(entry.Payload, &stored) != nil {
+		return false
+	}
+	return slices.Equal(stored.Commands, commandsOf(commands)) && stored.Unavailable == unavailableOf(commands)
 }

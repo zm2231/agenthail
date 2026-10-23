@@ -1114,14 +1114,164 @@ select {
   border-radius: 5px;
   background: var(--raised);
 }
-/* Actions sit in the turn's bottom padding, so revealing them never moves text. */
-.turn-actions {
+/* Actions share the footer line with the turn's time, so revealing them never moves text. */
+.turn-footer {
   display: flex;
+  align-items: baseline;
   gap: 12px;
-  height: 18px;
-  margin-bottom: -18px;
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--quiet);
+  font-size: 12px;
+}
+.turn.user .turn-footer,
+.turn.user .turn-header,
+.turn.user .attached-files {
+  justify-content: flex-end;
+}
+.turn-actions {
+  display: inline-flex;
+  gap: 12px;
   opacity: 0;
   transition: opacity 120ms ease-out;
+}
+.turn.user .turn-actions {
+  order: -1;
+}
+.turn.user .turn-content {
+  width: fit-content;
+  max-width: 85%;
+  margin-left: auto;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--ink);
+}
+.turn.peer {
+  padding-left: 14px;
+  border-left: 2px solid var(--focus);
+}
+.turn.peer .turn-label {
+  color: var(--focus);
+}
+.turn.agent .turn-label::before {
+  content: "✦ ";
+  color: var(--quiet);
+}
+.tool-run {
+  margin: 4px 0 14px;
+}
+.tool-line > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  list-style: none;
+  cursor: pointer;
+}
+.tool-line > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-mark {
+  flex: 0 0 auto;
+  color: var(--quiet);
+  font-size: 8px;
+}
+.tool-verb {
+  flex: 0 0 auto;
+}
+.tool-object {
+  overflow: hidden;
+  color: var(--quiet);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-object.code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tool-line.failed > summary,
+.tool-line.failed .tool-mark,
+.tool-line.failed .tool-object,
+.tool-failed {
+  color: var(--bad);
+}
+.tool-failed {
+  font-size: 11px;
+}
+.tool-fold > summary .tool-verb::after {
+  content: " ›";
+  color: var(--quiet);
+}
+.tool-body,
+.tool-fold-lines {
+  padding-left: 16px;
+}
+.tool-input,
+.tool-output {
+  max-height: 32rem;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--code);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+.tool-output.failed {
+  color: var(--bad);
+}
+.tool-result-label {
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 700;
+}
+.file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0 16px;
+}
+.file-chip {
+  display: inline-flex;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.file-chip .added {
+  color: var(--good);
+}
+.file-chip .removed {
+  color: var(--bad);
+}
+.timeline-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--quiet);
+  font-size: 12px;
+}
+.timeline-divider::before,
+.timeline-divider::after {
+  content: "";
+  flex: 0 0 18px;
+  border-top: 1px solid var(--rule);
+}
+.timeline-divider::after {
+  flex: 1;
+}
+.timeline-annotation {
+  color: var(--quiet);
+  font-size: 12px;
 }
 .turn:hover .turn-actions,
 .turn:focus-within .turn-actions {

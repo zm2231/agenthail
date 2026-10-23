@@ -99,10 +99,25 @@ struct SessionPreview: View {
 
     nonisolated static var basePreviewDetailJSON: String {
         let reading = ProcessInfo.processInfo.arguments.contains("--preview-reading")
-        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || reading else { return detailJSON }
+        let longActivity = ProcessInfo.processInfo.arguments.contains("--preview-long-activity")
+        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || reading || longActivity else { return detailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(detailJSON.utf8)) as! [String: Any]
         var timeline = detail["timeline"] as! [String: Any]
         var items = timeline["items"] as! [[String: Any]]
+        if longActivity {
+            // One run of many commands with recorded output, between two replies.
+            let runs: [[String: Any]] = (1...30).flatMap { n -> [[String: Any]] in
+                let output = (1...30).map { "ok \(n).\($0) fieldnotes/Sources/Reconnect\($0).swift compiled" }.joined(separator: "\n")
+                return [
+                    ["id": "run-\(n)", "kind": "toolCall", "title": "Bash", "text": "{\"command\":\"swift build --target Reconnect\(n)\"}", "callId": "run-\(n)", "truncated": false],
+                    ["id": "run-\(n)-result", "kind": "toolResult", "title": "Bash result", "text": output, "callId": "run-\(n)", "truncated": false],
+                ]
+            }
+            items.insert(contentsOf: runs, at: 4)
+            items.append(["id": "after-run", "kind": "message", "role": "assistant", "title": "assistant", "text": "Every target builds after reconnecting.", "truncated": false])
+            detail["timeline"] = timeline.merging(["items": items, "nextBefore": 0]) { $1 }
+            return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
+        }
         items.removeLast()
         items.append(["id": "5", "kind": "reasoning", "title": "Thinking", "text": "The regression test covers the reconnect boundary. The remaining check is whether the queued instruction retains its session identity.", "truncated": false])
         items.append(["id": "6", "kind": "message", "role": "assistant", "title": "assistant", "text": "## Reconnect is fixed\n\nThe pending build survives reconnecting. **All 8 regression tests pass.**\n\n- Preserved the session identity\n- Kept the queued instruction attached\n- Added coverage for interrupted delivery\n\n```swift\nawait session.restorePendingBuild()\n```\n\n| Check | Result |\n| --- | --- |\n| Reconnect | Passed |\n| Queue identity | Passed |", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])

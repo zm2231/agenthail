@@ -183,3 +183,39 @@ changes, concurrent requests for one checkout share a single listing, and only
 the 8 most recently used checkouts are kept. Only names are returned, never file contents. A session with no
 working directory, or one that is not on this computer, answers `404` with
 `no_cwd`.
+
+## Session commands
+
+`GET /api/v1/session-commands?id=<id>` (scope `read`, routed like other
+per-session reads) lists what a person can run from the session's composer:
+`{"commands":[{name, description, argumentHint, insert}], "unavailable"}`.
+`insert` is what the composer types, `/name` or `$name`. `unavailable`, when
+set, is one line saying why the route a person's message takes runs no
+commands, and `commands` is then empty.
+
+Only a person's message runs a command. An agent's or the CLI's message to a
+Claude session takes the session's native peer socket, which refuses a message
+that starts with a slash.
+
+- **Claude, run by the host.** The commands Claude reported when the session
+  started, replaced by each `commands_changed` it sends, without the ones it
+  marks terminal-only.
+- **Claude, reached over Remote Control or resumed in the host.** What Claude
+  offers a session started in the session's folder and config root. The host
+  lists a folder by starting Claude there without a prompt, with hooks and MCP
+  servers off: no conversation is written and no model is called. The process
+  takes a session id starting `00000000-0000-4000-8000-`, and discovery skips
+  its session record. Listings run one at a time, are killed after 15 seconds,
+  and are cached per folder and config root for 5 minutes; an older listing is
+  answered at once while a new one runs. Because MCP servers stay off, MCP
+  prompt commands are not listed for these sessions.
+- **Claude, reached only over its peer socket.** No commands;
+  `unavailable` says they run only with Remote Control.
+- **Codex.** The enabled skills for the thread's folder, from `skills/list`,
+  each inserted as `$name`. Codex runs no message that starts with a slash, on
+  either route.
+
+The session stream carries changes as a `commands` row (`itemId`
+`state:commands`, `op` `replace`) with the same `commands` and `unavailable`
+fields, omitted when empty. Each row replaces the session's previous one in
+the journal, and it is not a timeline item.

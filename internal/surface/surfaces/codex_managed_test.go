@@ -420,6 +420,9 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 			startManagedCodex(t, managedThreadReads(test.reads...))
 			var events []surface.StreamEvent
 			err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), test.turnID, func(event surface.StreamEvent) {
+				if event.Kind == "commands" {
+					return
+				}
 				events = append(events, event)
 			}, 2*time.Second)
 			test.check(t, events, err)
@@ -431,6 +434,9 @@ func TestAManagedStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", "hello"))))
 	var texts []string
 	err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		texts = append(texts, event.Text)
 	}, 0)
 	if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || texts[0] != "hello" {
@@ -443,6 +449,9 @@ func TestManagedStreamRestartsEmitIdempotentAuthoritativeSnapshots(t *testing.T)
 	for _, body := range []string{"hello", "hello", "hello world"} {
 		startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", body))))
 		err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
+			if event.Kind == "commands" {
+				return
+			}
 			events = append(events, event)
 		}, 20*time.Millisecond)
 		if !errors.Is(err, surface.ErrStreamWindow) {

@@ -240,7 +240,7 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 		}
 	}()
 	adapter := NewClaude(nil, home)
-	result, err := adapter.Send(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.Process.Pid, Transport: "uds"}, "status?")
+	result, err := adapter.Send(surface.WithReplyTarget(surface.WithSourceSessionID(context.Background(), "source-native"), "@reviewer"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.Process.Pid, Transport: "uds"}, "status?")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -249,7 +249,7 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 		if frame.From != "uds:"+sourceSocket {
 			t.Fatalf("from=%q", frame.From)
 		}
-		if !strings.Contains(string(frame.Message), "status?") {
+		if !strings.Contains(string(frame.Message), "status?") || !strings.Contains(string(frame.Message), `from-name=\"agenthail/claude: @reviewer\"`) {
 			t.Fatalf("message=%s", frame.Message)
 		}
 	case <-time.After(time.Second):

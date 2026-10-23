@@ -48,8 +48,8 @@ func TestSendToABusyClaudeSessionRidesItsPeerSocketWithTheSender(t *testing.T) {
 		t.Fatalf("steered=%d queued=%d, want neither", posts.count("handoff"), r.QueueCount(originalConversation))
 	}
 	history, err := r.ListHistory(10, originalConversation)
-	if err != nil || len(history) == 0 || history[0].Kind != "transport-accepted" || history[0].Message != "handoff" {
-		t.Fatalf("history=%+v err=%v, want the message text recorded", history, err)
+	if err != nil || len(history) == 0 || history[0].Kind != "transport-accepted" || history[0].Message != "handoff" || history[0].SourceSessionID != sender.ID {
+		t.Fatalf("history=%+v err=%v, want the message recorded from the sender", history, err)
 	}
 }
 

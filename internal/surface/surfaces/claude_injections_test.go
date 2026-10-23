@@ -160,3 +160,29 @@ func TestClaudeStreamCarriesAMidTurnMessage(t *testing.T) {
 		t.Fatalf("events=%+v", got)
 	}
 }
+
+func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
+	notice := strings.ReplaceAll(surface.LimitResumeNotice(), `"`, `\"`)
+	path := timelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"`+notice+`"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Continuing."}]}}
+{"type":"user","uuid":"u2","message":{"content":"`+notice+`"}}
+`)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notices []surface.TimelineItem
+	for _, item := range page.Items {
+		if item.Role != "assistant" && item.Kind != "done" {
+			notices = append(notices, item)
+		}
+	}
+	if len(notices) != 2 {
+		t.Fatalf("items=%+v", page.Items)
+	}
+	for _, item := range notices {
+		if item.Kind != "event" || item.Role != "system" || item.Origin != "agenthail-notice" || item.Title != "Resumed after usage limit" || item.Text != surface.LimitResumeText {
+			t.Fatalf("notice=%+v", item)
+		}
+	}
+}

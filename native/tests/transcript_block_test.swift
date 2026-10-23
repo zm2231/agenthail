@@ -62,7 +62,23 @@ struct TranscriptBlockTest {
         ], "injected context is instructions, never the agent's reply: \(kinds)")
     }
 
+    static func turnFooter() {
+        var reply = item("message", "assistant", text: "Done", role: "assistant")
+        reply = TimelineItem(id: reply.id, kind: reply.kind, role: reply.role, title: reply.title, text: reply.text, timestamp: "2026-10-23T10:09:00Z", callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let duration = TimelineItem(id: "d", kind: "event", role: nil, title: "Turn duration", text: "3m13s", timestamp: "2026-10-23T10:10:00Z", callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let blocks = TranscriptBlock.build([reply, duration])
+        check(blocks.count == 1 && blocks[0].kind == .assistant("Done"), "the turn's duration joins the reply that ended it: \(blocks.map(\.kind))")
+        check(blocks.first?.finished == "3m13s" && blocks.first?.timestamp == "2026-10-23T10:10:00Z", "the reply carries how long the turn took and when it finished")
+        let afterTools = TranscriptBlock.build([reply, item("toolCall", "Bash"), duration])
+        check(afterTools.count == 3 && afterTools[0].finished == nil, "a duration after tools does not attach to an earlier reply: \(afterTools.map(\.kind))")
+        check(TurnClock.clock("3m13s") == "3:13" && TurnClock.clock("12s") == "0:12" && TurnClock.clock("1h2m3s") == "1:02:03", "durations read as a clock")
+        check(TurnClock.clock("about a minute") == "about a minute", "an unparsed duration is shown as recorded")
+        check(TurnClock.footer(duration: "3m13s", at: nil) == "Finished 3:13", "the footer names the duration")
+        check(TurnClock.time("not a time") == nil && TurnClock.time("2026-10-23T10:10:00.123Z") != nil, "times parse with and without fractional seconds")
+    }
+
     static func main() {
+        turnFooter()
         injectedInstructions()
         usageLimitNotice()
         injected()
@@ -90,7 +106,7 @@ struct TranscriptBlockTest {
         check(kinds[2] == .notice("Context compacted: Summary of earlier work"), "an event with text is an expandable notice")
         check(kinds[3] == .annotation("Codex Voice ended · completed"), "an event status follows its title")
         check(kinds[4] == .annotation("Codex Voice started"), "an event without text is an annotation")
-        check(kinds[5] == .annotation("Worked for 12s"), "turn duration")
+        check(kinds[5] == .annotation("Finished 0:12"), "a turn duration with no reply before it stands alone")
         check(kinds[6] == .assistant("Done"), "context and goal records are not shown")
     }
 

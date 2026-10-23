@@ -213,6 +213,20 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	if !strings.Contains(sentBody.Content, "cross-session-message") || !strings.Contains(sentBody.Content, "from-session=\""+surface.PeerUUID(s.Surface, s.ID)+"\"") || strings.Contains(sentBody.Content, "from-mode") {
 		t.Fatalf("frame=%s", line)
 	}
+	reg, err = registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	history, err := reg.ListHistory(10, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.SessionID == s.ID && entry.SourceSessionID == s.ID {
+			t.Fatalf("history=%+v, want no row from the sender to itself", history)
+		}
+	}
 }
 
 func TestClaudePeerFakeTarget(t *testing.T) {
@@ -934,7 +948,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	remote := surface.Session{ID: "remote-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusIdle}
-	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a"}`), ObservedAt: time.Now().UTC()}); err != nil {
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::remote-a", Projection: []byte(`{"id":"h0123456789ab::remote-a","alias":"builder"}`), ObservedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	native := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
@@ -961,14 +975,14 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	if err := os.WriteFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(stand.Process.Pid)+".json"), record, 0600); err != nil {
 		t.Fatal(err)
 	}
-	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "vps"})
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir})
 	defer stop()
 	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var peer sessionRecord
-	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: vps/builder" {
+	if err := json.Unmarshal(data, &peer); err != nil || peer.Name != "agenthail/codex: vps::@builder" {
 		t.Fatalf("peer name=%q err=%v", peer.Name, err)
 	}
 	sendFrames(t, worker.SocketPath,
@@ -1301,4 +1315,82 @@ func sendToFakeTarget(t *testing.T, socketDir string, send func(target string) e
 		t.Fatalf("invalid frame=%s: %v", line, err)
 	}
 	return body.Content
+}
+
+func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
+	s := surface.Session{ID: "aliased-sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "a long working title", Status: surface.StatusIdle}
+	alias := "reviewer-" + strings.Repeat("x", 80)
+	listed, content := sendThroughWorker(t, context.Background(), s, alias)
+	if listed != "agenthail/claude: @"+alias {
+		t.Fatalf("peer name=%q", listed)
+	}
+	if !strings.Contains(content, `from-name="agenthail/claude: @`+alias+`"`) {
+		t.Fatalf("content=%q", content)
+	}
+}
+
+func TestThePersonIsNamedNotAddressedEvenWithAnAlias(t *testing.T) {
+	person, _ := surface.AgenthailSender(surface.PersonSessionID, "")
+	_, content := sendThroughWorker(t, surface.WithPersonName(context.Background(), "Ada Lovelace"), person, "me")
+	if !strings.Contains(content, `from-name="agenthail/person: Ada Lovelace"`) {
+		t.Fatalf("content=%q", content)
+	}
+}
+
+// sendThroughWorker sends one message as s, holding alias, through a peer
+// worker's control socket, and returns the name the worker lists and the
+// envelope the target received.
+func sendThroughWorker(t *testing.T, ctx context.Context, s surface.Session, alias string) (string, string) {
+	t.Helper()
+	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
+	socketDir := shortTempDir(t, "cp-socks-")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetAlias(alias, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = reg.Close()
+	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir})
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record sessionRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
+	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
+	reader := bufio.NewReader(stdout)
+	var target Ready
+	readyLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(readyLine), &target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Send(ctx, worker.ControlPath, s.ID, target.SocketPath, "ready for review"); err != nil {
+		t.Fatal(err)
+	}
+	line, _ := reader.ReadString('\n')
+	var sent frame
+	var body messageBody
+	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
+		t.Fatalf("invalid frame=%s: %v", line, err)
+	}
+	return record.Name, body.Content
 }

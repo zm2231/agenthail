@@ -227,3 +227,12 @@ func TestPrepareRegistersASavedOperatorAsItsSurfaceCarriesItNow(t *testing.T) {
 		t.Fatalf("prepare registered an operator its surface no longer has: %v", err)
 	}
 }
+
+func TestVoiceTargetAcceptsTheFromSessionOfAPeerMessage(t *testing.T) {
+	d, _, fake, _, registered := daemonFixture(t)
+	fake.sessions[registered.ID] = registered
+	target, err := d.resolveVoiceTarget(context.Background(), surface.PeerUUID(registered.Surface, registered.ID))
+	if err != nil || target.Session.ID != registered.ID {
+		t.Fatalf("target=%+v err=%v", target, err)
+	}
+}

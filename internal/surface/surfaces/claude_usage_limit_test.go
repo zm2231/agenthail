@@ -186,3 +186,41 @@ func TestAUsageLimitedSessionIsLimitedUntilItsResetOrItsNextTurn(t *testing.T) {
 		})
 	}
 }
+
+func TestObservingAUsageLimitedTurnReportsTheStopAfterTheLimitResets(t *testing.T) {
+	c, sess := usageLimitedConversation(t)
+	observation, err := c.Observe(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := observation.LimitStop
+	if stop == nil || stop.TurnID != "u1" || observation.UsageAccount != claudeTranscriptRoot(sess.Transcript) || !stop.ResetsAt.Equal(time.Unix(1791543600, 0)) || !stop.RefusedAt.Equal(time.Date(2026, 10, 9, 10, 11, 12, 653000000, time.UTC)) {
+		t.Fatalf("stop=%+v", stop)
+	}
+	if observation.UsageLimit != nil {
+		t.Fatalf("a limit that reset still reads as current: %+v", observation.UsageLimit)
+	}
+}
+
+func TestATurnThatSucceedsAfterTheLimitEndsTheStop(t *testing.T) {
+	c, sess := usageLimitedConversation(t)
+	later := `{"type":"user","uuid":"u3","sessionId":"` + fixtureConversation + `","timestamp":"2026-10-09T12:00:00Z","message":{"role":"user","content":"continue"}}
+{"type":"assistant","uuid":"a3","timestamp":"2026-10-09T12:00:05Z","message":{"id":"m3","model":"claude-opus-5-5","role":"assistant","stop_reason":"end_turn","type":"message","content":[{"type":"text","text":"done"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-10-09T12:00:06Z"}
+`
+	file, err := os.OpenFile(sess.Transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(later); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	observation, err := c.Observe(context.Background(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.LimitStop != nil || !observation.SettledAt.Equal(time.Date(2026, 10, 9, 12, 0, 5, 0, time.UTC)) {
+		t.Fatalf("stop=%+v settled=%s", observation.LimitStop, observation.SettledAt)
+	}
+}

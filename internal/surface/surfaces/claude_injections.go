@@ -17,6 +17,7 @@ const (
 	claudeOriginCommand          = "command"
 	claudeOriginInterrupt        = "interrupt"
 	claudeOriginSystem           = "system"
+	claudeOriginNotice           = "agenthail-notice"
 )
 
 var (
@@ -25,10 +26,15 @@ var (
 	claudePeerName        = regexp.MustCompile(`from-name="([^"]*)"`)
 )
 
-// claudePromptOrigin names who injected a user-role prompt. Claude Code
-// records it in origin.kind; a record without one is a human prompt unless
-// it is a task notification or a peer message envelope.
+// claudePromptOrigin names who injected a user-role prompt. An Agenthail
+// notice is Agenthail's whatever Claude Code recorded, since it arrives as a
+// typed prompt. Otherwise Claude Code records the origin in origin.kind; a
+// record without one is a human prompt unless it is a task notification or a
+// peer message envelope.
 func claudePromptOrigin(origin map[string]any, text string) string {
+	if _, _, ok := surface.ParseNotice(text); ok {
+		return claudeOriginNotice
+	}
 	if kind := str(origin, "kind"); kind != "" {
 		return kind
 	}
@@ -86,6 +92,13 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 			item.ID = "peer:" + id
 		}
 		return item
+	case claudeOriginNotice:
+		notice, body, _ := surface.ParseNotice(text)
+		title := "Agenthail notice"
+		if notice == surface.NoticeLimitResume {
+			title = "Resumed after usage limit"
+		}
+		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: title, Text: body}
 	case claudeOriginAutoContinuation:
 		return surface.TimelineItem{Kind: "event", Role: "system", Origin: kind, Title: "Continued automatically", Text: strings.TrimSpace(text)}
 	default:

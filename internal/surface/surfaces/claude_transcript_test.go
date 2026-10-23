@@ -297,7 +297,11 @@ func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testi
 	}
 	collect := func() []surface.StreamEvent {
 		var events []surface.StreamEvent
-		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) { events = append(events, event) }, 150*time.Millisecond)
+		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+			if event.Kind != "commands" {
+				events = append(events, event)
+			}
+		}, 150*time.Millisecond)
 		if !errors.Is(err, surface.ErrStreamWindow) {
 			t.Fatalf("stream err=%v", err)
 		}
@@ -610,6 +614,9 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	var events []surface.StreamEvent
 	streamContext, cancel := context.WithCancel(context.Background())
 	err := claude.Stream(streamContext, session, "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		events = append(events, event)
 		if event.Kind == "done" {
 			cancel()

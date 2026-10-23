@@ -381,6 +381,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
     }
 
+    func setResumeAfterLimit(_ enabled: Bool) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "resume-after-limit", "resumeAfterLimit": enabled])
+    }
+
     func updateSettings(action: String) async throws {
         let timeout: TimeInterval = action == "notifications-enable" ? 130 : 25
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": action], timeout: timeout)

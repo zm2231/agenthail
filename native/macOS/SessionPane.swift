@@ -6,6 +6,7 @@ import os
 final class SessionPane: ObservableObject, Identifiable {
     let id = UUID()
     let restoresSelection: Bool
+    let rowMemory = TranscriptRowMemory()
     unowned let model: AgenthailModel
 
     @Published private(set) var selectedSessionID: String? {
@@ -481,6 +482,12 @@ final class SessionPane: ObservableObject, Identifiable {
     func compactContext() {
         guard let sessionID = selectedSessionID else { return }
         runControl(action: "compact", sessionID: sessionID, modelID: nil)
+    }
+
+    /// Resumes a session a usage limit stopped now, or keeps it stopped.
+    func resumeAfterLimit(_ resume: Bool) {
+        guard let sessionID = selectedSessionID else { return }
+        runControl(action: resume ? "limit-resume" : "limit-resume-cancel", sessionID: sessionID, modelID: nil)
     }
 
     private func runControl(action: String, sessionID: String, modelID: String?) {

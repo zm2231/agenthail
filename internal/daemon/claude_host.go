@@ -8,6 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const (
@@ -67,6 +68,17 @@ func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 	}
 }
 
+type claudeHostListing interface{ HostChanged() }
+
+// claudeHostChanged drops the Claude surface's cached host listing, then asks
+// for a catalog pass that reads the host again.
+func (d *Daemon) claudeHostChanged() {
+	if listing, ok := d.adapters().ForSurface(surface.KindClaude).(claudeHostListing); ok {
+		listing.HostChanged()
+	}
+	d.requestCatalogDiscovery()
+}
+
 // watchClaudeHostRequests asks for a catalog pass whenever the host opens or
 // resolves a request or a session's background tasks change, so a session
 // shows what it waits on and runs as soon as Claude reports it rather than at
@@ -80,12 +92,12 @@ func (d *Daemon) watchClaudeHostRequests(ctx context.Context) {
 		start, _ := client.Subscribe(ctx, after, func(event claudehost.Event) {
 			d.recordPeerHold(event)
 			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" {
-				d.requestCatalogDiscovery()
+				d.claudeHostChanged()
 			}
 		})
 		if start.Gap {
 			after = start.Seq
-			d.requestCatalogDiscovery()
+			d.claudeHostChanged()
 			continue
 		}
 		after = 0
@@ -106,12 +118,12 @@ func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Cl
 			after = event.Seq
 			d.recordPeerHold(event)
 			if event.Kind == "request_opened" || event.Kind == "request_resolved" || event.Kind == "tasks" || event.Kind == "exited" {
-				d.requestCatalogDiscovery()
+				d.claudeHostChanged()
 			}
 		})
 		if start.Gap {
 			after = start.Seq
-			d.requestCatalogDiscovery()
+			d.claudeHostChanged()
 			continue
 		}
 		helloCtx, cancel := context.WithTimeout(ctx, time.Second)
@@ -127,7 +139,7 @@ func (d *Daemon) watchRetiringClaudeHost(ctx context.Context, host claudehost.Cl
 	}
 	if ctx.Err() == nil {
 		d.log.Printf("Claude host: the retiring host on %s has exited", host.Socket)
-		d.requestCatalogDiscovery()
+		d.claudeHostChanged()
 	}
 }
 

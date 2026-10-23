@@ -86,7 +86,7 @@ func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *
 		defer d.catalogLiveMu.Unlock()
 		return d.catalogLive[sessionID] == live
 	}
-	d.publishCatalogSession(ctx, live.adapter, session, live.identity, live.alias, counts[sessionID], live.open, config, view, time.Now().UTC(), current, func(committed bool) {
+	d.publishCatalogSession(ctx, live.adapter, session, live.identity, live.alias, counts[sessionID], d.limitResumeRow(sessionID), live.open, config, view, time.Now().UTC(), current, func(committed bool) {
 		d.catalogLiveMu.Lock()
 		defer d.catalogLiveMu.Unlock()
 		if !committed {

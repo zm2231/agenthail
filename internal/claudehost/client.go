@@ -94,7 +94,28 @@ type Session struct {
 	// Tasks are the live background tasks Claude last reported. A host that
 	// predates them leaves it nil.
 	Tasks []Task `json:"tasks"`
+	// Commands are what a person can run in the session, as Claude last
+	// listed them; nil until Claude has.
+	Commands []Command `json:"commands"`
 }
+
+// Command is a slash command or skill Claude runs when a person's message
+// starts with /Name.
+type Command struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+}
+
+// CommandListing is what Claude offers a session started in a folder.
+type CommandListing struct {
+	Commands []Command `json:"commands"`
+	ListedAt time.Time `json:"listedAt"`
+}
+
+// ListingSessionPrefix starts the session id of a Claude process the host
+// starts only to list commands, which is no session.
+const ListingSessionPrefix = "00000000-0000-4000-8000-"
 
 // AutoCompact is when Claude compacts the session's main model, as Claude
 // reported it; Window and Threshold are absent while it is off.
@@ -351,6 +372,19 @@ type Logs struct {
 func (c Client) Logs(ctx context.Context, sessionID string) (Logs, error) {
 	var out Logs
 	return out, c.sessionCall(ctx, "logs", map[string]string{"sessionId": sessionID}, &out)
+}
+
+// ListCommands is what Claude offers a session started in cwd with
+// configDir, or the default config directory when configDir is empty. The
+// host answers from a cache it refreshes in the background, and starts Claude
+// to list a folder it has not listed, which takes seconds.
+func (c Client) ListCommands(ctx context.Context, cwd, configDir string) (CommandListing, error) {
+	var out CommandListing
+	params := map[string]string{"cwd": cwd}
+	if configDir != "" {
+		params["configDir"] = configDir
+	}
+	return out, c.call(ctx, "commands", params, &out)
 }
 
 // Close stops a session now, on whichever host runs it, and returns once its

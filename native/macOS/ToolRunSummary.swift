@@ -10,6 +10,13 @@ enum ToolRunEntry: Identifiable {
         case .call(let item, _), .output(let item), .reasoning(let item): item.id
         }
     }
+
+    var changes: [FileChange] {
+        if case .call(let call, let results) = self, !results.contains(where: ToolRunSummary.isFailure) {
+            return ToolPresentation(name: call.title, text: call.text).changes
+        }
+        return []
+    }
 }
 
 enum ToolRunSummary {
@@ -54,6 +61,13 @@ enum ToolRunSummary {
             }
         }
         return entries
+    }
+
+    /// Runs longer than this fold into one summary line.
+    static let foldAfter = 6
+
+    static func folds(_ entries: [ToolRunEntry]) -> Bool {
+        entries.filter { if case .call = $0 { return true } else { return false } }.count > foldAfter
     }
 
     static func outputPreview(_ text: String) -> String {

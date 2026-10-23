@@ -198,6 +198,46 @@ func TestAHostRequestAsksForACatalogPassAtOnce(t *testing.T) {
 	}
 }
 
+func TestTheCatalogPassAHostRequestAsksForSeesTheRequest(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	d := newTestDaemon(t, hostRegistry(t), []surface.Surface{claude})
+	d.SetClaudeHost(fixture.Manager(t, "test"))
+	ctx, cancel := context.WithCancel(context.Background())
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-watched
+	})
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-d.catalogNudge:
+	default:
+	}
+	if observed, err := claude.Observe(ctx, &session); err != nil || observed.WaitingOn != nil {
+		t.Fatalf("before the request observed=%+v err=%v", observed, err)
+	}
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "TOOL", Origin: &claudehost.Origin{Kind: "human"}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(5 * time.Second):
+		t.Fatal("an opened request did not ask for a catalog pass")
+	}
+	if observed, err := claude.Observe(ctx, &session); err != nil || observed.WaitingOn == nil {
+		t.Fatalf("the pass the request asked for observed=%+v err=%v", observed, err)
+	}
+}
+
 func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
 	fixture := claudehosttest.New(t, "")
 	client := fixture.Start(t)
@@ -234,6 +274,17 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	}
 	pushes := newPushRecorder(t, r)
 	d := newTestDaemon(t, r, []surface.Surface{claude})
+	d.SetClaudeHost(fixture.Manager(t, "test"))
+	ctx, cancel := context.WithCancel(context.Background())
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchClaudeHostRequests(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-watched
+	})
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	ask := func(message string) map[string]string {

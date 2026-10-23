@@ -431,3 +431,26 @@ func TestAnExitedLocalNameLeavesAPairedHostsMatch(t *testing.T) {
 		t.Fatalf("local surface received %v", fake.sent)
 	}
 }
+
+func TestSendReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
+	app, reg, fake, api := federatedCLIFixture(t, true)
+	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
+	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
+		t.Fatal(err)
+	}
+	api.matches["remote-1"] = []remoteTarget{vpsBuilder}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", surface.PeerUUID(surface.KindCodex, "local-1"), "to the local one"})
+	}); err != nil || len(fake.sent) != 1 {
+		t.Fatalf("local from-session send err=%v sent=%v", err, fake.sent)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", surface.PeerUUID(surface.KindCodex, "remote-1"), "to the remote one"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["sessionId"] != vpsBuilder.ID || actions[0]["message"] != "to the remote one" {
+		t.Fatalf("actions=%v", actions)
+	}
+}

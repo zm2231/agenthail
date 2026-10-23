@@ -789,6 +789,22 @@ func TestRelayToBusyTargetQueuesOnceThenDeliversOnce(t *testing.T) {
 	if got := agent.deliveredTo("reviewer"); len(got) != 1 || !strings.Contains(got[0].text, "review this while you are busy") {
 		t.Fatalf("relayed=%+v", got)
 	}
+	history, err := h.store.ListHistory(50, "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	for _, entry := range history {
+		if entry.QueueID != queued[0].ID {
+			continue
+		}
+		if rows++; entry.SourceSessionID != "worker" {
+			t.Fatalf("history=%+v, want every row of the relayed message from its sender", history)
+		}
+	}
+	if rows < 2 {
+		t.Fatalf("history=%+v, want the queued and the delivered row", history)
+	}
 }
 
 func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
@@ -823,4 +839,12 @@ func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 	if count := h.store.QueueCount(surface.PersonSessionID) + h.store.QueueCount(surface.CLISessionID) + h.store.QueueCount(unrepliable); count != 0 {
 		t.Fatalf("queued %d messages for sessions nothing reads", count)
 	}
+}
+
+func TestAnActionReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
+	agent := newScriptedAgent("target")
+	h := startRunningDaemon(t, agent)
+	settle()
+	h.action(map[string]any{"action": "send", "sessionId": surface.PeerUUID(surface.KindCodex, "target"), "message": "replying to your message"})
+	eventually(t, "the reply delivered", func() bool { return len(agent.deliveredTo("target")) == 1 })
 }

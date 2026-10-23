@@ -9,4 +9,20 @@ extension XCUIElement {
         }
         tap()
     }
+
+    /// Taps once the element has stopped moving. A tap while a swipe is still decelerating only stops the scroll.
+    func tapWhenStill(timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var frame = self.frame
+        repeat {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            let next = self.frame
+            if next == frame {
+                tap()
+                return
+            }
+            frame = next
+        } while Date() < deadline
+        XCTFail("\(self) kept moving", file: file, line: line)
+    }
 }

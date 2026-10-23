@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -61,6 +62,7 @@ type pairedHost struct {
 	detail string
 	epoch  string
 	drain  sync.Mutex
+	wake   chan struct{}
 	// hidden holds rows the host serves whose id is already a local session,
 	// guarded by mu. Only the mirror loop writes it.
 	hidden map[string]dashboardSession
@@ -155,7 +157,12 @@ func (d *Daemon) startFederation(ctx context.Context) {
 	d.federation.mu.Lock()
 	d.federation.ctx = ctx
 	d.federation.running = true
+	d.federation.wg.Add(1)
 	d.federation.mu.Unlock()
+	go func() {
+		defer d.federation.wg.Done()
+		d.followHostDeliveries(ctx)
+	}()
 	d.failInterruptedMoves()
 	paired, err := d.Registry.ListHosts()
 	if err != nil {
@@ -204,7 +211,7 @@ func (d *Daemon) attachHostLocked(record registry.PairedHost) error {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	host := &pairedHost{record: record, client: client, cancel: cancel, state: hostStateConnecting}
+	host := &pairedHost{record: record, client: client, cancel: cancel, state: hostStateConnecting, wake: make(chan struct{}, 1)}
 	d.federation.hosts[record.ID] = host
 	if d.federation.running {
 		d.federation.wg.Add(2)
@@ -281,10 +288,17 @@ func (d *Daemon) routeSession(ref string) (*pairedHost, string, error) {
 	ref = strings.TrimSpace(ref)
 	if hostRef, target, qualified := hosts.Split(ref); qualified {
 		if d.isLocalHostRef(hostRef) {
-			if owner, err := d.Registry.SessionHost(target); err == nil && owner != "" {
-				return nil, "", registry.SessionOwnedError{SessionID: target, HostID: owner}
+			id, owner, found, err := d.Registry.CanonicalSession(target)
+			if err != nil {
+				return nil, "", err
 			}
-			return nil, target, nil
+			if !found {
+				return nil, target, nil
+			}
+			if owner != "" {
+				return nil, "", registry.SessionOwnedError{SessionID: id, HostID: owner}
+			}
+			return nil, id, nil
 		}
 		host, found := d.pairedHost(hostRef)
 		if !found {
@@ -295,15 +309,21 @@ func (d *Daemon) routeSession(ref string) (*pairedHost, string, error) {
 	if ref == "" {
 		return nil, ref, nil
 	}
-	owner, err := d.Registry.SessionHost(ref)
-	if err != nil || owner == "" {
+	id, owner, found, err := d.Registry.CanonicalSession(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	if !found || owner == "" {
+		if found {
+			ref = id
+		}
 		return nil, ref, nil
 	}
-	host, found := d.pairedHost(owner)
-	if !found {
+	host, paired := d.pairedHost(owner)
+	if !paired {
 		return nil, "", fmt.Errorf("%w %q", errUnknownHost, owner)
 	}
-	return host, ref, nil
+	return host, id, nil
 }
 
 func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted bool) {
@@ -722,9 +742,40 @@ func (d *Daemon) runHostDeliveries(ctx context.Context, host *pairedHost) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if state, _ := host.status(); state == hostStateConnected {
-				d.drainHostDeliveries(ctx, host)
+		case <-host.wake:
+		}
+		if state, _ := host.status(); state == hostStateConnected {
+			d.drainHostDeliveries(ctx, host)
+		}
+	}
+}
+
+// followHostDeliveries wakes every host's delivery loop when any process holds
+// a send for a host, so a held send to a connected host goes out at once.
+func (d *Daemon) followHostDeliveries(ctx context.Context) {
+	path, err := d.Registry.ChangeSignal(registry.ChangeHostDeliveries)
+	if err != nil {
+		d.log.Printf("follow held host sends, sending them on the delivery tick: %s", err)
+		return
+	}
+	wake := filewake.Follow(path)
+	defer wake.Release()
+	if wake.C() == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake.C():
+			d.federation.mu.Lock()
+			for _, host := range d.federation.hosts {
+				select {
+				case host.wake <- struct{}{}:
+				default:
+				}
 			}
+			d.federation.mu.Unlock()
 		}
 	}
 }

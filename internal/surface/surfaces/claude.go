@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -517,6 +518,20 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	return out, nil
 }
 
+// CatalogWatchDirs are the folders where each Claude process writes its
+// session record when it starts, one per config root.
+func (c *Claude) CatalogWatchDirs() []string {
+	roots, err := surface.ClaudeConfigRoots(c.home)
+	if err != nil {
+		return nil
+	}
+	dirs := make([]string, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, filepath.Join(root, "sessions"))
+	}
+	return dirs
+}
+
 // claudeSessionRecord is a Claude process's session record and the config
 // root it was written under.
 type claudeSessionRecord struct {
@@ -526,7 +541,8 @@ type claudeSessionRecord struct {
 
 // records returns the config roots and the session records of Claude
 // processes that are alive in any of them, excluding the records Agenthail
-// writes for its own peer workers and relays.
+// writes for its own peer workers and relays, and those of the processes the
+// host starts only to list commands.
 func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
@@ -551,7 +567,7 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 				continue
 			}
 			var m map[string]any
-			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
+			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" || strings.HasPrefix(str(m, "sessionId"), claudehost.ListingSessionPrefix) {
 				continue
 			}
 			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
@@ -1017,6 +1033,12 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if last.Done && last.UsageLimited && (last.UsageResetsAt.IsZero() || time.Now().Before(last.UsageResetsAt)) {
 		observation.UsageLimit = &surface.UsageLimit{ResetsAt: last.UsageResetsAt}
 	}
+	observation.UsageAccount = claudeTranscriptRoot(path)
+	if last.Done && last.UsageLimited {
+		observation.LimitStop = &surface.LimitStop{TurnID: last.UserID, RefusedAt: last.TerminalAt, ResetsAt: last.UsageResetsAt}
+	} else if last.Done && !last.Interrupted && last.APIError == "" {
+		observation.SettledAt = last.TerminalAt
+	}
 	return observation, nil
 }
 
@@ -1239,6 +1261,13 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	var commands *commandsWatch
+	if uuid == "" {
+		onEvent = serializedEvents(onEvent)
+		listed := *sess
+		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) { return c.Commands(ctx, &listed) }, onEvent)
+		defer commands.Stop()
+	}
 	path, err := c.sessionTranscript(sess)
 	if err != nil {
 		return err
@@ -1383,6 +1412,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if changed {
 				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
 			}
+			commands.Refresh()
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {

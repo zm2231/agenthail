@@ -22,6 +22,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.setAccessibilityPlaceholderValue(placeholder)
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
+        context.coordinator.sync = ComposerTextSync(text)
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
         textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }
@@ -50,9 +51,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.setAccessibilityPlaceholderValue(placeholder)
         }
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
-        if textView.string != text, !textView.hasMarkedText() {
-            textView.replaceAll(with: text)
-        }
+        textView.show(bound: text, sync: context.coordinator.sync)
         if focused, textView.window != nil, textView.window?.firstResponder !== textView {
             DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
         }
@@ -66,15 +65,17 @@ struct ComposerTextView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
+        var sync: ComposerTextSync
 
         init(_ parent: ComposerTextView) {
             self.parent = parent
+            sync = ComposerTextSync(parent.text)
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             textView.needsDisplay = true
-            if parent.text != textView.string { parent.text = textView.string }
+            sync.viewChanged(to: textView.string) { if parent.text != $0 { parent.text = $0 } }
         }
 
         func focusChanged(_ isFocused: Bool) {

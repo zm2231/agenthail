@@ -1,6 +1,24 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Scrolls the transcript so this point of its content, measured in `TimelineGroup.contentSpace`, sits
+    /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
+    /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
+    /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
+    @Entry var revealRow: (CGFloat) -> Void = { _ in }
+}
+
+extension View {
+    /// Keeps `top` at this view's top in the transcript's content, for `revealRow`.
+    func contentTop(_ top: Binding<CGFloat>) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TimelineGroup.contentSpace)).minY } action: { top.wrappedValue = $0 }
+    }
+}
+
 struct TimelineGroup: Identifiable {
+    /// The coordinate space of a transcript's scroll content.
+    static let contentSpace = "timeline-content"
+
     let id: String
     var items: [TimelineItem]
     var isMessage: Bool { items.first?.kind == "message" }
@@ -69,6 +87,8 @@ struct CompactActivityGroup: View {
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var onInspect: () -> Void = {}
     @State private var expanded = false
+    @State private var top: CGFloat = 0
+    @Environment(\.revealRow) private var revealRow
 
     var body: some View {
         if group.isActivity {
@@ -84,13 +104,18 @@ struct CompactActivityGroup: View {
                 }.buttonStyle(.plain)
                     .accessibilityIdentifier("activity-" + group.id)
                     .accessibilityHint("Expand recorded tools, results and reasoning")
+                    .contentTop($top)
                 if expanded {
                     ForEach(group.invocations) { invocation in
                         if let call = invocation.items.first, call.kind == "toolCall" {
                             ToolActivityRow(call: call, results: Array(invocation.items.dropFirst()), attachmentLoader: attachmentLoader)
                         } else { ForEach(invocation.items) { IOSTimelineRow(item: $0, attachmentLoader: attachmentLoader) } }
                     }
-                    Button("Collapse activity", systemImage: "chevron.up") { expanded = false }
+                    Button("Collapse activity", systemImage: "chevron.up") {
+                        // Collapsing from the end removes the rows on screen; bring the group back rather than leave the offset past the content.
+                        expanded = false
+                        revealRow(top)
+                    }
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .accessibilityIdentifier("collapse-activity-" + group.id)
@@ -108,7 +133,9 @@ struct ToolActivityRow: View {
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var standaloneRecord = false
     @State private var expanded = false
+    @State private var top: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.revealRow) private var revealRow
 
     private var presentation: ToolPresentation { ToolPresentation(name: call.title, text: call.text) }
     private var failed: Bool { results.contains { $0.status == "error" } }
@@ -139,6 +166,7 @@ struct ToolActivityRow: View {
             }.buttonStyle(.plain)
             .accessibilityHint("Show recorded input and output")
             .contextMenu { CopyCallID(item: call) }
+            .contentTop($top)
             if expanded {
                 VStack(alignment: .leading, spacing: 12) {
                     ToolContentView(item: call)
@@ -157,7 +185,10 @@ struct ToolActivityRow: View {
                         if result.truncated { shortened }
                     }
                     if call.truncated { shortened }
-                    Button { expanded = false } label: {
+                    Button {
+                        expanded = false
+                        revealRow(top)
+                    } label: {
                         Label("Collapse tool", systemImage: "chevron.up")
                             .font(.footnote.weight(.medium))
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -170,6 +201,7 @@ struct ToolActivityRow: View {
         }
         .background(SessionStyle.surface, in: RoundedRectangle(cornerRadius: 12))
     }
+
 
     private var shortened: some View {
         Label("Output shortened by the host", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary)

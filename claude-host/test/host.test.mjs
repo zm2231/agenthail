@@ -1242,3 +1242,72 @@ test('the host lists and announces the background tasks a session runs, marking 
   assert.deepEqual((await c.call('list')).sessions.find((s) => s.sessionId === id).tasks, []);
   c.close();
 });
+
+test('a session lists the commands a person can run, one per name, and follows what Claude reports', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_TERMINAL_COMMANDS: 'statusline' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  assert.deepEqual(opened.commands.map((x) => [x.name, x.description]), [
+    ['review', 'Review a pull request'],
+    ['compact', 'Compact the conversation'],
+    ['statusline', 'Set up the status line'],
+    ['l5-probe', 'A project skill'],
+  ]);
+  assert.equal(opened.commands[0].argumentHint, '[pr]');
+  const turn = randomUUID();
+  await c.call('send', { sessionId: id, uuid: turn, text: 'SKILLS' });
+  const changed = await c.event((e) => e.sessionId === id && e.kind === 'commands' && e.commands.some((x) => x.name === 'found-later'), 5000);
+  assert.ok(!changed.commands.some((x) => x.name === 'statusline'), 'a terminal-only command is not offered');
+  await c.event(turnResult(id, turn));
+  const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
+  assert.deepEqual(listed.commands, changed.commands);
+  c.close();
+});
+
+test('a folder is listed by a Claude that starts without hooks, MCP servers or a conversation, once however many ask', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const root = path.join(f.cwd, 'claude-work');
+  const [first, second] = await Promise.all([c.call('commands', { cwd: f.cwd, configDir: root }), c.call('commands', { cwd: f.cwd, configDir: root })]);
+  assert.deepEqual(first.commands.map((x) => x.name), ['review', 'compact', 'statusline', 'l5-probe']);
+  assert.deepEqual(second, first);
+  const spawns = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(spawns.length, 1);
+  const [spawned] = spawns;
+  assert.match(spawned.sessionId, /^00000000-0000-4000-8000-[0-9a-f]{12}$/);
+  assert.equal(spawned.configDir, root);
+  assert.equal(spawned.claudeaiMcp, 'false');
+  assert.ok(spawned.argv.includes('--strict-mcp-config'));
+  const settings = spawned.argv[spawned.argv.indexOf('--settings') + 1];
+  assert.equal(JSON.parse(settings).disableAllHooks, true);
+  assert.ok(!fs.existsSync(transcript(f, spawned.sessionId)), 'no conversation is written');
+  for (let i = 0; i < 100 && alive(spawned.pid); i++) await sleep(20);
+  assert.ok(!alive(spawned.pid), 'the listing Claude exits');
+  assert.deepEqual(await c.call('commands', { cwd: f.cwd, configDir: root }), first);
+  assert.equal(fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').length, 1, 'a fresh listing is answered from the cache');
+  c.close();
+});
+
+test('a listing that does not start in time is killed and refused, and folders are listed one at a time', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_INITIALIZE_MS: '2000', AGENTHAIL_CLAUDE_HOST_LISTING_TIMEOUT_MS: '600' } });
+  const c = new Client(f.socket);
+  const other = path.join(f.root, 'other');
+  fs.mkdirSync(other);
+  const started = Date.now();
+  const results = await Promise.allSettled([c.call('commands', { cwd: f.cwd }), c.call('commands', { cwd: other })]);
+  assert.deepEqual(results.map((r) => r.status), ['rejected', 'rejected']);
+  assert.ok(Date.now() - started >= 1200, 'the second folder waits for the first listing to end');
+  assert.match(results[0].reason.message, /did not list its commands/);
+  const spawns = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(spawns.length, 2);
+  for (const spawned of spawns) {
+    for (let i = 0; i < 100 && alive(spawned.pid); i++) await sleep(20);
+    assert.ok(!alive(spawned.pid), 'a listing that timed out is killed');
+  }
+  c.close();
+});

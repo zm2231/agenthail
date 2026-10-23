@@ -158,7 +158,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			return nil, fmt.Errorf("persist delivery source: %w", err)
 		}
 		var err error
-		if ctx, err = WithPersonName(ctx, d.Registry, sourceID, surface.PersonName(ctx)); err != nil {
+		if ctx, err = WithSender(ctx, d.Registry, sourceID, surface.PersonName(ctx)); err != nil {
 			return nil, err
 		}
 	}
@@ -182,7 +182,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
-	return d.steer(ctx, adapter, session, message, target, "", "steer", intent, false)
+	return d.steer(ctx, adapter, session, message, target, sourceID, "steer", intent, false)
 }
 
 // steer reports the evidence the surface proved: a Claude Remote Control steer
@@ -249,13 +249,13 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, fmt.Errorf("persist delivery source: %w", err)
 		}
 		var err error
-		if ctx, err = WithPersonName(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
+		if ctx, err = WithSender(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
 			return nil, err
 		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	busyMode, modeErr := d.busyMode(options)
@@ -345,7 +345,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		if intent != nil {
 			d.failIntent(intent, session.ID, err)
 		}
-		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result == nil {
@@ -353,7 +353,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		if intent != nil {
 			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 		}
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result.Accepted {
@@ -366,14 +366,14 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		d.markSent(receipt, intent, result.UUID, target)
 		if d.Registry != nil && !peerTransport {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
-				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
+				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID, Error: err.Error()})
 			}
 		}
 		if peerTransport {
-			d.record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, Message: message, Result: result.UUID})
+			d.record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
 			return receipt, nil
 		}
-		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
+		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
 		if result.Notice != "" {
 			d.record(registry.HistoryEntry{Kind: "model", SessionID: session.ID, Message: result.Notice, Result: result.UUID})
 		}
@@ -390,11 +390,16 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	return receipt, err
 }
 
-// WithPersonName names the person on a message they sent: given, when a
-// paired host named them, else the name this host has for them.
-func WithPersonName(ctx context.Context, r *registry.Registry, sourceID, given string) (context.Context, error) {
+// WithSender names the sender on a message: the person by given, when a
+// paired host named them, else the name this host has for them; a session by
+// the reply target this host has for it.
+func WithSender(ctx context.Context, r *registry.Registry, sourceID, given string) (context.Context, error) {
 	if sourceID != surface.PersonSessionID {
-		return ctx, nil
+		target, err := r.ReplyTarget(sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("read how the sender is addressed: %w", err)
+		}
+		return surface.WithReplyTarget(ctx, target), nil
 	}
 	if given == "" {
 		name, err := r.PersonName()
@@ -455,12 +460,12 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	}
 	if !allowQueue {
 		d.discardIntent(intent, session.ID)
-		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
+		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ErrTargetBusy.Error()})
 		return nil, ErrTargetBusy
 	}
 	if d.Registry == nil {
 		err := fmt.Errorf("%s is busy and no registry is available for queuing", adapter.Name())
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if needsOptionSender {

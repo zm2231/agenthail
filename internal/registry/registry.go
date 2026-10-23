@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
@@ -55,7 +57,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 34
+	schemaVersion   = 35
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -800,6 +802,16 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_announced INTEGER NOT NULL DEFAULT 0,
 	waiting_answerable INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS limit_resumes (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	turn_id TEXT NOT NULL,
+	account_key TEXT NOT NULL DEFAULT '',
+	refused_at_ms INTEGER NOT NULL DEFAULT 0,
+	resets_at_ms INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT 'waiting',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	updated_at_ms INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS session_origins (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	via TEXT NOT NULL,
@@ -1338,6 +1350,40 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 	return "", fmt.Errorf("reserve generated alias: exhausted candidates for %q", base)
 }
 
+// CanonicalSession names the session ref identifies, with the paired host
+// that owns it: ref is a session id, or the Claude peer id a peer message
+// carries as from-session. It is the one place both agenthail send and the
+// action API turn a peer id into its session. Peer ids are derived, not
+// stored, so a ref that is no session id hashes every session's id; with a
+// few thousand sessions that is a few milliseconds.
+func (r *Registry) CanonicalSession(ref string) (id, hostID string, found bool, err error) {
+	err = r.read.QueryRow(`SELECT id,host_id FROM sessions WHERE id=?`, ref).Scan(&id, &hostID)
+	if err == nil {
+		return id, hostID, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, err
+	}
+	if _, err := uuid.Parse(ref); err != nil {
+		return "", "", false, nil
+	}
+	rows, err := r.read.Query(`SELECT id,surface,host_id FROM sessions`)
+	if err != nil {
+		return "", "", false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&id, &kind, &hostID); err != nil {
+			return "", "", false, err
+		}
+		if strings.EqualFold(surface.PeerUUID(surface.SurfaceKind(kind), id), ref) {
+			return id, hostID, true, nil
+		}
+	}
+	return "", "", false, rows.Err()
+}
+
 // ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a
 // name/cwd fragment; "@<name>" resolves only an alias or exact ID, so a
 // name never reaches another session by substring. Name and cwd fragments
@@ -1748,7 +1794,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message, Result: options.Model})
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, SourceSessionID: options.SourceSessionID, QueueID: id, Message: message, Result: options.Model})
 	return id, deliveryID, nil
 }
 
@@ -2075,6 +2121,9 @@ const (
 	QueueHeldRetrying QueueHold = "retrying"
 	QueueHeldBehind   QueueHold = "behind"
 	QueueHeldUnloaded QueueHold = "notLoaded"
+	// QueueHeldLimited is a message to a session a usage limit stopped; it
+	// waits for the limit to reset.
+	QueueHeldLimited QueueHold = "limited"
 	// QueueHeldHostUnreachable is a send to a paired host's session that the
 	// host never received; it is replayed with its key when the host returns.
 	QueueHeldHostUnreachable QueueHold = "hostUnreachable"
@@ -2120,6 +2169,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 	}
 	return `CASE WHEN q.status!='pending' THEN ''
 		WHEN q.host_request!='' THEN 'hostUnreachable'
+		WHEN ` + fmt.Sprintf(limitHeldFilter, "q.session_id") + ` THEN 'limited'
 		WHEN ` + fmt.Sprintf(queueToPeerSocket, "q") + ` AND ` + fmt.Sprintf(queuePeerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind' WHEN q.refused=1 AND q.available_at_ms>?1 THEN 'refused' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
@@ -2340,8 +2390,8 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 // queued as a new attempt, so the earlier failure leaves the problem list and
 // a later outcome is reported again.
 func (r *Registry) RetryMessage(id int64) error {
-	var sessionID, message string
-	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
+	var sessionID, message, hostRequest string
+	_ = r.db.QueryRow(`SELECT session_id,message,host_request FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message, &hostRequest)
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -2359,6 +2409,9 @@ func (r *Registry) RetryMessage(id int64) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if hostRequest != "" {
+		r.signalChange(ChangeHostDeliveries)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return r.ReconcileAttentionItems(r.now())
@@ -2448,8 +2501,8 @@ const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
 func claimCandidateFilter(sessionID, busyDelivery string, mode deliverypolicy.Mode) (string, []any) {
-	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`
-	args := []any{sessionID, sessionID}
+	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent')) AND NOT ` + fmt.Sprintf(limitHeldFilter, "?")
+	args := []any{sessionID, sessionID, sessionID}
 	if busyDelivery == claimPeer {
 		filter += ` AND id=(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=? AND m.host_request='' AND m.status IN ('pending','inflight')) AND ` + fmt.Sprintf(queuePeerRow, "message_queue")
 		args = append(args, sessionID)
@@ -3291,6 +3344,31 @@ func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 	var name string
 	err := r.read.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
 	return name, err
+}
+
+// ReplyTarget is how this host addresses a session in agenthail send: @alias
+// for one of its own sessions with an alias, host::@alias for a paired
+// host's session with the alias that host gives it, and empty otherwise. An
+// alias this host holds for a paired host's session resolves nowhere, so it
+// is never the target. Agenthail's own pseudo-sessions have none: the person
+// and the CLI are named, not addressed.
+func (r *Registry) ReplyTarget(sessionID string) (string, error) {
+	var alias, hostName, hostAlias string
+	err := r.read.QueryRow(`SELECT CASE WHEN s.host_id='' THEN COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),'') ELSE '' END,
+		COALESCE(h.name,''),
+		COALESCE((SELECT json_extract(cs.projection_fingerprint,'$.alias') FROM catalog_sessions cs WHERE cs.session_id=s.id AND json_valid(cs.projection_fingerprint)),'')
+		FROM sessions s LEFT JOIN hosts h ON h.host_id=s.host_id WHERE s.id=? AND s.runtime_kind<>?`, sessionID, string(surface.RuntimeOperator)).Scan(&alias, &hostName, &hostAlias)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", err
+	case alias != "":
+		return "@" + alias, nil
+	case hostName != "" && hostAlias != "":
+		return hostName + "::@" + hostAlias, nil
+	}
+	return "", nil
 }
 
 func (r *Registry) RemoveAlias(name string) error {

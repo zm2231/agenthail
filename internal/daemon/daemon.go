@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -96,6 +97,12 @@ type Daemon struct {
 	identity                 registry.HostIdentity
 	federation               *federation
 	uploads                  *uploads.Store
+	limitResumes             *limitResumer
+	// limitResumeEnabled, when set, replaces the host's resume after limit
+	// setting.
+	limitResumeEnabled func() bool
+	// limitResumesRead, when set, runs each time usage-limit stops are read.
+	limitResumesRead func()
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -150,6 +157,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		federation:        newFederation(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
+		limitResumes:      newLimitResumer(),
 	}
 	d.ui = newUIState(reg)
 	identity, err := reg.HostIdentity()
@@ -275,6 +283,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseClaudeHost(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go d.runLimitResumes(ctx)
 	uiDone := make(chan struct{})
 	go func() {
 		defer close(uiDone)
@@ -311,17 +320,25 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 	}()
 	defer func() { <-statusDone }()
 	defer d.catalogIdentities.wait()
+	wakes := newCatalogWakes(d.Surfaces, filewake.FollowDir)
+	defer wakes.close()
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
+	wakes.sync()
 	d.discoverCatalog(ctx)
+	wakes.sync()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-discoveryTicker.C:
 			d.discoverCatalog(ctx)
+			wakes.sync()
 		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
+			wakes.sync()
+		case <-wakes.signal:
+			d.discoverCatalogOf(ctx, wakes.take())
 		}
 	}
 }
