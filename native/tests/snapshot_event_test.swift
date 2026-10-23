@@ -13,15 +13,15 @@ struct SnapshotEventTest {
         }
         let future = Int64(Date().timeIntervalSince1970 * 1000) + 20_000
         let requested = try JSONDecoder().decode(AgenthailEvent.self, from: Data("""
-        {"id":7,"type":"ui.snapshot.requested","timestamp":"2026-10-23T08:00:00.123456789Z","data":{"id":"abc","session":"s1","width":900,"height":600,"device":"Studio","expiresAt":\(future)}}
+        {"id":7,"type":"ui.snapshot.requested","timestamp":"2026-10-23T08:00:00.123456789Z","data":{"id":"abc","session":"s1","width":900,"height":600,"device":"Studio","rev":"r9","expiresAt":\(future)}}
         """.utf8))
-        check(requested.snapshot == SnapshotRequest(id: "abc", session: "s1", width: 900, height: 600, device: "Studio", expiresAt: future), "a snapshot request carries its fields, got \(String(describing: requested.snapshot))")
+        check(requested.snapshot == SnapshotRequest(id: "abc", session: "s1", width: 900, height: 600, device: "Studio", rev: "r9", expiresAt: future), "a snapshot request carries its fields, got \(String(describing: requested.snapshot))")
         check(requested.snapshot?.expired == false, "a request before its deadline has not expired")
 
         let bare = try JSONDecoder().decode(AgenthailEvent.self, from: Data("""
         {"id":8,"type":"ui.snapshot.requested","timestamp":"","data":{"id":"def","expiresAt":1}}
         """.utf8))
-        check(bare.snapshot?.session == nil && bare.snapshot?.width == nil && bare.snapshot?.device == nil, "a request for the window as shown has no session, size or device")
+        check(bare.snapshot?.session == nil && bare.snapshot?.width == nil && bare.snapshot?.device == nil && bare.snapshot?.rev == nil, "a request for the window as shown has no session, size or device")
         check(bare.snapshot?.expired == true, "a request replayed after its deadline has expired")
 
         let other = try JSONDecoder().decode(AgenthailEvent.self, from: Data("""

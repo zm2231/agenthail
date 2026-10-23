@@ -41,10 +41,21 @@ enum WindowSnapshot {
     static func answer(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, api: AgenthailAPI) {
         if let device = request.device, !device.isEmpty, device != Host.current().localizedName { return }
         Task { @MainActor in
+            await catchUp(to: request.rev, model: model, api: api)
             switch await capture(request, model: model, voice: voice) {
             case .success(let png): try? await api.uploadSnapshot(id: request.id, png: png)
             case .failure(let failure): try? await api.failSnapshot(id: request.id, reason: failure.message)
             }
+        }
+    }
+
+    /// A snapshot taken right after a ui.conf change must show it, background image included.
+    static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI) async {
+        guard let rev, !rev.isEmpty, model.interface.config.rev != rev else { return }
+        model.interface.load(from: api)
+        let deadline = ContinuousClock.now + loadDeadline
+        while model.interface.config.rev != rev, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 

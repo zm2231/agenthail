@@ -71,7 +71,8 @@ type uiSnapshotRequest struct {
 type uiSnapshotEvent struct {
 	ID string `json:"id"`
 	uiSnapshotRequest
-	ExpiresAt int64 `json:"expiresAt"`
+	Rev       string `json:"rev,omitempty"`
+	ExpiresAt int64  `json:"expiresAt"`
 }
 
 func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
@@ -88,9 +89,16 @@ func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_size", "Give both width and height, each from 1 to 8192 points, or neither.")
 		return
 	}
+	var rev string
+	if store, err := d.ui.open(); err == nil {
+		if state, err := store.Current(); err == nil {
+			rev = state.Rev
+			d.noteUIRevision(rev)
+		}
+	}
 	id, reply := d.snapshots.open()
 	defer d.snapshots.close(id)
-	d.publishEvent("ui.snapshot.requested", "", uiSnapshotEvent{ID: id, uiSnapshotRequest: request, ExpiresAt: time.Now().Add(uiSnapshotTimeout).UnixMilli()})
+	d.publishEvent("ui.snapshot.requested", "", uiSnapshotEvent{ID: id, uiSnapshotRequest: request, Rev: rev, ExpiresAt: time.Now().Add(uiSnapshotTimeout).UnixMilli()})
 	timer := time.NewTimer(uiSnapshotTimeout)
 	defer timer.Stop()
 	select {
