@@ -157,7 +157,7 @@ struct ConversationFlow: View {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
                     if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
-                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")) }
+                    else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")).phoneBackdrop(.pane) }
                 }
             } else {
                 NavigationStack(path: $path) {
@@ -1466,71 +1466,81 @@ struct IOSSessionRow: View {
         title ?? SessionStyle.title(session)
     }
 
+    @ViewBuilder
+    private func meta(spaced: Bool) -> some View {
+        Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .lineLimit(1).fixedSize()
+        if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
+            IOSHostBadge(name: host, unavailable: session.isUnavailable)
+                .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
+        }
+        if session.isWaitingOnYou {
+            HStack(spacing: 4) {
+                Image(systemName: "questionmark.bubble")
+                Text(session.waitingPlace?.label ?? "Waiting on you")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+        } else if let limit = session.limitLabel, !session.isWorking {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.100percent")
+                Text(limit)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+        } else if session.isWorking {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform")
+                Text("Working")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+        } else if session.isWaitingOnBackground {
+            HStack(spacing: 4) {
+                Image(systemName: "hourglass")
+                Text("Background work")
+            }
+            .font(.caption)
+            .foregroundStyle(SessionStyle.accent)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityLabel("Waiting on background work")
+        }
+        if let plan = session.livePlan {
+            HStack(spacing: 4) {
+                Image(systemName: "checklist")
+                Text(plan.badge)
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(plan.detail)
+        }
+        if spaced { Spacer(minLength: 0) }
+        if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+            Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(displayTitle).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-            layout {
-                Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    .lineLimit(1).fixedSize()
-                if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
-                    IOSHostBadge(name: host, unavailable: session.isUnavailable)
-                        .accessibilityLabel(session.isUnavailable ? "Unavailable on \(host)" : "On \(host)")
-                }
-                if session.isWaitingOnYou {
-                    HStack(spacing: 4) {
-                        Image(systemName: "questionmark.bubble")
-                        Text(session.waitingPlace?.label ?? "Waiting on you")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if let limit = session.limitLabel, !session.isWorking {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gauge.with.dots.needle.100percent")
-                        Text(limit)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if session.isWorking {
-                    HStack(spacing: 4) {
-                        Image(systemName: "waveform")
-                        Text("Working")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                } else if session.isWaitingOnBackground {
-                    HStack(spacing: 4) {
-                        Image(systemName: "hourglass")
-                        Text("Background work")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(SessionStyle.accent)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .accessibilityLabel("Waiting on background work")
-                }
-                if let plan = session.livePlan {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checklist")
-                        Text(plan.badge)
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(plan.detail)
-                }
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
-                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).fixedSize()
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { meta(spaced: true) }
+                    VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
