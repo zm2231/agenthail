@@ -837,6 +837,136 @@
       "active" : true,
       "items" : [
         {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "callId" : "a",
+          "id" : "ar",
+          "kind" : "toolResult",
+          "text" : "",
+          "title" : "toolResult",
+          "truncated" : false
+        },
+        {
+          "callId" : "b",
+          "id" : "b",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, working",
+      "states" : {
+        "a" : "later",
+        "b" : "running"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        },
+        {
+          "callId" : "b",
+          "id" : "b",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, a finished turn then a new one",
+      "states" : {
+        "a" : "unrecorded",
+        "b" : "running"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "d",
+          "kind" : "done",
+          "status" : "cancelled",
+          "text" : "",
+          "title" : "done",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, interrupted",
+      "states" : {
+        "a" : "interrupted"
+      }
+    },
+    {
+      "active" : false,
+      "items" : [
+        {
+          "callId" : "a",
+          "id" : "a",
+          "kind" : "toolCall",
+          "text" : "",
+          "title" : "toolCall",
+          "truncated" : false
+        },
+        {
+          "id" : "m",
+          "kind" : "message",
+          "text" : "",
+          "title" : "message",
+          "truncated" : false
+        }
+      ],
+      "name" : "a host without turn ids, idle",
+      "states" : {
+        "a" : "unrecorded"
+      }
+    },
+    {
+      "active" : true,
+      "items" : [
+        {
           "id" : "a",
           "kind" : "toolCall",
           "text" : "",

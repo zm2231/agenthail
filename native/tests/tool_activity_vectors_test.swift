@@ -67,6 +67,10 @@ struct ToolActivityVectorsTest {
         ("a result after an injected event", [item("c", "toolCall", turn: "t1", call: "k"), item("m", "event", turn: "t1", title: "Task notification"), item("r", "toolResult", turn: "t1", call: "k")], true),
         ("a result after an injected event, idle", [item("c", "toolCall", turn: "t1", call: "k"), item("m", "message", turn: "t1"), item("r", "toolResult", turn: "t1", call: "k"), item("d", "done", turn: "t1", status: "cancelled")], false),
         ("another call's result", [item("c", "toolCall", turn: "t1", call: "k"), item("r", "toolResult", turn: "t1", call: "j")], true),
+        ("a host without turn ids, working", [item("a", "toolCall", call: "a"), item("ar", "toolResult", call: "a"), item("b", "toolCall", call: "b"), item("m", "message")], true),
+        ("a host without turn ids, a finished turn then a new one", [item("a", "toolCall", call: "a"), item("d", "done"), item("m", "message"), item("b", "toolCall", call: "b")], true),
+        ("a host without turn ids, interrupted", [item("a", "toolCall", call: "a"), item("d", "done", status: "cancelled")], false),
+        ("a host without turn ids, idle", [item("a", "toolCall", call: "a"), item("m", "message")], false),
         ("parallel calls", [item("a", "toolCall", turn: "t1"), item("b", "toolCall", turn: "t1"), item("d", "done", turn: "t1", status: "cancelled"), item("c", "toolCall", turn: "t2")], true),
     ]
 
