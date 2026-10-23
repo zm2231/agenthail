@@ -78,6 +78,30 @@ final class ComposerPasteTests: XCTestCase {
         XCTAssertEqual(pasted.first?.attachments.count, 1)
     }
 
+    func testPastingACopiedFileAttachesTheFile() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("notes-\(UUID().uuidString).txt")
+        try Data("file body".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        UIPasteboard.general.items = [[UTType.fileURL.identifier: url.dataRepresentation, UTType.utf8PlainText.identifier: url.lastPathComponent]]
+        let view = makeTextView()
+        XCTAssertTrue(view.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
+        view.paste(nil)
+        XCTAssertEqual(pasted.first?.attachments.map(\.name), [url.lastPathComponent])
+        XCTAssertEqual(pasted.first?.attachments.first?.data, Data("file body".utf8))
+        XCTAssertEqual(view.text, "")
+    }
+
+    func testOutsideTextWaitsWhileTheKeyboardIsComposing() {
+        let view = makeTextView()
+        view.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0))
+        view.sync("cleared")
+        XCTAssertEqual(view.text, "ni")
+        view.unmarkText()
+        view.sync("cleared")
+        XCTAssertEqual(view.text, "cleared")
+        XCTAssertEqual(view.selectedRange, NSRange(location: 7, length: 0))
+    }
+
     func testWithoutAttachSupportAnImagePasteIsNotOffered() {
         UIPasteboard.general.setData(png, forPasteboardType: UTType.png.identifier)
         let view = makeTextView()

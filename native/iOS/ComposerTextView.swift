@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // SwiftUI's TextField only pastes text on iOS 18, so a copied image would
 // need a separate button; this text view takes it from the system Paste.
@@ -21,10 +22,7 @@ struct IOSComposerTextView: UIViewRepresentable {
 
     func updateUIView(_ view: ComposerUITextView, context: Context) {
         context.coordinator.text = $text
-        if view.text != text, view.markedTextRange == nil {
-            view.text = text
-            view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
-        }
+        view.sync(text)
         view.placeholder = placeholder
         view.accessibilityLabel = label
         view.pasteAttachments = pasteAttachments
@@ -100,8 +98,16 @@ final class ComposerUITextView: UITextView {
         return ceil(bounds.height)
     }
 
+    // Text set from outside waits while the keyboard is composing, so it never
+    // replaces marked text mid-word.
+    func sync(_ text: String) {
+        guard self.text != text, markedTextRange == nil else { return }
+        self.text = text
+        selectedRange = NSRange(location: (text as NSString).length, length: 0)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)), pasteAttachments != nil, UIPasteboard.general.hasImages { return true }
+        if action == #selector(paste(_:)), pasteAttachments != nil, UIPasteboard.general.hasImages || UIPasteboard.general.contains(pasteboardTypes: [UTType.fileURL.identifier]) { return true }
         return super.canPerformAction(action, withSender: sender)
     }
 
