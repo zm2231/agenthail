@@ -82,25 +82,40 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	}
 }
 
-func TestDashboardCreationWithoutIdentityMarksUnknown(t *testing.T) {
+func TestACreationWithoutIdentityReportsItsOutcomeAsUnknownOrFailed(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		err     error
-		unknown bool
+		name     string
+		err      error
+		launcher bool
+		status   string
+		code     string
 	}{
-		{name: "ambiguous", err: surface.DeliveryOutcomeUnknown(fmt.Errorf("native response lost")), unknown: true},
-		{name: "definite", err: fmt.Errorf("model rejected"), unknown: false},
+		{name: "ambiguous", err: surface.DeliveryOutcomeUnknown(fmt.Errorf("native response lost")), status: "unknown", code: "create_unknown"},
+		{name: "definite", err: fmt.Errorf("model rejected"), status: "failed", code: "create_failed"},
+		{name: "ambiguous launch", err: surface.DeliveryOutcomeUnknown(fmt.Errorf("launch reply lost")), launcher: true, status: "unknown", code: "create_unknown"},
+		{name: "definite launch", err: fmt.Errorf("cmux is not running"), launcher: true, status: "failed", code: "create_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, _, fake, _, _ := daemonFixture(t)
 			d.Surfaces = []surface.Surface{&noSessionStartSurface{daemonSurface: fake, err: tc.err}}
-			w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
+			request := `{"action":"session-create","surface":"codex","message":"hello"}`
+			if tc.launcher {
+				fake.kind = surface.KindClaude
+				d.Surfaces = []surface.Surface{fake}
+				d.SetLaunchers([]surface.Launcher{&launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, launchErr: tc.err}})
+				request = fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","cwd":%q}`, t.TempDir())
+			}
+			w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", request)
 			var body map[string]any
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 				t.Fatal(err, w.Body.String())
 			}
-			if w.Code != http.StatusBadGateway || body["ok"] != false || body["status"] != "failed" || body["retryable"] != false || body["unknown"] != tc.unknown || body["session"] != nil {
+			unknown := tc.status == "unknown"
+			if w.Code != http.StatusBadGateway || body["ok"] != false || body["status"] != tc.status || body["code"] != tc.code || body["retryable"] != false || body["unknown"] != unknown || body["session"] != nil {
 				t.Fatal(w.Code, w.Body.String())
+			}
+			if _, ok := body["error"].(string); !ok {
+				t.Fatalf("error is not a string: %s", w.Body.String())
 			}
 		})
 	}
