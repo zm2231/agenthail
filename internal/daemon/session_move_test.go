@@ -59,7 +59,7 @@ func moveNodeOn(t *testing.T, host *claudehosttest.Fixture) *moveNode {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reg.Close() })
-	d := New(reg, []surface.Surface{claude})
+	d := newTestDaemon(t, reg, []surface.Surface{claude})
 	node := &federationNode{daemon: d, reg: reg, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
 	return &moveNode{federationNode: node, host: host, claude: claude}
