@@ -48,14 +48,21 @@ transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journa
 to receive subsequent changes rather than replaying the entire retained journal.
 An older-page request does not change the active stream cursor.
 
-Every newest-page read starts the shared session source. A streamable session
-whose journal was seeded before is served from the journal at once; what the
-source then catches up gets later seqs and reaches the client on the session
-stream it opens after the page's `journalSeq`. A journal written by an earlier
-item derivation is not: the source's first pass rebuilds it, dropping rows the
-stream has no removal for, so its page waits for that pass. Any other newest-page read waits
-at most two seconds for the source's first pass, and a cold journal is seeded
-by that pass. A seeded journal backed by a transcript (Claude, and Codex with a
+Every newest-page read starts the shared session source and waits at most two
+seconds for its first pass, which catches the journal up with what the
+transcript gained while no source ran, rebuilds a journal written by an earlier
+item derivation, and seeds a cold one. What the source catches up after the
+wait gets later seqs and reaches the client on the session stream it opens
+after the page's `journalSeq`. A source that is already running has passed
+once, so its page is read at once.
+
+The catalog holds a source for every session whose process is live: a Claude
+session whose process its adapter finds open, and a managed Codex thread in a
+turn. Each discovery pass holds the newly live ones and releases those it no
+longer finds live; a partial pass only adds. A Codex Desktop thread has no
+process to check and is read when asked for. Each source watches its transcript
+through the process's shared file watcher, which follows at most 256 files;
+past that, sources poll their transcripts on the stream's timer instead. A seeded journal backed by a transcript (Claude, and Codex with a
 local transcript) catches up by reading the transcript newest-first until it
 meets the journal, so turns written while no source ran appear after it.
 A Claude journal also keeps a transcript checkpoint in
