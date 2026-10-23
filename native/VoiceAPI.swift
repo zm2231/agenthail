@@ -130,6 +130,7 @@ final class VoiceAPI: VoiceServiceClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
+            if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
             struct Failure: Decodable { let error: Detail; struct Detail: Decodable { let message: String } }
             let failure = try? JSONDecoder().decode(Failure.self, from: data)
             throw AgenthailAPIError.request(http.statusCode, failure?.error.message ?? "Voice connection failed (\(http.statusCode)).")
