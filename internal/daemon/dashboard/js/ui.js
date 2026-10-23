@@ -1,5 +1,5 @@
 import { createBackdrop, parseBackground } from "./ui-backdrop.js";
-import { foregroundOn, luminance, readableOnTint } from "./ui-contrast.js";
+import { foregroundOn, luminance, readableOnTint, readableText } from "./ui-contrast.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
@@ -24,13 +24,31 @@ function css([r, g, b], alpha) {
   return alpha === undefined ? `rgb(${channels})` : `rgb(${channels} / ${alpha})`;
 }
 
-export function applyTheme(document, values, prefersDark, colourOf) {
+export function effectiveTarget(values, highContrast) {
+  if (highContrast) return 7;
+  return Number.isFinite(values["contrast.target"]) ? values["contrast.target"] : 4.5;
+}
+
+function textSurfaces(colourOf) {
+  const composer = colourOf("var(--composer)", "var(--paper)");
+  const solid = [...SURFACES, "--code"].map((token) => colourOf(`var(${token})`));
+  const layered = [
+    composer,
+    colourOf("var(--glass)", "var(--paper)"),
+    colourOf("var(--accent-soft)", "var(--paper)"),
+    colourOf("var(--accent-soft)", "var(--panel)"),
+    composer && colourOf("var(--accent-soft)", css(composer)),
+  ];
+  return [...solid, ...layered].filter(Boolean);
+}
+
+export function applyTheme(document, values, prefersDark, colourOf, target = 4.5) {
   const root = document.documentElement;
   const theme = resolveTheme(values.theme, prefersDark);
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
   document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", theme);
-  for (const token of ACCENT_TOKENS) root.style.removeProperty(token);
+  for (const token of [...ACCENT_TOKENS, ...ROLES]) root.style.removeProperty(token);
   const accent = parseHex(values["theme.accent"]);
   if (accent) {
     const surfaces = SURFACES.map((token) => colourOf(`var(${token})`)).filter(Boolean);
@@ -38,6 +56,13 @@ export function applyTheme(document, values, prefersDark, colourOf) {
     root.style.setProperty("--accent", css(readable));
     root.style.setProperty("--accent-soft", css(readable, SOFT));
     root.style.setProperty("--on-accent", css(foregroundOn(readable)));
+  }
+  const surfaces = textSurfaces(colourOf);
+  for (const token of ROLES) {
+    const colour = colourOf(`var(${token})`);
+    if (!colour) continue;
+    const readable = readableText(colour, surfaces, theme === "dark", target);
+    if (readable !== colour) root.style.setProperty(token, css(readable));
   }
   return theme;
 }
@@ -57,7 +82,7 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, colourO
     polarity: theme,
     ground: ground || (theme === "dark" ? [0, 0, 0] : [1, 1, 1]),
     roles: ROLES.map((token) => colourOf(`var(${token})`)).filter(Boolean).map(luminance),
-    target: highContrast ? 7 : number("contrast.target", 4.5),
+    target: effectiveTarget(values, highContrast),
     readable: highContrast || values["glass.readability"] !== "off",
     width,
     height,
@@ -71,11 +96,19 @@ function browserColour(document) {
   const probe = document.createElement("span");
   probe.style.display = "none";
   document.body.append(probe);
-  return (value) => {
+  const resolve = (value) => {
     probe.style.color = value;
-    const resolved = getComputedStyle(probe).color;
-    if (!resolved || !context) return null;
+    return getComputedStyle(probe).color;
+  };
+  return (value, under) => {
+    const resolved = resolve(value);
+    const ground = under ? resolve(under) : null;
+    if (!resolved || !context || (under && !ground)) return null;
     context.clearRect(0, 0, 1, 1);
+    if (ground) {
+      context.fillStyle = ground;
+      context.fillRect(0, 0, 1, 1);
+    }
     context.fillStyle = resolved;
     context.fillRect(0, 0, 1, 1);
     const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
@@ -105,7 +138,7 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
   }
   let painting = Promise.resolve();
   const apply = () => {
-    const theme = applyTheme(document, values, scheme.matches, colourOf);
+    const theme = applyTheme(document, values, scheme.matches, colourOf, effectiveTarget(values, contrast.matches));
     if (!backdrop) return;
     const size = viewport();
     const look = backdropLook(values, theme, {

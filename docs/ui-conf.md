@@ -105,7 +105,7 @@ The dashboard reads the `web` device's settings and follows every change as it i
 - `theme` and `theme.accent` work as in the apps. `system` follows the browser's light or dark preference.
 - `background`, `background.light`, `background.fit`, `background.position`, `background.dim`, `background.opacity`, `background.session-opacity`, `texture`, `texture.strength` and `texture.spacing` draw the background, loaded from the daemon. `background.session-opacity` applies on the Conversations view.
 - `desktop` shows the plain window colour, since a browser cannot show the desktop.
-- Text keeps `contrast.target`: the dashboard measures the background across the whole window and lays its own ground colour over it as much as the least readable spot needs. `glass.readability = off` turns this off. With the browser's increased contrast preference, it uses 7.
+- Text keeps `contrast.target`. Text colours that would miss it on the dashboard's own surfaces are lifted toward white in dark, or black in light, until they reach it. Over a background, the dashboard measures the whole window and lays its own ground colour over it as much as the least readable spot needs; `glass.readability = off` turns that layer off. With the browser's increased contrast preference, the target is 7.
 
 ## The agenthail ui command
 

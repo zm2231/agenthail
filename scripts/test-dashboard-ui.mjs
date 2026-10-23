@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as contrast from "../internal/daemon/dashboard/js/ui-contrast.js";
 import * as backdrop from "../internal/daemon/dashboard/js/ui-backdrop.js";
-import { applyTheme, backdropLook, parseHex, resolveTheme, start } from "../internal/daemon/dashboard/js/ui.js";
+import { applyTheme, backdropLook, effectiveTarget, parseHex, resolveTheme, start } from "../internal/daemon/dashboard/js/ui.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const vectors = JSON.parse(fs.readFileSync(path.join(root, "scripts/fixtures/contrast-vectors.json"), "utf8"));
@@ -267,7 +267,7 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
 
 {
   const ink = contrast.luminance([0.93, 0.92, 0.9]);
-  const quiet = contrast.luminance([0.6, 0.58, 0.56]);
+  const quiet = contrast.luminance([0.75, 0.73, 0.7]);
   const ground = [0.09, 0.094, 0.102];
   const shown = backdrop.composite([1, 1, 1], 0.5, ground, 0.25, "dark");
   closeAll(shown, ground.map((g) => (g + (1 - g) * 0.5) * 0.75), "strength blends over the ground, then dim darkens");
@@ -275,17 +275,12 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
 
   for (const [polarity, roles, base, samples] of [
     ["dark", [ink, quiet], ground, [[0.05, 0.05, 0.05], [0.3, 0.6, 0.9], [0.95, 0.9, 0.8]]],
-    ["dark", [ink], ground, [[0.3, 0.6, 0.9], [0.95, 0.9, 0.8]]],
-    ["light", [contrast.luminance([0.2, 0.2, 0.2]), contrast.luminance([0.42, 0.41, 0.4])], [0.97, 0.96, 0.95], [[0.8, 0.2, 0.2], [0.1, 0.1, 0.3]]],
+    ["light", [contrast.luminance([0.2, 0.2, 0.2]), contrast.luminance([0.3, 0.3, 0.3])], [0.97, 0.96, 0.95], [[0.8, 0.2, 0.2], [0.1, 0.1, 0.3]]],
   ]) {
     for (const target of [4.5, 7]) {
       const alpha = backdrop.pageScrim(samples, roles, polarity, target, base);
       const under = (a) => samples.map((c) => c.map((v, i) => v + (base[i] - v) * a));
       const worst = (a) => Math.min(...under(a).flatMap((c) => roles.map((role) => contrast.ratio(role, contrast.luminance(c)))));
-      if (worst(1) < target) {
-        assert.equal(alpha, 1, `when even the ground misses ${target}:1, the scrim is solid ground (${polarity})`);
-        continue;
-      }
       assert.ok(worst(alpha) >= target, `the scrim brings every text role to ${target}:1 over every sample (${polarity}: ${worst(alpha)})`);
       assert.ok(alpha === 0 || worst(alpha - 1 / 255) < target + contrast.MARGIN, `and is the least that does (${polarity} ${target})`);
     }
@@ -371,6 +366,68 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   observer.callback();
   assert.equal(renders.at(-1).strength, 0.3, "at the session strength");
   assert.equal(resizes[0][0], "resize", "and resizing the window remeasures");
+}
+
+{
+  const quiet = [0.6, 0.58, 0.56];
+  const paper = [0.09, 0.094, 0.102];
+  assert.equal(contrast.readableText(quiet, [paper], true, 4.5), quiet, "text that already reads keeps its colour");
+  const lifted = contrast.readableText(quiet, [paper], true, 7);
+  assert.ok(textRatio(lifted, paper) >= 7, "text that misses the target is lifted until it reads");
+  assert.ok(lifted.every((v) => Math.round(v * 255) === v * 255), "in whole 8-bit steps, so the page draws what was measured");
+  const less = lifted.map((v, i) => Math.max(v - 2 / 255, quiet[i]));
+  assert.ok(textRatio(less, paper) < 7, "and no further than it needs");
+}
+
+for (const [name, set] of [["dark", dark], ["light", light]]) {
+  const over = (token, under) => token.colour.map((v, i) => Math.round((v * token.alpha + under[i] * (1 - token.alpha)) * 255) / 255);
+  const parse = (value) => {
+    const rgb = /^rgb\((\d+) (\d+) (\d+)/.exec(value);
+    if (rgb) return { colour: rgb.slice(1, 4).map((v) => +v / 255), alpha: 1 };
+    const token = /^var\(--([a-z-]+)\)$/.exec(value);
+    return token ? set[token[1]] : null;
+  };
+  const doc = fakeDocument();
+  const colourOf = (value, under) => {
+    const name = /^var\((--[a-z-]+)\)$/.exec(value)?.[1];
+    const top = parse(doc.documentElement.style.properties.get(name) ?? value);
+    if (!top) return null;
+    const ground = under ? parse(under) : null;
+    return ground ? over(top, ground.colour) : top.colour;
+  };
+  for (const [why, values, highContrast] of [
+    ["contrast.target = 7", { theme: name, "contrast.target": 7 }, false],
+    ["the browser's increased contrast", { theme: name, "contrast.target": 4.5 }, true],
+  ]) {
+    const target = effectiveTarget(values, highContrast);
+    applyTheme(doc, values, name === "dark", colourOf, target);
+    const roles = ["--ink", "--muted", "--quiet"].map((token) => colourOf(`var(${token})`));
+    const composer = over(set.composer, set.paper.colour);
+    const surfaces = [set.paper, set.panel, set.raised, set.hover, set.code].map((t) => t.colour).concat([
+      composer,
+      over(set.glass, set.paper.colour),
+      over(set["accent-soft"], set.paper.colour),
+      over(set["accent-soft"], set.panel.colour),
+      over(set["accent-soft"], composer),
+    ]);
+    for (const role of roles) for (const surface of surfaces) {
+      assert.ok(textRatio(role, surface) >= 7, `${name}, ${why}: every text role reads at 7:1 on every surface (${textRatio(role, surface).toFixed(2)})`);
+    }
+    const look = backdropLook(values, name, { sessionOpen: false, highContrast, colourOf, width: 1440, height: 900 });
+    assert.equal(look.target, 7);
+    const samples = [[1, 1, 1], [0, 0, 0], [0.9, 0.3, 0.2], [0.2, 0.4, 0.9]];
+    const alpha = backdrop.pageScrim(samples, look.roles, look.polarity, look.target, look.ground);
+    assert.ok(alpha < 1, `${name}, ${why}: the scrim reaches 7:1 before it is solid`);
+    for (const sample of samples) {
+      const shown = sample.map((v, i) => v + (look.ground[i] - v) * alpha);
+      for (const role of look.roles) {
+        const r = contrast.ratio(role, contrast.luminance(shown));
+        assert.ok(r >= 7, `${name}, ${why}: every role reads at 7:1 over the background (${r.toFixed(2)})`);
+      }
+    }
+  }
+  applyTheme(doc, { theme: name }, name === "dark", colourOf, 4.5);
+  assert.equal(doc.documentElement.style.properties.has("--quiet"), false, `${name}: at 4.5 the palette is used as it is`);
 }
 
 console.log("dashboard ui ok");
