@@ -2,14 +2,17 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +31,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	firstEntries := followJournal(t, manager, from.ID, first)
 	defer first.Cancel()
 	select {
 	case <-adapter.started:
@@ -36,7 +40,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	}
 	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 1, Operation: "append", Kind: "text", Text: "ready"}
 	select {
-	case <-first.Entries:
+	case <-firstEntries:
 	case <-time.After(time.Second):
 		t.Fatal("source did not journal event")
 	}
@@ -290,6 +294,101 @@ func TestASessionStreamCarriesEachRowAsTheSessionPageReadsIt(t *testing.T) {
 			t.Fatalf("a row the page leaves out carries an item: %s %+v", envelope.Data.ItemID, envelope.Item)
 		case onPage && (envelope.Item == nil || !reflect.DeepEqual(*envelope.Item, want)):
 			t.Fatalf("row %s streams as %+v, the page reads %+v", envelope.Data.ItemID, envelope.Item, want)
+		}
+	}
+}
+
+// gatedStreamWriter holds every write until release closes, the way a
+// client that stops reading holds the daemon's stream writer.
+type gatedStreamWriter struct {
+	release chan struct{}
+	mu      sync.Mutex
+	header  http.Header
+	body    bytes.Buffer
+}
+
+func (w *gatedStreamWriter) Header() http.Header { return w.header }
+
+func (w *gatedStreamWriter) WriteHeader(int) {}
+
+func (w *gatedStreamWriter) Write(p []byte) (int, error) {
+	<-w.release
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(p)
+}
+
+func (w *gatedStreamWriter) Flush() {}
+
+func (w *gatedStreamWriter) count(text string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Count(w.body.String(), text)
+}
+
+func TestASessionStreamThatStopsReadingDuringABurstStillReceivesEveryRow(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 200)}
+	adapter.caps.Stream = true
+	d = newTestDaemon(t, reg, []surface.Surface{adapter})
+	manager := newSessionSourceManager(reg)
+	defer manager.shutdown()
+	d.sources = manager
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("source did not start")
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, sessionJournalRetentionCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &gatedStreamWriter{release: make(chan struct{}), header: http.Header{}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id="+from.ID, nil).WithContext(ctx)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		d.writeSessionStream(writer, request, writer, from.ID, 0, window, subscription.Wake)
+	}()
+	const burst = 160
+	for i := range burst {
+		adapter.events <- surface.StreamEvent{ID: fmt.Sprintf("reply-%d", i), ProviderKey: fmt.Sprintf("reply-%d", i), Operation: "upsert", Kind: "text", Role: "assistant", Text: fmt.Sprintf("burst reply %d", i)}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		rows, err := reg.SessionJournalAfter(from.ID, window.LatestSeq, burst+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows.Entries) == burst {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the source journaled %d of %d rows", len(rows.Entries), burst)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(writer.release)
+	for writer.count(`"body":"burst reply `) < burst {
+		select {
+		case <-finished:
+			t.Fatalf("the stream ended after %d of %d rows", writer.count(`"body":"burst reply `), burst)
+		case <-time.After(time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the stream wrote %d of %d rows", writer.count(`"body":"burst reply `), burst)
+		}
+	}
+	for i := range burst {
+		if got := writer.count(fmt.Sprintf(`"body":"burst reply %d"`, i)); got != 1 {
+			t.Fatalf("row %d was written %d times", i, got)
 		}
 	}
 }

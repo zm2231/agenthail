@@ -141,7 +141,7 @@ separate. The following shapes are canonical:
 
 A `SessionSource` is the only component allowed to read provider session
 content for its session. It normalizes provider output, appends journal events
-in sequence order, and fans out journal entries to subscribers. Codex Desktop
+in sequence order, and wakes its followers. Codex Desktop
 content is read from its local JSONL transcript as one incremental source: the
 seed ends at the last complete newline, and the live tail starts at that exact
 byte offset. Seed and tail use the same record parser and stable item keys,
@@ -155,8 +155,13 @@ any viewer subscribes, a relay/route watches the session, a managed turn is
 active, delivery reconciliation is pending, or a voice call is active.
 It may become cold only when all holders are gone; a cold read reacquires it.
 
-The journal has count and byte retention limits. A slow subscriber is closed
-and resumes using its last received session sequence. Restart preserves the
+A follower, a session stream or a voice call's target stream, keeps its own
+cursor and reads the journal rows after it each time the source wakes it.
+Wakes coalesce, so a follower that is slow to read a burst finds the rows in
+the journal when it next reads; a row upserted while it waits arrives once, in
+its latest state. The journal has count and byte retention limits. A follower
+whose cursor falls behind what the journal retains ends: a session stream
+closes, and a voice call's stream reports a source error. Restart preserves the
 journal; a reconnect either replays without duplicates or receives
 `stream_gap`.
 
