@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -56,28 +57,7 @@ func SaveNotificationConfig(config NotificationConfig) error {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return fmt.Errorf("create notification config directory: %w", err)
 	}
-	temporary, err := os.CreateTemp(directory, ".notifications-*.json")
-	if err != nil {
-		return fmt.Errorf("create notification config: %w", err)
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0600); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(append(data, '\n')); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, NotificationConfigPath())
+	return atomicfile.WriteSynced(NotificationConfigPath(), append(data, '\n'), 0600)
 }
 
 func GetNotificationStatus() NotificationStatus {

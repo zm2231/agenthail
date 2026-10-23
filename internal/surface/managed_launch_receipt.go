@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/atomicfile"
 )
 
 type ManagedCodexLaunchReceipt struct {
@@ -147,25 +149,8 @@ func WriteManagedCodexLaunchReceipt(path string, receipt ManagedCodexLaunchRecei
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("create managed Codex launch receipt directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".receipt-*")
-	if err != nil {
-		return fmt.Errorf("create managed Codex launch receipt: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("protect managed Codex launch receipt: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
+	if err := atomicfile.Write(path, data, 0600); err != nil {
 		return fmt.Errorf("write managed Codex launch receipt: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close managed Codex launch receipt: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("publish managed Codex launch receipt: %w", err)
 	}
 	return nil
 }
