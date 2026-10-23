@@ -1,10 +1,203 @@
 {
+  "alignments" : [
+    {
+      "limit" : 4000000,
+      "new" : [
+        "b",
+        "a"
+      ],
+      "old" : [
+        "a",
+        "b"
+      ],
+      "steps" : [
+        "removed",
+        "same",
+        "added"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+        "y",
+        "a",
+        "x"
+      ],
+      "old" : [
+        "x",
+        "a",
+        "y"
+      ],
+      "steps" : [
+        "removed",
+        "removed",
+        "same",
+        "added",
+        "added"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+        "c",
+        "b",
+        "a"
+      ],
+      "old" : [
+        "a",
+        "b",
+        "c"
+      ],
+      "steps" : [
+        "removed",
+        "removed",
+        "same",
+        "added",
+        "added"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+        "k",
+        "b",
+        "a",
+        "k"
+      ],
+      "old" : [
+        "k",
+        "a",
+        "b",
+        "k"
+      ],
+      "steps" : [
+        "same",
+        "removed",
+        "same",
+        "added",
+        "same"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+        "x",
+        "a",
+        "x",
+        "b"
+      ],
+      "old" : [
+        "a",
+        "x",
+        "b",
+        "x"
+      ],
+      "steps" : [
+        "added",
+        "same",
+        "same",
+        "same",
+        "removed"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+        "a"
+      ],
+      "old" : [
+
+      ],
+      "steps" : [
+        "added"
+      ]
+    },
+    {
+      "limit" : 4000000,
+      "new" : [
+
+      ],
+      "old" : [
+        "a"
+      ],
+      "steps" : [
+        "removed"
+      ]
+    },
+    {
+      "limit" : 4,
+      "new" : [
+        "p",
+        "b",
+        "c",
+        "s"
+      ],
+      "old" : [
+        "p",
+        "a",
+        "b",
+        "s"
+      ],
+      "steps" : [
+        "same",
+        "removed",
+        "same",
+        "added",
+        "same"
+      ]
+    },
+    {
+      "limit" : 4,
+      "new" : [
+        "p",
+        "b",
+        "c",
+        "d",
+        "s"
+      ],
+      "old" : [
+        "p",
+        "a",
+        "b",
+        "s"
+      ],
+      "steps" : [
+        "same",
+        "removed",
+        "removed",
+        "added",
+        "added",
+        "added",
+        "same"
+      ]
+    },
+    {
+      "limit" : 3,
+      "new" : [
+        "b",
+        "a"
+      ],
+      "old" : [
+        "a",
+        "b"
+      ],
+      "steps" : [
+        "removed",
+        "removed",
+        "added",
+        "added"
+      ]
+    }
+  ],
   "calls" : [
     {
       "changes" : [
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "$ swift test --filter ReconnectTests\ndescription: Run the reconnect tests",
       "name" : "Bash",
       "object" : "Run the reconnect tests",
@@ -17,6 +210,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "$ swift build\n--target Reconnect\ntimeout: 120000",
       "name" : "Bash",
       "object" : "swift build",
@@ -29,6 +225,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "$ ls\ndescription:    ",
       "name" : "Bash",
       "object" : "ls",
@@ -41,6 +240,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "$ go test .\/...\nworkdir: \/work",
       "name" : "exec_command",
       "object" : "go test .\/...",
@@ -53,6 +255,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "$ ls -la\ncommand: [\n  \"bash\",\n  \"-lc\",\n  \"ls\"\n]",
       "name" : "functions.exec_command",
       "object" : "ls -la",
@@ -69,6 +274,48 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "\/work\/Sources\/App.swift",
+          "rows" : [
+            {
+              "kind" : "same",
+              "marks" : [
+
+              ],
+              "text" : "a"
+            },
+            {
+              "kind" : "removed",
+              "marks" : [
+
+              ],
+              "text" : "b"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "B"
+            },
+            {
+              "kind" : "same",
+              "marks" : [
+
+              ],
+              "text" : "c"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "d"
+            }
+          ]
+        }
+      ],
       "input" : "file_path: \/work\/Sources\/App.swift\nnew_string: a\nB\nc\nd\nold_string: a\nb\nc",
       "name" : "Edit",
       "object" : "App.swift",
@@ -85,6 +332,27 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "\/work\/notes.md",
+          "rows" : [
+            {
+              "kind" : "removed",
+              "marks" : [
+
+              ],
+              "text" : "one"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "two"
+            }
+          ]
+        }
+      ],
       "input" : "newText: two\noldText: one\npath: \/work\/notes.md",
       "name" : "edit",
       "object" : "notes.md",
@@ -101,6 +369,27 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "\/work\/New.swift",
+          "rows" : [
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "one"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "two"
+            }
+          ]
+        }
+      ],
       "input" : "content: one\ntwo\n\nfile_path: \/work\/New.swift",
       "name" : "Write",
       "object" : "New.swift",
@@ -117,6 +406,44 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "\/work\/M.swift",
+          "rows" : [
+            {
+              "kind" : "removed",
+              "marks" : [
+
+              ],
+              "text" : "x"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "y"
+            },
+            {
+              "hunk" : true
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "z"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "w"
+            }
+          ]
+        }
+      ],
       "input" : "edits: [\n  {\n    \"new_string\": \"y\",\n    \"old_string\": \"x\"\n  },\n  {\n    \"new_string\": \"z\\nw\",\n    \"old_string\": \"\"\n  }\n]\nfile_path: \/work\/M.swift",
       "name" : "MultiEdit",
       "object" : "M.swift",
@@ -138,6 +465,46 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "a\/b.swift",
+          "rows" : [
+            {
+              "kind" : "removed",
+              "marks" : [
+
+              ],
+              "text" : "old"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "new"
+            },
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "more"
+            }
+          ]
+        },
+        {
+          "path" : "c.md",
+          "rows" : [
+            {
+              "kind" : "added",
+              "marks" : [
+
+              ],
+              "text" : "hello"
+            }
+          ]
+        }
+      ],
       "input" : "input: *** Begin Patch\n*** Update File: a\/b.swift\n@@\n-old\n+new\n+more\n*** Add File: c.md\n+hello\n*** End Patch",
       "name" : "apply_patch",
       "object" : "b.swift, c.md",
@@ -154,6 +521,14 @@
         }
       ],
       "code" : true,
+      "diffs" : [
+        {
+          "path" : "gone.txt",
+          "rows" : [
+
+          ]
+        }
+      ],
       "input" : "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch",
       "name" : "apply_patch",
       "object" : "gone.txt",
@@ -166,6 +541,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "todos: [\n  {\n    \"content\": \"Verify\",\n    \"status\": \"in_progress\"\n  }\n]",
       "name" : "TodoWrite",
       "object" : "",
@@ -178,6 +556,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "plan: [\n  {\n    \"status\": \"pending\",\n    \"step\": \"Ship\"\n  }\n]",
       "name" : "update_plan",
       "object" : "",
@@ -190,6 +571,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "note: no list",
       "name" : "TodoWrite",
       "object" : "no list",
@@ -202,6 +586,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "file_path: \/work\/README.md\nlimit: 40",
       "name" : "Read",
       "object" : "README.md",
@@ -214,6 +601,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "path: \/work\/native\npattern: Collapse activity",
       "name" : "Grep",
       "object" : "Collapse activity",
@@ -226,6 +616,9 @@
 
       ],
       "code" : true,
+      "diffs" : [
+
+      ],
       "input" : "pattern: **\/*.swift",
       "name" : "Glob",
       "object" : "**\/*.swift",
@@ -238,6 +631,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "prompt: Summarise\nurl: https:\/\/example.com\/docs",
       "name" : "WebFetch",
       "object" : "https:\/\/example.com\/docs",
@@ -250,6 +646,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "query: swiftui scroll position",
       "name" : "WebSearch",
       "object" : "swiftui scroll position",
@@ -262,6 +661,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "description: Find the callers\nprompt: Look for every caller\nsubagent_type: Explore",
       "name" : "Agent",
       "object" : "Find the callers",
@@ -274,6 +676,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "activeForm: Parsing\ndescription: A long description\nsubject: Parse the list",
       "name" : "TaskCreate",
       "object" : "Parse the list",
@@ -286,6 +691,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "status: in_progress\ntaskId: 2",
       "name" : "TaskUpdate",
       "object" : "Task 2 · in progress",
@@ -298,6 +706,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "taskId: 3",
       "name" : "TaskUpdate",
       "object" : "Task 3",
@@ -310,6 +721,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "message: Audit done\nDetails follow\nsummary: \nto: @collab",
       "name" : "SendMessage",
       "object" : "Audit done",
@@ -322,6 +736,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "description: Weekly note\nsubject: Hi",
       "name" : "send_email",
       "object" : "Weekly note",
@@ -334,6 +751,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "count: 3\nflag: true",
       "name" : "mcp__xcode__build_sim",
       "object" : "2 fields",
@@ -346,6 +766,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "{}",
       "name" : "mcp__server__tool_name",
       "object" : "",
@@ -358,6 +781,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "big: 12345678901\nlist: []\nm: -0.25\nn: 1.5\nnested: {\n  \"a\": {},\n  \"b\": [\n    1,\n    \"x\",\n    null,\n    false\n  ]\n}",
       "name" : "custom",
       "object" : "5 fields",
@@ -370,6 +796,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "quote: {\n  \"s\": \"a\\\"b\\n\\u0001é\\t\"\n}",
       "name" : "custom",
       "object" : "1 field",
@@ -382,6 +811,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "a custom payload\nsecond line",
       "name" : "custom",
       "object" : "a custom payload",
@@ -394,6 +826,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "first\r\nsecond",
       "name" : "custom",
       "object" : "first",
@@ -406,6 +841,9 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "",
       "name" : "custom",
       "object" : "",
@@ -418,12 +856,408 @@
 
       ],
       "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "[1,2]",
       "name" : "custom",
       "object" : "[1,2]",
       "summary" : "[1,2]",
       "text" : "[1,2]",
       "verb" : "custom"
+    }
+  ],
+  "diffs" : [
+    {
+      "after" : "a\nB\nc\nd\ne",
+      "before" : "a\nb\nc",
+      "rows" : [
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "a"
+        },
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "b"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "B"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "c"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "d"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "e"
+        }
+      ]
+    },
+    {
+      "after" : "let y = 1",
+      "before" : "let x = 1",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+            [
+              4,
+              5
+            ]
+          ],
+          "text" : "let x = 1"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              4,
+              5
+            ]
+          ],
+          "text" : "let y = 1"
+        }
+      ]
+    },
+    {
+      "after" : "call(a, b)",
+      "before" : "call(a)",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "call(a)"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              6,
+              9
+            ]
+          ],
+          "text" : "call(a, b)"
+        }
+      ]
+    },
+    {
+      "after" : "    let run: String\n    let diffs: [FileDiff]",
+      "before" : "    let changes: [FileChange]",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+            [
+              8,
+              15
+            ],
+            [
+              18,
+              28
+            ]
+          ],
+          "text" : "    let changes: [FileChange]"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "    let run: String"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              8,
+              13
+            ],
+            [
+              16,
+              24
+            ]
+          ],
+          "text" : "    let diffs: [FileDiff]"
+        }
+      ]
+    },
+    {
+      "after" : "omega",
+      "before" : "alpha",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "alpha"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "omega"
+        }
+      ]
+    },
+    {
+      "after" : "café 👍🏽 new",
+      "before" : "café 👍🏽 old",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+            [
+              7,
+              10
+            ]
+          ],
+          "text" : "café 👍🏽 old"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              7,
+              10
+            ]
+          ],
+          "text" : "café 👍🏽 new"
+        }
+      ]
+    },
+    {
+      "after" : "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline ten\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20",
+      "before" : "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20",
+      "rows" : [
+        {
+          "folded" : 6
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 7"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 8"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 9"
+        },
+        {
+          "kind" : "removed",
+          "marks" : [
+            [
+              5,
+              7
+            ]
+          ],
+          "text" : "line 10"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              5,
+              8
+            ]
+          ],
+          "text" : "line ten"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 11"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 12"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "line 13"
+        },
+        {
+          "folded" : 7
+        }
+      ]
+    },
+    {
+      "after" : "a\r\nc\r\n",
+      "before" : "a\r\nb\r\n",
+      "rows" : [
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "a"
+        },
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "b"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "c"
+        }
+      ]
+    },
+    {
+      "after" : "one two three three",
+      "before" : "one two two three",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+            [
+              8,
+              11
+            ]
+          ],
+          "text" : "one two two three"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+            [
+              8,
+              13
+            ]
+          ],
+          "text" : "one two three three"
+        }
+      ]
+    },
+    {
+      "after" : "y = 2\nx = f(b, a)",
+      "before" : "x = f(a, b)\ny = 2",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "x = f(a, b)"
+        },
+        {
+          "kind" : "same",
+          "marks" : [
+
+          ],
+          "text" : "y = 2"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "x = f(b, a)"
+        }
+      ]
+    },
+    {
+      "after" : "new\nfile\n",
+      "before" : "",
+      "rows" : [
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "new"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "file"
+        }
+      ]
+    },
+    {
+      "after" : "",
+      "before" : "gone\n",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "gone"
+        }
+      ]
+    },
+    {
+      "after" : "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "before" : "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "rows" : [
+        {
+          "kind" : "removed",
+          "marks" : [
+
+          ],
+          "text" : "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "kind" : "added",
+          "marks" : [
+
+          ],
+          "text" : "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      ]
     }
   ],
   "labels" : {

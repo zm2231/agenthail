@@ -28,34 +28,6 @@ export function textLines(text) {
   return lines;
 }
 
-export function lineCounts(before, after) {
-  const a = textLines(before);
-  const b = textLines(after);
-  if (a.length * b.length > 250000) return { added: b.length, removed: a.length };
-  let previous = new Array(b.length + 1).fill(0);
-  for (let i = 1; i <= a.length; i += 1) {
-    const current = new Array(b.length + 1).fill(0);
-    for (let j = 1; j <= b.length; j += 1) {
-      current[j] = a[i - 1] === b[j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], current[j - 1]);
-    }
-    previous = current;
-  }
-  const common = previous[b.length];
-  return { added: b.length - common, removed: a.length - common };
-}
-
-export function patchChanges(patch) {
-  const changes = [];
-  for (const line of textLines(patch)) {
-    const file = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
-    if (file) changes.push({ path: file[1].trim(), added: 0, removed: 0 });
-    else if (line.startsWith("*** ") || !changes.length) continue;
-    else if (line.startsWith("+")) changes[changes.length - 1].added += 1;
-    else if (line.startsWith("-")) changes[changes.length - 1].removed += 1;
-  }
-  return changes;
-}
-
 function content(name, text) {
   const input = toolInput(text);
   if (!input) return { kind: "raw" };
@@ -120,22 +92,25 @@ export function toolLine(call) {
   return { verb, object: summary === "No input parameters" ? "" : summary, code: false };
 }
 
-export function toolChanges(call) {
+export function toolDiffs(call) {
   const name = call.title || "";
   const shape = content(name, call.text || "");
-  if (shape.kind === "edit") return [{ path: shape.path, ...lineCounts(shape.before, shape.after) }];
+  if (shape.kind === "edit") return [{ path: shape.path, hunks: [textDiff(shape.before, shape.after)] }];
   if (shape.kind !== "raw") return [];
   const input = toolInput(call.text);
   const path = string(input?.file_path) ?? string(input?.path);
-  if (name === "apply_patch") return patchChanges(string(input?.input) ?? string(input?.patch) ?? call.text);
-  if (["Write", "write_file"].includes(name) && path !== undefined && string(input.content) !== undefined) return [{ path, ...lineCounts("", input.content) }];
-  if (name === "MultiEdit" && path !== undefined && Array.isArray(input.edits)) {
-    return [input.edits.reduce((total, edit) => {
-      const counts = lineCounts(string(edit?.old_string) ?? "", string(edit?.new_string) ?? "");
-      return { path, added: total.added + counts.added, removed: total.removed + counts.removed };
-    }, { path, added: 0, removed: 0 })];
+  if (["Write", "write_file"].includes(name)) return path !== undefined && string(input.content) !== undefined ? [{ path, hunks: [textDiff("", input.content)] }] : [];
+  if (name === "MultiEdit") {
+    const edits = input?.edits;
+    if (path === undefined || !Array.isArray(edits) || !edits.every((edit) => edit && typeof edit === "object" && !Array.isArray(edit))) return [];
+    return [{ path, hunks: edits.map((edit) => textDiff(string(edit.old_string) ?? "", string(edit.new_string) ?? "")) }];
   }
+  if (name === "apply_patch") return patchDiffs(string(input?.input) ?? string(input?.patch) ?? call.text);
   return [];
+}
+
+export function toolChanges(call) {
+  return toolDiffs(call).map(fileChange);
 }
 
 export function readableInput(text) {
@@ -222,3 +197,217 @@ export function outputPreview(text) {
 
 // Lines each "Show more" adds, as the Mac's ToolOutputBlock.page.
 export const outputPage = 500;
+
+// Mirrors native/TextDiff.swift: Alignment, TextDiff and FileDiff, and DiffEntry.entries for the rows.
+export const cellLimit = 4000000;
+
+export function alignmentSteps(old, next, limit = cellLimit) {
+  let prefix = 0;
+  while (prefix < old.length && prefix < next.length && old[prefix] === next[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < old.length - prefix && suffix < next.length - prefix && old[old.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix += 1;
+  const a = old.slice(prefix, old.length - suffix);
+  const b = next.slice(prefix, next.length - suffix);
+  const n = a.length;
+  const m = b.length;
+  const steps = new Array(prefix).fill("same");
+  if (n * m > limit) {
+    steps.push(...new Array(n).fill("removed"), ...new Array(m).fill("added"));
+  } else {
+    const common = new Int32Array((n + 1) * (m + 1));
+    for (let i = n - 1; i >= 0; i -= 1) {
+      for (let j = m - 1; j >= 0; j -= 1) {
+        common[i * (m + 1) + j] = a[i] === b[j] ? common[(i + 1) * (m + 1) + j + 1] + 1 : Math.max(common[(i + 1) * (m + 1) + j], common[i * (m + 1) + j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[i] === b[j]) {
+        steps.push("same");
+        i += 1;
+        j += 1;
+      } else if (i < n && (j === m || common[(i + 1) * (m + 1) + j] >= common[i * (m + 1) + j + 1])) {
+        steps.push("removed");
+        i += 1;
+      } else {
+        steps.push("added");
+        j += 1;
+      }
+    }
+  }
+  return steps.concat(new Array(suffix).fill("same"));
+}
+
+export function textDiff(before, after) {
+  const old = textLines(before);
+  const next = textLines(after);
+  let i = 0;
+  let j = 0;
+  return alignmentSteps(old, next).map((kind) => {
+    if (kind === "removed") return { kind, text: old[i++], marks: [] };
+    if (kind === "added") return { kind, text: next[j++], marks: [] };
+    i += 1;
+    return { kind, text: next[j++], marks: [] };
+  });
+}
+
+export function patchDiffs(text) {
+  const files = [];
+  const append = (kind, line) => {
+    const hunks = files[files.length - 1].hunks;
+    if (!hunks.length) hunks.push([]);
+    hunks[hunks.length - 1].push({ kind, text: line.slice(1), marks: [] });
+  };
+  for (const line of textLines(text)) {
+    const file = ["*** Update File: ", "*** Add File: ", "*** Delete File: "].find((prefix) => line.startsWith(prefix));
+    if (file) files.push({ path: line.slice(file.length).trim(), hunks: [] });
+    else if (line.startsWith("*** ") || !files.length) continue;
+    else if (line.startsWith("@@")) { const hunks = files[files.length - 1].hunks; if (hunks.length && hunks[hunks.length - 1].length) hunks.push([]); }
+    else if (line.startsWith("+")) append("added", line);
+    else if (line.startsWith("-")) append("removed", line);
+    else if (line.startsWith(" ")) append("same", line);
+  }
+  return files.map((file) => ({ path: file.path, hunks: file.hunks.filter((hunk) => hunk.length) }));
+}
+
+export function fileChange(diff) {
+  const lines = diff.hunks.flat();
+  return { path: diff.path, added: lines.filter((line) => line.kind === "added").length, removed: lines.filter((line) => line.kind === "removed").length };
+}
+
+// One entry per file, in first-touched order, with the hunks of every call that changed it.
+export function mergedDiffs(diffs) {
+  const merged = [];
+  for (const diff of diffs) {
+    const existing = merged.find((other) => other.path === diff.path);
+    if (existing) existing.hunks.push(...diff.hunks);
+    else merged.push({ path: diff.path, hunks: [...diff.hunks] });
+  }
+  return merged;
+}
+
+export const markLimit = 1000;
+const pairSimilarity = 0.25;
+const pairWindow = 8;
+
+function characters(text) {
+  return Array.from(graphemes.segment(text), ({ segment }) => segment);
+}
+
+function wordKind(character) {
+  const scalar = String.fromCodePoint(character.codePointAt(0));
+  if (/\p{Alphabetic}|\p{N}/u.test(scalar) || scalar === "_") return 0;
+  if (/\p{White_Space}/u.test(scalar)) return 1;
+  return 2;
+}
+
+function words(text) {
+  const result = [];
+  let current = [];
+  let start = 0;
+  let offset = 0;
+  for (const character of characters(text)) {
+    const last = current[current.length - 1];
+    if (last !== undefined && (wordKind(last) !== wordKind(character) || wordKind(character) === 2)) {
+      result.push({ text: current.join(""), start, end: offset });
+      current = [];
+      start = offset;
+    }
+    current.push(character);
+    offset += 1;
+  }
+  if (current.length) result.push({ text: current.join(""), start, end: offset });
+  return result;
+}
+
+function ranges(list, changed) {
+  const result = [];
+  for (const index of [...changed].sort((x, y) => x - y)) {
+    const last = result[result.length - 1];
+    if (last && last[1] === list[index].start) last[1] = list[index].end;
+    else result.push([list[index].start, list[index].end]);
+  }
+  return result;
+}
+
+// The words that differ between two lines, in character offsets, and how much of the longer line they share.
+export function lineMarks(old, next) {
+  const oldCharacters = characters(old);
+  const nextCharacters = characters(next);
+  const visible = Math.max(oldCharacters.filter((character) => wordKind(character) !== 1).length, nextCharacters.filter((character) => wordKind(character) !== 1).length);
+  if (oldCharacters.length > markLimit || nextCharacters.length > markLimit || visible === 0) return { old: [], next: [], similarity: 0 };
+  const oldWords = words(old);
+  const nextWords = words(next);
+  const removed = new Set();
+  const inserted = new Set();
+  let i = 0;
+  let j = 0;
+  for (const step of alignmentSteps(oldWords.map((word) => word.text), nextWords.map((word) => word.text))) {
+    if (step === "removed") removed.add(i);
+    if (step === "added") inserted.add(j);
+    if (step !== "added") i += 1;
+    if (step !== "removed") j += 1;
+  }
+  const common = oldWords.reduce((total, word, index) => (removed.has(index) || characters(word.text).every((character) => wordKind(character) === 1) ? total : total + word.end - word.start), 0);
+  return { old: ranges(oldWords, removed), next: ranges(nextWords, inserted), similarity: common / visible };
+}
+
+function marked(lines) {
+  const result = lines.map((line) => ({ ...line, marks: [] }));
+  let index = 0;
+  while (index < result.length) {
+    if (result[index].kind !== "removed") {
+      index += 1;
+      continue;
+    }
+    let removedEnd = index;
+    while (removedEnd < result.length && result[removedEnd].kind === "removed") removedEnd += 1;
+    let addedEnd = removedEnd;
+    while (addedEnd < result.length && result[addedEnd].kind === "added") addedEnd += 1;
+    let next = removedEnd;
+    for (let old = index; old < removedEnd && next < addedEnd; old += 1) {
+      let best = null;
+      for (let candidate = next; candidate < Math.min(addedEnd, next + pairWindow); candidate += 1) {
+        const marks = lineMarks(result[old].text, result[candidate].text);
+        if (marks.similarity >= pairSimilarity && (!best || marks.similarity > best.marks.similarity)) best = { candidate, marks };
+      }
+      if (!best) continue;
+      result[old].marks = best.marks.old;
+      result[best.candidate].marks = best.marks.next;
+      next = best.candidate + 1;
+    }
+    index = addedEnd;
+  }
+  return result;
+}
+
+// Changes with `context` unchanged lines around each, the words that changed marked; longer unchanged stretches fold.
+export function diffRows(lines, context = 3) {
+  const all = marked(lines);
+  const rows = [];
+  let index = 0;
+  while (index < all.length) {
+    if (all[index].kind !== "same") {
+      rows.push(all[index]);
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < all.length && all[end].kind === "same") end += 1;
+    const leading = index === 0 ? 0 : context;
+    const trailing = end === all.length ? 0 : context;
+    if (end - index > leading + trailing + 1) {
+      rows.push(...all.slice(index, index + leading), { folded: end - index - leading - trailing }, ...all.slice(end - trailing, end));
+    } else {
+      rows.push(...all.slice(index, end));
+    }
+    index = end;
+  }
+  return rows;
+}
+
+// A file's hunks as rows, with a break between hunks, as DiffEntry.entries.
+export function diffEntries(hunks) {
+  return hunks.flatMap((hunk, index) => [...(index > 0 ? [{ hunk: true }] : []), ...diffRows(hunk)]);
+}

@@ -1764,6 +1764,73 @@ function rememberToolRow(event) {
   const row = event.target;
   if (row.matches?.("details[data-row]")) toolRows.set(row.dataset.row, row.open);
 }
+// Blocks a control re-renders in place, by key: a file's diff and a run's file chips.
+const toolBlocks = new Map();
+function rerenderToolBlock(block) {
+  const render = toolBlocks.get(block?.dataset.block);
+  if (render) block.outerHTML = render();
+}
+// Each call's diffs, kept while its text is unchanged so a transcript update does not work them out again.
+const toolDiffCache = new Map();
+function cachedToolDiffs(item, session) {
+  const key = toolRowKey(session, item.id);
+  const cached = toolDiffCache.get(key);
+  if (cached?.title === item.title && cached.text === item.text) return cached.diffs;
+  const diffs = tools.toolDiffs(item);
+  toolDiffCache.set(key, { title: item.title, text: item.text, diffs });
+  return diffs;
+}
+// Rows laid out per "Show more", as the Mac's DiffView.page.
+const diffPage = 400;
+function renderDiff(key, hunks) {
+  toolBlocks.set(key, () => renderDiff(key, hunks));
+  const entries = tools.diffEntries(hunks);
+  const shown = Math.max(toolRows.get(key) || diffPage, diffPage);
+  const rows = entries.slice(0, shown).map((entry) => {
+    if (entry.hunk) return '<div class="diff-note">⋯</div>';
+    if (entry.folded) return `<div class="diff-note">${entry.folded === 1 ? "1 unchanged line" : `${entry.folded} unchanged lines`}</div>`;
+    const spoken = { added: "Added: ", removed: "Removed: ", same: "" }[entry.kind];
+    return `<div class="diff-line ${entry.kind}"><span class="diff-sign" aria-hidden="true">${{ added: "+", removed: "−", same: " " }[entry.kind]}</span><span class="diff-text">${spoken ? `<span class="sr-only">${spoken}</span>` : ""}${markedText(entry.text, entry.marks)}</span></div>`;
+  }).join("");
+  const more = entries.length > shown ? `<button class="tool-control diff-more" type="button" data-diff-show="${shown + diffPage}">Show ${Math.min(diffPage, entries.length - shown)} more lines</button>` : "";
+  return `<div class="tool-diff" data-block="${escape(key)}">${rows}${more}</div>`;
+}
+// Marks are character offsets, so the text is split the way Swift counts characters.
+function markedText(text, marks) {
+  if (!marks.length) return escape(text);
+  const characters = Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), ({ segment }) => segment);
+  let html = "";
+  let at = 0;
+  for (const [start, end] of marks) {
+    html += `${escape(characters.slice(at, start).join(""))}<mark>${escape(characters.slice(start, end).join(""))}</mark>`;
+    at = end;
+  }
+  return html + escape(characters.slice(at).join(""));
+}
+function renderFileChips(key, diffs) {
+  toolBlocks.set(key, () => renderFileChips(key, diffs));
+  const isOpen = (diff) => toolRows.get(`${key}:${diff.path}`) === true;
+  const buttons = diffs.map((diff) => {
+    const change = tools.fileChange(diff);
+    const name = tools.baseName(change.path);
+    return `<button class="file-chip${isOpen(diff) ? " open" : ""}" type="button" data-chip="${escape(change.path)}" aria-expanded="${isOpen(diff)}" title="${escape(change.path)}" aria-label="${escape(`${name}, ${change.added} added, ${change.removed} removed`)}"><span>${escape(name)}</span>${change.added ? `<span class="added">+${change.added}</span>` : ""}${change.removed ? `<span class="removed">−${change.removed}</span>` : ""}</button>`;
+  }).join("");
+  const opened = diffs.filter(isOpen).map((diff) => `${diffs.length > 1 ? `<div class="diff-file">${escape(tools.baseName(diff.path))}</div>` : ""}${renderDiff(`${key}:${diff.path}:diff`, diff.hunks)}`).join("");
+  return `<div class="file-chips" data-block="${escape(key)}"><div class="file-chip-list">${buttons}</div>${opened}</div>`;
+}
+function toggleFileChip(button) {
+  const block = button.closest(".file-chips[data-block]");
+  if (!block) return;
+  const key = `${block.dataset.block}:${button.dataset.chip}`;
+  toolRows.set(key, toolRows.get(key) !== true);
+  rerenderToolBlock(block);
+}
+function showToolDiff(button) {
+  const block = button.closest(".tool-diff[data-block]");
+  if (!block) return;
+  toolRows.set(block.dataset.block, Number(button.dataset.diffShow) || diffPage);
+  rerenderToolBlock(block);
+}
 function renderToolRun(items, session, states = new Map()) {
   const entries = [];
   const calls = new Map();
@@ -1788,24 +1855,15 @@ function renderToolRun(items, session, states = new Map()) {
       return renderToolLine({ verb: "Output", object: tools.firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item, session), toolRowKey(session, item.id), isFailedTool(item));
     }
     const failed = isFailedTool(item) || results.some(isFailedTool);
-    const input = item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
+    const diffs = cachedToolDiffs(item, session);
+    const input = diffs.length
+      ? diffs.map((diff) => `${diffs.length > 1 ? `<div class="diff-file">${escape(tools.baseName(diff.path))}</div>` : ""}${renderDiff(toolRowKey(session, `diff:${item.id}:${diff.path}`), diff.hunks)}`).join("")
+      : item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
     const outputs = results.length ? results.map((result) => renderToolOutput(result, session)).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
     return renderToolLine(tools.toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, toolRowKey(session, item.id), failed, "Collapse tool");
   });
-  const changes = [];
-  for (const { item, results } of entries) {
-    if (item.kind === "reasoning" || item.kind === "toolResult" || isFailedTool(item) || results.some(isFailedTool)) continue;
-    for (const change of tools.toolChanges(item)) {
-      const existing = changes.find(other => other.path === change.path);
-      if (existing) {
-        existing.added += change.added;
-        existing.removed += change.removed;
-      } else {
-        changes.push({ ...change });
-      }
-    }
-  }
-  const chips = changes.length ? `<div class="file-chips">${changes.map(change => `<span class="file-chip" title="${escape(change.path)}" aria-label="${escape(`${tools.baseName(change.path)}, ${change.added} added, ${change.removed} removed`)}"><span>${escape(tools.baseName(change.path))}</span>${change.added ? `<span class="added">+${change.added}</span>` : ""}${change.removed ? `<span class="removed">−${change.removed}</span>` : ""}</span>`).join("")}</div>` : "";
+  const diffs = tools.mergedDiffs(entries.flatMap(({ item, results }) => (item.kind === "reasoning" || item.kind === "toolResult" || isFailedTool(item) || results.some(isFailedTool) ? [] : cachedToolDiffs(item, session))));
+  const chips = diffs.length ? renderFileChips(toolRowKey(session, `chips:${entries[0].item.id}`), diffs) : "";
   const callCount = entries.filter(entry => entry.item.kind !== "reasoning" && entry.item.kind !== "toolResult").length;
   if (callCount <= foldToolsAfter) return `<section class="tool-run">${lines.join("")}${chips}</section>`;
   const failures = entries.filter(({ item, results }) => isFailedTool(item) || results.some(isFailedTool)).length;
@@ -1829,6 +1887,7 @@ function toolRunLabel(entries) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 function renderTimeline(items, session) {
+  toolBlocks.clear();
   const out = [];
   let run = [];
   const states = tools.toolCallStates(items, session.status === "busy" || Boolean(session.waitingOn));
@@ -2588,6 +2647,10 @@ function renderSlashMenu() {
     .join("");
 }
 document.addEventListener("click", async (event) => {
+  const chip = event.target.closest("[data-chip]");
+  if (chip) return toggleFileChip(chip);
+  const diffShow = event.target.closest("[data-diff-show]");
+  if (diffShow) return showToolDiff(diffShow);
   const outputShow = event.target.closest("[data-output-show]");
   if (outputShow) return showToolOutput(outputShow);
   const collapseRow = event.target.closest("[data-collapse-row]");
