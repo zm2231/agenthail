@@ -2,13 +2,13 @@ package daemon
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -30,7 +30,7 @@ func busyClaude(t *testing.T, socket bool) (*registry.Registry, *claudetest.Fixt
 	transcript := process.Transcript(busyConversation, process.Home)
 	appendClaudeRecords(t, transcript, `{"type":"user","uuid":"prompt","timestamp":"2026-10-19T08:14:31Z","message":{"content":"Plan the release"}}`)
 	process.RecordStatus(busyConversation, process.Home, "session_busy", "busy", "", time.Now())
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

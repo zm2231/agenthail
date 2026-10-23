@@ -2,17 +2,17 @@ package daemon
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
 }
 
 func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T) {
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -84,7 +85,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	fixture := &orphanFixture{claude: claudetest.New(t), posts: &orphanPosts{}}
 	fixture.host = claudehosttest.New(t, fixture.claude.Home)
 	fixture.host.Start(t)
-	r, err := registry.Open(t.TempDir() + "/registry.db")
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

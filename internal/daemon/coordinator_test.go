@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -37,7 +38,7 @@ func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	f := &coordinatorFixture{claude: claudetest.New(t)}
 	f.host = claudehosttest.New(t, f.claude.Home)
 	f.host.Start(t)
-	r, err := registry.Open(t.TempDir() + "/registry.db")
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

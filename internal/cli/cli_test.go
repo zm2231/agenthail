@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
@@ -179,7 +180,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1259,7 +1260,7 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 }
 
 func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

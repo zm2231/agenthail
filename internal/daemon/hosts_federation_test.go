@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -155,7 +155,7 @@ func allowLoopbackHosts(t *testing.T) {
 func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	t.Helper()
 	allowLoopbackHosts(t)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
