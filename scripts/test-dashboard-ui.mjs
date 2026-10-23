@@ -61,10 +61,12 @@ const dark = tokens(":root");
 const light = tokens(':root[data-theme="light"]');
 assert.deepEqual(Object.keys(light).sort(), Object.keys(dark).sort(), "the light theme sets every colour the dark theme does");
 const textRatio = (a, b) => contrast.ratio(contrast.luminance(a), contrast.luminance(b));
-for (const role of ["ink", "muted", "quiet", "accent", "good", "warn", "bad", "focus"]) {
-  for (const surface of ["paper", "panel", "raised", "hover"]) {
-    const r = textRatio(light[role], light[surface]);
-    assert.ok(r >= 4.5, `light ${role} on ${surface} reads at ${r.toFixed(2)}`);
+for (const [name, set] of [["dark", dark], ["light", light]]) {
+  for (const role of ["ink", "muted", "quiet", "accent", "good", "warn", "bad", "focus"]) {
+    for (const surface of ["paper", "panel", "raised", "hover"]) {
+      const r = textRatio(set[role], set[surface]);
+      assert.ok(r >= 4.5, `${name} ${role} on ${surface} reads at ${r.toFixed(2)}`);
+    }
   }
 }
 assert.ok(textRatio(light.paper, light.accent) >= 4.5, "light button text on the accent reads");
