@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type watchingSurface struct {
@@ -107,7 +108,7 @@ func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.
 	codex := newWatchingSurface(surface.KindCodex, func() []string { return []string{rollouts} })
 	d.Surfaces = []surface.Surface{claude, codex}
 	runCatalogLoop(t, d)
-	awaitFederation(t, "the first discovery pass", func() bool { return claude.lists.Load() == 1 && codex.lists.Load() == 1 })
+	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return claude.lists.Load() == 1 && codex.lists.Load() == 1 })
 
 	claude.start(t, "outside", records)
 	awaitCatalogRow(t, d, "outside")
@@ -160,12 +161,12 @@ func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
 	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
 	d.Surfaces = []surface.Surface{claude}
 	runCatalogLoop(t, d)
-	awaitFederation(t, "the first discovery pass", func() bool { return claude.lists.Load() == 1 })
+	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return claude.lists.Load() == 1 })
 
 	if err := os.MkdirAll(records, 0700); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "the pass the new folder starts", func() bool { return claude.lists.Load() == 2 })
+	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return claude.lists.Load() == 2 })
 	claude.start(t, "first-ever", records)
 	awaitCatalogRow(t, d, "first-ever")
 }
@@ -185,13 +186,13 @@ func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 	})
 	d.Surfaces = []surface.Surface{codex}
 	runCatalogLoop(t, d)
-	awaitFederation(t, "the first discovery pass", func() bool { return codex.lists.Load() == 1 })
+	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return codex.lists.Load() == 1 })
 
 	day := filepath.Join(root, "23")
 	if err := os.Mkdir(day, 0700); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "the pass the new folder starts", func() bool { return codex.lists.Load() == 2 })
+	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return codex.lists.Load() == 2 })
 	codex.start(t, "after-midnight", day)
 	awaitCatalogRow(t, d, "after-midnight")
 }

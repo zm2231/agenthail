@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func (f *federatedSurface) Model(_ context.Context, _ *surface.Session, name string) (string, error) {
@@ -197,14 +198,14 @@ func TestFederationReportsAnOlderHostAsNeedingAnUpdate(t *testing.T) {
 
 	remote.gate.older.Store(false)
 	record := local.pair(t, remote, "vps")
-	awaitFederation(t, "remote session mirrored", func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 1 })
+	testkit.Eventually(t, "remote session mirrored", 10*time.Second, func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 1 })
 	remote.gate.older.Store(true)
 	host, _ := local.daemon.pairedHost(record.ID)
 	host.cancel()
 	if err := local.daemon.attachHost(record); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "older host marked incompatible", func() bool {
+	testkit.Eventually(t, "older host marked incompatible", 10*time.Second, func() bool {
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return len(rows) == 1 && rows[0].Host.State == hostStateIncompatible && strings.Contains(rows[0].UnavailableReason, "update Agenthail on that host")
 	})
@@ -235,7 +236,7 @@ func TestFederationSendsNothingBeyondVersionUntilTheHostIsConfirmed(t *testing.T
 	if err := local.daemon.attachHost(record); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "reconnect waits on the version check", func() bool { return hold.waiting.Load() > 0 })
+	testkit.Eventually(t, "reconnect waits on the version check", 10*time.Second, func() bool { return hold.waiting.Load() > 0 })
 	remote.gate.beyondVersion.Store(0)
 
 	local.request(t, http.MethodGet, "/api/v1/history?sessionId="+url.QueryEscape(qualified), nil)
@@ -256,7 +257,7 @@ func TestFederationSendsNothingBeyondVersionUntilTheHostIsConfirmed(t *testing.T
 	remote.gate.older.Store(true)
 	remote.gate.versions.Store(nil)
 	release()
-	awaitFederation(t, "older host marked incompatible", func() bool {
+	testkit.Eventually(t, "older host marked incompatible", 10*time.Second, func() bool {
 		current, _ := local.daemon.pairedHost(record.ID)
 		state, _ := current.status()
 		return state == hostStateIncompatible
@@ -291,7 +292,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 		local.daemon.drainHostDeliveries(context.Background(), host)
 		close(done)
 	}()
-	awaitFederation(t, "first held send reaches the host", func() bool { return hold.waiting.Load() == 1 })
+	testkit.Eventually(t, "first held send reaches the host", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
 
 	remote.gate.older.Store(true)
 	_, err := host.client.Version(context.Background())
@@ -321,7 +322,7 @@ func TestFederationMirrorKeepsEachSessionsRuntime(t *testing.T) {
 	remote.fake.sessions["remote-c"] = appServer
 	remote.fake.mu.Unlock()
 	remote.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "app-server session mirrored", func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 3 })
+	testkit.Eventually(t, "app-server session mirrored", 10*time.Second, func() bool { return len(sessionsOf(local.snapshot(t), record.ID)) == 3 })
 
 	check := func(stage string) {
 		t.Helper()

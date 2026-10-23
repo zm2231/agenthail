@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type fixtureProvider struct {
@@ -577,17 +578,6 @@ func targetSelected(t *testing.T, target *targetFixture) *voiceFixture {
 	return f
 }
 
-func waitFor(t *testing.T, what string, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
 func hasEventWith(v State, method, key, value string) bool {
 	for _, event := range v.Events {
 		if event.Method == method && event.Params[key] == value {
@@ -838,7 +828,7 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "three spoken items", func() bool { return len(f.provider.spoken()) >= 3 })
+	testkit.Eventually(t, "three spoken items", 5*time.Second, func() bool { return len(f.provider.spoken()) >= 3 })
 	if spoken := f.provider.spoken(); !reflect.DeepEqual(spoken, []string{"part", " complete", "second answer"}) {
 		t.Fatalf("spoken=%q", spoken)
 	}
@@ -852,7 +842,7 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "delegation failure", func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
+	testkit.Eventually(t, "delegation failure", 5*time.Second, func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
 }
 
 func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T) {
@@ -863,7 +853,7 @@ func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "the refused delegation to fail", func() bool {
+	testkit.Eventually(t, "the refused delegation to fail", 5*time.Second, func() bool {
 		for _, event := range f.View().Events {
 			if event.Method == "voice/delegation/failed" && strings.Contains(fmt.Sprint(event.Params["error"]), "out of usage") {
 				return true
@@ -891,7 +881,7 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
 	f.observe(spoken)
 	f.observe(spoken)
-	waitFor(t, "the spoken request", func() bool { return len(target.sends()) > 0 })
+	testkit.Eventually(t, "the spoken request", 5*time.Second, func() bool { return len(target.sends()) > 0 })
 	f.service.Close()
 	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"Inspect this session"}) {
 		t.Fatalf("spoken transcript was not delivered exactly once: %v", sends)
@@ -1020,7 +1010,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	p := f.provider
 	connectFixture(t, f)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
-	waitFor(t, "the transfer's answer", func() bool { return len(p.answers()) == 1 })
+	testkit.Eventually(t, "the transfer's answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	if got := f.View().Target; got == nil || got.ID != "target-a" {
 		t.Fatalf("transfer did not select target: %+v", got)
 	}
@@ -1030,7 +1020,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	}
 	p.mu.Unlock()
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-b", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
-	waitFor(t, "the return's answer", func() bool { return len(p.answers()) == 2 })
+	testkit.Eventually(t, "the return's answer", 5*time.Second, func() bool { return len(p.answers()) == 2 })
 	if got := f.View().Target; got != nil {
 		t.Fatalf("return did not clear target: %+v", got)
 	}

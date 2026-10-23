@@ -237,7 +237,7 @@ func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testi
 	history.WriteString(`{"type":"user","uuid":"u2","message":{"content":"next turn"}}` + "\n")
 	path := writeTranscript(t, history.String())
 	session := seededClaudeStreamSession(t, path, "")
-	appendRecords(t, path, `{"type":"assistant","uuid":"after","message":{"id":"after","content":[{"type":"text","text":"written after the seed"}]}}`+"\n")
+	testkit.AppendFile(t, path, `{"type":"assistant","uuid":"after","message":{"id":"after","content":[{"type":"text","text":"written after the seed"}]}}`+"\n")
 	var texts []string
 	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
 		if event.Text != "" {
@@ -252,7 +252,7 @@ func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testi
 func TestAStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	claudePath := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"first"}}`+"\n")
 	claudeSession := seededClaudeStreamSession(t, claudePath, "")
-	appendRecords(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
+	testkit.AppendFile(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
 	codexRecord := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", "appended")
 	codexSession := &surface.Session{ID: "codex", Transcript: timelineFixture(t, codexRecord), TranscriptOffsetSet: true}
 	for name, stream := range map[string]func(func(surface.StreamEvent)) error{

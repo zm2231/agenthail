@@ -21,6 +21,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // nativeSenderClaude is the Claude adapter with every send made from a native
@@ -105,16 +106,16 @@ func TestConversationResumedInASecondTerminalIsNeverSentToOneOfThemSilently(t *t
 	claude := nativeSenderClaude{Claude: surfaces.NewClaude(nil, fixture.Home), source: "sender-native"}
 	h, _ := runDaemon(t, store, claude)
 
-	eventually(t, "the later process's starting conversation to be registered", func() bool {
+	testkit.Eventually(t, "the later process's starting conversation to be registered", 5*time.Second, func() bool {
 		session, err := store.Session(started)
 		return err == nil && session.PID == later.PID
 	})
 	later.Record(conversation, "idle")
-	eventually(t, "the conversation to list both processes", func() bool {
+	testkit.Eventually(t, "the conversation to list both processes", 5*time.Second, func() bool {
 		holders := snapshotHolders(t, h, conversation)
 		return len(holders) == 2 && holders[0] == first.PID && holders[1] == later.PID
 	})
-	eventually(t, "the row the later process started under to be removed", func() bool {
+	testkit.Eventually(t, "the row the later process started under to be removed", 5*time.Second, func() bool {
 		h.daemon.requestCatalogDiscovery()
 		_, err := store.Session(started)
 		return errors.Is(err, sql.ErrNoRows)
@@ -139,7 +140,7 @@ func TestConversationResumedInASecondTerminalIsNeverSentToOneOfThemSilently(t *t
 		t.Fatalf("send pinned to an earlier process under pid %d: status=%d body=%s, want a refusal", later.PID, status, payload)
 	}
 	h.receipt(map[string]any{"action": "send", "sessionId": conversation, "author": "person", "message": "to the later terminal", "pid": later.PID})
-	eventually(t, "the pinned send to reach the later process", func() bool { return len(later.Received()) == 1 })
+	testkit.Eventually(t, "the pinned send to reach the later process", 5*time.Second, func() bool { return len(later.Received()) == 1 })
 	if len(first.Received()) != 0 {
 		t.Fatalf("a send pinned to process %d reached process %d: %q", later.PID, first.PID, first.Received())
 	}

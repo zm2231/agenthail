@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func pairedBothWays(t *testing.T) (*federationNode, *federationNode, registry.PairedHost, registry.PairedHost) {
@@ -29,7 +30,7 @@ func pairedBothWays(t *testing.T) (*federationNode, *federationNode, registry.Pa
 	vps.start(t, roots)
 	vpsRecord := laptop.pair(t, vps, "vps")
 	laptopRecord := vps.pair(t, laptop, "laptop")
-	awaitFederation(t, "both mirrors", func() bool {
+	testkit.Eventually(t, "both mirrors", 10*time.Second, func() bool {
 		return len(sessionsOf(laptop.snapshot(t), vpsRecord.ID)) == 2 && len(sessionsOf(vps.snapshot(t), laptopRecord.ID)) == 1
 	})
 	return laptop, vps, vpsRecord, laptopRecord
@@ -163,7 +164,7 @@ func TestFederationOffersAConnectedHostsSessionsAsPeers(t *testing.T) {
 		t.Fatalf("advertised %v, want the local session and both of the host's", seen)
 	}
 	remote.stop()
-	awaitFederation(t, "the host is no longer offered", func() bool {
+	testkit.Eventually(t, "the host is no longer offered", 10*time.Second, func() bool {
 		seen := advertised()
 		return seen["local-a"] && !seen["remote-a"] && !seen["remote-b"]
 	})
@@ -214,7 +215,7 @@ func TestFederationRelayLegKeepsItsHopCountOnTheOtherHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	var item *registry.QueuedMessage
-	awaitFederation(t, "the relay leg queued on vps", func() bool {
+	testkit.Eventually(t, "the relay leg queued on vps", 10*time.Second, func() bool {
 		claimed, err := vps.reg.ClaimNextMessage("vps-a", time.Now())
 		if err == nil && claimed != nil {
 			item = claimed
@@ -260,7 +261,7 @@ func TestFederationChannelReachesAMemberOnAnotherHost(t *testing.T) {
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"queued":1`) {
 		t.Fatalf("channel-send status=%d body=%s", send.Code, send.Body.String())
 	}
-	awaitFederation(t, "the vps member received the channel message", func() bool {
+	testkit.Eventually(t, "the vps member received the channel message", 10*time.Second, func() bool {
 		for _, message := range vps.fake.delivered() {
 			if strings.HasPrefix(message, "[from ") && strings.HasSuffix(message, " via #crew] standup") {
 				return true
@@ -294,7 +295,7 @@ func TestASendAnotherProcessHoldsForAConnectedHostGoesOutBeforeTheDeliveryTick(t
 	if _, err := other.QueueHostSend(registry.HostSend{SessionID: "vps-a", Message: "from another process", Key: "other-process-" + uuid.NewString(), SourceSessionID: "laptop-a"}); err != nil {
 		t.Fatal(err)
 	}
-	awaitFederation(t, "the vps session received the held send", func() bool {
+	testkit.Eventually(t, "the vps session received the held send", 10*time.Second, func() bool {
 		return slices.Contains(vps.fake.delivered(), "from another process")
 	})
 	if took := time.Since(sent); took > heldSendPromptness {

@@ -11,6 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type gatedProjects struct{ gate *gate }
@@ -200,7 +201,7 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 					t.Errorf("hangup: %v", err)
 				}
 			})
-			waitFor(t, "the hangup to cancel the held call", func() bool { return f.gate.waiters() == 0 })
+			testkit.Eventually(t, "the hangup to cancel the held call", 5*time.Second, func() bool { return f.gate.waiters() == 0 })
 			select {
 			case <-result:
 			case <-time.After(2 * time.Second):
@@ -226,7 +227,7 @@ func TestOverlappingDelegationsEachSpeakTheirOwnReply(t *testing.T) {
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "second", Text: "Second request"})
 	target.reply("turn-2", "Second reply.")
 	target.reply("turn-1", "First reply.")
-	waitFor(t, "each delegation to finish with its own turn", func() bool {
+	testkit.Eventually(t, "each delegation to finish with its own turn", 5*time.Second, func() bool {
 		view := f.View()
 		return hasDelegation(view, "voice/delegation/final", "first", "turn-1") && hasDelegation(view, "voice/delegation/final", "second", "turn-2")
 	})
@@ -262,7 +263,7 @@ func TestSpokenRequestsQueuedForAnEndedCallAreDroppedWithTheReason(t *testing.T)
 	)
 	f.gate.reached(t, "Send")
 	apply(t, f, Action{Action: "stop", AttemptID: "call-a"})
-	waitFor(t, "the queued request to be dropped", func() bool {
+	testkit.Eventually(t, "the queued request to be dropped", 5*time.Second, func() bool {
 		for _, event := range f.View().Events {
 			if event.Method == "voice/delegation/held" && event.Params["messageId"] == "voice-transcript:2" {
 				return strings.Contains(event.Params["error"].(string), "the call ended before this request was delivered")

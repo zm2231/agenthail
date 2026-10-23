@@ -9,8 +9,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const pickABranch = `{"questions":[{"question":"Which branch?","header":"Branch","options":[{"label":"main","description":"Release from main"},{"label":"next","description":"Release from next"}],"multiSelect":false}]}`
@@ -64,7 +66,7 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	q := newClaudeQuestion(t)
 	desktop := &withdrawals{}
 	h, _ := runDaemonWith(t, q.store, func(d *Daemon) { d.withdrawDesktop = desktop.record }, q.claude)
-	eventually(t, "the question the record shows to be announced", func() bool { return q.pushes.count("session.waiting") == 1 })
+	testkit.Eventually(t, "the question the record shows to be announced", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 1 })
 	generic := waitingNotificationKey(q.session.ID, questionID)
 
 	prompt := `{"session_id":"conversation-question","tool_name":"AskUserQuestion","tool_input":` + pickABranch + `}`
@@ -79,14 +81,14 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 	}()
 
 	var waiting *surface.Waiting
-	eventually(t, "the session to wait on the held prompt", func() bool {
+	testkit.Eventually(t, "the session to wait on the held prompt", 5*time.Second, func() bool {
 		waiting = h.sessionWaiting(q.session.ID)
 		return waiting != nil && strings.Contains(waiting.ID, ":held:")
 	})
-	eventually(t, "the notice that could not say what was asked to be withdrawn", func() bool {
+	testkit.Eventually(t, "the notice that could not say what was asked to be withdrawn", 5*time.Second, func() bool {
 		return desktop.has("agenthail-"+generic) && slices.ContainsFunc(q.pushes.all(""), func(push map[string]string) bool { return push["collapseId"] == generic })
 	})
-	eventually(t, "the held prompt to be announced with what it asks", func() bool { return q.pushes.count("session.waiting") == 2 })
+	testkit.Eventually(t, "the held prompt to be announced with what it asks", 5*time.Second, func() bool { return q.pushes.count("session.waiting") == 2 })
 	if announced := q.pushes.all("session.waiting")[1]; announced["requestId"] != waiting.ID {
 		t.Fatalf("announcement=%+v, want request %s", announced, waiting.ID)
 	}
@@ -108,8 +110,8 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredFromAgenthailAndItsNoticesAreWi
 		t.Fatalf("updatedInput=%+v", result.response.Decision.UpdatedInput)
 	}
 
-	eventually(t, "the answered question to stop waiting while Claude acts on it", func() bool { return h.sessionWaiting(q.session.ID) == nil })
-	eventually(t, "the answered question's notices to be withdrawn", func() bool {
+	testkit.Eventually(t, "the answered question to stop waiting while Claude acts on it", 5*time.Second, func() bool { return h.sessionWaiting(q.session.ID) == nil })
+	testkit.Eventually(t, "the answered question's notices to be withdrawn", 5*time.Second, func() bool {
 		return desktop.has("agenthail-" + waitingNotificationKey(q.session.ID, waiting.ID))
 	})
 	for range 3 {
@@ -178,7 +180,7 @@ func TestRightAfterAnAnswerTheSessionStopsShowingTheQuestionAndItsRequestsReadEm
 		h.postPrompt(prompt, q.process.PID)
 	}()
 	var waiting *surface.Waiting
-	eventually(t, "the session to wait on the held prompt", func() bool {
+	testkit.Eventually(t, "the session to wait on the held prompt", 5*time.Second, func() bool {
 		waiting = h.sessionWaiting(q.session.ID)
 		return waiting != nil && strings.Contains(waiting.ID, ":held:")
 	})

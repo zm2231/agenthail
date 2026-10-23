@@ -101,7 +101,7 @@ func pairMoveNodes(t *testing.T, source, target *moveNode) (*moveNode, *moveNode
 	target.serve(t, nil)
 	source.start(t, testRoots(target.server))
 	record := source.pair(t, target.federationNode, "server")
-	awaitFederation(t, "the target connected", func() bool { return source.daemon.hostConnected(record.ID) })
+	testkit.Eventually(t, "the target connected", 10*time.Second, func() bool { return source.daemon.hostConnected(record.ID) })
 	if head := runGit(t, checkout, "rev-parse", "HEAD"); head != commit {
 		t.Fatalf("target checkout at %s, want %s", head, commit)
 	}
@@ -235,7 +235,7 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 		t.Fatalf("held send=%+v err=%v", item, err)
 	}
 	target.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "the source to show the session as the target's", func() bool {
+	testkit.Eventually(t, "the source to show the session as the target's", 10*time.Second, func() bool {
 		for _, row := range sessionsOf(source.snapshot(t), record.ID) {
 			if row.ID == record.ID+"::"+session.ID && row.UnavailableReason == "" {
 				return true
@@ -303,7 +303,7 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 		_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 		done <- err
 	}()
-	awaitFederation(t, "the transfer to reach the target", func() bool { return hold.waiting.Load() > 0 })
+	testkit.Eventually(t, "the transfer to reach the target", 10*time.Second, func() bool { return hold.waiting.Load() > 0 })
 	target.server.CloseClientConnections()
 	err := <-done
 	var unknown MoveUnknownError
@@ -329,7 +329,7 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 	// Dropping the connections also makes the source reconnect, and a
 	// reconnect recovers sent moves too, so either may settle this one.
 	source.daemon.resumeHostMoves(context.Background(), mustPairedHost(t, source, record.ID))
-	awaitFederation(t, "recovery to settle the move", func() bool {
+	testkit.Eventually(t, "recovery to settle the move", 10*time.Second, func() bool {
 		move, _ := source.reg.SessionMove(unknown.MoveID)
 		return move.State == registry.MoveDone
 	})
@@ -385,7 +385,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 					t.Fatalf("status=%+v err=%v", status, err)
 				}
 				target.daemon.discoverCatalog(context.Background())
-				awaitFederation(t, "the target's row to reach the source while the session is still local there", func() bool {
+				testkit.Eventually(t, "the target's row to reach the source while the session is still local there", 10*time.Second, func() bool {
 					_, hidden := host.hiddenRow(session.ID)
 					return hidden
 				})
@@ -401,7 +401,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 			}
 			release()
 			source.daemon.resumeHostMoves(context.Background(), host)
-			awaitFederation(t, "recovery to settle the move", func() bool {
+			testkit.Eventually(t, "recovery to settle the move", 10*time.Second, func() bool {
 				move, _ := source.reg.SessionMove(manifest.ID)
 				return move.State == registry.MoveDone
 			})
@@ -409,7 +409,7 @@ func TestAMoveSentByADaemonThatStoppedIsSettledFromTheTargetsRecord(t *testing.T
 				t.Fatalf("the target resumed the conversation %d times", len(spawns))
 			}
 			if stage == "after the target resumed" {
-				awaitFederation(t, "the source to show the row the target reported before the flip", func() bool {
+				testkit.Eventually(t, "the source to show the row the target reported before the flip", 10*time.Second, func() bool {
 					for _, row := range sessionsOf(source.snapshot(t), record.ID) {
 						if row.ID == record.ID+"::"+session.ID && row.UnavailableReason == "" {
 							return true

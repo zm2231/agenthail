@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // statusFileAgent reports each session's status from a file, as Claude's
@@ -84,7 +85,7 @@ func TestAQueuedMessageIsDeliveredWhenTheStatusPassSeesTheTargetGoIdle(t *testin
 	idle := time.Now()
 	agent.setStatus("target", surface.StatusIdle)
 	agent.write(t, "target", surface.StatusIdle)
-	eventuallyWithin(t, "queued delivery after the target went idle", defaultPollInterval, func() bool { return len(agent.deliveredTo("target")) > 0 })
+	testkit.Eventually(t, "queued delivery after the target went idle", defaultPollInterval, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	latency := time.Since(idle)
 	t.Logf("idle to delivery: %s", latency)
 	if latency > 2500*time.Millisecond {

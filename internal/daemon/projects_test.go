@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
@@ -326,7 +327,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 		}
 		return nil
 	}
-	awaitFederation(t, "remote project mirrored", func() bool {
+	testkit.Eventually(t, "remote project mirrored", 10*time.Second, func() bool {
 		project := mirroredProject()
 		return project != nil && project.SessionCount == 2 && len(project.Checkouts) == 1 && project.Checkouts[0].Host.ID == record.ID && project.Checkouts[0].ProjectID == qualified
 	})
@@ -341,7 +342,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	if state, err := local.reg.ArchiveState(); err != nil || len(state.Projects) != 0 {
 		t.Fatalf("the archive was recorded on the wrong host: %+v err=%v", state, err)
 	}
-	awaitFederation(t, "mirrored rows archived", func() bool {
+	testkit.Eventually(t, "mirrored rows archived", 10*time.Second, func() bool {
 		project := mirroredProject()
 		rows := sessionsOf(local.snapshot(t), record.ID)
 		return project != nil && project.Archived && len(rows) == 2 && rows[0].Archived && rows[1].Archived
@@ -404,7 +405,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 		}
 		return found
 	}
-	awaitFederation(t, "one project with both checkouts", func() bool {
+	testkit.Eventually(t, "one project with both checkouts", 10*time.Second, func() bool {
 		projects := merged()
 		return len(projects) == 1 && projects[0].ID == projectID && len(projects[0].Checkouts) == 2 && projects[0].SessionCount == 3
 	})
@@ -417,7 +418,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	if response := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID}); response.Code != http.StatusOK {
 		t.Fatalf("archive on vps: %d %s", response.Code, response.Body)
 	}
-	awaitFederation(t, "vps checkout archived", func() bool {
+	testkit.Eventually(t, "vps checkout archived", 10*time.Second, func() bool {
 		projects := merged()
 		return len(projects) == 1 && projects[0].Checkouts[1].Archived && !projects[0].Checkouts[0].Archived && !projects[0].Archived
 	})
@@ -432,7 +433,7 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"host":"vps","ok":true`) {
 		t.Fatalf("archive everywhere: %d %s", archived.Code, archived.Body)
 	}
-	awaitFederation(t, "project archived on both hosts", func() bool {
+	testkit.Eventually(t, "project archived on both hosts", 10*time.Second, func() bool {
 		projects := merged()
 		return len(projects) == 1 && projects[0].Archived && projects[0].Checkouts[0].Archived && projects[0].Checkouts[1].Archived
 	})

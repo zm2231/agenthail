@@ -6,12 +6,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type desktopAlert struct{ message, sessionID string }
@@ -82,7 +84,7 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 		t.Fatalf("create status=%d body=%s err=%v", status, payload, err)
 	}
 	root := created.Session.ID
-	eventually(t, "the root's first turn", func() bool {
+	testkit.Eventually(t, "the root's first turn", 5*time.Second, func() bool {
 		thread, _ := lifecycle.Daemon().Thread(root)
 		return len(thread.Turns) == 1
 	})
@@ -90,7 +92,7 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 
 	child := "019f004a-0000-7000-8000-0000000000c1"
 	lifecycle.Daemon().AddThread(codextest.Thread{ID: child, Cwd: t.TempDir(), Originator: "agenthail", Source: map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": root, "depth": 1, "agent_path": nil, "agent_nickname": "Ada", "agent_role": nil}}}})
-	eventually(t, "the subagent's discovery", func() bool {
+	testkit.Eventually(t, "the subagent's discovery", 5*time.Second, func() bool {
 		h.daemon.requestCatalogDiscovery()
 		session, err := store.Session(child)
 		return err == nil && session.Subagent != nil && session.Subagent.RootID == root
@@ -103,38 +105,38 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 	if _, err := store.AddRoute(child, root, "^relay-never-matches$"); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "both sessions to be observed", func() bool {
+	testkit.Eventually(t, "both sessions to be observed", 5*time.Second, func() bool {
 		_, rootSeen, _ := store.RuntimeState(root)
 		_, childSeen, _ := store.RuntimeState(child)
 		return rootSeen && childSeen
 	})
 
 	h.receipt(map[string]any{"action": "send", "sessionId": root, "message": "Ship it"})
-	eventually(t, "the root's second turn", func() bool {
+	testkit.Eventually(t, "the root's second turn", 5*time.Second, func() bool {
 		thread, _ := lifecycle.Daemon().Thread(root)
 		return len(thread.Turns) == 2
 	})
-	eventually(t, "the root's second turn to be observed", func() bool {
+	testkit.Eventually(t, "the root's second turn to be observed", 5*time.Second, func() bool {
 		state, _, _ := store.RuntimeState(root)
 		return state.ActiveTurnID == "turn-2"
 	})
 	lifecycle.Daemon().CompleteTurn(root, "Shipped")
-	eventually(t, "the root's completion alert", func() bool {
+	testkit.Eventually(t, "the root's completion alert", 5*time.Second, func() bool {
 		return pushes.count("turn.completed") == 1 && len(desktop.matching(" finished")) == 1
 	})
 
 	h.receipt(map[string]any{"action": "send", "sessionId": child, "message": "Check the changelog"})
-	eventually(t, "the subagent's turn", func() bool {
+	testkit.Eventually(t, "the subagent's turn", 5*time.Second, func() bool {
 		thread, _ := lifecycle.Daemon().Thread(child)
 		return len(thread.Turns) == 1
 	})
-	eventually(t, "the working subagent's catalog row", func() bool {
+	testkit.Eventually(t, "the working subagent's catalog row", 5*time.Second, func() bool {
 		h.daemon.requestCatalogDiscovery()
 		row, found := h.catalogRow(child)
 		return found && row.Delegated
 	})
 	lifecycle.Daemon().SetActiveFlags(child, "waitingOnApproval")
-	eventually(t, "the subagent's approval alert", func() bool {
+	testkit.Eventually(t, "the subagent's approval alert", 5*time.Second, func() bool {
 		return pushes.count("session.waiting") == 1 && len(desktop.matching(" needs your approval")) == 1
 	})
 	if push := pushes.first("session.waiting"); push["sessionId"] != root {
@@ -146,19 +148,19 @@ func TestCodexSubagentTurnsRaiseNoCompletionAlertAndItsApprovalOpensTheRoot(t *t
 
 	lifecycle.Daemon().SetActiveFlags(child)
 	lifecycle.Daemon().CompleteTurn(child, "Changelog checked")
-	eventually(t, "the subagent's completion to be observed", func() bool {
+	testkit.Eventually(t, "the subagent's completion to be observed", 5*time.Second, func() bool {
 		state, found, err := store.RuntimeState(child)
 		return err == nil && found && state.CompletedTurnID != "" && state.ActiveTurnID == ""
 	})
 	// A later root turn's alert is the barrier: the subagent's turn finished
 	// before it, so any alert for it would already have been sent.
 	h.receipt(map[string]any{"action": "send", "sessionId": root, "message": "Tag the release"})
-	eventually(t, "the root's third turn to be observed", func() bool {
+	testkit.Eventually(t, "the root's third turn to be observed", 5*time.Second, func() bool {
 		state, _, _ := store.RuntimeState(root)
 		return state.ActiveTurnID == "turn-3"
 	})
 	lifecycle.Daemon().CompleteTurn(root, "Tagged")
-	eventually(t, "the root's second completion alert", func() bool {
+	testkit.Eventually(t, "the root's second completion alert", 5*time.Second, func() bool {
 		return pushes.count("turn.completed") >= 2 && len(desktop.matching(" finished")) >= 2
 	})
 	for _, push := range pushes.all("turn.completed") {

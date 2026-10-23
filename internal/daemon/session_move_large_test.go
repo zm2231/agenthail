@@ -17,6 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // TestALargeTranscriptMovesBetweenTwoDaemonProcesses moves a session whose
@@ -117,7 +118,7 @@ func TestALargeTranscriptMovesBetweenTwoDaemonProcesses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		awaitFederation(t, "the target connected", func() bool { return node.daemon.hostConnected(record.ID) })
+		testkit.Eventually(t, "the target connected", 10*time.Second, func() bool { return node.daemon.hostConnected(record.ID) })
 		session := startMovable(t, node)
 		transcript := claudeTranscriptIn(t, node.host.Home, session.ID)
 		padTranscript(t, transcript, session.ID, size)

@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // terminalAsker is a terminal Claude session whose hook holds each question
@@ -184,7 +185,7 @@ func answerHeld(t *testing.T, h *runningDaemon, id string, n int, root string) s
 	t.Helper()
 	var session *dashboardSession
 	var state surface.RequestState
-	eventually(t, fmt.Sprintf("question %d to be held, answerable and listed", n), func() bool {
+	testkit.Eventually(t, fmt.Sprintf("question %d to be held, answerable and listed", n), 5*time.Second, func() bool {
 		session = h.catalogSession(id)
 		if session == nil || session.WaitingOn == nil || !strings.Contains(session.WaitingOn.ID, ":held:") || !session.WaitingOn.Answerable || !session.Capabilities.Respond {
 			return false
@@ -236,12 +237,12 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 			t.Fatalf("question %d: the hook got status=%d body=%s", n, result.status, result.body)
 		}
 		asker.goOn(n)
-		eventually(t, fmt.Sprintf("Claude to go on after question %d", n), func() bool { return h.sessionWaiting(id) == nil })
+		testkit.Eventually(t, fmt.Sprintf("Claude to go on after question %d", n), 5*time.Second, func() bool { return h.sessionWaiting(id) == nil })
 		process.RecordStatus(id, process.Home, "", "idle", "", time.Time{})
 	}
 
 	hook := asker.ask(3)
-	eventually(t, "question 3 to be held before the restart", func() bool {
+	testkit.Eventually(t, "question 3 to be held before the restart", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
 		return waiting != nil && strings.Contains(waiting.ID, ":held:")
 	})
@@ -259,7 +260,7 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 		t.Fatalf("question 3 after the restart: the hook got status=%d body=%s", result.status, result.body)
 	}
 	asker.goOn(3)
-	eventually(t, "Claude to go on after the restart", func() bool { return restarted.sessionWaiting(id) == nil })
+	testkit.Eventually(t, "Claude to go on after the restart", 5*time.Second, func() bool { return restarted.sessionWaiting(id) == nil })
 
 	process.RecordStatus(id, process.Home, "", "idle", "", time.Time{})
 	hook = asker.ask(4)

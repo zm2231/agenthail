@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func widgetRepo(t *testing.T, origin string) string {
@@ -53,7 +54,7 @@ func widgetOnTwoHosts(t *testing.T) (*federationNode, *federationNode, registry.
 	moveSession(t, remote, "remote-c", remoteRepo, time.Now())
 	remote.daemon.discoverCatalog(context.Background())
 	local.daemon.discoverCatalog(context.Background())
-	awaitFederation(t, "the remote conversations and coordinator mirrored in the project", func() bool {
+	testkit.Eventually(t, "the remote conversations and coordinator mirrored in the project", 10*time.Second, func() bool {
 		for _, project := range local.snapshot(t).Projects {
 			if project.ID == "repo:github.com/example/widget" {
 				return project.SessionCount >= 5 && len(project.Coordinators) == 2
@@ -95,7 +96,7 @@ func TestAProjectChannelReachesItsActiveConversationsOnEveryHost(t *testing.T) {
 	if member := byRef[hosts.Qualify(record.ID, "remote-c")]; member.Outcome != broadcast.OutcomeQueued {
 		t.Fatalf("recipients=%+v", answer.Recipients)
 	}
-	awaitFederation(t, "the remote member received the message", func() bool {
+	testkit.Eventually(t, "the remote member received the message", 10*time.Second, func() bool {
 		for _, message := range remote.fake.delivered() {
 			if strings.HasSuffix(message, " via #widget] standup") && len(remote.fake.delivered()) == 2 {
 				return true
@@ -192,7 +193,7 @@ func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *test
 	if response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "standup", "author": "person"}); response.Code != http.StatusOK {
 		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
 	}
-	awaitFederation(t, "the remote member and coordinator received the post", func() bool { return len(remote.fake.delivered()) == 2 })
+	testkit.Eventually(t, "the remote member and coordinator received the post", 10*time.Second, func() bool { return len(remote.fake.delivered()) == 2 })
 	remote.fake.mu.Lock()
 	sources, persons := append([]string(nil), remote.fake.sources...), append([]string(nil), remote.fake.persons...)
 	remote.fake.mu.Unlock()

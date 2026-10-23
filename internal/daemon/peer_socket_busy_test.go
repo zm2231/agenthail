@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 const busyConversation = "conversation-busy"
@@ -56,12 +57,12 @@ func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	runDaemonWith(t, store, func(d *Daemon) { d.fireRelays(&from, "relay-turn", 0, "finished the release notes") }, surfaces.NewClaude(nil, process.Home))
-	eventually(t, "the relay over the peer socket", func() bool { return manager.Containing("finished the release notes") == 1 })
+	testkit.Eventually(t, "the relay over the peer socket", 5*time.Second, func() bool { return manager.Containing("finished the release notes") == 1 })
 	sends := manager.Sends()
 	if len(sends) != 1 || sends[0].Source != from.ID || sends[0].Target == "" {
 		t.Fatalf("peer sends=%+v, want one framed from the relay source", sends)
 	}
-	eventually(t, "the relay acknowledged", func() bool { return store.QueueCount(session.ID) == 0 })
+	testkit.Eventually(t, "the relay acknowledged", 5*time.Second, func() bool { return store.QueueCount(session.ID) == 0 })
 }
 
 func TestQueuedMessageToABusyRemoteControlClaudeSteersUnderTheSteerPolicy(t *testing.T) {
@@ -75,7 +76,7 @@ func TestQueuedMessageToABusyRemoteControlClaudeSteersUnderTheSteerPolicy(t *tes
 		t.Fatal(err)
 	}
 	runDaemon(t, store, claude)
-	eventually(t, "the steer into the running turn", func() bool {
+	testkit.Eventually(t, "the steer into the running turn", 5*time.Second, func() bool {
 		_, steered := claude.delivered()
 		return len(steered) == 1 && steered[0] == "into the turn"
 	})
@@ -136,7 +137,7 @@ func TestQueuedMessagesToABusyBridgedPeerNeverSteerUnderTheSteerPolicy(t *testin
 		t.Fatalf("item=%+v err=%v, want the second message behind the first", item, err)
 	}
 	runDaemon(t, store, claude)
-	eventually(t, "both messages over the peer socket", func() bool {
+	testkit.Eventually(t, "both messages over the peer socket", 5*time.Second, func() bool {
 		sent, _ := claude.delivered()
 		return len(sent) == 2
 	})
