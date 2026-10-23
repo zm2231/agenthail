@@ -38,6 +38,24 @@ struct DashboardSnapshotTest {
         precondition(!current.hasSamePresentation(as: renamed), "a new name for the person is shown")
         precondition(try! JSONDecoder().decode(PersonState.self, from: Data(#"{"name":"Ada Lovelace","set":false}"#.utf8)) == PersonState(name: "Ada Lovelace", set: false))
 
+        func lead(_ status: String) -> SessionState {
+            try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"cd55560f","surface":"claude","name":"Lead","status":"\#(status)","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
+        }
+        var applied = snapshot(updatedAt: "2026-10-23T20:15:01Z", eventCursor: 40, hostEpoch: "host-a", catalogSeq: 1293700, totalSessions: 1)
+        applied.sessions = [lead("idle")]
+        var readBeforeTheTurnEnded = snapshot(updatedAt: "2026-10-23T20:15:02Z", eventCursor: 41, hostEpoch: "host-a", catalogSeq: 1293708, totalSessions: 1)
+        readBeforeTheTurnEnded.sessions = [lead("busy")]
+        let kept = readBeforeTheTurnEnded.keepingCatalog(of: applied, appliedThrough: 1293709)
+        precondition(kept.sessions.first?.status == "idle", "a snapshot read before the applied idle event keeps the session idle")
+        precondition(kept.eventCursor == 41 && kept.catalogSeq == 1293708, "the rest of the snapshot is taken")
+        var readAfter = snapshot(updatedAt: "2026-10-23T20:15:03Z", eventCursor: 42, hostEpoch: "host-a", catalogSeq: 1293709, totalSessions: 1)
+        readAfter.sessions = [lead("busy")]
+        precondition(readAfter.keepingCatalog(of: applied, appliedThrough: 1293709).sessions.first?.status == "busy", "a snapshot at the applied position replaces the sessions")
+        var newEpoch = snapshot(updatedAt: "2026-10-23T20:15:03Z", eventCursor: 1, hostEpoch: "host-b", catalogSeq: 3, totalSessions: 1)
+        newEpoch.sessions = [lead("busy")]
+        precondition(newEpoch.keepingCatalog(of: applied, appliedThrough: 1293709).sessions.first?.status == "busy", "a snapshot from a restarted host replaces the sessions")
+        precondition(readBeforeTheTurnEnded.keepingCatalog(of: nil, appliedThrough: 1293709).sessions.first?.status == "busy", "the first snapshot is taken as it is")
+
         let child = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"child","surface":"codex","name":"Review","status":"busy","queueCount":0,"open":false,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},"subagent":{"parentId":"root","rootId":"root","depth":2,"nickname":"Euclid","role":"reviewer"}}"#.utf8))
         precondition(child.subagent == SubagentIdentity(parentId: "root", rootId: "root", depth: 2, nickname: "Euclid", role: "reviewer"))
         let claudeParent = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"session_x","surface":"claude","name":"Lead","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"subagents":{"count":3,"working":1}}"#.utf8))

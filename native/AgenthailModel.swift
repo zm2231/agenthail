@@ -217,7 +217,7 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            adopt(loaded)
+            adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
             if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
                 startCatalogStream()
             }

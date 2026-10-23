@@ -1271,6 +1271,18 @@ struct DashboardSnapshot: Decodable {
             person == other.person &&
             projects == other.projects
     }
+
+    /// Sessions, surfaces and delivery problems change only through catalog
+    /// events, so a snapshot older than the events applied keeps the client's.
+    func keepingCatalog(of current: DashboardSnapshot?, appliedThrough cursor: UInt64) -> DashboardSnapshot {
+        guard let current, let catalogSeq, hostEpoch == current.hostEpoch, catalogSeq < cursor else { return self }
+        var merged = self
+        merged.sessions = current.sessions
+        merged.totalSessions = current.totalSessions
+        merged.surfaces = current.surfaces
+        merged.deliveryProblems = current.deliveryProblems
+        return merged
+    }
 }
 
 struct ExchangeState: Decodable, Identifiable {
