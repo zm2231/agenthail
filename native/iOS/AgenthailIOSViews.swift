@@ -511,7 +511,7 @@ struct SessionScreen: View {
                 atLatest = value
             }
             .refreshable { await model.refreshSession(session.id) }
-            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await model.syncRequests(for: session) }
+            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let detail { SessionSummary(detail: detail) { showingInfo = true } }
             }
