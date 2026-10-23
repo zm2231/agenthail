@@ -461,6 +461,9 @@ func TestCodexDesktopStreamUsesLocalTranscriptHandoffBoundary(t *testing.T) {
 		}
 	}()
 	err = codex.Stream(ctx, &streamSession, "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		events = append(events, event)
 		cancel()
 	}, time.Second)
@@ -562,6 +565,9 @@ func TestCodexStreamPreservesObservedCommandOutputTruncationMetadata(t *testing.
 	session := &surface.Session{ID: "observed-item-completed", Transcript: path, TranscriptOffsetSet: true}
 	var events []surface.StreamEvent
 	err := NewCodex("").Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Kind == "commands" {
+			return
+		}
 		events = append(events, event)
 	}, 20*time.Millisecond)
 	if !errors.Is(err, surface.ErrStreamWindow) {
