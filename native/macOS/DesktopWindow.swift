@@ -1584,8 +1584,8 @@ struct ComposerView: View {
                             DeliveryProblemBanner(problem: problem, model: model)
                                 .padding(.bottom, DesktopSpace.s)
                         }
-                        if !session.capabilities.turnNotice.isEmpty {
-                            Text(session.capabilities.turnNotice)
+                        if !session.composerTurnNotice.isEmpty {
+                            Text(session.composerTurnNotice)
                                 .font(.system(size: DesktopType.caption))
                                 .foregroundStyle(DesktopPalette.text2)
                                 .frame(maxWidth: .infinity, alignment: .leading)

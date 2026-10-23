@@ -391,6 +391,7 @@ struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     let session: SessionState
+    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
     @State private var activityOnly = false
@@ -550,8 +551,8 @@ struct SessionScreen: View {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
                                 .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
                         } else {
-                            if !detail.capabilities.turnNotice.isEmpty {
-                                Label(detail.capabilities.turnNotice, systemImage: "terminal")
+                            if !liveSession.composerTurnNotice.isEmpty {
+                                Label(liveSession.composerTurnNotice, systemImage: "terminal")
                                     .font(.footnote).foregroundStyle(.secondary)
                                     .padding(.horizontal).padding(.top, 6)
                                     .frame(maxWidth: .infinity, alignment: .leading)

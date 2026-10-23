@@ -446,6 +446,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
+    /// The turn notice, with the app's own remedy when it can adopt the session.
+    var composerTurnNotice: String {
+        let notice = capabilities.turnNotice
+        guard !notice.isEmpty, canAdopt else { return notice }
+        return notice + " Open in Agenthail also makes it your own turn."
+    }
     /// A session its daemon can open in Agenthail's host.
     var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }
 

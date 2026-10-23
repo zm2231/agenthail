@@ -591,11 +591,11 @@ func TestClaudeTellsThePersonWhenTheyReachALiveTerminalOnlyAsANote(t *testing.T)
 			t.Fatalf("%s: a session that takes the person's turn has a notice: %q", name, notice)
 		}
 	}
-	if notice := adapter.SessionCapabilities(terminal).TurnNotice; !strings.Contains(notice, "/remote-control") || !strings.Contains(notice, "Open in Agenthail") {
+	if notice := adapter.SessionCapabilities(terminal).TurnNotice; !strings.Contains(notice, "/remote-control") {
 		t.Fatalf("live terminal notice = %q", notice)
 	}
 	adapter.DisableRemoteControl()
-	if notice := adapter.SessionCapabilities(terminal).TurnNotice; notice == "" || strings.Contains(notice, "/remote-control") || !strings.Contains(notice, "Open in Agenthail") {
+	if notice := adapter.SessionCapabilities(terminal).TurnNotice; notice == "" || strings.Contains(notice, "/remote-control") {
 		t.Fatalf("an install without Remote Control offers it: %q", notice)
 	}
 }
