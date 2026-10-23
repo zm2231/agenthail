@@ -32,6 +32,7 @@ SOURCES=(
   ToolPresentation.swift
   TurnSettings.swift
   UIConfig.swift
+  PaletteTokens.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
@@ -42,7 +43,7 @@ SOURCES=(
   macOS/AuditFacts.swift
   macOS/DesktopPalette.swift
   macOS/InterfaceStore.swift
-  macOS/Backdrop.swift
+  Backdrop.swift
   macOS/BoundedDock.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
@@ -53,7 +54,7 @@ SOURCES=(
   macOS/Overview.swift
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
-  macOS/ScrimField.swift
+  ScrimField.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
