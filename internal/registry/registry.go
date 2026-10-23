@@ -81,9 +81,14 @@ func (e *NewerSchemaError) Error() string {
 	if e.Backup == "" {
 		return refusal
 	}
-	dir, name := filepath.Dir(e.Path), filepath.Base(e.Path)
-	aside := filepath.Join(dir, strings.TrimSuffix(name, filepath.Ext(name))+fmt.Sprintf("-v%d.db", e.Found))
-	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; mv %s %s; rm -f %s-wal %s-shm; cp %s %s; agenthail daemon start", refusal, e.BackupSchema, e.Path, aside, e.Path, e.Path, e.Backup, e.Path)
+	aside := strings.TrimSuffix(e.Path, filepath.Ext(e.Path)) + fmt.Sprintf("-v%d.db", e.Found)
+	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; mv -- %s %s; rm -f -- %s %s; cp -- %s %s; agenthail daemon start", refusal, e.BackupSchema, shellQuote(e.Path), shellQuote(aside), shellQuote(e.Path+"-wal"), shellQuote(e.Path+"-shm"), shellQuote(e.Backup), shellQuote(e.Path))
+}
+
+// shellQuote quotes a path for a POSIX shell, so a printed command runs on
+// any path a home directory can have.
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
 func defaultPath() string {

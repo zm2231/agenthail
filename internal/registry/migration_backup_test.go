@@ -28,9 +28,24 @@ func registryAtSchema(t *testing.T, path string, schema int) {
 }
 
 func TestAMigrationKeepsACopyOfTheRegistryFromBeforeIt(t *testing.T) {
+	for _, mode := range []string{"wal", "delete"} {
+		t.Run(mode, func(t *testing.T) { migrationKeepsACopy(t, mode) })
+	}
+}
+
+func migrationKeepsACopy(t *testing.T, journal string) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.db")
 	registryAtSchema(t, path, schemaVersion-1)
+	plain, err := connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err := plain.db.QueryRow(`PRAGMA journal_mode=` + journal).Scan(&mode); err != nil || mode != journal {
+		t.Fatalf("journal_mode=%q err=%v", mode, err)
+	}
+	plain.Close()
 	for _, old := range []int{schemaVersion - 3, schemaVersion - 2} {
 		if err := os.WriteFile(migrationBackupPath(path, old), []byte("old"), 0600); err != nil {
 			t.Fatal(err)
@@ -88,7 +103,10 @@ func TestARegistryThatCannotBeBackedUpIsNotMigrated(t *testing.T) {
 }
 
 func TestANewerSchemaRefusalNamesTheCopyFromBeforeItAndHowToRestoreIt(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), `home odd" it's $HOME back\slash -n`)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "registry.db")
 	registryAtSchema(t, path, schemaVersion)
 	newer := schemaVersion + 1
