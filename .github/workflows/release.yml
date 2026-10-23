@@ -440,14 +440,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$RELEASE_VERSION" --draft=false --latest
+
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: agenthail-macos-release
+          path: dist
+      - uses: actions/create-github-app-token@v2
+        id: tap
+        with:
+          app-id: ${{ secrets.AGENTHAIL_TAP_APP_ID }}
+          private-key: ${{ secrets.AGENTHAIL_TAP_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
       - name: Update the Homebrew formula
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_TOKEN: ${{ steps.tap.outputs.token }}
           TAP: ${{ github.repository_owner }}/homebrew-tap
         run: |
-          : "${TAP_TOKEN:?missing HOMEBREW_TAP_TOKEN}"
           archive="dist/agenthail-${RELEASE_VERSION}-darwin-arm64.tar.gz"
-          sha="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+          sha="$(sha256sum "$archive" | cut -d' ' -f1)"
           tap="$RUNNER_TEMP/homebrew-tap"
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP}.git" "$tap"
           sed -e "s/@TAG@/${RELEASE_VERSION}/g" -e "s/@SHA256@/${sha}/" -e "s/@REVISION@/${GITHUB_SHA}/" packaging/homebrew/agenthail.rb > "$tap/Formula/agenthail.rb"

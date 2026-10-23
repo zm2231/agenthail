@@ -55,22 +55,21 @@ checksum() {
 }
 
 mkdir -p "$cache"
-if [ ! -x "$dist/bin/node" ]; then
-	if [ ! -f "$archive" ] || [ "$(checksum "$archive")" != "$sha" ]; then
-		rm -f "$archive"
-		curl -fsSL --retry 3 --retry-all-errors -o "$archive.part" "https://nodejs.org/dist/v$VERSION/$name.tar.gz"
-		mv "$archive.part" "$archive"
-	fi
-	if [ "$(checksum "$archive")" != "$sha" ]; then
-		echo "error: $archive does not match the pinned checksum" >&2
-		exit 1
-	fi
-	unpacked="$(mktemp -d "$cache/unpack.XXXXXX")"
-	tar -xzf "$archive" -C "$unpacked"
-	rm -rf "$dist"
-	mv "$unpacked/$name" "$dist"
-	rmdir "$unpacked"
+if [ ! -f "$archive" ] || [ "$(checksum "$archive")" != "$sha" ]; then
+	rm -f "$archive"
+	curl -fsSL --retry 3 --retry-all-errors -o "$archive.part" "https://nodejs.org/dist/v$VERSION/$name.tar.gz"
+	mv "$archive.part" "$archive"
 fi
+if [ "$(checksum "$archive")" != "$sha" ]; then
+	echo "error: $archive does not match the pinned checksum" >&2
+	exit 1
+fi
+# Only the archive is verified, so every run unpacks it afresh.
+unpacked="$(mktemp -d "$cache/unpack.XXXXXX")"
+tar -xzf "$archive" -C "$unpacked"
+rm -rf "$dist"
+mv "$unpacked/$name" "$dist"
+rmdir "$unpacked"
 
 if [ "$dist_only" -eq 1 ]; then
 	echo "$dist"
