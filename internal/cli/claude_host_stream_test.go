@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
-	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -21,8 +20,7 @@ func TestStreamWithoutADaemonFollowsAHostedSessionFromItsEnd(t *testing.T) {
 	client := host.Start(t)
 	const id = "6f3e1c2a-8d4b-4f5e-9a7c-1b2d3e4f5a6b"
 	host.Open(t, client, id)
-	app, _ := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaude(nil, fixture.Home)
+	app, _ := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
 	path := filepath.Join(fixture.Home, ".claude", "projects", "a-project", id+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)

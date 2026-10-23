@@ -25,8 +25,7 @@ func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture,
 	t.Helper()
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
-	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
+	app, r := claudeCLIFixture(t, surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request))
 	return app, r, fixture, posts
 }
 

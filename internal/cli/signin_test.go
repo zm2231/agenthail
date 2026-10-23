@@ -159,6 +159,7 @@ func TestDoctorShowsTheResolvedSigninAndHowToChangeIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: surfaces.NewClaude(reg, home)}}
+	app.DefaultTimeout = claudeFixtureTimeout
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
 	if err != nil {
 		t.Fatalf("doctor failed: err=%v output=%s", err, output)

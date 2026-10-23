@@ -187,6 +187,18 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }, daemonService: &fakeService{}}, r
 }
 
+// A real Claude surface starts host and Claude processes, which a loaded
+// runner can take well over a second to do.
+const claudeFixtureTimeout = 15 * time.Second
+
+func claudeCLIFixture(t *testing.T, claude surface.Surface) (*App, *registry.Registry) {
+	t.Helper()
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	app.Surfaces[0].Surface = claude
+	app.DefaultTimeout = claudeFixtureTimeout
+	return app, r
+}
+
 func captureStdout(t *testing.T, run func() error) (string, error) {
 	t.Helper()
 	old := os.Stdout

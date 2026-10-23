@@ -67,8 +67,7 @@ func exitedClaudeApp(t *testing.T) exitedClaude {
 	fixture := claudetest.New(t)
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaude(nil, fixture.Home)
+	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
 	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
 	if err := r.RegisterSession(exited); err != nil {
 		t.Fatal(err)
