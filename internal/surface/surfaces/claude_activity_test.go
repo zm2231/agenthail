@@ -58,7 +58,9 @@ func TestClaudeObserveSaysWhenAnOpenTurnHasNoClaudeProcess(t *testing.T) {
 }
 
 func TestAClaudeTurnTracksEachToolCallUntilItsResult(t *testing.T) {
-	at := func(minute int) string { return time.Date(2026, 10, 23, 10, minute, 0, 0, time.UTC).Format(time.RFC3339) }
+	at := func(minute int) string {
+		return time.Date(2026, 10, 23, 10, minute, 0, 0, time.UTC).Format(time.RFC3339)
+	}
 	record := func(raw string) claudeRecord {
 		t.Helper()
 		var parsed claudeRecord

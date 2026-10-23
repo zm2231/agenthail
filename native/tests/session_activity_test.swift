@@ -15,6 +15,10 @@ struct SessionActivityTest {
         let orphan = try session(#"{"busySince":"2026-10-23T05:07:57Z","lastProgressAt":"2026-10-23T05:07:57Z","noProcess":true}"#)
         check(orphan.workingLabel(now: now) == "Working · no activity for 5 hr 6 min · no Claude process", "a turn nothing runs says so: \(orphan.workingLabel(now: now))")
 
+        let codex = try JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"t","surface":"codex","name":"reviewer","status":"busy","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"activity":{"busySince":"2026-10-23T09:58:00.034Z","lastProgressAt":"2026-10-23T06:02:00.123456789-04:00","tool":{"name":"exec","startedAt":"2026-10-23T10:01:00.5Z"}}}"#.utf8))
+        let codexSince = try date("2026-10-23T10:01:00.5Z").formatted(date: .omitted, time: .shortened)
+        check(codex.workingLabel(now: now) == "Working · no activity for 12 min · running exec since \(codexSince)", "a quiet Codex turn reads the same way, whatever offset and precision its times carry: \(codex.workingLabel(now: now))")
+
         let fresh = try session(nil)
         check(fresh.workingLabel(now: now) == "Working", "a session without activity says Working")
 

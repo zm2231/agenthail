@@ -24,6 +24,12 @@ assert.equal(
   `Working · no activity for 12 min · running Bash since ${since}`,
 );
 assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T10:05:00Z" }), now), "Working");
+const codexSince = new Date("2026-10-23T10:01:00.5Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+assert.equal(
+  context.presenceLabel({ ...busy({ busySince: "2026-10-23T09:58:00.034Z", lastProgressAt: "2026-10-23T06:02:00.123456789-04:00", tool: { name: "exec", startedAt: "2026-10-23T10:01:00.5Z" } }), surface: "codex" }, now),
+  `Working · no activity for 12 min · running exec since ${codexSince}`,
+  "a quiet Codex turn reads the same way, whatever offset and precision its times carry",
+);
 assert.equal(context.presenceLabel(busy(undefined), now), "Working");
 assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T05:07:57Z", noProcess: true }), now), "Working · no activity for 5 hr 6 min · no Claude process");
 assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T08:14:00Z" }), now), "Working · no activity for 2 hr");
