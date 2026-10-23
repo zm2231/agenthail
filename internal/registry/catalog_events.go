@@ -210,10 +210,23 @@ func catalogHostEpochTx(tx *sql.Tx, create bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_state(id,host_epoch) VALUES(1,?)`, epoch); err != nil {
+	if _, err := tx.Exec(`INSERT INTO catalog_state(id,host_epoch,projection_clock) VALUES(1,?,(SELECT COALESCE(MAX(projection_generation),0) FROM catalog_sessions))`, epoch); err != nil {
 		return "", err
 	}
 	return epoch, nil
+}
+
+// nextProjectionGenerationTx takes the next value of the host's projection
+// clock. Every write of a catalog row's projection takes one, so a generation
+// is never reused, even by a row deleted and created again: a session and its
+// generation name exactly one projection.
+func nextProjectionGenerationTx(tx *sql.Tx) (int64, error) {
+	if _, err := catalogHostEpochTx(tx, true); err != nil {
+		return 0, err
+	}
+	var generation int64
+	err := tx.QueryRow(`UPDATE catalog_state SET projection_clock=projection_clock+1 WHERE id=1 RETURNING projection_clock`).Scan(&generation)
+	return generation, err
 }
 
 func catalogEventByDedupeKey(q interface{ QueryRow(string, ...any) *sql.Row }, key string) (CatalogEvent, error) {
