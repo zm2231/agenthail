@@ -31,6 +31,7 @@ let package = Package(
                 "UIConfig.swift",
                 "HolderPins.swift",
                 "ComposerAttachment.swift",
+                "ComposerTextSync.swift",
                 "SessionSelection.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
