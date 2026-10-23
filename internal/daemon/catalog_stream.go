@@ -697,44 +697,58 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 // recent session, a subagent entering or leaving the list, or an archive change
 // is published on the next tick.
 type catalogPresence struct {
-	mu      sync.Mutex
-	decoded map[string]decodedProjection
+	mu        sync.Mutex
+	hostEpoch string
+	clock     int64
+	rows      map[string]presenceRow
 }
 
-type decodedProjection struct {
+// presenceRow is a row's stored projection, decoded, at its generation. A row
+// is settled once a pass found its outputs already stored; while its
+// generation and outputs stay the same, later passes neither encode nor write
+// it.
+type presenceRow struct {
+	generation int64
 	stored     string
 	projection dashboardSession
+	settled    presenceOutputs
+	isSettled  bool
 }
 
-// projection decodes a stored projection, reusing the previous pass's
-// decoding while the stored text is unchanged.
-func (p *catalogPresence) projection(id, stored string, seen map[string]decodedProjection) (dashboardSession, bool) {
-	if cached, ok := p.decoded[id]; ok && cached.stored == stored {
-		seen[id] = cached
-		return cached.projection, true
+type presenceOutputs struct {
+	queueCount      int
+	current         bool
+	currentReason   string
+	hidden          *surface.SubagentRollup
+	subagents       *surface.SubagentRollup
+	listed          bool
+	archived        bool
+	projectArchived bool
+}
+
+func presenceOutputsOf(row dashboardSession) presenceOutputs {
+	outputs := presenceOutputs{queueCount: row.QueueCount, current: row.Current, currentReason: row.CurrentReason, hidden: row.HiddenSubagents, subagents: row.Subagents, listed: row.Listed, archived: row.Archived}
+	if row.Project != nil {
+		outputs.projectArchived = row.Project.Archived
 	}
-	var projection dashboardSession
-	if json.Unmarshal([]byte(stored), &projection) != nil {
-		return dashboardSession{}, false
-	}
-	seen[id] = decodedProjection{stored: stored, projection: projection}
-	return projection, true
+	return outputs
+}
+
+func (o presenceOutputs) same(other presenceOutputs) bool {
+	return o.queueCount == other.queueCount && o.current == other.current && o.currentReason == other.currentReason &&
+		sameSubagentRollup(o.hidden, other.hidden) && sameSubagentRollup(o.subagents, other.subagents) &&
+		o.listed == other.listed && o.archived == other.archived && o.projectArchived == other.projectArchived
+}
+
+func (p *catalogPresence) known(id string, generation int64) bool {
+	row, ok := p.rows[id]
+	return ok && row.generation == generation
 }
 
 func (d *Daemon) publishCatalogPresence() {
 	defer d.refreshHostQueueCounts()
 	d.presence.mu.Lock()
 	defer d.presence.mu.Unlock()
-	counts, err := d.Registry.QueueCounts()
-	if err != nil {
-		d.log.Printf("catalog queue counts: %s", err)
-		return
-	}
-	records, listing, err := d.Registry.CatalogPresenceRows()
-	if err != nil {
-		d.log.Printf("catalog presence rows: %s", err)
-		return
-	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)
@@ -745,9 +759,20 @@ func (d *Daemon) publishCatalogPresence() {
 		d.log.Printf("catalog view state: %s", err)
 		return
 	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	read, err := d.Registry.CatalogPresenceRows(d.presence.hostEpoch, d.presence.clock, d.presence.known)
+	if err != nil {
+		d.log.Printf("catalog presence rows: %s", err)
+		return
+	}
 	now := time.Now()
 	type localRow struct {
 		record     registry.CatalogPresenceRow
+		stored     presenceRow
 		projection dashboardSession
 		adapter    surface.Surface
 	}
@@ -755,37 +780,54 @@ func (d *Daemon) publishCatalogPresence() {
 		row.projection.QueueCount = count
 		row.projection.Current, row.projection.CurrentReason = surface.PresenceFor(row.adapter, row.record.Session, surface.PresenceInput{QueueCount: count, Open: row.projection.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
 	}
-	rows := make([]localRow, 0, len(records))
-	projections := make([]dashboardSession, 0, len(records))
-	decoded := make(map[string]decodedProjection, len(records))
-	defer func() { d.presence.decoded = decoded }()
-	for _, record := range records {
-		projection, ok := d.presence.projection(record.Session.ID, record.ProjectionFingerprint, decoded)
-		if !ok {
-			continue
+	rows := make([]localRow, 0, len(read.Rows))
+	projections := make([]dashboardSession, 0, len(read.Rows))
+	kept := make(map[string]presenceRow, len(read.Rows))
+	defer func() {
+		d.presence.rows, d.presence.hostEpoch, d.presence.clock = kept, read.HostEpoch, read.Clock
+	}()
+	for _, record := range read.Rows {
+		stored, ok := d.presence.rows[record.Session.ID]
+		if record.FingerprintRead && (!ok || stored.generation != record.Generation || stored.stored != record.ProjectionFingerprint) {
+			var projection dashboardSession
+			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+				continue
+			}
+			stored = presenceRow{generation: record.Generation, stored: record.ProjectionFingerprint, projection: projection}
 		}
+		kept[record.Session.ID] = stored
 		adapter, err := d.adapters().For(&record.Session)
 		if err != nil {
 			continue
 		}
-		row := localRow{record: record, projection: projection, adapter: adapter}
+		row := localRow{record: record, stored: stored, projection: stored.projection, adapter: adapter}
 		present(&row, counts[record.Session.ID])
-		hidden := listing.HiddenSubagents(record.Session.ID)
+		hidden := read.Listing.HiddenSubagents(record.Session.ID)
 		row.projection.HiddenSubagents = hidden
-		row.projection.Subagents = addSubagentRollups(projection.ObservedSubagents, hidden)
-		row.projection.Listed = listing.Current(record.Session.ID)
+		row.projection.Subagents = addSubagentRollups(stored.projection.ObservedSubagents, hidden)
+		row.projection.Listed = read.Listing.Current(record.Session.ID)
 		rows = append(rows, row)
 		projections = append(projections, row.projection)
 	}
 	d.settleArchiveActivity(projections, view)
 	for _, row := range rows {
+		applyCatalogView(&row.projection, view)
+		if row.stored.isSettled && row.stored.settled.same(presenceOutputsOf(row.projection)) {
+			continue
+		}
 		for attempt := 0; attempt < 3; attempt++ {
 			applyCatalogView(&row.projection, view)
 			fingerprint, err := json.Marshal(row.projection)
-			if err != nil || string(fingerprint) == row.record.ProjectionFingerprint {
+			if err != nil {
 				break
 			}
-			if err := d.catalog.updateProjection(row.record.Session.ID, row.record.ProjectionFingerprint, string(fingerprint)); err == nil {
+			if string(fingerprint) == row.stored.stored {
+				settled := kept[row.record.Session.ID]
+				settled.settled, settled.isSettled = presenceOutputsOf(row.projection), true
+				kept[row.record.Session.ID] = settled
+				break
+			}
+			if err := d.catalog.updateProjection(row.record.Session.ID, row.stored.stored, string(fingerprint)); err == nil {
 				break
 			} else {
 				var conflict *registry.CatalogQueueProjectionConflict
