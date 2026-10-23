@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -53,5 +54,41 @@ func TestClaudeObserveSaysWhenAnOpenTurnHasNoClaudeProcess(t *testing.T) {
 	observation, err := claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusBusy || observation.Activity == nil || !observation.Activity.NoProcess || !observation.Activity.LastProgressAt.Equal(time.Date(2026, 10, 23, 5, 7, 57, 0, time.UTC)) {
 		t.Fatalf("observation=%+v activity=%+v err=%v", observation, observation.Activity, err)
+	}
+}
+
+func TestAClaudeTurnTracksEachToolCallUntilItsResult(t *testing.T) {
+	at := func(minute int) string { return time.Date(2026, 10, 23, 10, minute, 0, 0, time.UTC).Format(time.RFC3339) }
+	record := func(raw string) claudeRecord {
+		t.Helper()
+		var parsed claudeRecord
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	turns := appendClaudeTurn(nil, record(`{"type":"user","uuid":"u","timestamp":"`+at(0)+`","message":{"role":"user","content":"go"}}`))
+	turns = appendClaudeTurn(turns, record(`{"type":"assistant","timestamp":"`+at(1)+`","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"a","name":"Read"}]}}`))
+	turns = appendClaudeTurn(turns, record(`{"type":"assistant","timestamp":"`+at(1)+`","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"b","name":"Grep"}]}}`))
+	shared := turns[len(turns)-1]
+	turns = appendClaudeTurn(turns, record(`{"type":"user","timestamp":"`+at(2)+`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"b","content":"x"}]}}`))
+	if got := turns[len(turns)-1].Tools; len(got) != 1 || got[0].ID != "a" || got[0].Name != "Read" {
+		t.Fatalf("after one of two parallel results, tools=%+v", got)
+	}
+	if len(shared.Tools) != 2 {
+		t.Fatalf("a result changed an earlier copy of the turn: %+v", shared.Tools)
+	}
+	turns = appendClaudeTurn(turns, record(`{"type":"user","timestamp":"`+at(3)+`","message":{"role":"user","tool_use_id":"a","content":"done"}}`))
+	if got := turns[len(turns)-1].Tools; len(got) != 0 {
+		t.Fatalf("a message-level tool_use_id left tools=%+v", got)
+	}
+	turns = appendClaudeTurn(turns, record(`{"type":"assistant","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"tool_use","id":"c","name":"Bash"}]}}`))
+	last := turns[len(turns)-1]
+	if !last.LastAt.Equal(time.Date(2026, 10, 23, 10, 3, 0, 0, time.UTC)) || len(last.Tools) != 0 {
+		t.Fatalf("a record without a timestamp moved progress or started a tool: last=%v tools=%+v", last.LastAt, last.Tools)
+	}
+	turns = appendClaudeTurn(turns, record(`{"type":"user","uuid":"next","timestamp":"`+at(9)+`","message":{"role":"user","content":"next prompt"}}`))
+	if next := turns[len(turns)-1]; next.UserID != "next" || len(next.Tools) != 0 || !next.LastAt.Equal(time.Date(2026, 10, 23, 10, 9, 0, 0, time.UTC)) {
+		t.Fatalf("a new turn inherited activity: %+v", next)
 	}
 }
