@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -102,6 +103,26 @@ func TestTheAccentIsLiftedOrLeftToTheDevice(t *testing.T) {
 	chosen := Colors(map[string]string{"theme.accent": "#1b2a6b", "color.link": "accent"}, "mac", 4.5)
 	if chosen["accent"].SystemAccent || chosen["link"].Dark != chosen["accent"].Dark || chosen["accent"].Dark == "#1b2a6b" {
 		t.Fatalf("hex accent = %+v link %+v", chosen["accent"], chosen["link"])
+	}
+	for _, accent := range []string{"system", "#1b2a6b"} {
+		for _, link := range []string{"default", ""} {
+			colors := Colors(map[string]string{"theme.accent": accent, "color.link": link}, "mac", 4.5)
+			if !reflect.DeepEqual(colors["link"], colors["accent"]) {
+				t.Errorf("link %q with accent %s = %+v, want the accent %+v", link, accent, colors["link"], colors["accent"])
+			}
+		}
+	}
+}
+
+func TestAnUnknownClassReadsOnTheWebSurfacesAndANamedDeviceWins(t *testing.T) {
+	if !reflect.DeepEqual(Colors(nil, "watch", 4.5), Colors(nil, "web", 4.5)) {
+		t.Fatalf("an unknown class does not fall back to the web surfaces")
+	}
+	parsed := Parse("color.meta@phone = #a0a0a0\ncolor.meta@device:Pocket = #c0c0c0/#303030\n")
+	named, _ := parsed.Chosen(Device{Class: "phone", Name: "Pocket"})
+	other, _ := parsed.Chosen(Device{Class: "phone", Name: "Spare"})
+	if named["color.meta"] != "#c0c0c0/#303030" || other["color.meta"] != "#a0a0a0" {
+		t.Fatalf("named %q other %q", named["color.meta"], other["color.meta"])
 	}
 }
 

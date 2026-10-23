@@ -24,10 +24,14 @@ func Colors(chosen map[string]string, class string, target float64) map[string]R
 	}
 	for _, role := range TextRoles {
 		value := chosen["color."+role]
-		switch {
-		case value == "accent":
+		if value == "" || value == "default" {
+			key, _ := Lookup("color." + role)
+			value = key.Default
+		}
+		switch value {
+		case "accent":
 			colors[role] = colors["accent"]
-		case value == "default" || value == "":
+		case "default":
 			colors[role] = liftPair(BuiltIn.Roles[role], surfaces, target)
 		default:
 			pair, _ := parsePair(value)
