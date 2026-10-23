@@ -248,6 +248,32 @@ func TestAClaudeWindowShorterThanItsTurnReplayStillReadsWhatWasAppended(t *testi
 	}
 }
 
+func TestAStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
+	claudePath := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"first"}}`+"\n")
+	claudeSession := seededClaudeStreamSession(t, claudePath, "")
+	appendRecords(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
+	codexRecord := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", "appended")
+	codexSession := &surface.Session{ID: "codex", Transcript: timelineFixture(t, codexRecord), TranscriptOffsetSet: true}
+	for name, stream := range map[string]func(func(surface.StreamEvent)) error{
+		"claude": func(onEvent func(surface.StreamEvent)) error {
+			return NewClaude(nil, t.TempDir()).Stream(context.Background(), claudeSession, "", onEvent, 0)
+		},
+		"codex": func(onEvent func(surface.StreamEvent)) error {
+			return NewCodex("").Stream(context.Background(), codexSession, "", onEvent, 0)
+		},
+	} {
+		var texts []string
+		err := stream(func(event surface.StreamEvent) {
+			if event.Text != "" {
+				texts = append(texts, event.Text)
+			}
+		})
+		if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || !strings.Contains(texts[0], "appended") {
+			t.Errorf("%s: err=%v texts=%q", name, err, texts)
+		}
+	}
+}
+
 func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testing.T) {
 	var history strings.Builder
 	for turn := 1; turn <= 30; turn++ {

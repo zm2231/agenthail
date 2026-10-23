@@ -181,7 +181,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	defer wake.Release()
 	deadline := time.Now().Add(timeout)
 	currentTurnID := session.CodexCurrentTurnID
-	for time.Now().Before(deadline) {
+	for first := true; first || time.Now().Before(deadline); first = false {
 		currentInfo, statErr := os.Stat(path)
 		if statErr != nil || currentInfo == nil || !os.SameFile(fileInfo, currentInfo) || currentInfo.Size() < offset {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)

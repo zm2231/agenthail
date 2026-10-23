@@ -1317,7 +1317,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 		}
 	}
-	for time.Now().Before(deadline) {
+	for first := true; first || time.Now().Before(deadline); first = false {
 		if info, statErr := os.Stat(path); statErr == nil {
 			if current := transcriptFileIdentity(info); identity != "" && current != identity {
 				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
