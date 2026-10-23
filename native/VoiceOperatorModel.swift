@@ -43,6 +43,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var inputRevision = 0
     private var hostHangupAttemptID: String?
     private var closed = false
+    private var workID = 0
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
     var committedRoute: String { state?.target?.name ?? "Agenthail orchestrator" }
     var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
@@ -147,6 +148,7 @@ final class VoiceOperatorModel: ObservableObject {
                 hostHangupPending = false
                 hostHangupUnconfirmed = false
                 hostHangupAttemptID = nil
+                stopPollingIfIdle()
             }
             if let sdp = next.sdp, sdp != appliedSDP, let attemptID, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -169,9 +171,12 @@ final class VoiceOperatorModel: ObservableObject {
         visibleScreens = visible
         guard visible == 0 else { return }
         activityRefresh?.cancel(); activityRefresh = nil
-        if !hasLocalCall && !hostHangupPending && !hostHangupUnconfirmed {
-            polling?.cancel(); polling = nil
-        }
+        stopPollingIfIdle()
+    }
+
+    private func stopPollingIfIdle() {
+        guard visibleScreens == 0, !hasLocalCall, !hostHangupPending, !hostHangupUnconfirmed else { return }
+        polling?.cancel(); polling = nil
     }
 
     // Timeline reads run beside the state poll, so a slow read never delays
@@ -229,9 +234,10 @@ final class VoiceOperatorModel: ObservableObject {
 
     func call() async {
         guard let api, canCall else { return }
-        working = true; dialing = true; error = nil; microphoneDenied = false; generation += 1
+        let work = beginWork(); dialing = true; error = nil; microphoneDenied = false; generation += 1
         let current = generation
-        defer { working = false }
+        defer { endWork(work) }
+        open()
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
             guard !closed, generation == current else { return }
@@ -371,6 +377,7 @@ final class VoiceOperatorModel: ObservableObject {
 
     func hangup() {
         generation += 1
+        workID += 1; working = false
         heartbeat?.cancel(); heartbeat = nil
         mediaRecovery?.cancel(); mediaRecovery = nil
         if let attemptID { diagnostics?.end("local_hangup", id: attemptID) }
@@ -382,7 +389,10 @@ final class VoiceOperatorModel: ObservableObject {
         let shouldStopHost = startSubmitted || hostHangupUnconfirmed || (localAttempt == nil && state?.hasCall == true)
         attemptID = nil
         startSubmitted = false
-        guard shouldStopHost, let api, let id, state?.occupied != true else { return }
+        guard shouldStopHost, let api, let id, state?.occupied != true else {
+            stopPollingIfIdle()
+            return
+        }
         hostHangupPending = true
         hostHangupUnconfirmed = false
         hostHangupAttemptID = id
@@ -403,9 +413,21 @@ final class VoiceOperatorModel: ObservableObject {
         }
     }
 
+    // An action owns `working` until it finishes or a hangup ends it, so an
+    // action that outlives a hangup cannot clear a newer action's state.
+    private func beginWork() -> Int {
+        workID += 1
+        working = true
+        return workID
+    }
+
+    private func endWork(_ id: Int) {
+        if workID == id { working = false }
+    }
+
     func sendText() async {
         guard let api, !closed, !working, let id = attemptID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        working = true; defer { working = false }
+        let work = beginWork(); defer { endWork(work) }
         let current = generation
         let messageID = UUID().uuidString
         let submitted = text; text = ""
@@ -418,8 +440,8 @@ final class VoiceOperatorModel: ObservableObject {
 
     func transfer() async {
         guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true else { return }
-        working = true
-        defer { working = false }
+        let work = beginWork()
+        defer { endWork(work) }
         let current = generation
         do {
             let next = try await api.action(VoiceAction(action: "transfer", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -441,8 +463,8 @@ final class VoiceOperatorModel: ObservableObject {
 
     func interruptTarget() async {
         guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true, state?.target != nil else { return }
-        working = true
-        defer { working = false }
+        let work = beginWork()
+        defer { endWork(work) }
         let current = generation
         do {
             let next = try await api.action(VoiceAction(action: "target-interrupt", attemptId: state?.attemptId))
@@ -454,9 +476,9 @@ final class VoiceOperatorModel: ObservableObject {
 
     func startNewConversation() async {
         guard let api, canStartNewConversation else { return }
-        working = true; error = nil; generation += 1
+        let work = beginWork(); error = nil; generation += 1
         let current = generation
-        defer { working = false }
+        defer { endWork(work) }
         do {
             let next = try await api.action(VoiceAction(action: "new"))
             guard !closed, generation == current else { return }
