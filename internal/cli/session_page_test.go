@@ -143,3 +143,27 @@ func TestLastResolvesAnExitedSessionByItsName(t *testing.T) {
 		t.Fatalf("a read sent %q", provider.sent)
 	}
 }
+
+func TestReplyAfterABuiltInCommandIsTheModelsReplyWhileLastIsTheCommand(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
+	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}}
+	app, _ := cliFixture(t, provider.cliSurface)
+	app.Surfaces[0].Surface = provider
+	app.catalogDaemonRunning = func() bool { return true }
+	app.daemonSessionPageReader = func() (sessionPageReader, error) {
+		return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: []surface.Exchange{
+			{User: "Reply with READY", Assistant: "READY", Turn: surface.NewTurnMetadata(surface.TurnCompleted, surface.TurnMeasure{})},
+			{User: "/context", Assistant: "## Context Usage", Command: true},
+			{User: "/echo READY", Assistant: "READY", Command: true},
+		}}}, nil
+	}
+
+	reply, err := captureStdout(t, func() error { return app.Run([]string{"reply", "claude:s", "--json"}) })
+	if err != nil || !strings.Contains(reply, `"text":"READY"`) || !strings.Contains(reply, `"state":"completed"`) {
+		t.Fatalf("reply=%s err=%v", reply, err)
+	}
+	last, err := captureStdout(t, func() error { return app.Run([]string{"last", "claude:s"}) })
+	if err != nil || !strings.Contains(last, "/echo READY") {
+		t.Fatalf("last=%s err=%v", last, err)
+	}
+}

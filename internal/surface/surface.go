@@ -734,6 +734,9 @@ type Exchange struct {
 	Timestamp time.Time     `json:"timestamp"`
 	Source    string        `json:"source,omitempty"`
 	Turn      *TurnMetadata `json:"turn,omitempty"`
+	// Command marks a built-in command the provider ran without a model
+	// turn; its Assistant is what the command printed, not a reply.
+	Command bool `json:"command,omitempty"`
 }
 
 type StreamEvent struct {
