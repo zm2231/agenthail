@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/testnode"
 )
 
 func testContext(t *testing.T) context.Context {
@@ -443,11 +444,7 @@ func TestDiagnoseSignalsOnlyTheHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	foreign := exec.Command(node, "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
+	foreign := exec.Command(testnode.Path(t), "-e", "setInterval(() => {}, 1000)", "fake-claude.mjs")
 	foreign.Env = append(os.Environ(), claudehosttest.OwnerEnv()...)
 	if err := foreign.Start(); err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ build/
 
 # build output
 /agenthail
+/runtime/
 .gitnexus
 .codebase-memory/
 .agenthail/

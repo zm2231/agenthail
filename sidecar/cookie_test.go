@@ -14,6 +14,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/zm2231/agenthail/internal/testnode"
 )
 
 type bridgeHome struct {
@@ -27,9 +29,7 @@ func requireCookieBridgeDeps(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("the browser fixtures use macOS profile locations")
 	}
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Fatal("node is required for the cookie bridge tests")
-	}
+	testnode.Path(t)
 	if _, err := os.Stat(filepath.Join("node_modules", "@steipete", "sweet-cookie")); err != nil {
 		if os.Getenv("CI") == "" {
 			t.Skip("run `npm ci --ignore-scripts` in sidecar/ to test the cookie bridge")
@@ -74,11 +74,7 @@ func newBridgeHome(t *testing.T) bridgeHome {
 
 func nodePath(t *testing.T) string {
 	t.Helper()
-	path, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return testnode.Path(t)
 }
 
 func writeChromeCookieDB(t *testing.T, profileDir, host, name, value string) {
@@ -108,7 +104,7 @@ func runBridge(t *testing.T, fixture bridgeHome, args ...string) (string, string
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", append([]string{"cookie.mjs"}, args...)...)
+	cmd := exec.CommandContext(ctx, testnode.Path(t), append([]string{"cookie.mjs"}, args...)...)
 	cmd.Env = []string{"HOME=" + fixture.home, "PATH=" + fixture.path, "TMPDIR=" + t.TempDir()}
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

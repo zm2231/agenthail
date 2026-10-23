@@ -23,6 +23,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudetestenv"
+	"github.com/zm2231/agenthail/internal/testnode"
 )
 
 type Fixture struct {
@@ -82,10 +83,7 @@ func (f *Fixture) Manager(t testing.TB, version string) *claudehost.Manager {
 func (f *Fixture) launch(t testing.TB, script, version string, env ...string) claudehost.Launch {
 	t.Helper()
 	hostDir := hostDir()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Fatalf("the Claude host tests need node on PATH: %v", err)
-	}
+	node := testnode.Path(t)
 	if _, err := os.Stat(filepath.Join(hostDir, "node_modules", "@anthropic-ai", "claude-agent-sdk")); err != nil {
 		t.Fatalf("install the host's dependencies first (npm ci --prefix claude-host): %v", err)
 	}
