@@ -41,21 +41,25 @@ enum WindowSnapshot {
     static func answer(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, api: AgenthailAPI) {
         if let device = request.device, !device.isEmpty, device != Host.current().localizedName { return }
         Task { @MainActor in
-            guard let png = await capture(request, model: model, voice: voice) else { return }
-            try? await api.uploadSnapshot(id: request.id, png: png)
+            switch await capture(request, model: model, voice: voice) {
+            case .success(let png): try? await api.uploadSnapshot(id: request.id, png: png)
+            case .failure(let failure): try? await api.failSnapshot(id: request.id, reason: failure.message)
+            }
         }
     }
 
-    static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController) async -> Data? {
+    static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController) async -> Result<Data, WindowImage.Failure> {
         let size = request.width.flatMap { width in request.height.map { CGSize(width: width, height: $0) } }
-        if request.session == nil, size == nil, let window = model.mainWindow, window.isVisible, !window.isMiniaturized, let png = png(of: window) {
-            return png
+        if request.session == nil, size == nil, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
+            let live = WindowImage.png(of: window)
+            if live != .failure(.empty) { return live }
         }
         let session = request.session ?? model.mainPane.selectedSessionID
         return await offscreen(session: session, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice)
     }
 
-    static func offscreen(session: String?, size: CGSize, model: AgenthailModel, voice: VoiceController) async -> Data? {
+    static func offscreen(session: String?, size: CGSize, model: AgenthailModel, voice: VoiceController) async -> Result<Data, WindowImage.Failure> {
+        guard WindowImage.system != nil else { return .failure(.unavailable) }
         let pane = model.openPane()
         defer { model.closePane(pane) }
         let resolved = session.map(model.resolveSessionID)
@@ -85,32 +89,9 @@ enum WindowSnapshot {
             try? await Task.sleep(for: .milliseconds(50))
         }
         try? await Task.sleep(for: settle)
-        return png(of: window)
+        return WindowImage.png(of: window)
     }
 
-    /// The window server's copy keeps glass that cacheDisplay drops, and reads occluded windows whole.
-    static func png(of window: NSWindow) -> Data? {
-        guard let image = windowImage(window) else { return nil }
-        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-    }
-
-    private typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
-
-    // CGWindowListCreateImage is unavailable to Swift from the macOS 15 SDK on, but remains in CoreGraphics.
-    private static let createImage: CreateImage? = {
-        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
-              let symbol = dlsym(handle, "CGWindowListCreateImage") else { return nil }
-        return unsafeBitCast(symbol, to: CreateImage.self)
-    }()
-
-    private static func windowImage(_ window: NSWindow) -> CGImage? {
-        let includingWindow: UInt32 = 1 << 3
-        let boundsIgnoreFraming: UInt32 = 1 << 0
-        let bestResolution: UInt32 = 1 << 3
-        guard let image = createImage?(.null, includingWindow, UInt32(window.windowNumber), boundsIgnoreFraming | bestResolution)?.takeRetainedValue(),
-              image.width > 1, image.height > 1 else { return nil }
-        return image
-    }
 }
 
 final class SnapshotWindow: NSWindow {

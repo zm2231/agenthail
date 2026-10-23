@@ -76,6 +76,7 @@ SOURCES=(
   macOS/TranscriptRows.swift
   macOS/VoiceController.swift
   macOS/WindowBackdrop.swift
+  macOS/WindowImage.swift
   macOS/WindowRectReader.swift
 )
 

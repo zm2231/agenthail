@@ -24,16 +24,21 @@ var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 // Requests live only in memory: one that outlives its caller is useless.
 type snapshotRelay struct {
 	mu      sync.Mutex
-	pending map[string]chan []byte
+	pending map[string]chan snapshotAnswer
+}
+
+type snapshotAnswer struct {
+	image   []byte
+	failure string
 }
 
 func newSnapshotRelay() *snapshotRelay {
-	return &snapshotRelay{pending: map[string]chan []byte{}}
+	return &snapshotRelay{pending: map[string]chan snapshotAnswer{}}
 }
 
-func (s *snapshotRelay) open() (string, chan []byte) {
+func (s *snapshotRelay) open() (string, chan snapshotAnswer) {
 	id := uuid.NewString()
-	reply := make(chan []byte, 1)
+	reply := make(chan snapshotAnswer, 1)
 	s.mu.Lock()
 	s.pending[id] = reply
 	s.mu.Unlock()
@@ -46,13 +51,13 @@ func (s *snapshotRelay) close(id string) {
 	s.mu.Unlock()
 }
 
-func (s *snapshotRelay) deliver(id string, image []byte) bool {
+func (s *snapshotRelay) deliver(id string, answer snapshotAnswer) bool {
 	s.mu.Lock()
 	reply, ok := s.pending[id]
 	delete(s.pending, id)
 	s.mu.Unlock()
 	if ok {
-		reply <- image
+		reply <- answer
 	}
 	return ok
 }
@@ -90,10 +95,14 @@ func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
 	timer := time.NewTimer(uiSnapshotTimeout)
 	defer timer.Stop()
 	select {
-	case image := <-reply:
+	case answer := <-reply:
+		if answer.failure != "" {
+			writeAPIError(w, http.StatusBadGateway, "snapshot_failed", answer.failure)
+			return
+		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(image)
+		_, _ = w.Write(answer.image)
 	case <-timer.C:
 		message := "No Agenthail app answered. Open the Mac app on a computer connected to this daemon."
 		if request.Device != "" {
@@ -114,6 +123,21 @@ func (d *Daemon) apiUISnapshotUploadHandler(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusNotFound, "snapshot_not_found", "No snapshot request has that id.")
 		return
 	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var failed struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, apiRequestBodyLimit)).Decode(&failed); err != nil || strings.TrimSpace(failed.Error) == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_json", "A failed snapshot is reported as {\"error\": \"<reason>\"}.")
+			return
+		}
+		if !d.snapshots.deliver(id, snapshotAnswer{failure: strings.TrimSpace(failed.Error)}) {
+			writeAPIError(w, http.StatusConflict, "snapshot_not_pending", "That snapshot was already answered or has expired.")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	image, err := io.ReadAll(io.LimitReader(r.Body, uiSnapshotMaxBytes+1))
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "snapshot_unreadable", err.Error())
@@ -127,7 +151,7 @@ func (d *Daemon) apiUISnapshotUploadHandler(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusUnsupportedMediaType, "snapshot_not_png", "A snapshot must be a PNG image.")
 		return
 	}
-	if !d.snapshots.deliver(id, image) {
+	if !d.snapshots.deliver(id, snapshotAnswer{image: image}) {
 		writeAPIError(w, http.StatusConflict, "snapshot_not_pending", "That snapshot was already answered or has expired.")
 		return
 	}

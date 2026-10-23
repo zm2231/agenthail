@@ -263,6 +263,11 @@ final class AgenthailAPI: @unchecked Sendable {
         try validate(response: response, data: data)
     }
 
+    func failSnapshot(id: String, reason: String) async throws {
+        guard let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { throw AgenthailAPIError.invalidResponse }
+        let _: EmptyResponse = try await post("/api/v1/ui/snapshot/" + encoded, body: ["error": reason])
+    }
+
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author, attachments: attachments)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)

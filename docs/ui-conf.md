@@ -124,6 +124,6 @@ Apps read and change `ui.conf` through the daemon, with the same checks as `agen
 - `--session <id>` and `--size <W>x<H>` draw a separate copy of the main window, in points, that nobody sees. The window you are using keeps its session, size and layout. A size below the window's minimum is widened to that minimum, as the real window would be.
 - `--name <device>` picks the Mac by its name when more than one Mac app is connected. Otherwise the first app to answer is used.
 - The command waits up to 20 seconds and says so if no app answered.
+- The capture uses macOS's `CGWindowListCreateImage`. If a future macOS removes it, the command fails with a message saying so rather than saving a less faithful picture.
 
 The API behind it is `POST /api/v1/ui/snapshot` with an optional JSON body `{"session", "width", "height", "device"}`; the response is the PNG. It needs the `read` scope. A snapshot can show any session visible in the window, so anything allowed to read sessions can take one. Connected apps receive the request as a `ui.snapshot.requested` event and answer with `POST /api/v1/ui/snapshot/<id>`; requests are held only in memory and expire after 20 seconds.
-

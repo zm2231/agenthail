@@ -115,3 +115,27 @@ func TestUISnapshotRefusesBadSizesAndOversizedImages(t *testing.T) {
 		t.Fatalf("a snapshot without a token: %d", response.Code)
 	}
 }
+
+func TestUISnapshotPassesTheAppsFailureToTheCaller(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
+	defer cancel()
+
+	done := make(chan snapshotCall, 1)
+	go func() { done <- snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{}`)) }()
+	request := nextSnapshotRequest(t, stream)
+	if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(`{"error":" "}`)); call.code != http.StatusBadRequest {
+		t.Fatalf("an empty failure was accepted: %d %s", call.code, call.body)
+	}
+	if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(`{"error":"This macOS no longer provides CGWindowListCreateImage."}`)); call.code != http.StatusNoContent {
+		t.Fatalf("failure report: %d %s", call.code, call.body)
+	}
+	call := <-done
+	if call.code != http.StatusBadGateway || !strings.Contains(string(call.body), "snapshot_failed") || !strings.Contains(string(call.body), "CGWindowListCreateImage") {
+		t.Fatalf("caller got %d %s", call.code, call.body)
+	}
+	if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(`{"error":"late"}`)); call.code != http.StatusConflict {
+		t.Fatalf("a failure after the answer was accepted: %d", call.code)
+	}
+}
