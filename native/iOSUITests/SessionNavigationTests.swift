@@ -49,7 +49,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.tabBars.buttons["Inbox"].isHittable)
         app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
         XCTAssertTrue(session.waitForExistence(timeout: 5))
-        app.buttons["new-session"].tapWhenReady()
+        app.buttons["new-menu"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["New session"].waitForExistence(timeout: 5))
         app.navigationBars["New session"].buttons["Cancel"].tapWhenReady()
         XCTAssertTrue(session.waitForExistence(timeout: 5))

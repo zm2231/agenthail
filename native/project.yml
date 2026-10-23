@@ -37,6 +37,7 @@ targets:
       - path: ComposerAttachment.swift
       - path: ComposerTextSync.swift
       - path: SessionSelection.swift
+      - path: ProjectActions.swift
       - path: SessionTree.swift
       - path: MetadataOverlay.swift
       - path: EventRetryBackoff.swift

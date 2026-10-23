@@ -7,6 +7,7 @@ struct SessionSidebarHeader: View {
     let help: (SessionFilter) -> String
     let newSessionHelp: String
     let findShortcut: KeyboardShortcut?
+    let addProject: () -> Void
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -28,6 +29,13 @@ struct SessionSidebarHeader: View {
             HStack(spacing: DesktopSpace.s) {
                 search
                 SessionRefinementMenu(model: model)
+                Button(action: addProject) {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .help("Add project")
+                .accessibilityLabel("Add project")
                 Button {
                     model.openNewSession()
                 } label: {

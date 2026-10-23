@@ -26,6 +26,7 @@ SOURCES=(
   RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift
+  ProjectActions.swift
   SessionTree.swift
   MetadataOverlay.swift
   StatusRefreshPolicy.swift

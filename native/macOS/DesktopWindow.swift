@@ -25,6 +25,11 @@ struct DesktopWindow: View {
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
+        .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
+        .alert(pane.projectConfirmation?.message ?? "", isPresented: Binding(get: { pane.projectConfirmation != nil }, set: { if !$0 { pane.projectConfirmation = nil } }), presenting: pane.projectConfirmation) { confirmation in
+            Button(confirmation.action, role: .destructive) { pane.confirm(confirmation) }
+            Button("Cancel", role: .cancel) {}
+        }
         .overlay(alignment: .top) {
             if model.paletteVisible {
                 ZStack(alignment: .top) {
@@ -161,7 +166,8 @@ struct SessionSidebar: View {
                 counts: tree.counts,
                 help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
                 newSessionHelp: shortcuts.help("New session", .newSession),
-                findShortcut: shortcuts.keyboardShortcut(.findSession)
+                findShortcut: shortcuts.keyboardShortcut(.findSession),
+                addProject: { pane.projectSheet = .add(host: nil, folder: "") }
             )
             SessionRefinementBar(model: model)
                 .scrimText("sidebar-refinement")
@@ -188,6 +194,10 @@ struct SessionSidebar: View {
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
+                                        if let state = model.projects.first(where: { $0.id == identity.id }) {
+                                            Divider()
+                                            ProjectMenuButtons(model: model, pane: pane, project: state)
+                                        }
                                     }
                                 }
                             ForEach(shown.checkouts) { checkout in
@@ -210,7 +220,15 @@ struct SessionSidebar: View {
                             }
                         }
                     }
-                    if tree.projects.isEmpty {
+                    ForEach(projectsWithoutSessions(tree)) { project in
+                        ProjectHeaderView(name: project.displayName, host: project.checkouts.contains { $0.host.state == "local" } ? nil : project.checkouts.first.map { ProjectMenu.shortHostName($0.host.name) }, branch: nil, dirty: false, archived: false)
+                            .contextMenu {
+                                Button("Archive Project") { model.setProjectArchived(project.id, true) }
+                                Divider()
+                                ProjectMenuButtons(model: model, pane: pane, project: project)
+                            }
+                    }
+                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
@@ -363,6 +381,12 @@ extension SessionSidebar {
         }
     }
 
+    private func projectsWithoutSessions(_ tree: SessionTree) -> [ProjectState] {
+        guard model.sessionFilter == .recent || model.sessionFilter == .all, !model.sessionRefinement.isActive else { return [] }
+        let listed = Set(tree.projects.compactMap(\.identity?.id))
+        return model.projects.filter { $0.archived != true && !listed.contains($0.id) }
+    }
+
     private func step(_ order: [String], by offset: Int) {
         guard !order.isEmpty else { return }
         let current = pane.selectedSessionID.flatMap { order.firstIndex(of: $0) }
@@ -398,8 +422,11 @@ extension SessionSidebar {
             }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
-            if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
-                Button("Add Folder as Project") { model.addProject(path: cwd) }
+            if ProjectMenu.canAddFolder(session), let cwd = session.cwd {
+                Button("Add Folder as Project") { pane.changeProject { _ in await model.addProject(path: cwd, host: ProjectMenu.host(of: session)) } }
+            }
+            if ProjectMenu.canMakeLead(session, projects: model.projects) {
+                Button("Make Project Lead") { pane.changeProject { await model.makeLead(session.id, replace: $0) } }
             }
         }
     }

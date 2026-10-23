@@ -573,9 +573,56 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "permission-mode", "sessionId": sessionID, "permissionMode": mode])
     }
 
-    func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) async throws -> ProjectIdentity? {
-        let response: ProjectActionResponse = try await postAction(ProjectActionRequest(action: action, projectId: projectID, path: path))
-        return response.project
+    func projectAction(_ action: String, projectID: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": action, "projectId": projectID])
+    }
+
+    func addProject(path: String, title: String? = nil, host: String? = nil) async throws -> (project: ProjectIdentity?, created: Bool) {
+        var body: [String: Any] = ["action": "project-add", "path": path]
+        if let title, !title.isEmpty { body["title"] = title }
+        if let host { body["host"] = host }
+        let response: ProjectAddResponse = try await projectRequest(body)
+        return (response.project, response.created ?? true)
+    }
+
+    func renameProject(_ projectID: String, title: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": "project-rename", "projectId": projectID, "title": title])
+    }
+
+    func makeLead(sessionID: String, replace: Bool) async throws -> ProjectLead {
+        var body: [String: Any] = ["action": "coordinator-set", "sessionId": sessionID]
+        if replace { body["replace"] = true }
+        let response: LeadResponse = try await projectRequest(body)
+        return response.coordinator
+    }
+
+    func startLead(surface: String, folder: String, host: String?, name: String?, replace: Bool) async throws -> ProjectLead {
+        var body: [String: Any] = ["action": "coordinator-new", "surface": surface, "cwd": folder]
+        if let host { body["host"] = host }
+        if let name, !name.isEmpty { body["name"] = name }
+        if replace { body["replace"] = true }
+        let response: LeadResponse = try await projectRequest(body)
+        return response.coordinator
+    }
+
+    func clearLead(projectID: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": "coordinator-clear", "projectId": projectID])
+    }
+
+    private func projectRequest<T: Decodable>(_ body: [String: Any]) async throws -> T {
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: nil)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
+            throw ProjectActionError(status: http.statusCode, data: data)
+        }
+        if T.self == EmptyResponse.self { return EmptyResponse() as! T }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     func postAction<Body: Encodable, Response: Decodable>(_ body: Body, idempotencyKey: String? = nil) async throws -> Response {
@@ -834,14 +881,13 @@ private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
 }
 
-private struct ProjectActionRequest: Encodable {
-    let action: String
-    let projectId: String?
-    let path: String?
+private struct ProjectAddResponse: Decodable {
+    let project: ProjectIdentity?
+    let created: Bool?
 }
 
-private struct ProjectActionResponse: Decodable {
-    let project: ProjectIdentity?
+private struct LeadResponse: Decodable {
+    let coordinator: ProjectLead
 }
 
 struct ActionReceipt: Decodable {

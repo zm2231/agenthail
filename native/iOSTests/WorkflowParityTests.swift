@@ -335,6 +335,56 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testProjectsAreManagedThroughTheComputerThatListsThem() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let capabilities = #""capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}"#
+        let project = #"{"id":"p1","displayName":"one","rootPath":"/p1","kind":"git","added":true}"#
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
+        {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
+          {"id":"s-lead","surface":"claude","name":"lead","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/p1","project":\(project)},
+          {"id":"s2","surface":"claude","name":"helper","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/p1","project":\(project)},
+          {"id":"m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/tool","host":{"id":"hpeer","name":"peer","state":"connected"}},
+          {"id":"m2","surface":"claude","name":"remote lead","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/repo","host":{"id":"hpeer","name":"peer","state":"connected"},"project":{"id":"repo:shared","displayName":"shared","rootPath":"/srv/repo","kind":"git"}}],
+         "totalSessions":4,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,
+         "projects":[
+          {"id":"p1","displayName":"one","checkouts":[{"host":{"id":"computer","name":"computer","state":"local"},"projectId":"p1","rootPath":"/p1","added":true},{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"hpeer::p1","rootPath":"/srv/p1","added":true}],"coordinators":[{"host":{"id":"computer","name":"computer","state":"local"},"name":"lead","surface":"claude","sessionId":"s-lead"}]},
+          {"id":"repo:shared","displayName":"shared","checkouts":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"repo:shared","rootPath":"/srv/repo"}],"coordinators":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"name":"remote","surface":"claude","sessionId":"m2"}]},
+                    {"id":"p-empty","displayName":"empty","checkouts":[{"host":{"id":"computer","name":"computer","state":"local"},"projectId":"p-empty","rootPath":"/empty","added":true}],"coordinators":[]}]}
+        """.utf8)))
+        XCTAssertEqual(Set(model.projects.keys), ["computer::p1", "repo:shared", "computer::p-empty"])
+        let sessions = try XCTUnwrap(model.snapshot?.sessions)
+        let lead = try XCTUnwrap(sessions.first { $0.id == "computer::s-lead" })
+        let helper = try XCTUnwrap(sessions.first { $0.id == "computer::s2" })
+        let remote = try XCTUnwrap(sessions.first { $0.id == "hpeer::m1" })
+        XCTAssertFalse(model.canMakeLead(lead))
+        XCTAssertTrue(model.canMakeLead(helper))
+        XCTAssertTrue(model.canAddFolder(remote))
+        let mirroredLead = try XCTUnwrap(sessions.first { $0.id == "hpeer::m2" })
+        XCTAssertFalse(model.canMakeLead(mirroredLead), "a lead reached through a mirror is not offered to lead again")
+        XCTAssertEqual(model.projects[try XCTUnwrap(mirroredLead.project?.id)]?.state.id, "repo:shared")
+
+        let asked = await model.makeLead(helper.id, replace: false)
+        XCTAssertEqual(asked, .confirmReplace("/p1 already has coordinator @lead; replace it to take over. Replace it?"))
+        let replaced = await model.makeLead(helper.id, replace: true)
+        XCTAssertEqual(replaced, .done("@helper leads /p1."))
+        XCTAssertEqual(ParityProtocol.state.actions.last?["sessionId"] as? String, "s2")
+
+        _ = await model.addFolder(of: remote)
+        let added = try XCTUnwrap(ParityProtocol.state.actions.last)
+        XCTAssertEqual(added["action"] as? String, "project-add")
+        XCTAssertEqual(added["path"] as? String, "/srv/tool")
+        XCTAssertEqual(added["host"] as? String, "hpeer")
+
+        let listed = try XCTUnwrap(model.projects["computer::p1"])
+        _ = await model.removeProject("hpeer::p1", of: listed)
+        XCTAssertEqual(ParityProtocol.state.actions.last?["action"] as? String, "project-remove")
+        XCTAssertEqual(ParityProtocol.state.actions.last?["projectId"] as? String, "hpeer::p1")
+        XCTAssertEqual(model.creationHost(for: listed.state.checkouts[1], of: listed), "hpeer")
+        XCTAssertEqual(model.creationHost(for: listed.state.checkouts[0], of: listed), "computer")
+    }
+
+    @MainActor
     func testArchivingARepositoryProjectUsesItsSharedID() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -387,6 +437,10 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if failReceipt { return (409,#"{"ok":false,"accepted":true,"retryable":false,"launcher":"tmux","error":"launcher busy"}"#) }
+            if body["action"] as? String == "coordinator-set" {
+                if body["replace"] as? Bool != true { return (409, #"{"error":{"code":"coordinator_exists","message":"/p1 already has coordinator @lead; replace it to take over"}}"#) }
+                return (200, #"{"ok":true,"coordinator":{"name":"helper","projectRoot":"/p1"}}"#)
+            }
             if body["action"] as? String == "session-fork" {
                 return (200, #"{"ok":true,"result":{"session":{"id":"forked"}}}"#)
             }

@@ -156,6 +156,7 @@ struct SessionCreationOptions: Decodable {
     let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
     var claudeConfigRoots: [ClaudeConfigRootOption]? = nil
+    var folders: [String]? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -165,6 +166,7 @@ struct LaunchProject: Decodable, Hashable, Identifiable {
     let displayName: String
     let rootPath: String
     let kind: String
+    var added: Bool? = nil
 }
 
 struct CreationHost: Hashable, Identifiable {
@@ -1020,6 +1022,7 @@ struct ProjectIdentity: Codable, Hashable {
     let rootPath: String
     let kind: String
     var archived: Bool? = nil
+    var added: Bool? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {
@@ -1251,6 +1254,8 @@ struct DashboardSnapshot: Decodable {
     var signin: [SigninConsumerState]? = nil
     /// What this host's sessions call the person; an older host sends none.
     var person: PersonState? = nil
+    /// Only a whole-catalog snapshot carries projects; a page leaves them out.
+    var projects: [ProjectState]? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1266,7 +1271,8 @@ struct DashboardSnapshot: Decodable {
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
             signin == other.signin &&
-            person == other.person
+            person == other.person &&
+            projects == other.projects
     }
 }
 

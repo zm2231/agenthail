@@ -217,6 +217,9 @@ struct ConversationListView: View {
     @State private var search = ""
     @State private var collapsedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
+    @State private var projectSheet: ProjectSheet?
+    @State private var projectConfirmation: ProjectConfirmation?
+    @State private var newSessionPlace: NewSessionPlace?
 
     private var tree: SessionTree {
         let sessions = SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
@@ -226,6 +229,12 @@ struct ConversationListView: View {
         }.flatMap(\.sessions)
         let attention = SessionAttention.build(sessions: model.snapshot?.sessions ?? [], attention: model.snapshot?.attention ?? [], deliveryProblems: model.snapshot?.deliveryProblems ?? [])
         return SessionTree.build(sessions, filter: scope, attention: attention)
+    }
+
+    private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
+        guard (scope == .recent || scope == .all) && search.isEmpty else { return [] }
+        let listed = Set(tree.projects.compactMap(\.identity?.id))
+        return model.projects.filter { $0.value.state.archived != true && !listed.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
     }
 
     var body: some View {
@@ -289,6 +298,9 @@ struct ConversationListView: View {
                             Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
                                 Task { await model.setProjectArchived(identity.id, !project.archived) }
                             }
+                            if let listed = model.projects[identity.id] {
+                                IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                            }
                         }
                     }
                     .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
@@ -296,7 +308,19 @@ struct ConversationListView: View {
                     .accessibilityIdentifier("project-" + project.id)
                 }
             }
-            if families.isEmpty && !model.searching {
+            let empty = projectsWithoutSessions(tree)
+            if !empty.isEmpty {
+                Section("Projects without sessions") {
+                    ForEach(empty, id: \.state.id) { listed in
+                        Menu {
+                            IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                        } label: {
+                            Label(listed.state.displayName, systemImage: "folder").foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            if families.isEmpty && empty.isEmpty && !model.searching {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
@@ -322,13 +346,30 @@ struct ConversationListView: View {
         .task(id: search) { await model.searchSessions(search) }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("New session", systemImage: "square.and.pencil") {
+                Menu {
+                    Button("New session", systemImage: "square.and.pencil") {
+                        model.creationError = nil
+                        showingNewSession = true
+                    }.accessibilityIdentifier("new-session")
+                    Button("Add project", systemImage: "folder.badge.plus") { projectSheet = .add(host: nil, folder: "") }
+                        .accessibilityIdentifier("add-project")
+                } label: {
+                    Image(systemName: "plus")
+                } primaryAction: {
                     model.creationError = nil
                     showingNewSession = true
-                }.accessibilityIdentifier("new-session")
+                }
+                .accessibilityLabel("New")
+                .accessibilityIdentifier("new-menu")
             }
         }
         .sheet(isPresented: $showingNewSession) { NewSessionSheet(model: model) }
+        .sheet(item: $newSessionPlace) { place in NewSessionSheet(model: model, place: place) }
+        .sheet(item: $projectSheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
+        .alert(projectConfirmation?.message ?? "", isPresented: Binding(get: { projectConfirmation != nil }, set: { if !$0 { projectConfirmation = nil } }), presenting: projectConfirmation) { confirmation in
+            Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
+            Button("Cancel", role: .cancel) {}
+        }
         .refreshable { await model.refresh(fresh: true) }
     }
 
@@ -1270,6 +1311,7 @@ struct SessionInspector: View {
                     }
                 }
                 Section("Controls") {
+                    IOSSessionProjectControls(model: model, session: session)
                     if session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
                     }

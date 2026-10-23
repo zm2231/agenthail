@@ -17,10 +17,13 @@ struct NewSessionSheet: View {
     @State private var showingModels = false
     @State private var turnSettings = TurnSettings()
 
-    init(model: AgenthailIOSModel) {
+    init(model: AgenthailIOSModel, place: NewSessionPlace? = nil) {
         self.model = model
         let selected = model.snapshot?.sessions.first { $0.id == model.selectedSessionID }
-        _hosts = State(initialValue: CreationHostPicker(hosts: model.creationHosts, selectedSession: selected))
+        var hosts = CreationHostPicker(hosts: model.creationHosts, selectedSession: selected)
+        if let place { _ = hosts.select(place.host) }
+        _hosts = State(initialValue: hosts)
+        _cwd = State(initialValue: place?.folder ?? "")
     }
 
     private var options: SessionCreationOptions? { hosts.options }

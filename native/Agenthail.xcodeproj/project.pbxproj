@@ -46,6 +46,7 @@
 		6E4F830C96ED017ED4620BB2 /* PairedCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFA7D196BFE26BFAA11299B /* PairedCredential.swift */; };
 		6F2B7A6950189346B2FBBD64 /* NativeVoicePeer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80556ACED6CC69B509058277 /* NativeVoicePeer.swift */; };
 		71E1B11E844EB9A03D8BCCC4 /* VoiceCallCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A23D43BE6185EB08D3D29A /* VoiceCallCoordinator.swift */; };
+		74EE3850D1C6BD945E00BF40 /* ProjectSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F615A5BED830A2197727378 /* ProjectSheets.swift */; };
 		79D778B9895C8D365EA2666A /* HolderPins.swift in Sources */ = {isa = PBXBuildFile; fileRef = A09357D1028E7F360CE47824 /* HolderPins.swift */; };
 		7DC117AD0726F803381476B0 /* AgenthailIOSTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7039428BDACFBDD5CA67BBBB /* AgenthailIOSTests.swift */; };
 		7EED627B413EDDEB73D5EC42 /* EventRetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C5287EF2BD6F1B5CC9EE0E8 /* EventRetryBackoff.swift */; };
@@ -57,6 +58,7 @@
 		8B6804836C0F77C19FF386D0 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 69AC673BBC26A79668444D61 /* WebRTC */; };
 		8D013EE6AE4E56CDE6D3685F /* VoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */; };
 		8E72D14478259402D504EDCB /* AgenthailIOSModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E782347BC048EE03E6B10D1 /* AgenthailIOSModel.swift */; };
+		94E0A4BF19A8DC81A49BB0B5 /* ProjectActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0D1455D8C879BD82B89137 /* ProjectActions.swift */; };
 		974D95FB09748D667F1EC63B /* TurnSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABDB2B82FC46DF06F8EE66BA /* TurnSettingsView.swift */; };
 		981C510BDFF1178C1EE97792 /* AgenthailIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57BABF4D52336F4B67989152 /* AgenthailIOSApp.swift */; };
 		98853FE65F2FD7C5E96C5D74 /* RequestNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31C90794BE0EC19254B01F4 /* RequestNotifications.swift */; };
@@ -140,6 +142,7 @@
 		0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExperienceTests.swift; sourceTree = "<group>"; };
 		0E782347BC048EE03E6B10D1 /* AgenthailIOSModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSModel.swift; sourceTree = "<group>"; };
 		0EBFE61CC399105A1DE63886 /* SessionTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTree.swift; sourceTree = "<group>"; };
+		0F615A5BED830A2197727378 /* ProjectSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSheets.swift; sourceTree = "<group>"; };
 		0F97182BB6B3E031BAE4D18C /* SessionControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionControls.swift; sourceTree = "<group>"; };
 		1BA98FE5DE654713AD7F43A6 /* WorkflowParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowParityTests.swift; sourceTree = "<group>"; };
 		1BE85140BFF4D3D8B996F2AD /* VoiceAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioBridge.swift; sourceTree = "<group>"; };
@@ -179,6 +182,7 @@
 		836598CAF0AF568C68FD23C5 /* SessionCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCreation.swift; sourceTree = "<group>"; };
 		87937A6C5398E3EADF7ED3C0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8DFA7D196BFE26BFAA11299B /* PairedCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedCredential.swift; sourceTree = "<group>"; };
+		8E0D1455D8C879BD82B89137 /* ProjectActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectActions.swift; sourceTree = "<group>"; };
 		8EACD0579E00E89E27303C55 /* AgenthailIOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgenthailIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		91A23D43BE6185EB08D3D29A /* VoiceCallCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCallCoordinator.swift; sourceTree = "<group>"; };
 		95E0C3350224ACA1936067A2 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -260,6 +264,7 @@
 				AF46B959BB42711D6404DF7F /* NativeVoiceAudio.swift */,
 				80556ACED6CC69B509058277 /* NativeVoicePeer.swift */,
 				3085052480F0B14328A21215 /* PairingLink.swift */,
+				0F615A5BED830A2197727378 /* ProjectSheets.swift */,
 				E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */,
 				BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */,
 				DD6DB02C48C8DEC1677170BC /* SessionCapture.swift */,
@@ -319,6 +324,7 @@
 				3F91185845FD3DB37E5314A7 /* MetadataOverlay.swift */,
 				8DFA7D196BFE26BFAA11299B /* PairedCredential.swift */,
 				5E80B314FC553489CC8B6E80 /* PaletteTokens.swift */,
+				8E0D1455D8C879BD82B89137 /* ProjectActions.swift */,
 				C64D3D86919EFE5E0B284026 /* RequestAnswer.swift */,
 				5604EB54518AE2296BC2A09C /* RequestCard.swift */,
 				D31C90794BE0EC19254B01F4 /* RequestNotifications.swift */,
@@ -535,6 +541,8 @@
 				6E4F830C96ED017ED4620BB2 /* PairedCredential.swift in Sources */,
 				B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */,
 				2A9003DD1539FA7670FCC4DF /* PaletteTokens.swift in Sources */,
+				94E0A4BF19A8DC81A49BB0B5 /* ProjectActions.swift in Sources */,
+				74EE3850D1C6BD945E00BF40 /* ProjectSheets.swift in Sources */,
 				B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */,
 				393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */,
 				804F7D1D34481579C862C34C /* RequestAnswer.swift in Sources */,
