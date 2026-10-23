@@ -124,6 +124,8 @@ and sessions mirrored from another host. A request scans at most 2000 journal
 rows; when it stops short of `limit` it returns the cursor it reached, so a
 rare `q` match may take several pages.
 
-The prompts come only from the journal. A session the journal has not
-recorded, for example one never opened since the journal was added, has no
-sent prompts until it is seeded.
+The prompts come only from the journal, and the journal records a session
+only once something reads it: a session page read, a session stream, a
+voice call, or a watch or relay that holds it. A session nothing has read
+since the journal was added, such as a closed terminal Claude session or an
+older Codex thread, has no sent prompts until then.
