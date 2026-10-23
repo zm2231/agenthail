@@ -11,15 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type watchingSurface struct {
 	*daemonSurface
-	dirs  func() []string
-	mu    sync.Mutex
-	added []surface.Session
-	lists atomic.Int32
+	dirs   func() []string
+	mu     sync.Mutex
+	added  []surface.Session
+	lists  atomic.Int32
+	listed func()
 }
 
 func newWatchingSurface(kind surface.SurfaceKind, dirs func() []string) *watchingSurface {
@@ -31,8 +33,14 @@ func (w *watchingSurface) CatalogWatchDirs() []string { return w.dirs() }
 func (w *watchingSurface) List(context.Context) ([]surface.Session, error) {
 	w.lists.Add(1)
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	return append([]surface.Session{}, w.added...), nil
+	sessions := append([]surface.Session{}, w.added...)
+	listed := w.listed
+	w.listed = nil
+	w.mu.Unlock()
+	if listed != nil {
+		listed()
+	}
+	return sessions, nil
 }
 
 func (w *watchingSurface) start(t *testing.T, id, folder string) {
@@ -112,10 +120,54 @@ func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.
 		claude.start(t, "burst-"+strconv.Itoa(index), records)
 	}
 	awaitCatalogRow(t, d, "burst-39")
-	time.Sleep(300 * time.Millisecond)
 	if passes := claude.lists.Load() - before; passes < 1 || passes > 3 {
 		t.Fatalf("40 sessions starting at once took %d discovery passes; they coalesce into a pass and at most one more", passes)
 	}
+}
+
+func TestManyWakesBeforeAPassAskForOnePassOfEachSurface(t *testing.T) {
+	wakes := newCatalogWakes(nil, nil)
+	for range 40 {
+		wakes.request(surface.KindClaude)
+	}
+	wakes.request(surface.KindCodex)
+	if len(wakes.signal) != 1 {
+		t.Fatalf("%d signals pending, want one", len(wakes.signal))
+	}
+	<-wakes.signal
+	if taken := wakes.take(); len(taken) != 2 || !taken[surface.KindClaude] || !taken[surface.KindCodex] {
+		t.Fatalf("took %v, want one pass of each surface", taken)
+	}
+	if taken := wakes.take(); len(taken) != 0 {
+		t.Fatalf("took %v again", taken)
+	}
+}
+
+func TestASessionStartedDuringTheFirstPassIsNotLeftForTheTicker(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	records := t.TempDir()
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	claude.listed = func() { claude.start(t, "during-the-pass", records) }
+	d.Surfaces = []surface.Surface{claude}
+	runCatalogLoop(t, d)
+	awaitCatalogRow(t, d, "during-the-pass")
+}
+
+func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	root := t.TempDir()
+	records := filepath.Join(root, "config", "sessions")
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	d.Surfaces = []surface.Surface{claude}
+	runCatalogLoop(t, d)
+	awaitFederation(t, "the first discovery pass", func() bool { return claude.lists.Load() == 1 })
+
+	if err := os.MkdirAll(records, 0700); err != nil {
+		t.Fatal(err)
+	}
+	awaitFederation(t, "the pass the new folder starts", func() bool { return claude.lists.Load() == 2 })
+	claude.start(t, "first-ever", records)
+	awaitCatalogRow(t, d, "first-ever")
 }
 
 func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
@@ -142,4 +194,21 @@ func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 	awaitFederation(t, "the pass the new folder starts", func() bool { return codex.lists.Load() == 2 })
 	codex.start(t, "after-midnight", day)
 	awaitCatalogRow(t, d, "after-midnight")
+}
+
+func TestClosedCatalogWakesFollowNothingMore(t *testing.T) {
+	records := t.TempDir()
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	follows := 0
+	wakes := newCatalogWakes([]surface.Surface{claude}, func(dir string) *filewake.Wake {
+		follows++
+		return filewake.FollowDir(dir)
+	})
+	wakes.sync()
+	claude.start(t, "while-closing", records)
+	wakes.close()
+	wakes.sync()
+	if follows != 1 {
+		t.Fatalf("followed %d times, want nothing followed after close", follows)
+	}
 }

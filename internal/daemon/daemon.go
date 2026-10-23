@@ -316,6 +316,7 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 	defer wakes.close()
 	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer discoveryTicker.Stop()
+	wakes.sync()
 	d.discoverCatalog(ctx)
 	wakes.sync()
 	for {

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -18,15 +19,22 @@ type catalogWakes struct {
 	follow   func(string) *filewake.Wake
 
 	mu       sync.Mutex
+	closed   bool
 	watching map[string]*catalogWake
 	pending  map[surface.SurfaceKind]bool
 	signal   chan struct{}
+	forwards sync.WaitGroup
 }
 
+// catalogWake follows one folder. A folder a surface names is followed
+// itself; one that does not exist yet is waited for from its nearest
+// existing ancestor, which asks for a pass only once the folder appears.
 type catalogWake struct {
-	kind surface.SurfaceKind
-	wake *filewake.Wake
-	stop chan struct{}
+	kinds  map[surface.SurfaceKind]bool
+	named  bool
+	awaits []string
+	wake   *filewake.Wake
+	stop   chan struct{}
 }
 
 func newCatalogWakes(adapters []surface.Surface, follow func(string) *filewake.Wake) *catalogWakes {
@@ -36,28 +44,50 @@ func newCatalogWakes(adapters []surface.Surface, follow func(string) *filewake.W
 // sync follows the folders the surfaces name now and drops the ones they no
 // longer name.
 func (c *catalogWakes) sync() {
-	wanted := map[string]surface.SurfaceKind{}
+	wanted := map[string]*catalogWake{}
+	want := func(dir string) *catalogWake {
+		if wanted[dir] == nil {
+			wanted[dir] = &catalogWake{kinds: map[surface.SurfaceKind]bool{}}
+		}
+		return wanted[dir]
+	}
 	for _, adapter := range c.adapters {
 		watcher, ok := adapter.(surface.CatalogWatcher)
 		if !ok {
 			continue
 		}
 		for _, dir := range watcher.CatalogWatchDirs() {
-			wanted[filepath.Clean(dir)] = adapter.Name()
+			dir = filepath.Clean(dir)
+			if existingDir(dir) {
+				watch := want(dir)
+				watch.kinds[adapter.Name()] = true
+				watch.named = true
+				continue
+			}
+			ancestor := nearestExistingDir(dir)
+			if ancestor == "" {
+				continue
+			}
+			watch := want(ancestor)
+			watch.kinds[adapter.Name()] = true
+			watch.awaits = append(watch.awaits, dir)
 		}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	for dir, watch := range c.watching {
-		if kind, found := wanted[dir]; !found || kind != watch.kind {
+		if wanted[dir] == nil {
 			watch.release()
 			delete(c.watching, dir)
 		}
 	}
-	for dir, kind := range wanted {
+	for dir, spec := range wanted {
 		if watch, found := c.watching[dir]; found {
-			// Arms a folder that did not exist when it was first followed,
-			// or one replaced since.
+			watch.kinds, watch.named, watch.awaits = spec.kinds, spec.named, spec.awaits
+			// Re-arms a folder replaced since it was first followed.
 			watch.wake.Refresh()
 			continue
 		}
@@ -68,23 +98,34 @@ func (c *catalogWakes) sync() {
 			wake.Release()
 			continue
 		}
-		watch := &catalogWake{kind: kind, wake: wake, stop: make(chan struct{})}
-		c.watching[dir] = watch
-		go c.forward(watch)
+		spec.wake, spec.stop = wake, make(chan struct{})
+		c.watching[dir] = spec
+		c.forwards.Add(1)
+		go c.forward(spec)
 	}
 }
 
-// forward turns a folder's wakes into discovery requests for its surface. It
-// syncs first, so a folder created by the wake, such as a new day's, is
-// followed before the pass it starts.
+// forward turns a folder's wakes into discovery requests for its surfaces.
+// It syncs first, so a folder created by the wake, such as a new day's, is
+// followed before the pass it starts. A wake of an ancestor that only waits
+// for a folder asks for nothing until that folder exists.
 func (c *catalogWakes) forward(watch *catalogWake) {
+	defer c.forwards.Done()
 	for {
 		select {
 		case <-watch.stop:
 			return
 		case <-watch.wake.C():
+			c.mu.Lock()
+			kinds, named, awaits := watch.kinds, watch.named, watch.awaits
+			c.mu.Unlock()
 			c.sync()
-			c.request(watch.kind)
+			if !named && !anyExistingDir(awaits) {
+				continue
+			}
+			for kind := range kinds {
+				c.request(kind)
+			}
 		}
 	}
 }
@@ -112,14 +153,43 @@ func (c *catalogWakes) take() map[surface.SurfaceKind]bool {
 
 func (c *catalogWakes) close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.closed = true
 	for dir, watch := range c.watching {
 		watch.release()
 		delete(c.watching, dir)
 	}
+	c.mu.Unlock()
+	c.forwards.Wait()
 }
 
 func (w *catalogWake) release() {
 	close(w.stop)
 	w.wake.Release()
+}
+
+func existingDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func anyExistingDir(paths []string) bool {
+	for _, path := range paths {
+		if existingDir(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func nearestExistingDir(path string) string {
+	for {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		if existingDir(parent) {
+			return parent
+		}
+		path = parent
+	}
 }
