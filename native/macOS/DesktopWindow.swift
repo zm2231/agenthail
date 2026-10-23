@@ -1473,7 +1473,8 @@ struct AssistantReply: View {
         .overlay(alignment: .topTrailing) {
             if footer == nil && note == nil {
                 MessageActions(text: text, revealed: hovering)
-                    .offset(y: -MessageActions.height)
+                    .background(hovering ? DesktopPalette.bubble : .clear, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+                    .allowsHitTesting(hovering)
             }
         }
         .onHover { hovering = $0 }
