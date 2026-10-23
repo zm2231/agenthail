@@ -1537,10 +1537,13 @@ select {
   color: var(--bad);
 }
 .health-state.signin_off,
-.surface-health-icon.signin_off {
+.health-state.signin_unavailable,
+.surface-health-icon.signin_off,
+.surface-health-icon.signin_unavailable {
   color: var(--quiet);
 }
-.connection-line.signin_off i {
+.connection-line.signin_off i,
+.connection-line.signin_unavailable i {
   background: var(--quiet);
 }
 .signin-card {

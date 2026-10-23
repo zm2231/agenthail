@@ -237,6 +237,8 @@ func (c *Claude) describeLogin(ctx context.Context, root *surface.ClaudeConfigRo
 		switch {
 		case signin.IsOff(err):
 			root.UsageProblem = "browser sign-in is off for Claude, so usage is not read"
+		case signin.IsUnavailable(err):
+			root.UsageProblem = "this computer has no browser to read the claude.ai sign-in from, so usage is not read"
 		case surface.IsDeliveryUnavailable(err):
 			root.UsageProblem = "claude.ai could not be asked which profile holds this login; usage is shown once it answers"
 		}

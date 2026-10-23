@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -247,5 +248,14 @@ func TestSigninAPINeedsTheSettingsScope(t *testing.T) {
 	}
 	if code := api.do(http.MethodPut, "/api/v1/signin/bindings", `{"consumer":"notion","profileId":"none"}`, nil); code != http.StatusUnauthorized {
 		t.Fatalf("a control-only device changed sign-in settings: status=%d", code)
+	}
+}
+
+func TestASurfaceOnAComputerWithNoBrowserReportsTheStatedLimit(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	limit := signin.UnavailableError{Consumer: signin.Notion}
+	entry := d.dashboardSurfaceHealth(context.Background(), fake, limit)
+	if entry.Health != "signin_unavailable" || entry.HealthDetail != limit.Error() || strings.Contains(entry.HealthDetail, "xdg-settings") {
+		t.Fatalf("entry=%+v", entry)
 	}
 }

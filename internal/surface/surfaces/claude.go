@@ -157,7 +157,7 @@ func (c *Claude) Health(ctx context.Context) error {
 		return err
 	}
 	cookies, signinErr := c.cookieSource(ctx, nil)
-	if signin.IsOff(signinErr) {
+	if signin.IsOff(signinErr) || signin.IsUnavailable(signinErr) {
 		if bridged {
 			return signinErr
 		}
@@ -190,6 +190,8 @@ func signinTerminalKind(err error) surface.DeliveryTerminalKind {
 	switch {
 	case signin.IsOff(err):
 		return surface.DeliverySigninOff
+	case signin.IsUnavailable(err):
+		return surface.DeliverySigninUnavailable
 	case errors.As(err, &problem):
 		return surface.DeliverySigninUnreadable
 	}
