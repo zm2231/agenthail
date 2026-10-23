@@ -43,8 +43,8 @@ final class WorkflowParityTests: XCTestCase {
         ParityProtocol.state.reset(unknown: true)
         let model = makeModel()
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
-        XCTAssertTrue(created); XCTAssertNil(model.requestedSessionID)
-        XCTAssertNil(model.creationError)
+        XCTAssertFalse(created); XCTAssertNil(model.requestedSessionID)
+        XCTAssertEqual(model.creationError, SessionCreationReceipt.unknownOutcomeMessage)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
     }
 
