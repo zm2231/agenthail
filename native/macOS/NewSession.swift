@@ -41,6 +41,7 @@ struct NewSessionView: View {
             status
         }
         .frame(maxWidth: 680)
+        .scrimText("new-session")
         .padding(.horizontal, DesktopSpace.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .backdropSurface(DesktopPalette.window)

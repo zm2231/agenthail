@@ -70,6 +70,8 @@ SOURCES=(
   macOS/TranscriptFollow.swift
   macOS/TranscriptRows.swift
   macOS/VoiceController.swift
+  macOS/WindowBackdrop.swift
+  macOS/WindowRectReader.swift
 )
 
 rm -rf "$OUT"

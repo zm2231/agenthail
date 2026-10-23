@@ -31,6 +31,16 @@ enum ScrimField {
             let x1 = min(max(x + width, 0), w), y1 = min(max(y + height, 0), h)
             return Rect(x: x0, y: y0, width: max(x1 - x0, 0), height: max(y1 - y0, 0))
         }
+
+        func intersection(_ other: Rect) -> Rect? {
+            let x0 = max(x, other.x), y0 = max(y, other.y)
+            let x1 = min(x + width, other.x + other.width), y1 = min(y + height, other.y + other.height)
+            return x1 > x0 && y1 > y0 ? Rect(x: x0, y: y0, width: x1 - x0, height: y1 - y0) : nil
+        }
+
+        func offset(dx: Int, dy: Int) -> Rect {
+            Rect(x: x + dx, y: y + dy, width: width, height: height)
+        }
     }
 
     enum Polarity { case dark, light }

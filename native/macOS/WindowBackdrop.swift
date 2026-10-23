@@ -22,7 +22,10 @@ final class WindowBackdrop: ObservableObject {
     @Published private(set) var border: Double = 0
     @Published private(set) var composerOpacity: Double = 0.5
 
-    private var regions: [String: (rect: CGRect, region: Region)] = [:]
+    /// Keyed by reader, not by region id: two views can briefly report the
+    /// same id while one replaces the other, and each withdraws only its own.
+    private(set) var regions: [UUID: (id: String, rect: CGRect, region: Region)] = [:]
+    private var probes: [UUID: WeakProbe] = [:]
     private var scale: CGFloat = 2
     private var dark = true
     private var config = UIConfig.defaults
@@ -74,15 +77,29 @@ final class WindowBackdrop: ObservableObject {
         schedule()
     }
 
-    func report(_ id: String, rect: CGRect, region: Region) {
-        if let current = regions[id], current.rect == rect, current.region == region { return }
-        regions[id] = (rect, region)
+    func report(_ key: UUID, id: String, rect: CGRect, region: Region) {
+        if let current = regions[key], current.id == id, current.rect == rect, current.region == region { return }
+        regions[key] = (id, rect, region)
         schedule()
     }
 
-    func remove(_ id: String) {
-        guard regions.removeValue(forKey: id) != nil else { return }
+    func remove(_ key: UUID) {
+        probes[key] = nil
+        guard regions.removeValue(forKey: key) != nil else { return }
         schedule()
+    }
+
+    /// Keeps the view that reports a region, so a render measures it again:
+    /// a probe hears about its own moves, not its ancestors'.
+    func attach(_ key: UUID, probe: WindowRectReader.RectProbe) {
+        probes[key] = WeakProbe(probe: probe)
+    }
+
+    private func remeasure() {
+        for (key, weak) in probes {
+            guard let rect = weak.probe?.measure(), let current = regions[key] else { continue }
+            regions[key] = (current.id, rect, current.region)
+        }
     }
 
     private func schedule() {
@@ -103,6 +120,7 @@ final class WindowBackdrop: ObservableObject {
     }
 
     private func spec() -> BackdropSpec? {
+        remeasure()
         guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config, image: wallpaper) else { return nil }
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let ground = DesktopPalette.ground(dark: dark)
@@ -122,7 +140,9 @@ final class WindowBackdrop: ObservableObject {
             scrimTint = color.map { .color(Float($0.red), Float($0.green), Float($0.blue)) } ?? .auto
         }
         let workspace = NSWorkspace.shared
-        let panes: [BackdropSpec.Pane] = regions.compactMap { id, entry in
+        let entries = regions.sorted { ($0.value.id, $0.key.uuidString) < ($1.value.id, $1.key.uuidString) }.map(\.value)
+        let panes: [BackdropSpec.Pane] = entries.compactMap { entry in
+            let id = entry.id
             guard case .pane(let role) = entry.region else { return nil }
             switch role {
             case .sidebar:
@@ -134,7 +154,8 @@ final class WindowBackdrop: ObservableObject {
                 return BackdropSpec.Pane(id: id, rect: entry.rect, radius: 0, minimum: Float(config.chromeOpacity), strength: Float(config.backgroundOpacity), sharp: true)
             }
         }.sorted { $0.id < $1.id }
-        let texts = regions.filter { $0.value.region == .text || $0.value.region == .pane(.chrome) }.sorted { $0.key < $1.key }.map(\.value.rect)
+        let texts = entries.filter { $0.region == .text || $0.region == .pane(.chrome) }.map(\.rect)
+        let paneTexts = entries.filter { $0.region == .text }.map(\.rect)
         return BackdropSpec(
             wallpaper: wallpaper,
             fit: config.backgroundFit,
@@ -156,7 +177,9 @@ final class WindowBackdrop: ObservableObject {
             scale: scale,
             panes: panes,
             texts: texts,
-            solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency
+            paneTexts: paneTexts,
+            solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency,
+            readability: config.readability || workspace.accessibilityDisplayShouldIncreaseContrast
         )
     }
 
@@ -258,10 +281,9 @@ private struct GlassPane: ViewModifier {
             content.background {
                 ZStack {
                     BackdropSlice(backdrop: backdrop, paneID: id, fallback: fallback)
-                    WindowRectReader { rect, _ in backdrop.report(id, rect: rect, region: region) }
+                    RegionReader(id: id, region: region, backdrop: backdrop)
                 }
                 .ignoresSafeArea()
-                .onDisappear { backdrop.remove(id) }
             }
         } else if let backdrop {
             GlassPaneBody(content: content, id: id, region: region, fallback: fallback, backdrop: backdrop)
@@ -289,10 +311,9 @@ private struct GlassPaneBody<Content: View>: View {
                             .strokeBorder(DesktopPalette.text.opacity(backdrop.border), lineWidth: 1)
                             .padding(backdrop.gutter)
                     }
-                    WindowRectReader { rect, _ in backdrop.report(id, rect: rect, region: region) }
+                    RegionReader(id: id, region: region, backdrop: backdrop)
                 }
                 .ignoresSafeArea()
-                .onDisappear { backdrop.remove(id) }
             }
     }
 }
@@ -364,16 +385,53 @@ private struct FloatingGlassBody<Content: View, S: InsettableShape>: View {
     }
 }
 
+/// One view's claim on a backdrop region, for as long as its reader is in
+/// the window.
+@MainActor
+final class RegionHandle {
+    let key = UUID()
+    let id: String
+    let region: WindowBackdrop.Region
+    private weak var backdrop: WindowBackdrop?
+
+    init(id: String, region: WindowBackdrop.Region, backdrop: WindowBackdrop) {
+        self.id = id
+        self.region = region
+        self.backdrop = backdrop
+    }
+
+    func attach(_ probe: WindowRectReader.RectProbe) {
+        backdrop?.attach(key, probe: probe)
+    }
+
+    func report(_ rect: CGRect) {
+        backdrop?.report(key, id: id, rect: rect, region: region)
+    }
+
+    func leave() {
+        backdrop?.remove(key)
+    }
+}
+
+struct RegionReader: View {
+    @State private var handle: RegionHandle
+
+    init(id: String, region: WindowBackdrop.Region, backdrop: WindowBackdrop) {
+        _handle = State(initialValue: RegionHandle(id: id, region: region, backdrop: backdrop))
+    }
+
+    var body: some View {
+        WindowRectReader(probe: { handle.attach($0) }, onLeave: { handle.leave() }) { rect, _ in handle.report(rect) }
+    }
+}
+
 private struct ScrimText: ViewModifier {
     let id: String
     @Environment(\.windowBackdrop) private var backdrop
 
     func body(content: Content) -> some View {
         if let backdrop {
-            content.background {
-                WindowRectReader { rect, _ in backdrop.report(id, rect: rect, region: .text) }
-                    .onDisappear { backdrop.remove(id) }
-            }
+            content.background { RegionReader(id: id, region: .text, backdrop: backdrop) }
         } else {
             content
         }
@@ -425,82 +483,4 @@ private struct DesktopBlur: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
-
-/// Reports a view's rect in its window, top left origin, in points. It
-/// works across split view columns, which SwiftUI coordinate spaces don't.
-struct WindowRectReader: NSViewRepresentable {
-    let onChange: (CGRect, NSWindow) -> Void
-
-    func makeNSView(context: Context) -> RectProbe {
-        let probe = RectProbe()
-        probe.onChange = onChange
-        return probe
-    }
-
-    func updateNSView(_ probe: RectProbe, context: Context) {
-        probe.onChange = onChange
-        probe.post()
-    }
-
-    final class RectProbe: NSView {
-        var onChange: ((CGRect, NSWindow) -> Void)?
-        nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
-        private var last: CGRect?
-        private var lastAppearance: NSAppearance.Name?
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers = []
-            guard let window else { return }
-            for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification, NSWindow.didChangeBackingPropertiesNotification] {
-                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.post(force: true) }
-                })
-            }
-            observers.append(NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.post() }
-            })
-            post(force: true)
-        }
-
-        override func layout() {
-            super.layout()
-            post()
-        }
-
-        override func setFrameOrigin(_ newOrigin: NSPoint) {
-            super.setFrameOrigin(newOrigin)
-            post()
-        }
-
-        override func setFrameSize(_ newSize: NSSize) {
-            super.setFrameSize(newSize)
-            post()
-        }
-
-        override func viewDidChangeEffectiveAppearance() {
-            super.viewDidChangeEffectiveAppearance()
-            post(force: true)
-        }
-
-        func post(force: Bool = false) {
-            guard let window, let content = window.contentView else { return }
-            let inWindow = convert(bounds, to: nil)
-            let rect = CGRect(x: inWindow.minX, y: content.bounds.height - inWindow.maxY, width: inWindow.width, height: inWindow.height)
-            let appearance = window.effectiveAppearance.name
-            guard force || rect != last || appearance != lastAppearance else { return }
-            last = rect
-            lastAppearance = appearance
-            let onChange = onChange
-            DispatchQueue.main.async { onChange?(rect, window) }
-        }
-
-        deinit {
-            observers.forEach(NotificationCenter.default.removeObserver)
-        }
-    }
 }

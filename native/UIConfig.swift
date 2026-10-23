@@ -96,6 +96,7 @@ struct UIConfig: Decodable, Equatable {
     var sidebarOpacity: Double { number("glass.sidebar.opacity", 0.45) }
     var chromeOpacity: Double { number("glass.chrome.opacity", 0) }
     var composerOpacity: Double { number("glass.composer.opacity", 0.5) }
+    var readability: Bool { text("glass.readability", "auto") == "auto" }
     var border: Double { number("glass.border", 0.08) }
     var gutter: Double { number("glass.gutter", 8) }
 

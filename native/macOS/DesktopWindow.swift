@@ -143,6 +143,7 @@ struct SessionSidebar: View {
             .padding(.horizontal, DesktopSpace.l)
             .padding(.top, DesktopSpace.xs)
             .padding(.bottom, DesktopSpace.s)
+            .scrimText("sidebar-filters")
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
@@ -173,12 +174,14 @@ struct SessionSidebar: View {
             .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             .padding(.horizontal, DesktopSpace.m)
             .padding(.bottom, 10)
+            .scrimText("sidebar-search")
             .background {
                 Button("") { searchFocused = true }
                     .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
                     .hidden()
             }
             SessionRefinementBar(model: model)
+                .scrimText("sidebar-refinement")
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -234,9 +237,11 @@ struct SessionSidebar: View {
                 }
                 .padding(.horizontal, DesktopSpace.s)
                 .padding(.bottom, DesktopSpace.l)
+                .scrimText("sidebar-rows")
             }
 
             ConnectionFooter(model: model)
+                .scrimText("sidebar-footer")
         }
         .glassPane("sidebar", .sidebar, fallback: DesktopPalette.side)
         .background {
@@ -700,6 +705,7 @@ struct ConversationPane: View {
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
                     })
+                    .scrimText("conversation-header")
                     .backdropSurface(DesktopPalette.window, paneID: "content")
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -712,6 +718,7 @@ struct ConversationPane: View {
                                                   open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil,
                                                   restart: { model.stopAndResume(session.id) })
                                     .id(waiting.id)
+                                    .scrimText("dock-wait")
                                     .frame(maxWidth: 720)
                                     .padding(.horizontal, DesktopSpace.l)
                                     .padding(.top, DesktopSpace.s)
@@ -720,6 +727,7 @@ struct ConversationPane: View {
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
                                 .id(request.id)
+                                .scrimText("dock-request")
                                 .frame(maxWidth: 720)
                                 .padding(.horizontal, DesktopSpace.l)
                                 .padding(.top, DesktopSpace.s)
@@ -737,7 +745,6 @@ struct ConversationPane: View {
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
-                .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -879,6 +886,8 @@ struct TranscriptView: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var underfilled = false
+    @State private var textHeight: CGFloat = 0
+    private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
@@ -936,9 +945,21 @@ struct TranscriptView: View {
             .frame(maxWidth: 700)
             .padding(.horizontal, DesktopSpace.xxl)
             .padding(.top, 28)
-            .padding(.bottom, 12)
+            .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
+        }
+        .background {
+            Color.clear
+                .frame(maxWidth: 700)
+                .frame(height: textHeight)
+                .scrimText("transcript-column")
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            min(geometry.contentSize.height - Self.bottomPadding - max(geometry.contentOffset.y, 0), geometry.containerSize.height).rounded()
+        } action: { _, height in
+            textHeight = max(height, 0)
         }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -1452,6 +1473,7 @@ struct ComposerView: View {
                         ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, DesktopSpace.s) }
                     }
                 }
+                .scrimText("dock-attention")
             }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
@@ -1488,6 +1510,7 @@ struct ComposerView: View {
                         }
                     }
                 }
+                .scrimText("dock-notices")
                 if !slashSuggestions.isEmpty {
                     SlashCommandMenu(suggestions: slashSuggestions, roundedTop: queued.isEmpty) { choice in
                         draft.text = choice
@@ -1586,6 +1609,7 @@ struct ComposerView: View {
                     .padding(.bottom, DesktopSpace.s)
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .scrimText("composer")
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
@@ -1600,6 +1624,7 @@ struct ComposerView: View {
                 Text(error)
                     .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.failed)
+                    .scrimText("composer-error")
                     .padding(.top, 6)
             } else if model.pendingForks.contains(session.id) {
                 HStack(spacing: DesktopSpace.s) {
@@ -1611,6 +1636,7 @@ struct ComposerView: View {
                         .help("Start another fork instead of waiting for this one")
                 }
                 .font(.system(size: DesktopType.meta))
+                .scrimText("composer-fork")
                 .padding(.top, 6)
             }
         }
@@ -2012,6 +2038,7 @@ struct SessionInspector: View {
             .font(.system(size: DesktopType.body))
             .padding(.horizontal, DesktopSpace.l)
             .frame(height: 52)
+            .scrimText("inspector-tabs")
             .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
             if let session = pane.displayedSession {
                 ScrollView {
@@ -2024,6 +2051,7 @@ struct SessionInspector: View {
                     .font(.system(size: DesktopType.body))
                     .padding(DesktopSpace.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrimText("inspector-content")
                 }
             } else {
                 Spacer()
