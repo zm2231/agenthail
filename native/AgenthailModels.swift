@@ -1318,6 +1318,23 @@ struct ContextState: Decodable {
 	}
 }
 
+extension ContextState {
+    enum Level { case normal, high, full }
+
+    /// How full the window is, for the composer's ring: high from 80 percent,
+    /// full from 95 or once an estimated window is overrun.
+    var level: Level {
+        guard let fraction else { return exceedsEstimatedWindow ? .full : .normal }
+        return fraction >= 0.95 ? .full : fraction >= 0.8 ? .high : .normal
+    }
+
+    var spokenLabel: String {
+        if compacting { return "Compacting context" }
+        if let fraction { return "Context \(Int((fraction * 100).rounded())) percent used" }
+        return "\(usedTokens.formatted(.number.notation(.compactName))) tokens of context used"
+    }
+}
+
 struct ModelOption: Decodable, Identifiable {
     let id: String
     let displayName: String

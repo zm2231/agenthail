@@ -1619,6 +1619,7 @@ struct ComposerView: View {
                                 .foregroundStyle(DesktopPalette.text2)
                                 .padding(.trailing, DesktopSpace.xs)
                         }
+                        ComposerContextRing(pane: pane, session: session)
                         if showsSteerNow {
                             Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
                                 .controlSize(.small)
@@ -2161,6 +2162,48 @@ struct SessionInspector: View {
             }
         }
         .glassPane("inspector", .sidebar, fallback: DesktopPalette.side)
+    }
+}
+
+/// How full the session's context is, beside Send. Its menu says how much is
+/// used and offers to compact.
+struct ComposerContextRing: View {
+    @ObservedObject var pane: SessionPane
+    let session: SessionState
+
+    var body: some View {
+        if let context = pane.detail?.context, context.usedTokens > 0 {
+            let tint = switch context.level {
+            case .normal: DesktopPalette.text2
+            case .high: DesktopPalette.attention
+            case .full: DesktopPalette.failed
+            }
+            Menu {
+                Text("Context · " + ContextBreakdown.usage(context))
+                if context.compacting {
+                    Text("Compacting context")
+                } else if session.capabilities.compact && !session.isReadOnly && pane.removedSession == nil {
+                    Button("Compact context") { pane.compactContext() }
+                        .disabled(pane.controlPending)
+                }
+            } label: {
+                ZStack {
+                    Circle().stroke(DesktopPalette.line, lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: min(context.fraction ?? (context.level == .full ? 1 : 0), 1))
+                        .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 14, height: 14)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(context.spokenLabel)
+            .accessibilityLabel(context.spokenLabel)
+        }
     }
 }
 

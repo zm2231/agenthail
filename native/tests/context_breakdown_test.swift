@@ -25,6 +25,16 @@ struct ContextBreakdownTest {
         check(ContextBreakdown.rows(estimated)[1].label == "Estimated window", "an estimated window is labeled")
         let configured = try context(#"{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0,"contextWindowSource":"configured"}"#)
         check(ContextBreakdown.rows(configured)[1].label == "Configured window", "a configured window is labeled")
+
+        func used(_ tokens: Int, estimated: Bool = false) throws -> ContextState {
+            try context(#"{"usedTokens":\#(tokens),"contextWindow":1000,"compacting":false,"compactionCount":0,"windowEstimated":\#(estimated)}"#)
+        }
+        let levels = try [799, 800, 949, 950].map { try used($0).level }
+        check(levels == [.normal, .high, .high, .full], "the ring turns high at 80 percent and full at 95: \(levels)")
+        check(try used(1200, estimated: true).level == .full, "an overrun estimated window reads as full")
+        let spoken = try used(620).spokenLabel
+        check(spoken == "Context 62 percent used", "VoiceOver reads the percent: \(spoken)")
+        check(compacted.spokenLabel == "Compacting context", "a compaction in progress says so")
     }
 
     static func context(_ json: String) throws -> ContextState {

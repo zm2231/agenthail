@@ -1236,11 +1236,15 @@ struct SessionSummary: View {
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
-			if let fraction = context.fraction {
-				Text("\(context.windowEstimated == true ? "~" : "")\(Int(fraction * 100))% context").monospacedDigit()
-			} else {
-				Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
+			Group {
+				if let fraction = context.fraction {
+					Text("\(context.windowEstimated == true ? "~" : "")\(Int(fraction * 100))% context").monospacedDigit()
+				} else {
+					Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
+				}
 			}
+			.foregroundStyle(context.level == .full ? Color.red : context.level == .high ? Color.orange : Color.secondary)
+			.accessibilityLabel(context.spokenLabel)
         }
     }
 }
