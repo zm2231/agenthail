@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
@@ -1336,6 +1338,32 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 		}
 	}
 	return "", fmt.Errorf("reserve generated alias: exhausted candidates for %q", base)
+}
+
+// PeerSession finds the session whose Claude peer id is peerID, the
+// from-session a peer message carries, with the paired host that owns it.
+// Peer ids are derived, not stored, so it hashes every session's id; with a
+// few thousand sessions that is about a millisecond, and only a target that
+// matches nothing else reaches it.
+func (r *Registry) PeerSession(peerID string) (id, hostID string, found bool, err error) {
+	if _, err := uuid.Parse(peerID); err != nil {
+		return "", "", false, nil
+	}
+	rows, err := r.read.Query(`SELECT id,surface,host_id FROM sessions`)
+	if err != nil {
+		return "", "", false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&id, &kind, &hostID); err != nil {
+			return "", "", false, err
+		}
+		if strings.EqualFold(surface.PeerUUID(surface.SurfaceKind(kind), id), peerID) {
+			return id, hostID, true, nil
+		}
+	}
+	return "", "", false, rows.Err()
 }
 
 // ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a

@@ -114,6 +114,13 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 	if target, err = a.expandTargetLead(target, identity); err != nil {
 		return nil, nil, nil, err
 	}
+	if _, err := a.registry().Session(target); errors.Is(err, sql.ErrNoRows) {
+		if id, hostID, found, err := a.registry().PeerSession(target); err != nil {
+			return nil, nil, nil, err
+		} else if found {
+			target = hosts.Qualify(hostID, id)
+		}
+	}
 	if hostText, rest, ok := hosts.Split(target); ok {
 		if strings.EqualFold(hostText, identity.ID) || strings.EqualFold(hostText, identity.Name) {
 			session, adapter, err := a.resolveLocalTarget(ctx, rest)
