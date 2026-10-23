@@ -71,8 +71,8 @@ type uiSnapshotRequest struct {
 type uiSnapshotEvent struct {
 	ID string `json:"id"`
 	uiSnapshotRequest
-	Rev       string `json:"rev,omitempty"`
-	ExpiresAt int64  `json:"expiresAt"`
+	Rev        string `json:"rev,omitempty"`
+	DeadlineMs int64  `json:"deadlineMs"`
 }
 
 func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +97,10 @@ func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id, reply := d.snapshots.open()
+	// Replayed history carries this after the request, so an app that sees a stale request also sees it end.
+	defer d.publishEvent("ui.snapshot.closed", id, nil)
 	defer d.snapshots.close(id)
-	d.publishEvent("ui.snapshot.requested", "", uiSnapshotEvent{ID: id, uiSnapshotRequest: request, Rev: rev, ExpiresAt: time.Now().Add(uiSnapshotTimeout).UnixMilli()})
+	d.publishEvent("ui.snapshot.requested", "", uiSnapshotEvent{ID: id, uiSnapshotRequest: request, Rev: rev, DeadlineMs: uiSnapshotTimeout.Milliseconds()})
 	timer := time.NewTimer(uiSnapshotTimeout)
 	defer timer.Stop()
 	select {

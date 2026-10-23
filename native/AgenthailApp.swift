@@ -575,6 +575,7 @@ private struct AgenthailMenuBarApp: App {
             guard let model, let voice else { return }
             WindowSnapshot.answer(request, model: model, voice: voice, api: api)
         }
+        model.onSnapshotClosed = { WindowSnapshot.cancel($0) }
         _model = StateObject(wrappedValue: model)
         _voice = StateObject(wrappedValue: voice)
     }

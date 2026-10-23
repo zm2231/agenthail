@@ -44,6 +44,20 @@ func nextSnapshotRequest(t *testing.T, stream <-chan apiEvent) uiSnapshotEvent {
 	}
 }
 
+func nextSnapshotClosed(t *testing.T, stream <-chan apiEvent) string {
+	t.Helper()
+	for {
+		select {
+		case event := <-stream:
+			if event.Type == "ui.snapshot.closed" {
+				return event.EntityID
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no snapshot close was published")
+		}
+	}
+}
+
 func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -67,7 +81,7 @@ func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	if request.Rev == "" || request.Rev != current.Rev {
 		t.Fatalf("the request names ui.conf revision %q, want the current %q", request.Rev, current.Rev)
 	}
-	if request.ID == "" || request.Session != "s1" || request.Width != 900 || request.Height != 600 || request.Device != "Studio" || request.ExpiresAt <= time.Now().UnixMilli() {
+	if request.ID == "" || request.Session != "s1" || request.Width != 900 || request.Height != 600 || request.Device != "Studio" || request.DeadlineMs != uiSnapshotTimeout.Milliseconds() {
 		t.Fatalf("published request = %+v", request)
 	}
 
@@ -84,6 +98,9 @@ func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	if call.code != http.StatusOK || call.kind != "image/png" || !bytes.Equal(call.body, image) {
 		t.Fatalf("caller got %d %q %q", call.code, call.kind, call.body)
 	}
+	if closed := nextSnapshotClosed(t, stream); closed != request.ID {
+		t.Fatalf("closed %q after answering, want %q", closed, request.ID)
+	}
 	if call := snapshotPost(handler, "/api/v1/ui/snapshot/unknown", "image/png", image); call.code != http.StatusConflict {
 		t.Fatalf("an upload for no request was accepted: %d", call.code)
 	}
@@ -96,12 +113,19 @@ func TestUISnapshotExplainsWhenNoAppAnswers(t *testing.T) {
 	uiSnapshotTimeout = 50 * time.Millisecond
 	defer func() { uiSnapshotTimeout = saved }()
 
+	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
+	defer cancel()
+
 	call := snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{}`))
 	if call.code != http.StatusGatewayTimeout || !strings.Contains(string(call.body), "snapshot_unanswered") || !strings.Contains(string(call.body), "Mac app") {
 		t.Fatalf("unanswered snapshot: %d %s", call.code, call.body)
 	}
 	if len(d.snapshots.pending) != 0 {
 		t.Fatalf("an unanswered request stayed pending: %v", d.snapshots.pending)
+	}
+	request := nextSnapshotRequest(t, stream)
+	if closed := nextSnapshotClosed(t, stream); closed != request.ID {
+		t.Fatalf("closed %q after expiring, want %q", closed, request.ID)
 	}
 }
 

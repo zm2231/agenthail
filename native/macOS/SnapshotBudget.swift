@@ -1,20 +1,19 @@
 import Foundation
 
-/// Ends before the daemon gives up on the request, leaving time to upload the answer.
+/// Starts when the request arrives and ends before the daemon gives up on it, leaving time to upload the answer.
 struct SnapshotBudget {
     static let reserve: Duration = .seconds(2)
     let deadline: ContinuousClock.Instant
 
-    init(expiresAt: Int64, reserve: Duration = SnapshotBudget.reserve, now: Date = Date()) {
-        let left = expiresAt - Int64(now.timeIntervalSince1970 * 1000)
-        deadline = ContinuousClock.now + .milliseconds(left) - reserve
+    init(deadlineMs: Int64, reserve: Duration = SnapshotBudget.reserve) {
+        deadline = ContinuousClock.now + .milliseconds(deadlineMs) - reserve
     }
 
     var remaining: Duration { max(.zero, deadline - ContinuousClock.now) }
 
     @MainActor
     func wait(until done: () -> Bool) async {
-        while !done(), ContinuousClock.now < deadline {
+        while !done(), !Task.isCancelled, ContinuousClock.now < deadline {
             try? await Task.sleep(for: min(.milliseconds(50), remaining))
         }
     }

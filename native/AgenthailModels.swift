@@ -1747,9 +1747,7 @@ struct SnapshotRequest: Decodable, Equatable {
     let height: Int?
     let device: String?
     var rev: String? = nil
-    let expiresAt: Int64
-
-    var expired: Bool { Int64(Date().timeIntervalSince1970 * 1000) >= expiresAt }
+    let deadlineMs: Int64
 }
 
 struct SessionTimeline: Decodable {

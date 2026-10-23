@@ -64,6 +64,7 @@ final class AgenthailModel: ObservableObject {
     private(set) var mainPane: SessionPane!
     weak var mainWindow: NSWindow?
     var onSnapshotRequest: ((SnapshotRequest, AgenthailAPI) -> Void)?
+    var onSnapshotClosed: ((String) -> Void)?
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
     private var connectionTask: Task<Void, Never>?
@@ -1153,9 +1154,14 @@ final class AgenthailModel: ObservableObject {
         }
         if event.type == "ui.snapshot.requested" {
             lastEventID = max(lastEventID, event.id)
-            if let request = event.snapshot, !request.expired, let api {
+            if let request = event.snapshot, let api {
                 onSnapshotRequest?(request, api)
             }
+            return
+        }
+        if event.type == "ui.snapshot.closed" {
+            lastEventID = max(lastEventID, event.id)
+            if let id = event.entityId { onSnapshotClosed?(id) }
             return
         }
         if event.type == "stream.reset" {
