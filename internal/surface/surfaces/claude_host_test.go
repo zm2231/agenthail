@@ -14,8 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
-	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/installdir"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -267,7 +267,7 @@ func TestWithoutAHostOnlyARecordedProcessThatStillRunsCountsAsHosted(t *testing.
 	home := t.TempDir()
 	c := NewClaude(nil, home)
 	live := os.Getpid()
-	started, err := claudepeer.ProcessStart(live)
+	started, err := procstart.Lstart(context.Background(), live)
 	if err != nil {
 		t.Fatal(err)
 	}

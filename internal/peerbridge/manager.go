@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/unixjson"
 )
 
 const (
@@ -87,18 +88,6 @@ type managerRequest struct {
 	ReplySocket     string `json:"replySocket,omitempty"`
 	MsgID           string `json:"msgId,omitempty"`
 	PersonName      string `json:"personName,omitempty"`
-}
-
-type managerError struct {
-	Class string `json:"class"`
-	Kind  string `json:"kind,omitempty"`
-	Error string `json:"error"`
-}
-
-type managerResponse struct {
-	OK     bool                `json:"ok"`
-	Result *surface.SendResult `json:"result,omitempty"`
-	Error  *managerError       `json:"error,omitempty"`
 }
 
 type Manager struct {
@@ -236,7 +225,7 @@ func (m *Manager) serve() {
 			case m.rejections <- struct{}{}:
 				go m.rejectBusy(conn)
 			default:
-				_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "unavailable", Error: "Claude peer manager admission is saturated; retry shortly"}})
+				_ = json.NewEncoder(conn).Encode(claudepeer.Response{Error: &claudepeer.ResponseError{Class: "unavailable", Error: "Claude peer manager admission is saturated; retry shortly"}})
 				_ = conn.Close()
 			}
 			continue
@@ -246,12 +235,12 @@ func (m *Manager) serve() {
 			defer conn.Close()
 			var request managerRequest
 			if err := json.NewDecoder(io.LimitReader(conn, managerRequestBytes)).Decode(&request); err != nil {
-				_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "invalid or oversized Claude peer manager request"}})
+				_ = json.NewEncoder(conn).Encode(claudepeer.Response{Error: &claudepeer.ResponseError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "invalid or oversized Claude peer manager request"}})
 				return
 			}
 			ctx, cancel := context.WithTimeout(m.ctx, peerStartTimeout)
 			defer cancel()
-			response := managerResponse{}
+			response := claudepeer.Response{}
 			switch request.Operation {
 			case "send":
 				response.Result, err = m.Send(surface.WithPersonName(surface.WithMessageUUID(ctx, request.MsgID), request.PersonName), request.SourceSessionID, request.TargetSocket, request.Message)
@@ -276,10 +265,10 @@ func (m *Manager) rejectBusy(conn net.Conn) {
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	var discarded managerRequest
 	if err := json.NewDecoder(io.LimitReader(conn, managerRequestBytes)).Decode(&discarded); err != nil {
-		_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "invalid or oversized Claude peer manager request"}})
+		_ = json.NewEncoder(conn).Encode(claudepeer.Response{Error: &claudepeer.ResponseError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "invalid or oversized Claude peer manager request"}})
 		return
 	}
-	_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "unavailable", Error: "Claude peer manager is at its 32-request concurrency limit; retry shortly"}})
+	_ = json.NewEncoder(conn).Encode(claudepeer.Response{Error: &claudepeer.ResponseError{Class: "unavailable", Error: "Claude peer manager is at its 32-request concurrency limit; retry shortly"}})
 }
 
 var errPeerPoolFull = errors.New("Claude peer pool is full")
@@ -830,25 +819,13 @@ func Ensure(ctx context.Context, home, sourceID string) error {
 	return nil
 }
 
-func requestManager(ctx context.Context, home string, request managerRequest) (*managerResponse, error) {
-	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "unix", managerPath(home))
-	if err != nil {
-		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", err))
-	}
-	defer conn.Close()
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
-	deadline := time.Now().Add(15 * time.Second)
-	if value, ok := ctx.Deadline(); ok && value.Before(deadline) {
-		deadline = value
-	}
-	_ = conn.SetDeadline(deadline)
-	if err := json.NewEncoder(conn).Encode(request); err != nil {
-		return nil, managerRequestError(request, err)
-	}
-	var response managerResponse
-	if err := json.NewDecoder(io.LimitReader(conn, managerReplyBytes)).Decode(&response); err != nil {
+func requestManager(ctx context.Context, home string, request managerRequest) (*claudepeer.Response, error) {
+	var response claudepeer.Response
+	if err := unixjson.Call(ctx, managerPath(home), 15*time.Second, managerReplyBytes, request, &response); err != nil {
+		var dial *unixjson.DialError
+		if errors.As(err, &dial) {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", dial.Err))
+		}
 		return nil, managerRequestError(request, err)
 	}
 	return &response, nil
@@ -872,28 +849,15 @@ func Send(ctx context.Context, home, sourceID, socket, message string) (*surface
 	if err != nil {
 		return nil, err
 	}
-	if response.OK && response.Result != nil {
-		return response.Result, nil
-	}
-	if response.Error == nil {
-		return nil, surface.DeliveryOutcomeUnknown(errors.New("malformed Claude peer manager response"))
-	}
-	switch response.Error.Class {
-	case "terminal":
-		return nil, surface.DeliveryTerminal(errors.New(response.Error.Error), surface.DeliveryTerminalKind(response.Error.Kind))
-	case "unavailable":
-		return nil, surface.DeliveryUnavailable(errors.New(response.Error.Error))
-	default:
-		return nil, surface.DeliveryOutcomeUnknown(errors.New(response.Error.Error))
-	}
+	return response.Outcome("malformed Claude peer manager response")
 }
 
-func classifyManagerError(err error) *managerError {
+func classifyManagerError(err error) *claudepeer.ResponseError {
 	if surface.IsDeliveryTerminal(err) {
-		return &managerError{Class: "terminal", Kind: string(surface.DeliveryTerminalReason(err)), Error: err.Error()}
+		return &claudepeer.ResponseError{Class: "terminal", Kind: string(surface.DeliveryTerminalReason(err)), Error: err.Error()}
 	}
 	if surface.IsDeliveryOutcomeUnknown(err) {
-		return &managerError{Class: "unknown", Error: err.Error()}
+		return &claudepeer.ResponseError{Class: "unknown", Error: err.Error()}
 	}
-	return &managerError{Class: "unavailable", Error: err.Error()}
+	return &claudepeer.ResponseError{Class: "unavailable", Error: err.Error()}
 }

@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/installdir"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -153,7 +153,7 @@ func (h *claudeHost) readState() {
 		if entry.Started == "" || !claudeProcessAlive(entry.PID) {
 			continue
 		}
-		if started, err := claudepeer.ProcessStart(entry.PID); err == nil && started == entry.Started {
+		if started, err := procstart.Lstart(context.Background(), entry.PID); err == nil && started == entry.Started {
 			h.sessions[id] = entry.PID
 		}
 	}

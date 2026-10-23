@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -43,7 +43,7 @@ func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 
 func testProcessStart(t *testing.T) string {
 	t.Helper()
-	if ticks, err := claudepeer.ProcStartTicks(os.Getpid()); err == nil {
+	if ticks, err := procstart.Ticks(os.Getpid()); err == nil {
 		return ticks
 	}
 	start, err := processStartTime(os.Getpid())

@@ -25,8 +25,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/unixjson"
 )
 
 const (
@@ -145,16 +147,35 @@ type controlRequest struct {
 	PersonName   string `json:"personName,omitempty"`
 }
 
-type controlResponse struct {
+// Response is a peer delivery answer, from a worker's control socket or the
+// daemon's peer manager.
+type Response struct {
 	OK     bool                `json:"ok"`
 	Result *surface.SendResult `json:"result,omitempty"`
-	Error  *controlError       `json:"error,omitempty"`
+	Error  *ResponseError      `json:"error,omitempty"`
 }
 
-type controlError struct {
+type ResponseError struct {
 	Class string `json:"class"`
 	Kind  string `json:"kind,omitempty"`
 	Error string `json:"error"`
+}
+
+func (r Response) Outcome(malformed string) (*surface.SendResult, error) {
+	if r.OK && r.Result != nil {
+		return r.Result, nil
+	}
+	if r.Error == nil {
+		return nil, surface.DeliveryOutcomeUnknown(errors.New(malformed))
+	}
+	switch r.Error.Class {
+	case "terminal":
+		return nil, surface.DeliveryTerminal(errors.New(r.Error.Error), surface.DeliveryTerminalKind(r.Error.Kind))
+	case "unavailable":
+		return nil, surface.DeliveryUnavailable(errors.New(r.Error.Error))
+	default:
+		return nil, surface.DeliveryOutcomeUnknown(errors.New(r.Error.Error))
+	}
 }
 
 func RuntimeRoot(home string) string {
@@ -181,7 +202,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 		return runReplyRelay(ctx, c, parent, ready)
 	}
 	pid := os.Getpid()
-	procStart, err := ProcessStart(pid)
+	procStart, err := procstart.Lstart(context.Background(), pid)
 	if err != nil {
 		return fmt.Errorf("read process start: %w", err)
 	}
@@ -329,38 +350,16 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	if err := ValidateSend(senderID, targetSocket, message); err != nil {
 		return nil, err
 	}
-	conn, err := dialContext(ctx, controlPath)
-	if err != nil {
-		return nil, surface.DeliveryUnavailable(fmt.Errorf("peer control socket: %w", err))
-	}
-	defer conn.Close()
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
-	if err := conn.SetDeadline(time.Now().Add(readDeadline)); err != nil {
-		return nil, err
-	}
-	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)})
-	if _, err := conn.Write(append(req, '\n')); err != nil {
+	request := controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)}
+	var response Response
+	if err := unixjson.Call(ctx, controlPath, readDeadline, maxLineBytes, request, &response); err != nil {
+		var dial *unixjson.DialError
+		if errors.As(err, &dial) {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("peer control socket: %w", dial.Err))
+		}
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
-	var resp controlResponse
-	if err := json.NewDecoder(io.LimitReader(conn, maxLineBytes)).Decode(&resp); err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
-	}
-	if resp.OK && resp.Result != nil {
-		return resp.Result, nil
-	}
-	if resp.Error == nil {
-		return nil, surface.DeliveryOutcomeUnknown(errors.New("malformed peer control response"))
-	}
-	switch resp.Error.Class {
-	case "terminal":
-		return nil, surface.DeliveryTerminal(errors.New(resp.Error.Error), surface.DeliveryTerminalKind(resp.Error.Kind))
-	case "unavailable":
-		return nil, surface.DeliveryUnavailable(errors.New(resp.Error.Error))
-	default:
-		return nil, surface.DeliveryOutcomeUnknown(errors.New(resp.Error.Error))
-	}
+	return response.Outcome("malformed peer control response")
 }
 
 // SendNative sends as a Claude session through its own socket. fromMode is the
@@ -402,7 +401,7 @@ func ValidateSend(senderID, targetSocket, message string) error {
 
 func runReplyRelay(ctx context.Context, c Config, parent io.Reader, ready io.Writer) error {
 	pid := os.Getpid()
-	procStart, err := ProcessStart(pid)
+	procStart, err := procstart.Lstart(context.Background(), pid)
 	if err != nil {
 		return fmt.Errorf("read relay process start: %w", err)
 	}
@@ -501,15 +500,6 @@ func status(s surface.Session) string {
 		return "idle"
 	}
 	return "waiting"
-}
-
-// ProcessStart is the process's start time as ps reports it in UTC, which
-// tells a process from a later one that reuses its pid.
-func ProcessStart(pid int) (string, error) {
-	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	out, err := command.Output()
-	return strings.TrimSpace(string(out)), err
 }
 
 func listenOwned(path string) (net.Listener, error) {
@@ -758,38 +748,18 @@ func IsClockTicks(value string) bool {
 	return true
 }
 
-func ProcStartTicks(pid int) (string, error) {
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return "", err
-	}
-	return procStatStartTime(string(data))
-}
-
-func procStatStartTime(stat string) (string, error) {
-	end := strings.LastIndexByte(stat, ')')
-	if end < 0 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	fields := strings.Fields(stat[end+1:])
-	if len(fields) < 20 {
-		return "", fmt.Errorf("malformed /proc stat")
-	}
-	return fields[19], nil
-}
-
 // nativeProcessMatches reports whether pid is the process a native Claude
 // record names, by the start time Claude recorded for it.
 func nativeProcessMatches(pid int, recorded string) bool {
 	if IsClockTicks(recorded) {
-		actual, err := ProcStartTicks(pid)
+		actual, err := procstart.Ticks(pid)
 		return err == nil && actual == recorded
 	}
 	return processMatches(pid, recorded)
 }
 
 func processMatches(pid int, expected string) bool {
-	actual, err := ProcessStart(pid)
+	actual, err := procstart.Lstart(context.Background(), pid)
 	return err == nil && actual == expected
 }
 
@@ -1238,17 +1208,17 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 	_ = conn.SetDeadline(time.Now().Add(readDeadline))
 	var req controlRequest
 	err := json.NewDecoder(io.LimitReader(conn, maxLineBytes)).Decode(&req)
-	resp := controlResponse{}
+	resp := Response{}
 	if err != nil {
-		resp.Error = &controlError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: err.Error()}
+		resp.Error = &ResponseError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: err.Error()}
 	} else if req.SenderID != c.Session.ID || strings.TrimSpace(req.Message) == "" {
-		resp.Error = &controlError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "sender identity mismatch or empty message"}
+		resp.Error = &ResponseError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "sender identity mismatch or empty message"}
 	} else if err := validateTargetSocket(c.SocketDir, req.TargetSocket); err != nil {
 		resp.Error = classifyControlError(err)
 	} else {
 		session, err := reg.Session(c.Session.ID)
 		if err != nil {
-			resp.Error = &controlError{Class: "terminal", Kind: string(surface.DeliveryTargetMissing), Error: "sender session is no longer registered"}
+			resp.Error = &ResponseError{Class: "terminal", Kind: string(surface.DeliveryTargetMissing), Error: "sender session is no longer registered"}
 			_ = json.NewEncoder(conn).Encode(resp)
 			return
 		}
@@ -1294,16 +1264,16 @@ func validateRelaySocket(socketDir, path string) error {
 	return validateTargetSocket(socketDir, path)
 }
 
-func classifyControlError(err error) *controlError {
+func classifyControlError(err error) *ResponseError {
 	var terminal surface.DeliveryTerminalError
 	if errors.As(err, &terminal) {
-		return &controlError{Class: "terminal", Kind: string(terminal.Kind), Error: terminal.Error()}
+		return &ResponseError{Class: "terminal", Kind: string(terminal.Kind), Error: terminal.Error()}
 	}
 	var unavailable surface.DeliveryUnavailableError
 	if errors.As(err, &unavailable) {
-		return &controlError{Class: "unavailable", Error: unavailable.Error()}
+		return &ResponseError{Class: "unavailable", Error: unavailable.Error()}
 	}
-	return &controlError{Class: "unknown", Error: err.Error()}
+	return &ResponseError{Class: "unknown", Error: err.Error()}
 }
 
 // ClaudeSocketDirs returns the directories Claude Code binds peer sockets in:
@@ -1477,10 +1447,6 @@ func authenticatedFrame(home, target string, payload []byte) ([]byte, error) {
 	return payload, nil
 }
 
-func dialContext(ctx context.Context, path string) (net.Conn, error) {
-	var d net.Dialer
-	return d.DialContext(ctx, "unix", path)
-}
 func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
 var closingPeerTag = regexp.MustCompile(`(?i)<(\s*/\s*cross-session-message\b)`)
