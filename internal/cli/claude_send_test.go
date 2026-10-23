@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,7 +132,15 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 			if err := r.RegisterSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 				t.Fatal(err)
 			}
-			time.Sleep(1100 * time.Millisecond)
+			db, err := sql.Open("sqlite", r.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Exec(`UPDATE sessions SET updated_at=datetime('now','-1 hour') WHERE id='session_closed'`)
+			db.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
 			cutoff := time.Now()
 			for _, target := range []string{"session_closed", "claude:session_closed"} {
 				if _, _, err := app.resolveTarget(context.Background(), target); err != nil {

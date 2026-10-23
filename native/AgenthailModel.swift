@@ -42,6 +42,10 @@ final class AgenthailModel: ObservableObject {
     @Published var auditQuery = ""
     @Published var auditKind = ""
     @Published var connectionError: String?
+    /// The build of the daemon on this Mac, as it last named it.
+    @Published private(set) var daemonBuild: AgenthailBuild?
+    /// Set when that daemon is another build than this app.
+    var daemonBuildNotice: String? { AgenthailBuild.daemonNotice(app: .app(Bundle.main.infoDictionary), daemon: daemonBuild) }
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
@@ -58,6 +62,9 @@ final class AgenthailModel: ObservableObject {
     let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
+    weak var mainWindow: NSWindow?
+    var onSnapshotRequest: ((SnapshotRequest, AgenthailAPI) -> Void)?
+    var onSnapshotClosed: ((String) -> Void)?
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
     private var connectionTask: Task<Void, Never>?
@@ -148,7 +155,7 @@ final class AgenthailModel: ObservableObject {
             while !Task.isCancelled {
                 do {
                     let api = try AgenthailAPI()
-                    _ = try await api.version()
+                    daemonBuild = try await api.version().build
                     self.api = api
                     clearConnectionError()
                     lastEventID = 0
@@ -349,13 +356,16 @@ final class AgenthailModel: ObservableObject {
             case .starting:
                 return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
-                if let id { await openCreatedSession(id, started: true) }
+                guard let id else { return .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage) }
+                await openCreatedSession(id, started: true)
                 return .unconfirmed("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }
+        } catch AgenthailAPIError.outcomeUnknown {
+            return .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage)
         } catch AgenthailAPIError.request(_, let message) {
             return .failed(message)
         } catch AgenthailAPIError.unavailable(let message) {
@@ -592,6 +602,18 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func createLoginLink() async -> String? {
+        guard let api else { return nil }
+        do {
+            let link = try await api.createLoginLink(remote: true)
+            operationError = nil
+            return link.url
+        } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return nil
+        }
+    }
+
     func loadPermissions() async {
         guard let api else { return }
         do {
@@ -786,15 +808,63 @@ final class AgenthailModel: ObservableObject {
         projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
     }
 
-    func addProject(path: String) {
-        projectAction("project-add", path: path)
+    var projects: [ProjectState] { snapshot?.projects ?? [] }
+
+    func addProject(path: String, title: String? = nil, host: String? = nil) async -> ProjectChange {
+        await projectChange {
+            let (project, created) = try await $0.addProject(path: path, title: title, host: host)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
     }
 
-    private func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) {
+    func renameProject(_ projectID: String, to title: String) async -> ProjectChange {
+        await projectChange {
+            try await $0.renameProject(projectID, title: title)
+            return "Renamed to \(title)."
+        }
+    }
+
+    func removeProject(_ projectID: String) async -> ProjectChange {
+        await projectChange {
+            try await $0.projectAction("project-remove", projectID: projectID)
+            return "Project removed."
+        }
+    }
+
+    func clearLead(of project: ProjectState) async -> ProjectChange {
+        await projectChange {
+            try await $0.clearLead(projectID: project.id)
+            return "\(project.displayName) has no lead now."
+        }
+    }
+
+    func makeLead(_ sessionID: String, replace: Bool = false) async -> ProjectChange {
+        await projectChange {
+            let lead = try await $0.makeLead(sessionID: sessionID, replace: replace)
+            return "@\(lead.name) leads \(lead.projectRoot)."
+        }
+    }
+
+    func startLead(of project: ProjectState, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool = false) async -> ProjectChange {
+        await projectChange {
+            let lead = try await $0.startLead(surface: surface, folder: checkout.rootPath, host: ProjectMenu.host(of: checkout), name: name, replace: replace)
+            return "@\(lead.name) leads \(project.displayName); its first message starts it."
+        }
+    }
+
+    private func projectChange(_ body: (AgenthailAPI) async throws -> String) async -> ProjectChange {
+        guard let api else { return .failed(AgenthailAPIError.disconnectedGuidance) }
+        let change = await ProjectChange.run { try await body(api) }
+        _ = await refresh(fresh: true)
+        return change
+    }
+
+    private func projectAction(_ action: String, projectID: String) {
         guard let api else { return }
         Task {
             do {
-                _ = try await api.projectAction(action, projectID: projectID, path: path)
+                try await api.projectAction(action, projectID: projectID)
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
@@ -1093,8 +1163,9 @@ final class AgenthailModel: ObservableObject {
                     reconnecting = true
                     do {
                         let reloadedAPI = try AgenthailAPI()
-                        _ = try await reloadedAPI.version()
+                        let build = try await reloadedAPI.version().build
                         if Task.isCancelled { return }
+                        daemonBuild = build
                         self.api = reloadedAPI
                         clearConnectionError()
                     } catch {
@@ -1127,6 +1198,18 @@ final class AgenthailModel: ObservableObject {
         if event.type == "ui.changed" {
             lastEventID = max(lastEventID, event.id)
             if let api { interface.load(from: api) }
+            return
+        }
+        if event.type == "ui.snapshot.requested" {
+            lastEventID = max(lastEventID, event.id)
+            if let request = event.snapshot, let api {
+                onSnapshotRequest?(request, api)
+            }
+            return
+        }
+        if event.type == "ui.snapshot.closed" {
+            lastEventID = max(lastEventID, event.id)
+            if let id = event.entityId { onSnapshotClosed?(id) }
             return
         }
         if event.type == "stream.reset" {

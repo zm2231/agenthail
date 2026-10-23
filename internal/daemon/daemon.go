@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/filewake"
@@ -50,6 +51,7 @@ type Daemon struct {
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState
+	snapshots            *snapshotRelay
 	retryMu              sync.Mutex
 	observeRetry         map[string]observeRetry
 	notificationMu       sync.Mutex
@@ -93,6 +95,7 @@ type Daemon struct {
 	dashboard                *dashboardServer
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
+	build                    buildinfo.Identity
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
@@ -103,6 +106,9 @@ type Daemon struct {
 	limitResumeEnabled func() bool
 	// limitResumesRead, when set, runs each time usage-limit stops are read.
 	limitResumesRead func()
+	// liveSources names the surface of each session the catalog holds a
+	// source for because its process is live.
+	liveSources map[string]surface.SurfaceKind
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -150,6 +156,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
+		liveSources:       map[string]surface.SurfaceKind{},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
 		catalogNudge:      make(chan struct{}, 1),
@@ -160,6 +167,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		limitResumes:      newLimitResumer(),
 	}
 	d.ui = newUIState(reg)
+	d.snapshots = newSnapshotRelay()
 	identity, err := reg.HostIdentity()
 	if err != nil {
 		d.log.Printf("host identity: %s", err)

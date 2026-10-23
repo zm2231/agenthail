@@ -30,6 +30,21 @@ private struct BelowWindowChrome: ViewModifier {
     }
 }
 
+/// Shows the sidebar over the conversation when the window is too narrow
+/// to dock it.
+struct SidebarToggle: View {
+    @ObservedObject var pane: SessionPane
+
+    var body: some View {
+        Button { pane.toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+            .buttonStyle(.plain)
+            .foregroundStyle(pane.sidebarOverlay ? DesktopPalette.text : DesktopPalette.text2)
+            .font(.system(size: DesktopType.body))
+            .help(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+            .accessibilityLabel(pane.sidebarOverlay ? "Hide sidebar" : "Show sidebar")
+    }
+}
+
 struct TitleBarStrip: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
@@ -44,6 +59,7 @@ struct TitleBarStrip: View {
     var body: some View {
         let tree = model.sessionTree
         HStack(spacing: DesktopSpace.s) {
+            if !pane.sidebarDocks { SidebarToggle(pane: pane) }
             GeometryReader { geometry in
                 let tabs = pane.tabs.tabs
                 let fits = max(Int(geometry.size.width / Self.minimumTab), 1)
@@ -290,7 +306,7 @@ struct StatusStrip: View {
         let working = sessions.filter(\.isWorking).count
         let needsYou = model.sessionTree.needsYou
         HStack(spacing: DesktopSpace.l) {
-            if items.contains("usage") { UsageLimits(limits: usage.limits, problem: usage.problem) }
+            if items.contains("usage") { UsageLimits(usage: usage) }
             Spacer(minLength: DesktopSpace.l)
             ForEach(items.filter { $0 != "usage" }, id: \.self) { item in
                 switch item {
@@ -345,52 +361,37 @@ private struct StatusLabelStyle: LabelStyle {
 }
 
 private struct UsageLimits: View {
-    let limits: [ClaudeConfigRootOption.Usage.Limit]
-    let problem: String?
+    @ObservedObject var usage: UsageMonitor
 
     var body: some View {
-        HStack(spacing: DesktopSpace.l) {
-            if limits.isEmpty {
-                Text(problem ?? "Claude")
-            }
-            ForEach(limits, id: \.kind) { limit in
-                HStack(spacing: 6) {
-                    Text(Self.label(limit.kind))
-                    ProgressView(value: min(max(limit.percent / 100, 0), 1))
-                        .progressViewStyle(.linear)
-                        .frame(width: 44)
-                        .tint(limit.percent >= 90 ? DesktopPalette.failed : DesktopPalette.text2)
-                    Text("\(Int(limit.percent.rounded()))%" + (Self.reset(limit.resetsAt).map { " · \($0)" } ?? ""))
-                        .monospacedDigit()
+        TimelineView(.everyMinute) { context in
+            let meters = UsageMeters.meters(provider: "Claude", usage: usage.claude, now: context.date) + UsageMeters.meters(provider: "Codex", usage: usage.codex, now: context.date)
+            HStack(spacing: DesktopSpace.l) {
+                if meters.isEmpty {
+                    Text(usage.problem ?? "Claude")
                 }
-                .accessibilityElement(children: .combine)
+                ForEach(meters, id: \.label) { meter in
+                    HStack(spacing: 6) {
+                        Text(meter.label)
+                        ProgressView(value: min(max(meter.percent / 100, 0), 1))
+                            .progressViewStyle(.linear)
+                            .frame(width: 44)
+                            .tint(meter.percent >= 90 ? DesktopPalette.failed : DesktopPalette.text2)
+                        Text(meter.text)
+                            .monospacedDigit()
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(meter.spokenLabel)
+                }
             }
         }
-    }
-
-    static func label(_ kind: String) -> String {
-        switch kind {
-        case "session": "Claude"
-        case "weekly_all": "week"
-        case "weekly_scoped": "week, model"
-        default: kind.replacingOccurrences(of: "_", with: " ")
-        }
-    }
-
-    static func reset(_ value: String?) -> String? {
-        guard let value, let date = ISO8601DateFormatter().date(from: value) else { return nil }
-        let seconds = Int(date.timeIntervalSinceNow)
-        guard seconds > 0 else { return nil }
-        let days = seconds / 86_400, hours = seconds % 86_400 / 3600, minutes = seconds % 3600 / 60
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "resets \(hours)h \(minutes)m" }
-        return "resets \(minutes)m"
     }
 }
 
 @MainActor
 final class UsageMonitor: ObservableObject {
-    @Published private(set) var limits: [ClaudeConfigRootOption.Usage.Limit] = []
+    @Published private(set) var claude: ProviderUsage?
+    @Published private(set) var codex: ProviderUsage?
     @Published private(set) var problem: String?
 
     func run(_ model: AgenthailModel) async {
@@ -402,14 +403,19 @@ final class UsageMonitor: ObservableObject {
 
     private func load(_ model: AgenthailModel) async {
         guard let api = model.api else { return }
+        if model.snapshot?.surfaces.contains(where: { $0.name == "codex" && $0.connected }) == true {
+            codex = try? await api.codexUsage().usage
+        } else {
+            codex = nil
+        }
         do {
             let options = try await api.sessionOptions()
             guard let root = options.claudeConfigRoots?.first(where: \.primary) ?? options.claudeConfigRoots?.first else {
-                limits = []
+                claude = nil
                 return
             }
             let fresh = try await api.claudeRootUsage(root: root.root)
-            limits = (fresh.usage ?? root.usage)?.limits?.filter { $0.kind != "weekly_scoped" || $0.percent > 0 } ?? []
+            claude = fresh.usage ?? root.usage
             problem = fresh.usageProblem
         } catch {
             if error.isCancellation { return }

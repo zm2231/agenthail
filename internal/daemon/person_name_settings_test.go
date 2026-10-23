@@ -15,7 +15,7 @@ func TestTheMacSetsThePersonsNameAndAPhoneOnlyReadsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	call := func(token, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		request := httptest.NewRequest(method, path, strings.NewReader(body))

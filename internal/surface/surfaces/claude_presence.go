@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -64,7 +65,7 @@ func claudeRecordLive(record map[string]any) bool {
 	}
 	started := str(record, "procStart")
 	if started == "" {
-		return true
+		return claudeRecordPredatesProcess(record, int(pid))
 	}
 	if claudepeer.IsClockTicks(started) {
 		actual, err := claudepeer.ProcStartTicks(int(pid))
@@ -72,4 +73,23 @@ func claudeRecordLive(record map[string]any) bool {
 	}
 	actual, err := processStartTime(int(pid))
 	return err == nil && sameClaudeProcessStart(str(record, "version"), started, actual.UTC().Format(claudeProcessStartLayout))
+}
+
+// claudeRecordPredatesProcess dates a record that names no procStart by its
+// startedAt, which Claude writes once its process runs, so a process that
+// started after it holds a reused pid. A record with neither cannot be dated.
+func claudeRecordPredatesProcess(record map[string]any, pid int) bool {
+	at, ok := record["startedAt"].(float64)
+	if !ok || at <= 0 {
+		return true
+	}
+	started, err := processStartedAt(pid)
+	return err == nil && claudeProcessStartedBy(started, int64(at))
+}
+
+// claudeProcessStartedBy reports whether a process that started at started
+// was running by startedAt, which is whole milliseconds, so the process start
+// is compared to the millisecond.
+func claudeProcessStartedBy(started time.Time, startedAt int64) bool {
+	return !started.Truncate(time.Millisecond).After(time.UnixMilli(startedAt))
 }

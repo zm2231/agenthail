@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,14 +18,88 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var testRegistryTemplate struct {
+	once sync.Once
+	data []byte
+	err  error
+}
+
+// openTestRegistry opens a new registry copied from one migrated once per test
+// process. The copy gets its own host id and host epoch before it is opened.
 func openTestRegistry(t *testing.T) *Registry {
 	t.Helper()
-	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
+	testRegistryTemplate.once.Do(func() { testRegistryTemplate.data, testRegistryTemplate.err = buildTestRegistryTemplate() })
+	if testRegistryTemplate.err != nil {
+		t.Fatal(testRegistryTemplate.err)
+	}
+	path := filepath.Join(t.TempDir(), "registry.db")
+	if err := os.WriteFile(path, testRegistryTemplate.data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := giveTestRegistryItsOwnIdentity(path); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
 	return r
+}
+
+func buildTestRegistryTemplate() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "registry-template")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	_, checkpointErr := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	if err := errors.Join(checkpointErr, r.Close()); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// giveTestRegistryItsOwnIdentity replaces the host id and catalog host epoch
+// copied from the template. Open does not touch a registry already at this
+// schema, so the copy must not share the template's.
+func giveTestRegistryItsOwnIdentity(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, 6+16)
+	_, randErr := rand.Read(raw)
+	var hostErr, epochErr error
+	if randErr == nil {
+		_, hostErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw[:6]))
+		_, epochErr = db.Exec(`UPDATE catalog_state SET host_epoch=? WHERE id=1`, hex.EncodeToString(raw[6:]))
+	}
+	return errors.Join(randErr, hostErr, epochErr, db.Close())
+}
+
+func TestEachTestRegistryHasItsOwnHostIdentityAndEpoch(t *testing.T) {
+	var ids, epochs []string
+	for range 2 {
+		r := openTestRegistry(t)
+		identity, err := r.HostIdentity()
+		if err != nil || !ValidHostID(identity.ID) {
+			t.Fatalf("identity=%+v err=%v", identity, err)
+		}
+		epoch, _, err := r.CatalogState()
+		if err != nil || epoch == "" {
+			t.Fatalf("epoch=%q err=%v", epoch, err)
+		}
+		ids, epochs = append(ids, identity.ID), append(epochs, epoch)
+	}
+	if ids[0] == ids[1] || epochs[0] == epochs[1] {
+		t.Fatalf("copies share ids=%v epochs=%v", ids, epochs)
+	}
 }
 
 func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {
@@ -1656,5 +1732,56 @@ func TestControlOperationsWaitForIdleAndAreNeverSteered(t *testing.T) {
 	}
 	if claimInflightExpired("inflight", QueueOperationGoal, time.Now().Add(-2*time.Minute).UnixMilli(), time.Now()) {
 		t.Fatal("a goal command that is still waiting on its outcome was reclaimed")
+	}
+}
+
+func TestHistoryRowsNameTheirQueueOperation(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	compactID, err := r.QueueCompact("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalID, err := r.QueueGoal("session", "/goal tests pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageID, err := r.QueueMessageWithOptions("session", "hello", "", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{compactID, goalID, messageID} {
+		if err := r.RecordHistory(HistoryEntry{Kind: "delivered", SessionID: "session", QueueID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.RecordHistory(HistoryEntry{Kind: "session-operation", SessionID: "session", Result: "adopt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM sessions WHERE id='session'`); err != nil {
+		t.Fatal(err)
+	}
+	var queued int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue`).Scan(&queued); err != nil || queued != 0 {
+		t.Fatalf("queue rows after the session was deleted=%d err=%v", queued, err)
+	}
+	want := map[int64]QueueOperation{compactID: QueueOperationCompact, goalID: QueueOperationGoal, messageID: QueueOperationMessage, 0: ""}
+	byList, err := r.ListHistory(50, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPage, _, err := r.ListHistoryPage(50, 0, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, entries := range map[string][]HistoryEntry{"session history": byList, "history page": byPage} {
+		if len(entries) < 4 {
+			t.Fatalf("%s: entries=%+v", name, entries)
+		}
+		for _, entry := range entries {
+			if entry.Operation != want[entry.QueueID] {
+				t.Fatalf("%s: entry %+v has operation %q, want %q", name, entry, entry.Operation, want[entry.QueueID])
+			}
+		}
 	}
 }

@@ -123,8 +123,21 @@ type Device struct {
 }
 
 // Resolve returns every key's value for one device: key@device:<name> beats
-// key@<class>, which beats key, which beats the default.
+// key@<class>, which beats key, which beats the default. background.light is
+// the background to draw in light appearance.
 func (p Parsed) Resolve(device Device) map[string]any {
+	chosen, _ := p.Chosen(device)
+	values := make(map[string]any, len(Keys)+1)
+	for _, key := range Keys {
+		values[key.Name] = typed(key, chosen[key.Name])
+	}
+	values["background.light"] = expandBackground(chosen["background"]).Light
+	return values
+}
+
+// Chosen returns, for one device, each key's value as ui.conf writes it, and
+// the device of every value that comes from a key@<device> line.
+func (p Parsed) Chosen(device Device) (map[string]string, map[string]string) {
 	rank := func(s setting) int {
 		switch {
 		case s.device == "":
@@ -136,25 +149,28 @@ func (p Parsed) Resolve(device Device) map[string]any {
 		}
 		return 0
 	}
-	chosen := map[string]setting{}
+	winners := map[string]setting{}
 	for _, s := range p.settings {
 		r := rank(s)
 		if r == 0 {
 			continue
 		}
-		if current, ok := chosen[s.key]; !ok || r >= rank(current) {
-			chosen[s.key] = s
+		if current, ok := winners[s.key]; !ok || r >= rank(current) {
+			winners[s.key] = s
 		}
 	}
-	values := make(map[string]any, len(Keys))
+	values := make(map[string]string, len(Keys))
+	overrides := map[string]string{}
 	for _, key := range Keys {
-		value := key.Default
-		if s, ok := chosen[key.Name]; ok {
-			value = s.value
+		values[key.Name] = key.Default
+		if s, ok := winners[key.Name]; ok {
+			values[key.Name] = s.value
+			if s.device != "" {
+				overrides[key.Name] = s.device
+			}
 		}
-		values[key.Name] = typed(key, value)
 	}
-	return values
+	return values, overrides
 }
 
 func typed(key Key, value string) any {
@@ -168,7 +184,7 @@ func typed(key Key, value string) any {
 		}
 		return strings.Split(value, ", ")
 	case kindBackground:
-		return expandBackground(value)
+		return expandBackground(value).Dark
 	}
 	return value
 }
@@ -277,9 +293,11 @@ func ShowDefaults(docs bool) string {
 		}
 	}
 	if docs {
-		b.WriteString("# Gradient presets, usable as background = gradient: <name> or copied as a mesh:\n")
+		b.WriteString("# Built-in pictures, usable as background = art: <name>, each drawn for dark and light:\n")
+		fmt.Fprintf(&b, "#   %s\n", strings.Join(ArtNames, ", "))
+		b.WriteString("# Gradient presets, usable as background = gradient: <name> or copied as a mesh (dark, then light):\n")
 		for _, name := range PresetNames {
-			fmt.Fprintf(&b, "#   %-7s %s\n", name, Presets[name])
+			fmt.Fprintf(&b, "#   %-7s %s\n#   %-7s %s\n", name, Presets[name].Dark, "", Presets[name].Light)
 		}
 	}
 	return b.String()

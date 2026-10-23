@@ -967,6 +967,17 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	// The reviewer's Claude reads each receipt and hangs up, as Claude does.
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+		}
+	}()
 	procStart := nativeRecordStart(t, stand.Process.Pid)
 	if err := os.MkdirAll(filepath.Join(surface.ClaudeConfigDir(home), "sessions"), 0700); err != nil {
 		t.Fatal(err)
@@ -1026,6 +1037,13 @@ func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
 // socket in the Claude namespace and collects every frame sent back to it.
 func listenAsSender(t *testing.T, socketDir string) (string, <-chan map[string]any) {
 	t.Helper()
+	return listenAs(t, socketDir, false)
+}
+
+// listenAs stands in for a native Claude socket. One that holds keeps every
+// connection open after reading it, as a sender that never closes would.
+func listenAs(t *testing.T, socketDir string, hold bool) (string, <-chan map[string]any) {
+	t.Helper()
 	stand := exec.Command("sleep", "30")
 	if err := stand.Start(); err != nil {
 		t.Fatal(err)
@@ -1050,6 +1068,10 @@ func listenAsSender(t *testing.T, socketDir string) (string, <-chan map[string]a
 				if json.Unmarshal(scanner.Bytes(), &decoded) == nil && decoded["type"] != "auth" {
 					frames <- decoded
 				}
+			}
+			if hold {
+				t.Cleanup(func() { conn.Close() })
+				continue
 			}
 			conn.Close()
 		}
@@ -1153,6 +1175,40 @@ func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.
 				t.Fatalf("history=%+v", history)
 			}
 		})
+	}
+}
+
+func TestReceiptsDoNotWaitForASenderThatNeverCloses(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	target := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
+	if err := reg.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	socketDir := shortTempDir(t, "cp-socks-")
+	senderSocket, received := listenAs(t, socketDir, true)
+	worker, stop := startWorker(t, Config{Home: shortTempDir(t, "cp-home-"), RegistryPath: regPath, Session: target, SocketDir: socketDir})
+	defer stop()
+	var frames []frame
+	for range 3 {
+		frames = append(frames, frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + senderSocket, Message: mustJSON(messageBody{Role: "user", Content: "please rerun the build"})})
+	}
+	sendFrames(t, worker.SocketPath, frames...)
+	sent := time.Now()
+	for _, f := range frames {
+		if receipt := nextFrame(t, received); receipt["status"] != "received" || receipt["orig_msg_id"] != f.MsgID {
+			t.Fatalf("receipt=%v want received for %s", receipt, f.MsgID)
+		}
+	}
+	if elapsed := time.Since(sent); elapsed >= readDeadline {
+		t.Fatalf("three receipts took %s against a sender that never closes", elapsed)
+	}
+	if reg.QueueCount(target.ID) != 3 {
+		t.Fatalf("queue count=%d", reg.QueueCount(target.ID))
 	}
 }
 

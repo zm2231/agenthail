@@ -72,11 +72,8 @@ func TestConfigureDashboardShareRejectsFunnel(t *testing.T) {
 }
 
 func TestRemoteDashboardURLAndQR(t *testing.T) {
-	value, err := remoteDashboardURL("agent.tailnet.ts.net", "http://127.0.0.1:7412/?token=secret", 7412)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if value != "https://agent.tailnet.ts.net:7412/?token=secret#conversations" {
+	value := remoteDashboardURL("agent.tailnet.ts.net", 7412)
+	if value != "https://agent.tailnet.ts.net:7412/" {
 		t.Fatalf("URL=%q", value)
 	}
 	path := filepath.Join(t.TempDir(), "share.png")

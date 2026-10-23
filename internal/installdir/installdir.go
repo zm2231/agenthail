@@ -29,3 +29,8 @@ func Bundle(exe string) string {
 	}
 	return bundle
 }
+
+// Node is the Node runtime shipped in the install at root.
+func Node(root string) string {
+	return filepath.Join(root, "runtime", "node", "bin", "node")
+}

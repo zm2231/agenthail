@@ -32,10 +32,10 @@ func (c *slowCatchUpClaude) TranscriptItems(ctx context.Context, session *surfac
 	return c.Claude.TranscriptItems(ctx, session, request)
 }
 
-func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptOrder(t *testing.T) {
-	previousGrace := sessionPageHandoffGrace
-	sessionPageHandoffGrace = 10 * time.Millisecond
-	t.Cleanup(func() { sessionPageHandoffGrace = previousGrace })
+func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t *testing.T) {
+	previousGrace, previousWait := sessionPageHandoffGrace, sessionPageCatchUpWait
+	sessionPageHandoffGrace, sessionPageCatchUpWait = 10*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { sessionPageHandoffGrace, sessionPageCatchUpWait = previousGrace, previousWait })
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	d, r, _, _, _ := daemonFixture(t)
 	t.Cleanup(d.sources.shutdown)
@@ -54,7 +54,7 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 	}
 	const catchUpDelay = 1500 * time.Millisecond
 	d.Surfaces = []surface.Surface{&slowCatchUpClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), delay: catchUpDelay}}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)
 	}
@@ -74,7 +74,7 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 	appendToFile(t, path, claudeTurns(conversation, 3, 5))
 
 	request := httptest.NewRequest(http.MethodGet, "/api/session?id="+conversation+"&timeline=1", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	started := time.Now()
 	handler.ServeHTTP(response, request)
@@ -87,7 +87,7 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
 	}
 	if elapsed >= catchUpDelay/2 || len(page.Exchanges) != 2 || page.JournalSeq == 0 {
-		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page at once", elapsed, len(page.Exchanges), page.JournalSeq)
+		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page once the wait runs out", elapsed, len(page.Exchanges), page.JournalSeq)
 	}
 
 	server := httptest.NewServer(handler)
@@ -169,9 +169,9 @@ func TestAJournalAwaitingRederivationIsRebuiltBeforeItsPage(t *testing.T) {
 		t.Fatal("the fixture session does not stream, so the page would wait regardless")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
-	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	dashboardRouter(d).ServeHTTP(response, request)
 	var page struct {
 		Timeline struct {
 			Items []surface.TimelineItem `json:"items"`

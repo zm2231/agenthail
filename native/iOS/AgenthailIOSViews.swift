@@ -217,6 +217,9 @@ struct ConversationListView: View {
     @State private var search = ""
     @State private var collapsedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
+    @State private var projectSheet: ProjectSheet?
+    @State private var projectConfirmation: ProjectConfirmation?
+    @State private var newSessionPlace: NewSessionPlace?
 
     private var tree: SessionTree {
         let sessions = SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
@@ -226,6 +229,12 @@ struct ConversationListView: View {
         }.flatMap(\.sessions)
         let attention = SessionAttention.build(sessions: model.snapshot?.sessions ?? [], attention: model.snapshot?.attention ?? [], deliveryProblems: model.snapshot?.deliveryProblems ?? [])
         return SessionTree.build(sessions, filter: scope, attention: attention)
+    }
+
+    private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
+        guard (scope == .recent || scope == .all) && search.isEmpty else { return [] }
+        let listed = Set(tree.projects.compactMap(\.identity?.id))
+        return model.projects.filter { $0.value.state.archived != true && !listed.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
     }
 
     var body: some View {
@@ -272,6 +281,9 @@ struct ConversationListView: View {
                                 IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
+                            Text("\(project.listedSessionCount)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
@@ -286,14 +298,29 @@ struct ConversationListView: View {
                             Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
                                 Task { await model.setProjectArchived(identity.id, !project.archived) }
                             }
+                            if let listed = model.projects[identity.id] {
+                                IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                            }
                         }
                     }
                     .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
-                    .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
+                    .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
                     .accessibilityIdentifier("project-" + project.id)
                 }
             }
-            if families.isEmpty && !model.searching {
+            let empty = projectsWithoutSessions(tree)
+            if !empty.isEmpty {
+                Section("Projects without sessions") {
+                    ForEach(empty, id: \.state.id) { listed in
+                        Menu {
+                            IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                        } label: {
+                            Label(listed.state.displayName, systemImage: "folder").foregroundStyle(.primary)
+                        }
+                    }
+                }
+            }
+            if families.isEmpty && empty.isEmpty && !model.searching {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
@@ -319,13 +346,30 @@ struct ConversationListView: View {
         .task(id: search) { await model.searchSessions(search) }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("New session", systemImage: "square.and.pencil") {
+                Menu {
+                    Button("New session", systemImage: "square.and.pencil") {
+                        model.creationError = nil
+                        showingNewSession = true
+                    }.accessibilityIdentifier("new-session")
+                    Button("Add project", systemImage: "folder.badge.plus") { projectSheet = .add(host: nil, folder: "") }
+                        .accessibilityIdentifier("add-project")
+                } label: {
+                    Image(systemName: "plus")
+                } primaryAction: {
                     model.creationError = nil
                     showingNewSession = true
-                }.accessibilityIdentifier("new-session")
+                }
+                .accessibilityLabel("New")
+                .accessibilityIdentifier("new-menu")
             }
         }
         .sheet(isPresented: $showingNewSession) { NewSessionSheet(model: model) }
+        .sheet(item: $newSessionPlace) { place in NewSessionSheet(model: model, place: place) }
+        .sheet(item: $projectSheet) { sheet in IOSProjectSheetView(model: model, sheet: sheet) }
+        .alert(projectConfirmation?.message ?? "", isPresented: Binding(get: { projectConfirmation != nil }, set: { if !$0 { projectConfirmation = nil } }), presenting: projectConfirmation) { confirmation in
+            Button(confirmation.action, role: .destructive) { Task { model.settle(await confirmation.run()) } }
+            Button("Cancel", role: .cancel) {}
+        }
         .refreshable { await model.refresh(fresh: true) }
     }
 
@@ -699,17 +743,18 @@ struct IOSComposer: View {
                     .disabled(!empty)
                     .accessibilityIdentifier("composer-stash")
                 }
-                TextField(steering ? "Steer this turn…" : "Message this agent…", text: $draft.text, axis: .vertical)
-                    .font(.body).lineLimit(1...6).textFieldStyle(.plain)
-                    .padding(.horizontal, 8).padding(.top, 8)
-                    .accessibilityLabel(steering ? "Instruction for the current turn" : "Message to this agent")
-                    .accessibilityIdentifier("composer-input")
+                IOSComposerTextView(
+                    text: $draft.text,
+                    placeholder: steering ? "Steer this turn…" : "Message this agent…",
+                    label: steering ? "Instruction for the current turn" : "Message to this agent",
+                    lines: 1 ... 6,
+                    pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil
+                )
+                .padding(.horizontal, 8).padding(.top, 8)
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
                     if detail.capabilities.attach && detail.capabilities.send {
                         ComposerAttachmentMenu(model: model)
-                            .disabled(sending)
-                        ComposerPasteButton(model: model)
                             .disabled(sending)
                     }
                     if detail.capabilities.model {
@@ -1107,7 +1152,12 @@ struct SessionSummary: View {
     }
     private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
-        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? "Working" : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
+        TimelineView(.everyMinute) { context in
+            statusLabel(now: context.date)
+        }
+    }
+    private func statusLabel(now: Date) -> some View {
+        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
               systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
@@ -1261,6 +1311,7 @@ struct SessionInspector: View {
                     }
                 }
                 Section("Controls") {
+                    IOSSessionProjectControls(model: model, session: session)
                     if session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
                     }
@@ -1411,6 +1462,18 @@ struct IOSSessionRow: View {
                     .fixedSize()
                     .accessibilityLabel("Waiting on background work")
                 }
+                if let plan = session.livePlan {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checklist")
+                        Text(plan.badge)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(plan.detail)
+                }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
@@ -1419,6 +1482,12 @@ struct IOSSessionRow: View {
             }
             if session.isUnavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
+            } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+                TimelineView(.everyMinute) { context in
+                    if let note = activity.quietNote(now: context.date) {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
@@ -1468,6 +1537,9 @@ struct SettingsView: View {
                 Section {
                     Label(connectionLabel(host), systemImage: connectionIcon(host))
                     if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    if let build = host.build {
+                        LabeledContent("Agenthail", value: build.label).font(.footnote).textSelection(.enabled)
+                    }
                     ForEach(host.surfaces) { surface in
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
@@ -1497,6 +1569,9 @@ struct SettingsView: View {
                     ForEach(host.peers) { peer in
                         VStack(alignment: .leading, spacing: 4) {
                             LabeledContent(peer.name, value: peer.stateLabel)
+                            if let build = peer.build {
+                                Text(build.label).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                             if let detail = peer.detail, !detail.isEmpty {
                                 Text(detail).font(.footnote).foregroundStyle(.secondary)
                             }

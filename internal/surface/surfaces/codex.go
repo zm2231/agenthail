@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -32,11 +33,23 @@ type Codex struct {
 	contextState map[string]*codexContextState
 	sweepMu      sync.Mutex
 	lastSweep    time.Time
+	usageMu      sync.Mutex
+	usageReads   map[string]*codexUsageRead
+	planMu       sync.Mutex
+	planState    map[string]*codexPlanState
 }
+
+// codexDesktopRunsHere is whether Codex Desktop can run on this machine;
+// Agenthail drives only its macOS app. Elsewhere nothing probes the default
+// debugging port unless one is configured, since another program may own it.
+var codexDesktopRunsHere = runtime.GOOS == "darwin"
 
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
+		if !codexDesktopRunsHere {
+			return &Codex{managed: managed}
+		}
 		remoteURL = "9231"
 	}
 	if !strings.Contains(remoteURL, "://") {
@@ -153,7 +166,12 @@ type cdpConn struct {
 }
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
-	targets, err := resolveCodexRendererEndpoint(ctx, c.desktopURL)
+	if c.desktopURL == "" {
+		return nil, fmt.Errorf("Codex Desktop does not run on %s; set AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT to reach one", runtime.GOOS)
+	}
+	targets, err := surface.ProbeOnce(ctx, codexDesktopProbe{c.desktopURL}, func() ([]codexCDPTarget, error) {
+		return resolveCodexRendererEndpoint(ctx, c.desktopURL)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +193,8 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	}
 	return nil, fmt.Errorf("connect Codex Desktop renderer bridge: %s", strings.Join(failures, "; "))
 }
+
+type codexDesktopProbe struct{ endpoint string }
 
 type codexCDPTarget struct {
 	wsURL string
@@ -328,9 +348,12 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	}
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
-		c.reconcileLocalStatus(&session)
+		c.reconcileLocalStatus(ctx, &session)
 		applyCodexPendingModel(&session)
 		out = append(out, session)
+	}
+	if complete {
+		c.forgetUnreadPlans()
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
 	return out, complete, nil
@@ -753,6 +776,11 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		value, _ := result["thread"].(map[string]any)
 		thread.Waiting = codexWaitingKind(value["status"])
 		observation = codexObservation(thread)
+	}
+	if path := codexTranscriptPath(sess); path != "" {
+		if info, err := os.Stat(path); err == nil {
+			observation.Plan = c.plan(ctx, path, info)
+		}
 	}
 	return observation, nil
 }

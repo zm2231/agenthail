@@ -23,13 +23,14 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 func hostRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +489,8 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 }
 
 func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
-	t.Setenv("FAKE_CLAUDE_HOLD_MS", "3000")
+	release := filepath.Join(t.TempDir(), "release-hold")
+	t.Setenv("FAKE_CLAUDE_HOLD_RELEASE", release)
 	fixture := claudehosttest.New(t, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -552,6 +554,9 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	if !told("held") {
 		t.Fatal("the sender was not told its message is held")
 	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	claudehosttest.WaitFor(t, "the hold to expire", func() bool { return problem(registry.DeliveryIntentFailed) != nil })
 	if !told("failure") {
 		t.Fatal("the sender was not told its message was dropped")
@@ -574,7 +579,7 @@ func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
 	t.Cleanup(d.sources.shutdown)
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

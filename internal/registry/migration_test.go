@@ -65,6 +65,7 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 		{name: "v11", wantVersion: schemaVersion, source: "sender", check: assertV11SeedCheckpointMigrated},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
 			r := openMigrationFixture(t, fixture.name)
 			var version int
 			if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != fixture.wantVersion {
@@ -469,6 +470,15 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
 		t.Fatal(err)
 	}
+	upgradeFromTheVersionBefore := func() {
+		t.Helper()
+		if _, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.migrate(true); err != nil {
+			t.Fatal(err)
+		}
+	}
 	want := map[string]surface.RuntimeKind{
 		"claude":         surface.RuntimeClaudeCLI,
 		"codex-managed":  surface.RuntimeCodexAppServer,
@@ -493,16 +503,12 @@ func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := r.migrate(true); err != nil {
-		t.Fatal(err)
-	}
+	upgradeFromTheVersionBefore()
 	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,name,transport,runtime_kind) VALUES('recorded','codex','recorded','managed','codex-desktop')`); err != nil {
 		t.Fatal(err)
 	}
 	want["recorded"] = surface.RuntimeCodexDesktop
-	if err := r.migrate(true); err != nil {
-		t.Fatal(err)
-	}
+	upgradeFromTheVersionBefore()
 	for id, kind := range want {
 		var got string
 		if err := r.db.QueryRow(`SELECT runtime_kind FROM sessions WHERE id=?`, id).Scan(&got); err != nil || surface.RuntimeKind(got) != kind {
@@ -1005,5 +1011,95 @@ func TestOpenPlacesTheRowsOfARegistryAtVersion32WhereTheirSeqWas(t *testing.T) {
 	}
 	if page, err := r.ReadSessionJournalPage("session", 0, 10); err != nil || journalKeys(t, page.Entries) != "two three one" {
 		t.Fatalf("after an upsert %q err=%v", journalKeys(t, page.Entries), err)
+	}
+}
+
+// Every CLI command opens the registry; one that waits for the writer could
+// queue past busy_timeout behind the daemon and other commands.
+func TestOpeningACurrentRegistryWaitsForNoWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	held, err := writer.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if _, err := held.ExecContext(t.Context(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer held.ExecContext(context.Background(), `ROLLBACK`)
+	opened := make(chan error, 1)
+	go func() {
+		r, err := Open(path)
+		if err == nil {
+			err = r.Close()
+		}
+		opened <- err
+	}()
+	select {
+	case err := <-opened:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		held.ExecContext(context.Background(), `ROLLBACK`)
+		<-opened
+		t.Fatal("opening a registry with this build's schema waited for another writer")
+	}
+}
+
+// A registry at schemaVersion is opened without migrating, so the schema a
+// build creates may change only together with the version.
+func TestTheSchemaChangesOnlyWithItsVersion(t *testing.T) {
+	const regenerate = "AGENTHAIL_UPDATE_SCHEMA=1 go test ./internal/registry -run TestTheSchemaChangesOnlyWithItsVersion"
+	golden := filepath.Join("testdata", "schema.sql")
+	rows, err := openTestRegistry(t).db.Query(`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var created strings.Builder
+	for rows.Next() {
+		var kind, name, definition string
+		if err := rows.Scan(&kind, &name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&created, "-- %s %s\n%s;\n\n", kind, name, strings.TrimSpace(definition))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	header := fmt.Sprintf("-- schemaVersion %d\n\n", schemaVersion)
+	recorded, err := os.ReadFile(golden)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	recordedHeader, recordedSchema, _ := strings.Cut(string(recorded), "\n\n")
+	changed := recordedSchema != created.String()
+	if os.Getenv("AGENTHAIL_UPDATE_SCHEMA") != "" {
+		if recordedHeader+"\n\n" == header && changed {
+			t.Fatalf("the schema changed but schemaVersion is still %d; raise it before regenerating %s", schemaVersion, golden)
+		}
+		if err := os.WriteFile(golden, []byte(header+created.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	switch {
+	case recordedHeader+"\n\n" != header:
+		t.Fatalf("%s records %q; regenerate it for schemaVersion %d with %s", golden, recordedHeader, schemaVersion, regenerate)
+	case changed:
+		t.Fatalf("the schema changed but schemaVersion is still %d; raise it, then regenerate %s with %s", schemaVersion, golden, regenerate)
 	}
 }

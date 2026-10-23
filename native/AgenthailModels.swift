@@ -19,19 +19,11 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     struct Login: Decodable, Hashable {
         var email: String? = nil
     }
-    struct Usage: Decodable, Hashable {
-        struct Limit: Decodable, Hashable {
-            let kind: String
-            let percent: Double
-            var resetsAt: String? = nil
-        }
-        var limits: [Limit]? = nil
-    }
     let name: String
     let root: String
     let primary: Bool
     var signedInAs: Login? = nil
-    var usage: Usage? = nil
+    var usage: ProviderUsage? = nil
     var id: String { root }
     var choice: String { primary ? "" : root }
     var signedIn: Bool { signedInAs != nil }
@@ -135,9 +127,25 @@ struct SessionConfigRoot: Codable, Hashable {
 
 /// One config root's current usage, read from claude.ai after the new-session
 /// form has shown the roots.
+/// An account's limits as its provider last reported them, at fetchedAt.
+struct ProviderUsage: Decodable, Hashable {
+    struct Limit: Decodable, Hashable {
+        let kind: String
+        let percent: Double
+        var resetsAt: String? = nil
+    }
+    var fetchedAt: String? = nil
+    var limits: [Limit]? = nil
+}
+
 struct ClaudeRootUsage: Decodable {
     let root: String
-    var usage: ClaudeConfigRootOption.Usage? = nil
+    var usage: ProviderUsage? = nil
+    var usageProblem: String? = nil
+}
+
+struct CodexUsage: Decodable {
+    var usage: ProviderUsage? = nil
     var usageProblem: String? = nil
 }
 
@@ -148,6 +156,7 @@ struct SessionCreationOptions: Decodable {
     let projects: [LaunchProject]
     var launchers: [LauncherOption]? = nil
     var claudeConfigRoots: [ClaudeConfigRootOption]? = nil
+    var folders: [String]? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -157,6 +166,7 @@ struct LaunchProject: Decodable, Hashable, Identifiable {
     let displayName: String
     let rootPath: String
     let kind: String
+    var added: Bool? = nil
 }
 
 struct CreationHost: Hashable, Identifiable {
@@ -276,10 +286,14 @@ struct SessionCreationReceipt: Decodable {
     let warning: String?
     let session: RawSession?
     let sessionId: String?
+    let code: String?
     let error: String?
     let launcher: String?
     let location: SessionRuntime.Location?
     var id: String? { session?.id ?? sessionId }
+    /// Older daemons mark an unknown create with status "failed", so status alone never decides it.
+    var outcomeUnknown: Bool { unknown == true || code == "create_unknown" }
+    static let unknownOutcomeMessage = "Agenthail can't tell whether this session started. Check the sidebar before trying again."
 }
 
 struct APIVersion: Decodable {
@@ -287,12 +301,53 @@ struct APIVersion: Decodable {
     let minimumProtocol: Int
     let maximumProtocol: Int
     let pushRelayUrl: String?
+    var version: String? = nil
+    var revision: String? = nil
+    var modified: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case minimumProtocol
         case maximumProtocol
         case pushRelayUrl
+        case version
+        case revision
+        case modified
+    }
+
+    /// The build the daemon runs; nil for a daemon too old to say.
+    var build: AgenthailBuild? {
+        version.map { AgenthailBuild(version: $0, revision: revision ?? "unknown", modified: modified ?? false) }
+    }
+}
+
+/// The build an Agenthail daemon or app came from.
+struct AgenthailBuild: Codable, Hashable {
+    let version: String
+    let revision: String
+    var modified = false
+
+    /// v0.2.68 (e387b0d8), as doctor names a build.
+    var label: String {
+        "\(version) (\(revision.prefix(8))\(modified ? ", modified" : ""))"
+    }
+
+    var revisionKnown: Bool { !revision.isEmpty && revision != "unknown" }
+
+    /// The build this app was packaged from, or nil when it was built without
+    /// naming its commit.
+    static func app(_ info: [String: Any]?) -> AgenthailBuild? {
+        guard let revision = info?["AgenthailRevision"] as? String, !revision.isEmpty else { return nil }
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        return AgenthailBuild(version: version, revision: revision, modified: info?["AgenthailRevisionModified"] as? Bool ?? false)
+    }
+
+    /// What to tell the person when the daemon this app runs with is another
+    /// build. Builds that do not both name an unmodified commit are not compared.
+    static func daemonNotice(app: AgenthailBuild?, daemon: AgenthailBuild?) -> String? {
+        guard let app, let daemon, app.revisionKnown, daemon.revisionKnown, !app.modified, !daemon.modified,
+              app.revision != daemon.revision else { return nil }
+        return "The running daemon is \(daemon.label); this app is \(app.label). Restart Agenthail to use this version."
     }
 }
 
@@ -444,6 +499,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
     var limitResume: LimitResumeState? = nil
+    var activity: SessionActivity? = nil
+    var plan: SessionPlan? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -462,7 +519,18 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
 
     var isWorking: Bool { status == "busy" }
+    /// "Working", with how long the turn has been quiet once it has been.
+    func workingLabel(now: Date) -> String {
+        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
+    }
     var isWaitingOnYou: Bool { waitingOn != nil }
+    /// The task list's progress while the session is open and has steps
+    /// left. The row keeps the plan after the session closes; a session that
+    /// stopped part way shows no badge.
+    var livePlan: SessionPlan? {
+        guard open, status != "offline", !isUnavailable, let plan, plan.total > 0, plan.done < plan.total else { return nil }
+        return plan
+    }
     var waitingPlace: WaitingPlace? {
         waitingOn.map { WaitingPlace($0, runtimeKind: runtimeKind, lifecycle: isReadOnly ? SessionLifecycle() : capabilities.lifecycle) }
     }
@@ -498,6 +566,7 @@ struct HostHealth: Decodable, Hashable, Identifiable {
     let state: String
     var detail: String? = nil
     var notice: String? = nil
+    var build: AgenthailBuild? = nil
 
     var stateLabel: String {
         switch state {
@@ -624,6 +693,57 @@ struct LimitResumeState: Codable, Hashable {
         let time = Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
         return "Usage limit, resumes \(time)"
     }
+}
+
+/// How a working session's turn is going, as its daemon reads it. It never
+/// changes the session's status; it only lets a quiet turn say how long it
+/// has been quiet and what it is running.
+struct SessionActivity: Codable, Hashable {
+    struct RunningTool: Codable, Hashable {
+        let name: String
+        var startedAt: String? = nil
+    }
+
+    var busySince: String? = nil
+    var lastProgressAt: String? = nil
+    var tool: RunningTool? = nil
+    var noProcess: Bool? = nil
+
+    /// How long a working turn stays quiet before its row says so.
+    static let quietAfter: TimeInterval = 10 * 60
+
+    /// "no activity for 12 min · running Bash since 10:02" once the turn has
+    /// been quiet for quietAfter, or nil before.
+    func quietNote(now: Date) -> String? {
+        guard let raw = lastProgressAt ?? busySince, let last = SessionTree.parseTimestamp(raw) else { return nil }
+        let quiet = now.timeIntervalSince(last)
+        guard quiet >= Self.quietAfter else { return nil }
+        var parts = ["no activity for " + Self.duration(quiet)]
+        if noProcess == true {
+            parts.append("no Claude process")
+        } else if let tool {
+            parts.append("running " + tool.name + (tool.startedAt.flatMap(SessionTree.parseTimestamp).map { " since " + $0.formatted(date: .omitted, time: .shortened) } ?? ""))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func duration(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval / 60)
+        guard minutes >= 60 else { return "\(minutes) min" }
+        return minutes % 60 == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(minutes % 60) min"
+    }
+}
+
+/// How far a session is through the task list its agent keeps, as its
+/// daemon reads it. current is the step in progress, when one is.
+struct SessionPlan: Codable, Hashable {
+    let done: Int
+    let total: Int
+    var current: String? = nil
+
+    var badge: String { "\(done)/\(total)" }
+    var spokenLabel: String { "\(done) of \(total) tasks done" }
+    var detail: String { current.map { spokenLabel + " · " + $0 } ?? spokenLabel }
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -902,6 +1022,7 @@ struct ProjectIdentity: Codable, Hashable {
     let rootPath: String
     let kind: String
     var archived: Bool? = nil
+    var added: Bool? = nil
 }
 
 struct CheckoutIdentity: Codable, Hashable {
@@ -956,6 +1077,23 @@ struct QueueState: Decodable, Identifiable, Equatable {
         heldBy == "waiting"
             ? "Queued for \(target), which is waiting on you; sends after you answer."
             : "Queued for \(target); sends when current turn ends."
+    }
+
+    /// An unconfirmed live delivery is a neutral receipt, whatever retry state
+    /// the queue holds it in.
+    var outcomeLabel: String {
+        switch (evidence, isHistorical) {
+        case ("unknown", true): return "Never confirmed"
+        case ("unknown", false): return "Submitted"
+        case ("failed", true): return "Delivery failed"
+        case ("transport_accepted", _): return "Transport accepted"
+        default:
+            switch status {
+            case "dead": return "Delivery needs review"
+            case "inflight": return "Sending"
+            default: return status.capitalized
+            }
+        }
     }
 
     /// Why a pending message has not been delivered yet.
@@ -1074,6 +1212,7 @@ struct HistoryState: Decodable, Identifiable, Equatable {
     let result: String?
     let error: String?
     var evidence: String? = nil
+    var operation: String? = nil
 }
 
 struct DaemonState: Decodable, Equatable {
@@ -1115,6 +1254,8 @@ struct DashboardSnapshot: Decodable {
     var signin: [SigninConsumerState]? = nil
     /// What this host's sessions call the person; an older host sends none.
     var person: PersonState? = nil
+    /// Only a whole-catalog snapshot carries projects; a page leaves them out.
+    var projects: [ProjectState]? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1130,7 +1271,8 @@ struct DashboardSnapshot: Decodable {
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
             signin == other.signin &&
-            person == other.person
+            person == other.person &&
+            projects == other.projects
     }
 }
 
@@ -1261,12 +1403,12 @@ struct SessionDetail: Decodable {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume, activity: session.activity)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
-            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume, newValue.activity)
         }
     }
 }
@@ -1289,20 +1431,21 @@ struct SessionLiveState: Equatable {
     var backgroundTasks: BackgroundTasks?
     var usageLimit: UsageLimitState?
     var limitResume: LimitResumeState?
+    var activity: SessionActivity?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
          capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
-         limitResume: LimitResumeState?) {
+         limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
-        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume) = (waitingOn, backgroundTasks, usageLimit, limitResume)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, limitResume, activity)
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume, activity: live.activity)
     }
 }
 
@@ -1320,7 +1463,13 @@ struct RawSession: Decodable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var activity: SessionActivity? = nil
     var runtimeKind: String? = nil
+
+    /// "Working", with how long the turn has been quiet once it has been.
+    func workingLabel(now: Date) -> String {
+        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
+    }
 }
 
 struct GoalState: Decodable {
@@ -1563,6 +1712,11 @@ struct SigninProfileResponse: Decodable {
     let profile: SigninProfileState?
 }
 
+struct LoginLinkResponse: Decodable {
+    let url: String
+    let expiresAt: String
+}
+
 struct PairingResponse: Decodable {
     let id: String
     let expiresAt: String
@@ -1588,6 +1742,38 @@ struct AgenthailEvent: Decodable {
     let type: String
     let timestamp: String
     let entityId: String?
+    let snapshot: SnapshotRequest?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, type, timestamp, entityId, data
+    }
+
+    init(id: UInt64, type: String, timestamp: String, entityId: String?, snapshot: SnapshotRequest? = nil) {
+        self.id = id
+        self.type = type
+        self.timestamp = timestamp
+        self.entityId = entityId
+        self.snapshot = snapshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UInt64.self, forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        timestamp = try container.decode(String.self, forKey: .timestamp)
+        entityId = try container.decodeIfPresent(String.self, forKey: .entityId)
+        snapshot = type == "ui.snapshot.requested" ? try container.decodeIfPresent(SnapshotRequest.self, forKey: .data) : nil
+    }
+}
+
+struct SnapshotRequest: Decodable, Equatable {
+    let id: String
+    let session: String?
+    let width: Int?
+    let height: Int?
+    let device: String?
+    var rev: String? = nil
+    let deadlineMs: Int64
 }
 
 struct SessionTimeline: Decodable {

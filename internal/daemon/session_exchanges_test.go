@@ -34,7 +34,7 @@ func appendJournalPayloads(t *testing.T, r *registry.Registry, sessionID string,
 
 func TestAPIV1SessionRejectsALimitOutsideTheExchangePage(t *testing.T) {
 	d, _, _, from, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	for _, limit := range []string{"0", "51", "abc", "-1"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+from.ID+"&limit="+limit, nil)
 		request.Header.Set("Authorization", "Bearer secret")
@@ -226,7 +226,7 @@ func TestSessionStreamCursorRecoversAcrossARederivedJournal(t *testing.T) {
 	}
 	fake.kind, fake.caps.Stream = surface.KindClaude, true
 	d.Surfaces = []surface.Surface{adapter}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	stream := func(after uint64) *httptest.ResponseRecorder {
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()

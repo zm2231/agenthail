@@ -18,8 +18,6 @@ struct ComposerAttachmentMenu: View {
                 Button { takingPhoto = true } label: { Label("Take Photo", systemImage: "camera") }
                     .accessibilityIdentifier("attach-camera")
             }
-            Button(action: pasteImage) { Label("Paste Image", systemImage: "doc.on.clipboard") }
-                .accessibilityIdentifier("attach-paste")
             Button { choosingFiles = true } label: { Label("Choose File", systemImage: "folder") }
                 .accessibilityIdentifier("attach-files")
         } label: {
@@ -62,11 +60,6 @@ struct ComposerAttachmentMenu: View {
         model.addAttachments(images, problem: problem)
     }
 
-    private func pasteImage() {
-        let providers = UIPasteboard.general.itemProviders
-        Task { await model.paste(providers) }
-    }
-
     private func addImage(_ data: Data, name: String) {
         if let image = ComposerAttachments.image(data, name: name) {
             model.addAttachments([image])
@@ -89,31 +82,6 @@ struct ComposerAttachmentMenu: View {
         }
         model.addAttachments(files, problem: problem)
     }
-}
-
-// The system paste button reads the pasteboard without the paste prompt,
-// and the text field's own Paste only takes text, so this is how a copied
-// image gets into the draft.
-struct ComposerPasteButton: View {
-    @ObservedObject var model: AgenthailIOSModel
-    @State private var hasImages = UIPasteboard.general.hasImages
-
-    var body: some View {
-        Group {
-            if hasImages {
-                PasteButton(supportedContentTypes: [.image]) { providers in
-                    Task { @MainActor in await model.paste(providers) }
-                }
-                .labelStyle(.iconOnly)
-                .buttonBorderShape(.circle)
-                .accessibilityIdentifier("composer-paste")
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-    }
-
-    private func refresh() { hasImages = UIPasteboard.general.hasImages }
 }
 
 struct ComposerAttachmentStrip: View {

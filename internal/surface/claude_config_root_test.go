@@ -95,7 +95,7 @@ func TestDescribedRootsIgnoreClaudesCachedUsage(t *testing.T) {
 func TestClaudeUsageExhaustedUntilTheLatestLimitResets(t *testing.T) {
 	now := time.Now()
 	resets := now.Add(2 * time.Hour)
-	usage := &ClaudeUsage{Limits: []ClaudeUsageLimit{{Kind: "session", Percent: 100, ResetsAt: now.Add(time.Hour)}, {Kind: "weekly_all", Percent: 100, ResetsAt: resets}, {Kind: "weekly_scoped", Percent: 35}}}
+	usage := &Usage{Limits: []UsageWindow{{Kind: "session", Percent: 100, ResetsAt: now.Add(time.Hour)}, {Kind: "weekly_all", Percent: 100, ResetsAt: resets}, {Kind: "weekly_scoped", Percent: 35}}}
 	if until, out := usage.Exhausted(now); !out || !until.Equal(resets) {
 		t.Fatalf("exhausted=%v until=%v", out, until)
 	}

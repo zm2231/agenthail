@@ -244,6 +244,12 @@ elif [ -d "$REPO_DIR/claude-host" ]; then
 	cp -R "$REPO_DIR/claude-host" "$STAGE_DIR/claude-host"
 fi
 test -f "$STAGE_DIR/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+if [ -f "$REPO_DIR/scripts/fetch-node.sh" ]; then
+	"$REPO_DIR/scripts/fetch-node.sh" "$(uname -s | tr "[:upper:]" "[:lower:]")" "$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")" "$STAGE_DIR"
+elif [ -d "$REPO_DIR/runtime" ]; then
+	cp -R "$REPO_DIR/runtime" "$STAGE_DIR/runtime"
+fi
+test -x "$STAGE_DIR/runtime/node/bin/node"
 
 SERVICE_PROGRAM=""
 SERVICE_MANAGED=0

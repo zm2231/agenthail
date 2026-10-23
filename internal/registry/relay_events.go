@@ -260,7 +260,7 @@ func (r *Registry) ConsumeRelay(route RouteRow, event RelayEvent, payload, busyD
 		if _, err := tx.Exec(`INSERT INTO relay_deliveries(route_id,completion_id) VALUES(?,?) ON CONFLICT DO NOTHING`, route.ID, event.CompletionID); err != nil {
 			return 0, err
 		}
-		if _, err := tx.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result) VALUES('relay',?,?,?,?,?,?,'queued')`, route.ToSession, route.FromSession, route.ID, queueID, event.CompletionID, event.Message); err != nil {
+		if _, err := tx.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,operation) VALUES('relay',?,?,?,?,?,?,'queued',?)`, route.ToSession, route.FromSession, route.ID, queueID, event.CompletionID, event.Message, QueueOperationMessage); err != nil {
 			return 0, err
 		}
 	}

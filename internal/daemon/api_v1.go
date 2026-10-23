@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -77,6 +78,7 @@ type apiVersionResponse struct {
 	PushRelayURL      string `json:"pushRelayUrl"`
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
+	buildinfo.Identity
 }
 
 func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -103,6 +105,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/requests", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.requestsHandler))))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.sessionOptionsHandler))))
 	mux.HandleFunc("/api/v1/session-options/claude-usage", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.claudeRootUsageHandler))))
+	mux.HandleFunc("/api/v1/session-options/codex-usage", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.codexUsageHandler))))
 	mux.HandleFunc("/api/v1/relays", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("", d.apiRelaysHandler))))
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.mobileQueueHandler)))
 	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("sessionId", d.dashboardHistoryHandler))))
@@ -114,6 +117,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/claude/remote-control", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.claudeRemoteControlHandler)))
 	mux.HandleFunc("/api/v1/pairings", d.apiV1Guard(dashboard, "settings", d.apiPairingsHandler))
 	mux.HandleFunc("/api/v1/devices", d.apiV1Guard(dashboard, "settings", d.apiDevicesHandler))
+	mux.HandleFunc("/api/v1/dashboard/login-links", d.apiV1Guard(dashboard, "settings", d.apiLoginLinksHandler))
 	mux.HandleFunc("/api/v1/device", d.apiDeviceSelfHandler)
 	mux.HandleFunc("/api/v1/device/push", d.apiDevicePushHandler)
 	mux.HandleFunc("/api/v1/pair", d.apiPairHandler)
@@ -153,7 +157,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

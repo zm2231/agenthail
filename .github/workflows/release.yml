@@ -88,6 +88,8 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
       - name: Test source
         run: |
           go test ./... -race -count=1 -timeout 25m
@@ -204,6 +206,9 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - name: Stage the shipped Node
+        if: matrix.arch == 'amd64'
+        run: scripts/fetch-node.sh
       - name: Test source on Linux
         if: matrix.arch == 'amd64'
         run: |
@@ -235,9 +240,12 @@ jobs:
           test -x "$RUNNER_TEMP/inspect/$name/agenthail"
           test -f "$RUNNER_TEMP/inspect/$name/skills/agenthail-operations/SKILL.md"
           test -f "$RUNNER_TEMP/inspect/$name/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+          test -x "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node"
           file "$RUNNER_TEMP/inspect/$name/agenthail" | grep -q "ELF 64-bit"
           if [ "$ARCH" = "amd64" ]; then
             "$RUNNER_TEMP/inspect/$name/agenthail" version --json | jq -e --arg version "$AGENTHAIL_VERSION" '.version == $version'
+            test "$("$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" --version)" = v22.23.1
+            (cd "$RUNNER_TEMP/inspect/$name/claude-host" && "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -432,3 +440,45 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$RELEASE_VERSION" --draft=false --latest
+
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: agenthail-macos-release
+          path: dist
+      - uses: actions/create-github-app-token@v2
+        id: tap
+        with:
+          app-id: ${{ secrets.AGENTHAIL_TAP_APP_ID }}
+          private-key: ${{ secrets.AGENTHAIL_TAP_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+      - name: Update the Homebrew formula
+        env:
+          TAP_TOKEN: ${{ steps.tap.outputs.token }}
+          TAP: ${{ github.repository_owner }}/homebrew-tap
+        run: |
+          archive="dist/agenthail-${RELEASE_VERSION}-darwin-arm64.tar.gz"
+          sha="$(sha256sum "$archive" | cut -d' ' -f1)"
+          tap="$RUNNER_TEMP/homebrew-tap"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP}.git" "$tap"
+          sed -e "s/@TAG@/${RELEASE_VERSION}/g" -e "s/@SHA256@/${sha}/" -e "s/@REVISION@/${GITHUB_SHA}/" packaging/homebrew/agenthail.rb > "$tap/Formula/agenthail.rb"
+          if grep -q '@[A-Z0-9]*@' "$tap/Formula/agenthail.rb"; then
+            echo "error: the formula template left a placeholder unfilled" >&2
+            exit 1
+          fi
+          cd "$tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agenthail.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "agenthail ${RELEASE_VERSION#v}"
+            git push origin HEAD
+          fi

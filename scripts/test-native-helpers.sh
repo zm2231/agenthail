@@ -26,24 +26,28 @@ SOURCES=(
   RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift
+  ProjectActions.swift
   SessionTree.swift
   MetadataOverlay.swift
   StatusRefreshPolicy.swift
   ToolPresentation.swift
   TurnSettings.swift
   UIConfig.swift
+  PaletteTokens.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
+  macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift
   macOS/AuditFacts.swift
   macOS/DesktopPalette.swift
   macOS/InterfaceStore.swift
-  macOS/Backdrop.swift
+  Backdrop.swift
   macOS/BoundedDock.swift
+  macOS/UsageMeters.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
   macOS/ComposerNSTextView.swift
@@ -53,7 +57,7 @@ SOURCES=(
   macOS/Overview.swift
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
-  macOS/ScrimField.swift
+  ScrimField.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift
@@ -61,15 +65,21 @@ SOURCES=(
   macOS/SessionOperations.swift
   macOS/NewSessionDraft.swift
   macOS/SessionPane.swift
+  macOS/SessionRefinementMenu.swift
+  macOS/SessionSidebarHeader.swift
   macOS/SessionTabs.swift
   macOS/ShortcutStore.swift
   macOS/SlashCommand.swift
+  macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
   macOS/ToolRunSummary.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptRows.swift
   macOS/VoiceController.swift
+  macOS/WindowBackdrop.swift
+  macOS/WindowImage.swift
+  macOS/WindowRectReader.swift
 )
 
 rm -rf "$OUT"

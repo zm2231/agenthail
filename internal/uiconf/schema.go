@@ -44,6 +44,9 @@ func color(name, def, doc string, words ...string) Key {
 	return Key{Name: name, Default: def, Doc: doc, kind: kindColor, choices: words}
 }
 
+// DefaultBackground is what fills the window until ui.conf says otherwise.
+const DefaultBackground = "art: tide"
+
 // Keys lists every setting in the order show-defaults prints them.
 var Keys = []Key{
 	{Name: "version", Default: "1", Doc: "File format version.", kind: kindVersion},
@@ -51,7 +54,7 @@ var Keys = []Key{
 	choice("theme", "system", "Light or dark appearance.", "system", "dark", "light"),
 	color("theme.accent", "system", "Accent for links, focus and working state: the system accent or a colour.", "system"),
 
-	{Name: "background", Default: "gradient: aurora", Doc: "What fills the window: none, desktop, image: <path>, gradient: <preset>, gradient: <angle>deg, <colour> <pos>%, ..., or mesh: <cols>x<rows>, <colour>, ...", kind: kindBackground},
+	{Name: "background", Default: DefaultBackground, Doc: "What fills the window: none, desktop, art: <name>, image: <path>, gradient: <preset>, gradient: <angle>deg, <colour> <pos>%, ..., or mesh: <cols>x<rows>, <colour>, ...", kind: kindBackground},
 	choice("background.fit", "cover", "How an image fills the window.", "cover", "contain", "center", "tile"),
 	choice("background.position", "center", "Which part of an image stays in view.", "center", "top", "bottom", "left", "right"),
 	number("background.dim", "0", "Darkens (dark) or lightens (light) the background before anything else.", 0, 0.8),
@@ -64,12 +67,13 @@ var Keys = []Key{
 	number("glass.opacity", "0.18", "Tint opacity of the content pane. A minimum: raised where text needs it.", 0, 1),
 	number("glass.sidebar.opacity", "0.45", "Tint opacity of the sidebar.", 0, 1),
 	number("glass.chrome.opacity", "0", "Tint opacity of the title bar and status strip.", 0, 1),
-	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers.", 0, 1),
+	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers. With glass.readability auto it is at least 0.2.", 0, 1),
+	choice("glass.readability", "auto", "auto raises pane tint and adds a scrim where text needs it to reach contrast.target; off uses the glass opacities exactly, so text may be harder to read. Increase Contrast always uses auto.", "auto", "off"),
 	number("glass.border", "0.08", "Opacity of pane hairlines.", 0, 0.3),
 	number("glass.gutter", "8", "Points between floating panes; 0 joins them edge to edge.", 0, 16),
 
-	choice("texture", "scanlines", "Texture over the background, never over panes or text.", "none", "scanlines", "grain"),
-	number("texture.strength", "0.35", "How strongly the texture darkens.", 0, 0.6),
+	choice("texture", "none", "Texture over the background, never over panes or text.", "none", "scanlines", "grain"),
+	number("texture.strength", "0.2", "How strongly the texture darkens.", 0, 0.6),
 	number("texture.spacing", "3", "Points between scanlines.", 2, 8),
 
 	color("scrim.tint", "auto", "Colour of the layer that keeps text readable: auto takes the background's own hue, darkened.", "auto", "black"),

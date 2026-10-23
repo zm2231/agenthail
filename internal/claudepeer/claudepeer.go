@@ -38,6 +38,7 @@ const (
 	maxFrames           = 16
 	readDeadline        = 5 * time.Second
 	firstLineDeadline   = 3 * time.Second
+	noticeDeadline      = time.Second
 )
 
 var heartbeatInterval = 2 * time.Second
@@ -1158,7 +1159,9 @@ func rejectFrame(reg *registry.Registry, c Config, f frame, ownSocket string, er
 	}
 	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
 	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.Session, replyTarget(reg, c.Session.ID), ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
-	_ = sendAuthenticatedFrame(c.Home, target, payload)
+	if framed, err := authenticatedFrame(c.Home, target, payload); err == nil {
+		_ = postFrame(target, framed)
+	}
 }
 
 // queueHostFrame holds a message for a session another host owns, to be sent
@@ -1364,7 +1367,24 @@ func sendReceipt(socketDir, from, ownSocket, msgID, status, detail string) error
 		return err
 	}
 	payload, _ := json.Marshal(map[string]any{"type": "control", "action": "peer_message_status", "status": status, "orig_msg_id": msgID, "from": "uds:" + ownSocket, "detail": detail})
-	return sendFrame(target, payload)
+	return postFrame(target, payload)
+}
+
+// postFrame writes a frame nothing waits on, such as a receipt, and closes
+// without waiting for the sender to close first: a sender that accepts and
+// never closes would otherwise hold the connection that is answering it for
+// the full read deadline on every frame.
+func postFrame(target string, payload []byte) error {
+	conn, err := net.DialTimeout("unix", target, noticeDeadline)
+	if err != nil {
+		return surface.DeliveryUnavailable(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(noticeDeadline))
+	if _, err := conn.Write(append(payload, '\n')); err != nil {
+		return surface.DeliveryOutcomeUnknown(err)
+	}
+	return nil
 }
 
 func sendFrame(target string, payload []byte) error {
@@ -1411,14 +1431,23 @@ func nativeRecord(home, socket string) (string, sessionRecord, bool, error) {
 	return "", sessionRecord{}, false, nil
 }
 
-// sendAuthenticatedFrame reads the peer key Claude wrote beside the target
-// process's session record, in whichever config root holds that record.
 func sendAuthenticatedFrame(home, target string, payload []byte) error {
+	framed, err := authenticatedFrame(home, target, payload)
+	if err != nil {
+		return err
+	}
+	return sendFrame(target, framed)
+}
+
+// authenticatedFrame prefixes payload with the peer key Claude wrote beside
+// the target process's session record, in whichever config root holds that
+// record.
+func authenticatedFrame(home, target string, payload []byte) ([]byte, error) {
 	hash := sha256.Sum256([]byte(target))
 	pid := strings.TrimSuffix(filepath.Base(target), ".sock")
 	root, _, found, err := nativeRecord(home, target)
 	if err != nil {
-		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
 	if !found {
 		root = surface.ClaudeConfigDir(home)
@@ -1426,26 +1455,26 @@ func sendAuthenticatedFrame(home, target string, payload []byte) error {
 	keyPath := filepath.Join(root, "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() {
-			return surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)
+			return nil, surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)
 		}
 		var key struct {
 			PeerToken string `json:"peerToken"`
 		}
 		f, err := os.Open(keyPath)
 		if err != nil {
-			return surface.DeliveryUnavailable(err)
+			return nil, surface.DeliveryUnavailable(err)
 		}
 		err = json.NewDecoder(io.LimitReader(f, 8192)).Decode(&key)
 		f.Close()
 		if err != nil || key.PeerToken == "" {
-			return surface.DeliveryTerminal(errors.New("invalid Claude peer key"), surface.DeliveryAuthenticationNeeded)
+			return nil, surface.DeliveryTerminal(errors.New("invalid Claude peer key"), surface.DeliveryAuthenticationNeeded)
 		}
 		auth, _ := json.Marshal(map[string]string{"type": "auth", "token": key.PeerToken})
 		payload = append(append(auth, '\n'), payload...)
 	} else if !os.IsNotExist(err) {
-		return surface.DeliveryUnavailable(err)
+		return nil, surface.DeliveryUnavailable(err)
 	}
-	return sendFrame(target, payload)
+	return payload, nil
 }
 
 func dialContext(ctx context.Context, path string) (net.Conn, error) {

@@ -809,6 +809,11 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.project-count {
+  color: var(--quiet);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 .project-header .link-button,
 .project-more {
   border: 0;

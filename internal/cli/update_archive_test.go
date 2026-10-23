@@ -65,6 +65,7 @@ func releaseArchive(t *testing.T, tag string) []byte {
 		{name: root + "/skills/agenthail-operations/SKILL.md", body: "skill " + tag, mode: 0644},
 		{name: root + "/claude-host/"},
 		{name: root + "/claude-host/host.mjs", body: "host " + tag, mode: 0644},
+		{name: root + "/runtime/node/bin/node", body: "node " + tag, mode: 0755},
 	})
 }
 
@@ -171,6 +172,25 @@ func TestLinuxUpdateReplacesInstalledClaudeHost(t *testing.T) {
 	host, _ := os.ReadFile(filepath.Join(fixture.dataDir, "claude-host", "host.mjs"))
 	if string(host) != "host v0.2.0" {
 		t.Fatalf("host=%q", host)
+	}
+}
+
+func TestLinuxUpdateReplacesTheNodeItShips(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	node := filepath.Join(fixture.dataDir, "runtime", "node", "bin", "node")
+	if err := os.MkdirAll(filepath.Dir(node), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(node, []byte("node v0.1.7"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return fixture.app.Run([]string{"update"}) }); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(node)
+	info, err := os.Stat(node)
+	if string(body) != "node v0.2.0" || err != nil || info.Mode().Perm()&0111 == 0 {
+		t.Fatalf("node=%q info=%v err=%v", body, info, err)
 	}
 }
 

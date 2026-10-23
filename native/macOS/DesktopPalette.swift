@@ -3,22 +3,22 @@ import os
 import SwiftUI
 
 enum DesktopPalette {
-    private static let windowHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x17181A)
-    private static let sideHex: (light: UInt32, dark: UInt32) = (0xF3F3F4, 0x1D1E21)
-    private static let raisedHex: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x232427)
+    private static let windowHex = PaletteTokens.window
+    private static let sideHex = PaletteTokens.side
+    private static let raisedHex = PaletteTokens.raised
 
     static let side = dynamic(sideHex)
     static let window = dynamic(windowHex)
     static let raised = dynamic(raisedHex)
     static let line = dynamic(light: 0xE3E3E6, dark: 0x2E2F33)
     static let line2 = dynamic(light: 0xECECEE, dark: 0x26272A)
-    private static let textHex: (light: UInt32, dark: UInt32) = (0x1D1D1F, 0xECECEE)
-    private static let text2Hex: (light: UInt32, dark: UInt32) = (0x5F6066, 0xA3A3A8)
-    private static let mutedHex: (light: UInt32, dark: UInt32) = (0x6E6E76, 0x8E8E93)
-    private static let attentionHex: (light: UInt32, dark: UInt32) = (0x965A00, 0xFFB224)
-    private static let workingHex: (light: UInt32, dark: UInt32) = (0x2A64CC, 0x7AA7FF)
-    private static let doneHex: (light: UInt32, dark: UInt32) = (0x1A7F4E, 0x4CC38A)
-    private static let failedHex: (light: UInt32, dark: UInt32) = (0xC4271B, 0xFF6B61)
+    private static let textHex = PaletteTokens.text
+    private static let text2Hex = PaletteTokens.text2
+    private static let mutedHex = PaletteTokens.muted
+    private static let attentionHex = PaletteTokens.attention
+    private static let workingHex = PaletteTokens.working
+    private static let doneHex = PaletteTokens.done
+    private static let failedHex = PaletteTokens.failed
 
     static let text = dynamic(textHex)
     static let text2 = dynamic(text2Hex)
@@ -59,7 +59,7 @@ enum DesktopPalette {
 
     /// Every colour text is drawn in, which a scrim must keep readable.
     static func textRoles(dark: Bool) -> [AccentContrast.RGB] {
-        [textHex, text2Hex, mutedHex, attentionHex, workingHex, doneHex, failedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+        PaletteTokens.textRoles.map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
     }
 
     static func ground(dark: Bool) -> AccentContrast.RGB {
@@ -126,6 +126,20 @@ enum DesktopSpace {
     static let xl: CGFloat = 20
     static let xxl: CGFloat = 24
     static let xxxl: CGFloat = 32
+}
+
+enum DesktopColumns {
+    static let sidebar = (min: CGFloat(248), ideal: CGFloat(300), max: CGFloat(340))
+    static let detail = (min: CGFloat(340), ideal: CGFloat(892))
+    static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
+}
+
+enum ColumnFit {
+    /// Narrower than this, a docked inspector would pin the window at the
+    /// columns' minimum widths, so it stops docking before the window does.
+    static let inspectorDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min + DesktopColumns.inspector.ideal
+    /// The same for the sidebar, once the inspector has collapsed.
+    static let sidebarDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min
 }
 
 enum DesktopRadius {

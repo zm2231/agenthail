@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -705,7 +706,7 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 
 // applyRecordStatus takes status and last activity from Claude's session
 // record. The transcript decides only when the record does not report status,
-// and dates a working session's activity after the record's last write.
+// and dates a working session by its turn's last progress when that is later.
 func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
 	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
 		sess.LastActive = time.UnixMilli(int64(ts))
@@ -714,15 +715,21 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.WaitingOn = nil
 	sess.BackgroundTasks = nil
 	sess.UsageLimit = nil
+	sess.Activity = nil
+	sess.Plan = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
 			sess.BackgroundTasks = observation.BackgroundTasks
 			sess.UsageLimit = observation.UsageLimit
+			sess.Activity = observation.Activity
+			sess.Plan = observation.Plan
 		}
 	}
-	advanceBusyActivityFromTranscript(sess)
+	if sess.Activity != nil && sess.Activity.LastProgressAt.After(sess.LastActive) {
+		sess.LastActive = sess.Activity.LastProgressAt
+	}
 }
 
 // claudeRootTranscript returns a conversation's one transcript when it lies
@@ -907,6 +914,11 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surface.TurnObservation) {
 	record, live := c.liveRecord(*sess)
 	if !live {
+		// With no pid and no record, nothing runs the turn the transcript
+		// leaves open.
+		if observation.Activity != nil && sess.PID <= 0 && !claudeHosted(sess) {
+			observation.Activity.NoProcess = true
+		}
 		return
 	}
 	status := claudePeerStatus(record)
@@ -917,7 +929,28 @@ func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surf
 	if status != surface.StatusBusy {
 		observation.ActiveTurnID = ""
 		observation.WaitingOn = nil
+		observation.Activity = nil
+		return
 	}
+	if changed, ok := record["statusUpdatedAt"].(float64); ok && observation.Activity != nil {
+		if at := time.UnixMilli(int64(changed)); at.After(observation.Activity.LastProgressAt) {
+			observation.Activity.LastProgressAt = at
+		}
+	}
+}
+
+// claudeTurnActivity reads an open turn's start, its newest record and the
+// tool call it started last that has no result yet.
+func claudeTurnActivity(turn claudeTurn) *surface.Activity {
+	activity := &surface.Activity{BusySince: turn.StartedAt, LastProgressAt: turn.LastAt}
+	if activity.LastProgressAt.IsZero() {
+		activity.LastProgressAt = turn.StartedAt
+	}
+	if count := len(turn.Tools); count > 0 {
+		call := turn.Tools[count-1]
+		activity.Tool = &surface.RunningTool{Name: call.Name, StartedAt: call.StartedAt}
+	}
+	return activity
 }
 
 // observe reads the turn from the transcript and what it waits on from the
@@ -943,6 +976,7 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
+		observation.Activity = nil
 	}
 	if observation.Status != surface.StatusOffline {
 		observation.BackgroundTasks = c.claudeBackground(ctx, sess)
@@ -1002,6 +1036,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if err != nil {
 		return nil, err
 	}
+	observation.Plan = state.tasks.plan
 	compactPending := state.compactPending()
 	if !state.hasCurrent {
 		transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)
@@ -1018,6 +1053,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if !last.Done && !last.Interrupted && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = last.UserID
+		observation.Activity = claudeTurnActivity(last)
 	} else if (last.Done || last.Interrupted) && transcriptCanSetReady && !claudeBridgeActivityAfterTerminal(sess, last) {
 		observation.Status = surface.StatusIdle
 	}
@@ -1346,16 +1382,13 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 		}
 	}
-	for first := true; first || time.Now().Before(deadline); first = false {
-		if info, statErr := os.Stat(path); statErr == nil {
-			if current := transcriptFileIdentity(info); identity != "" && current != identity {
-				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
-				identity, offset = current, 0
-			}
-		}
+	// readAppended reads what the transcript gained since offset, and its goal.
+	var tail []byte
+	readAppended := func() error {
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
 		// The anchor then rolls forward over the bytes this scan parses, never a later read.
-		tail, tailErr := transcriptTail(path, offset)
+		var tailErr error
+		tail, tailErr = transcriptTail(path, offset)
 		if turns.closing.TurnID != "" && (tailErr != nil || anchorOf(tail) != turns.closing.Anchor) {
 			turns.closing = surface.ClaudeClosingTurn{}
 		}
@@ -1413,6 +1446,25 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
 			}
 			commands.Refresh()
+		}
+		return nil
+	}
+	// read is the transcript as the last read found it. A pass that finds it
+	// the same size, time and file has nothing to read and only settles turns.
+	var read os.FileInfo
+	for first := true; first || time.Now().Before(deadline); first = false {
+		info, statErr := os.Stat(path)
+		if statErr == nil {
+			if current := transcriptFileIdentity(info); identity != "" && current != identity {
+				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
+				identity, offset = current, 0
+			}
+		}
+		if statErr != nil || read == nil || !sameTranscriptState(read, info) {
+			if err := readAppended(); err != nil {
+				return err
+			}
+			read = info
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {
@@ -1583,3 +1635,32 @@ func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session,
 const claudeHostTranscriptTick = 250 * time.Millisecond
 
 var claudeHostTranscriptLookupTicks = 8
+
+// sameTranscriptState reports whether two stats of a transcript show the same
+// file at the same size, modification time and change time. Every write moves
+// the change time, which no one can set back as they can the modification
+// time.
+func sameTranscriptState(a, b os.FileInfo) bool {
+	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
+}
+
+// transcriptChangeTime is a stat's inode change time, or "" where the platform
+// does not report one.
+func transcriptChangeTime(info os.FileInfo) string {
+	if info.Sys() == nil {
+		return ""
+	}
+	value := reflect.ValueOf(info.Sys())
+	if value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range []string{"Ctimespec", "Ctim"} {
+		if field := value.FieldByName(name); field.IsValid() && field.CanInterface() {
+			return fmt.Sprintf("%v", field.Interface())
+		}
+	}
+	return ""
+}

@@ -36,6 +36,7 @@ struct Transcript: View {
             .padding(24)
         }
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
+        .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: 44) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) { feed.following = following }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
@@ -211,6 +212,34 @@ struct TranscriptFollowTest {
         spin(0.3)
         expect(!feed.following, "a reader who scrolled up a little is not following")
         expect(renders["R35", default: 0] == before, "leaving the live edge does not redraw rows that stayed on screen, R35 drew \(renders["R35", default: 0] - before) more times")
+
+        feed.transcript = "L"
+        feed.rows = rows("L", 60)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript shows the live edge")
+        // A lazy stack that re-measures rows can put the offset back within the same layout pass that anchored a resize to the bottom.
+        let held = offset(scroll)
+        feed.rows += rows("Lg", 3)
+        hosting.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: held))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        hosting.layoutSubtreeIfNeeded()
+        spin(0.5)
+        feed.rows += rows("Lh", 2)
+        spin(0.5)
+        expectBottom(scroll, "layout that moves the offset while a resize settles does not stop following")
+        expect(feed.following, "layout that moves the offset while a resize settles leaves the reader following")
+
+        feed.transcript = "M"
+        feed.rows = rows("M", 600)
+        spin(0.6)
+        move(scroll, to: 0)
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(0.05)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 3000))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        spin(1.5)
+        expect(!feed.following || abs(gap(scroll)) < 2, "a view at rest away from the bottom is not following, so Jump to latest shows; following=\(feed.following) gap=\(Int(gap(scroll)))")
     }
 
     @MainActor

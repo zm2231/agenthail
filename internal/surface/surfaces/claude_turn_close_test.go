@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -362,5 +363,71 @@ func TestClaudeSDKTurnClosesWhenItsProcessRecordsIdle(t *testing.T) {
 	}, 150*time.Millisecond)
 	if !errors.Is(err, surface.ErrStreamWindow) || done["u1"] != 1 || source.ClaudeClosingTurn.TurnID != "" {
 		t.Fatalf("stream err=%v done=%v closing=%+v", err, done, source.ClaudeClosingTurn)
+	}
+}
+
+func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *testing.T) {
+	path := writeTranscript(t, closedTurnRecords)
+	session := seededClaudeStreamSession(t, path, "")
+	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	// The stream parks between passes, so the rewrite and the restored
+	// modification time land before it looks at the transcript again.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	parked, resume := make(chan struct{}), make(chan struct{})
+	transcriptWaiting = func() {
+		select {
+		case parked <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-resume:
+		case <-ctx.Done():
+		}
+	}
+	t.Cleanup(func() { transcriptWaiting = nil })
+	nextPass := func() {
+		t.Helper()
+		select {
+		case <-parked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the stream made no pass")
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- NewClaude(nil, t.TempDir()).Stream(ctx, session, "", func(surface.StreamEvent) {}, time.Minute)
+	}()
+	nextPass()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt([]byte("TWO"), int64(bytes.Index(data, []byte(`"text":"ONE"`))+len(`"text":"`))); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	resume <- struct{}{}
+	nextPass()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stream err=%v", err)
+	}
+	if session.ClaudeClosingTurn.TurnID != "" {
+		t.Fatalf("a closing turn outlived the rewrite of the bytes it closed in: %+v", session.ClaudeClosingTurn)
 	}
 }

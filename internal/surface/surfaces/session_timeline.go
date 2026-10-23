@@ -18,7 +18,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const timelineReadBudget = 16 << 20
+var timelineReadBudget int64 = 16 << 20
+
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
@@ -409,11 +410,35 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	if floor > end {
 		return nil, fmt.Errorf("activity transcript changed; refresh the session")
 	}
-	start := max(floor, end-timelineReadBudget)
+	for window := timelineFirstWindow; ; window *= 2 {
+		window = min(window, timelineReadBudget)
+		page := *result
+		complete, err := readTranscriptSpan(ctx, file, path, source, floor, max(floor, end-window), end, completeEnd, before, limit, settled, &page)
+		if err != nil {
+			return nil, err
+		}
+		if complete || window == timelineReadBudget || end-window <= floor {
+			return &page, nil
+		}
+	}
+}
+
+// timelineFirstWindow is the transcript a page reads first. A page reads twice
+// as much until its records stop inside what it read, up to
+// timelineReadBudget, so a page costs about what it shows. Tests set it to
+// the budget to read a page the way one read of the whole budget does.
+var timelineFirstWindow int64 = 512 << 10
+
+// readTranscriptSpan fills result with the page that ends at end from the
+// records after start. It reports whether a larger span would give the same
+// page: the page stopped at a record its own limits chose, after the first
+// record whose state the span knows exactly.
+func readTranscriptSpan(ctx context.Context, file *os.File, path, source string, floor, start, end, completeEnd, before int64, limit int, settled func(time.Time) bool, result *surface.SessionReadResult) (bool, error) {
+	var err error
 	windowStart := start
 	data := make([]byte, end-start)
-	if _, err := file.ReadAt(data, start); err != nil && err != io.EOF {
-		return nil, err
+	if _, err = file.ReadAt(data, start); err != nil && err != io.EOF {
+		return false, err
 	}
 	if start > floor {
 		if first := bytes.IndexByte(data, '\n'); first >= 0 {
@@ -422,7 +447,7 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 		} else {
 			result.Truncated = true
 			result.NextBefore = start
-			return result, nil
+			return false, nil
 		}
 	}
 	// Incomplete appends are retried by the next refresh, never rendered as records.
@@ -437,15 +462,25 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	recordTurnIDs := map[int]string{}
 	currentTurnID := ""
 	codexTurns := map[int]*surface.TurnMetadata{}
+	// Claude's turn state is rebuilt at start; Codex's turn and prompt state
+	// are known from the span's first turn start.
+	exactFrom := start
 	if source == "codex" {
+		exactFrom = end
 		meter, err := codexTurnMeterAt(ctx, file, start)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
+		lineOffset := start
 		for index, line := range lines {
+			recordOffset := lineOffset
+			lineOffset += int64(len(line))
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				continue
+			}
+			if exactFrom == end && codexRecordStartsTurn(record) {
+				exactFrom = recordOffset
 			}
 			if turn := meter.observe(record); turn != nil {
 				codexTurns[index] = turn
@@ -467,7 +502,7 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	if source == "claude" {
 		turns, err := claudeTurnStateAt(ctx, file, start)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 		claudeEnds = map[int][]claudeTurnEnd{}
 		claudeInterrupts = map[int]bool{}
@@ -492,7 +527,7 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 			// A stream resuming at the page's end finishes the turn the page saw closing.
 			closing := turns.closing
 			if closing.Anchor, err = completionAnchor(path, completeEnd); err != nil {
-				return nil, err
+				return false, err
 			}
 			result.ClaudeClosingTurn = closing
 		}
@@ -502,6 +537,10 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	var groups [][]surface.TimelineItem
 	var groupOffsets []int64
 	var records []transcriptRecord
+	// truncatedAt holds the records the page shortened or dropped; only those
+	// on the page mark it truncated.
+	var truncatedAt []int64
+	stopped := false
 	for index := len(lines) - 1; index >= 0; index-- {
 		line := lines[index]
 		offset -= int64(len(line))
@@ -509,18 +548,18 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return false, err
 		}
 		var record map[string]any
 		if json.Unmarshal(line, &record) != nil {
-			result.Truncated = true
+			truncatedAt = append(truncatedAt, offset)
 			continue
 		}
 		var items []surface.TimelineItem
 		if source == "claude" {
 			items, err = claudeRecordTimelineItems(ctx, record, offset, line, recordTurnIDs[index], claudeEnds[index], claudeInterrupts[index])
 			if err != nil {
-				return nil, err
+				return false, err
 			}
 		} else {
 			items = codexTimelineItems(record)
@@ -538,7 +577,7 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 				}
 			}
 			if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
-				return nil, err
+				return false, err
 			}
 			if skipResponseUsers[index] {
 				continue
@@ -576,21 +615,24 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 		}
 		if len(groups) > 0 && (len(encoded) > budget || count+len(items) > timelineItemLimit) {
 			result.NextBefore = offset + int64(len(line))
+			stopped = true
 			break
 		}
 		records = append(records, transcriptRecord{offset: offset, line: line, items: full})
 		// A single oversized record must not defeat the response budget.
 		for len(encoded) > budget && len(items) > 1 {
 			items = items[1:]
-			result.Truncated = true
+			truncatedAt = append(truncatedAt, offset)
 			encoded, _ = json.Marshal(items)
 		}
 		if len(encoded) > budget {
-			result.Truncated = true
+			truncatedAt = append(truncatedAt, offset)
 			continue
 		}
 		for _, item := range items {
-			result.Truncated = result.Truncated || item.Truncated
+			if item.Truncated {
+				truncatedAt = append(truncatedAt, offset)
+			}
 		}
 		groups = append(groups, items)
 		groupOffsets = append(groupOffsets, offset)
@@ -624,8 +666,14 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	for _, start := range surface.ExchangeStarts(items) {
 		exchangeOffsets = append(exchangeOffsets, itemOffsets[start])
 	}
+	// Records that reached the span's start may continue before it: a reply
+	// from their first turn may be that turn's tail, and no reply may only
+	// mean it is further back.
+	replyKnown := true
 	if source == "claude" {
-		result.Reply = claudeTranscriptReply(records, result.Source, settled)
+		var from int
+		result.Reply, from = claudeTranscriptReply(records, result.Source, settled)
+		replyKnown = stopped || from > 0 || start <= floor
 	}
 	pageStart := int64(-1)
 	if limit > 0 && len(result.Exchanges) > limit {
@@ -648,7 +696,16 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 		}
 	}
 	slices.Reverse(result.Items)
-	return result, nil
+	for _, at := range truncatedAt {
+		if at >= pageStart {
+			result.Truncated = true
+		}
+	}
+	used := result.NextBefore
+	if !stopped {
+		used = pageStart
+	}
+	return replyKnown && used >= 0 && used >= exactFrom && (stopped || pageStart >= 0), nil
 }
 
 // claudeRecordTimelineItems returns the timeline items of one transcript
@@ -722,7 +779,9 @@ func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, in
 	return codexDesktopStreamKey(turnID, kind, semanticID)
 }
 
-func claudeTranscriptReply(records []transcriptRecord, source string, settled func(time.Time) bool) *surface.ReplyResult {
+// claudeTranscriptReply returns the reply of the latest turn in records that
+// has one, and the index of that turn, or -1.
+func claudeTranscriptReply(records []transcriptRecord, source string, settled func(time.Time) bool) (*surface.ReplyResult, int) {
 	var turns []claudeTurn
 	for _, record := range records {
 		var parsed claudeRecord
@@ -731,8 +790,10 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 		}
 	}
 	reply := &surface.ReplyResult{Done: false, Source: source}
-	for _, turn := range turns {
+	from := -1
+	for index, turn := range turns {
 		if turn.Assistant != "" || turn.APIError != "" {
+			from = index
 			done := turn.Done || turn.Closing && settled != nil && settled(turn.TerminalAt)
 			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: done, Source: source}
 			if turn.Interrupted && !done {
@@ -743,7 +804,7 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 			}
 		}
 	}
-	return reply
+	return reply, from
 }
 
 const (

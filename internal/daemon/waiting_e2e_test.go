@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -263,7 +263,7 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 	appendClaudeRecords(t, transcript,
 		`{"type":"user","uuid":"prompt","timestamp":"2026-10-18T08:14:31Z","message":{"content":"Plan the release"}}`,
 		`{"type":"attachment","timestamp":"2026-10-18T08:14:42Z"}`)
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T) {
 	home := codextest.Home(t)
 	lifecycle := codextest.InstallLifecycle(t, home, func(string, map[string]any) map[string]any { return nil })
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 }
 
 func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) {
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +722,7 @@ func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
 		h.t.Fatal(err)
 	}
 	request.Header.Set("Origin", h.server.URL)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: e2eToken})
+	request.AddCookie(browserCookie(h.t, h.store))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		h.t.Fatal(err)
@@ -765,7 +765,7 @@ func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {
 func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
 	home := codextest.Home(t)
 	lifecycle := codextest.InstallLifecycle(t, home, func(string, map[string]any) map[string]any { return nil })
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

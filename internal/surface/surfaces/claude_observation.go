@@ -26,6 +26,7 @@ type claudeObservationState struct {
 	pendingWithoutTime   int
 	markersWithoutTime   int
 	completedWithoutTime int
+	tasks                claudePlanState
 }
 
 // observeTranscript advances the shared observation of path and returns a copy,
@@ -60,6 +61,7 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 	if err != nil {
 		return nil, err
 	}
+	state.tasks.resolve(path)
 	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
 		state.settle()
 	}
@@ -75,6 +77,7 @@ func (s *claudeObservationState) apply(line []byte) error {
 	at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
 	s.applyCompact(record, at)
 	s.applyTurn(record)
+	s.tasks.apply(record, line)
 	return nil
 }
 

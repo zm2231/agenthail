@@ -74,7 +74,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	reader := deviceToken(t, r, "Watcher", "read")
 
@@ -136,7 +136,7 @@ func TestAPermissionModeChangeTakesTheCreationGuardAndIsRecordedWithWhoChangedIt
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, r, []surface.Surface{claude})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	reader := deviceToken(t, r, "Watcher", "read")
 
@@ -285,7 +285,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 		cancel()
 		<-watched
 	})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	phone := deviceToken(t, r, "Phone", "read", "control")
 	ask := func(message string) map[string]string {
 		t.Helper()

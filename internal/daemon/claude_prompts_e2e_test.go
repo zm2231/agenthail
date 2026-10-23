@@ -134,7 +134,7 @@ func TestOnlyAgenthailsOwnHookCanPostAPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Origin", h.server.URL)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: e2eToken})
+	request.AddCookie(browserCookie(t, q.store))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)

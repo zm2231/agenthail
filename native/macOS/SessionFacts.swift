@@ -41,6 +41,7 @@ enum SessionFacts {
         if let host = session.remoteHostName {
             parts[1] = session.isUnavailable ? "Unavailable on \(host)" : "\(parts[1]) on \(host)"
         }
+        if let plan = session.livePlan { parts.append(plan.detail) }
         if session.queueCount > 0 { parts.append(queuedLabel(session.queueCount)) }
         if !session.sharedHolders.isEmpty { parts.append(holdersLabel(session.sharedHolders.count)) }
         return parts.joined(separator: " · ")

@@ -502,10 +502,49 @@ function limitResumeLabel(session) {
 function limitLabel(session) {
   return session.limitResume ? limitResumeLabel(session) : session.usageLimit ? usageLimitLabel(session) : "";
 }
-function presenceLabel(session) {
+// How long a working turn stays quiet before its row says so.
+const quietAfterMs = 10 * 60 * 1000;
+// "no activity for 12 min · running Bash since 10:02" once a working turn has
+// been quiet for quietAfterMs. It never changes the session's status.
+function quietNote(activity, now = Date.now()) {
+  const last = Date.parse(activity?.lastProgressAt || activity?.busySince || "");
+  if (!last || now - last < quietAfterMs) return "";
+  const parts = [`no activity for ${quietDuration(now - last)}`];
+  if (activity.noProcess) {
+    parts.push("no Claude process");
+  } else if (activity.tool?.name) {
+    const started = Date.parse(activity.tool.startedAt || "");
+    parts.push(`running ${activity.tool.name}${started ? ` since ${new Date(started).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`);
+  }
+  return parts.join(" · ");
+}
+function quietDuration(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} hr ${minutes % 60} min` : `${hours} hr`;
+}
+function workingLabel(session, now = Date.now()) {
+  const note = quietNote(session.activity, now);
+  return note ? `Working · ${note}` : "Working";
+}
+// The task list's progress while the session is open and has steps left. The
+// row keeps the plan after the session closes; a session that stopped part
+// way shows no badge.
+function livePlan(session) {
+  const plan = session.plan;
+  if (!session.open || session.status === "offline" || session.unavailableReason || !plan?.total || plan.done >= plan.total) return null;
+  return plan;
+}
+function planDetail(plan) {
+  const done = `${plan.done} of ${plan.total} tasks done`;
+  return plan.current ? `${done} · ${plan.current}` : done;
+}
+function presenceLabel(session, now = Date.now()) {
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
   if (limitLabel(session)) return limitLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
+  if (session.status === "busy") return workingLabel(session, now);
   return (
     {
       working: "Working",
@@ -523,7 +562,7 @@ function presenceTone(session) {
   return session.status;
 }
 function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
-  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : session.status === "busy" ? workingLabel(session) : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   const label = modelLabel(model, pendingModel);
   if (label) parts.push(label);
@@ -693,7 +732,8 @@ function withHolder(sessionID, payload) {
 }
 function sessionButton(session) {
   const holders = sharedHolders(session);
-  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${holders.length ? `<span title="${escape(holders.map(holderLabel).join("; "))}">${holders.length} terminals</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
+  const plan = livePlan(session);
+  return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${plan ? `<span title="${escape(planDetail(plan))}"><span aria-hidden="true">${plan.done}/${plan.total}</span><span class="sr-only">${escape(planDetail(plan))}</span></span>` : ""}${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${holders.length ? `<span title="${escape(holders.map(holderLabel).join("; "))}">${holders.length} terminals</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
 }
 function projectSection(project, sessions) {
   const expanded = app.expandedProjects.has(project.id);
@@ -702,7 +742,7 @@ function projectSection(project, sessions) {
   const hidden = ordered.length - shown.length;
   const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`On ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span><span class="project-count" title="${ordered.length} ${ordered.length === 1 ? "session" : "sessions"}">${ordered.length}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 // projectMenu lists what a person can change about a project: its name once
 // it was added on some host, a new conversation and the lead in one of its
@@ -900,7 +940,7 @@ function renderSurfaceFilter() {
 }
 function queueReason(item) {
 	if (item.evidence === "transport_accepted") return "Transport accepted; receiver completion is pending";
-	if (item.evidence === "unknown") return "Delivery outcome is unknown";
+	if (item.evidence === "unknown") return item.historical ? "Delivery was never confirmed" : "Submitted";
 	if (item.evidence === "failed") return "Delivery failed";
 	if (item.status !== "pending") return statusLabel(item.status);
   if (item.heldBy === "hostUnreachable")
@@ -950,11 +990,11 @@ function renderOperations() {
         const label = {
           queued: "Queued",
           transport_accepted: "Transport accepted",
-          held: "Held by receiver",
+          held: "Held by the receiver",
           delivered: "Delivered",
           reply_observed: "Reply observed",
           failed: "Failed",
-          unknown: "Delivery uncertain",
+          unknown: "Never confirmed",
           canceled: "Canceled",
         }[entry.evidence] || auditKindLabel(entry.kind);
         const detail = entry.error || entry.message || entry.result || "No details recorded";
@@ -1007,6 +1047,10 @@ function renderOperations() {
 function auditKindLabel(kind) {
   const words = String(kind || "event").replace(/[_-]+/g, " ").trim().toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+function auditHeading(entry) {
+  const operation = entry.operation && entry.operation !== "message" ? auditKindLabel(entry.operation) : "";
+  return operation ? `${auditKindLabel(entry.kind)} · ${operation}` : auditKindLabel(entry.kind);
 }
 function auditRoute(entry) {
   const target = entry.target || entry.sessionId || "Agenthail";
@@ -1270,6 +1314,11 @@ function revealRemoteQR() {
   app.remoteQRHideTimer = setTimeout(hideRemoteQR, 60000);
   renderSettings();
 }
+async function createLoginLink() {
+  const response = await fetch("/api/v1/dashboard/login-links", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ remote: true }) });
+  if (!response.ok) throw Error((await response.json().catch(() => ({}))).error?.message || "Could not create a phone link.");
+  return (await response.json()).url;
+}
 async function updateSettings(body) {
   const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw Error(await response.text());
@@ -1284,7 +1333,7 @@ function renderAudit() {
   $("#history-list").innerHTML = audit.items.map((entry) => {
     const route = auditRoute(entry);
     const content = entry.error || entry.message || entry.result || "No message content recorded";
-    return `<article class="audit-event"><div class="audit-marker ${entry.error ? "failed" : ""}"></div><div class="audit-event-body"><div class="audit-event-heading"><strong>${escape(auditKindLabel(entry.kind))}</strong><time>${timeAgo(entry.createdAt)}</time></div><div class="audit-route">${route}</div><details><summary>View details</summary><div class="audit-detail${entry.error ? " operation-error" : ""}">${markdown(content)}</div></details></div></article>`;
+    return `<article class="audit-event"><div class="audit-marker ${entry.error ? "failed" : ""}"></div><div class="audit-event-body"><div class="audit-event-heading"><strong>${escape(auditHeading(entry))}</strong><time>${timeAgo(entry.createdAt)}</time></div><div class="audit-route">${route}</div><details><summary>View details</summary><div class="audit-detail${entry.error ? " operation-error" : ""}">${markdown(content)}</div></details></div></article>`;
   }).join("") || `<div class="empty-card">${audit.loading ? "Loading activity." : audit.loaded ? "No activity matches these filters." : "Open Audit to load activity."}</div>`;
   const more = $("#history-more");
   more.hidden = !audit.loaded || !audit.hasMore;
@@ -1629,8 +1678,10 @@ function toolLine(call) {
   const command = input?.command ?? input?.cmd;
   if (typeof command === "string") return { verb: "Run", object: input.description || firstLine(command), code: !input.description };
   if (name === "apply_patch") return { verb: "Edit", object: toolChanges(call).map(change => baseName(change.path)).join(", "), code: true };
-  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan" };
+  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan", TaskCreate: "Add task", TaskUpdate: "Update task" };
   const verb = verbs[name] || name.replace(/^functions\./, "").replace(/^mcp__/, "").replace(/__/g, " · ").replace(/_/g, " ");
+  if (name === "TaskCreate" && typeof input?.subject === "string") return { verb, object: input.subject, code: false };
+  if (name === "TaskUpdate" && input?.taskId) return { verb, object: [`Task ${input.taskId}`, input.status?.replace(/_/g, " ")].filter(Boolean).join(" · "), code: false };
   if (typeof input?.pattern === "string") return { verb, object: input.pattern, code: true };
   const path = input?.file_path || input?.path || input?.notebook_path;
   if (typeof path === "string") return { verb, object: baseName(path), code: true };
@@ -3183,12 +3234,19 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-copy-remote]")) {
+    let link;
+    try {
+      link = await createLoginLink();
+    } catch (error) {
+      toast(error.message);
+      return;
+    }
     try {
       if (!navigator.clipboard) throw Error("Clipboard access is unavailable");
-      await navigator.clipboard.writeText(app.settings.remoteAccess.url);
-      toast("Phone link copied.");
+      await navigator.clipboard.writeText(link);
+      toast("Phone link copied. It works once, within 15 minutes.");
     } catch {
-      window.prompt("Copy this phone link", app.settings.remoteAccess.url);
+      window.prompt("Copy this phone link. It works once, within 15 minutes.", link);
     }
   }
 });

@@ -209,6 +209,40 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func changeUI(_ change: UIChange, device: String) async throws -> UIConfig {
+        var components = URLComponents()
+        components.path = "/api/v1/ui"
+        components.queryItems = [URLQueryItem(name: "class", value: "mac"), URLQueryItem(name: "device", value: device)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await requestEncoded(path, method: "POST", body: change)
+    }
+
+    func uiLog(limit: Int) async throws -> [UIChangeEntry] {
+        let response: UIChangeLog = try await get("/api/v1/ui/log?limit=\(limit)")
+        return response.entries
+    }
+
+    func uiPresets() async throws -> [UIPreset] {
+        let response: UIPresetList = try await get("/api/v1/ui/presets")
+        return response.presets
+    }
+
+    /// Streams the file, so the daemon can refuse it by name or size before it
+    /// is read.
+    func uploadBackground(file: URL) async throws -> String {
+        var components = URLComponents()
+        components.path = "/api/v1/ui/background"
+        components.queryItems = [URLQueryItem(name: "name", value: file.lastPathComponent)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        let (body, response) = try await session.upload(for: request, fromFile: file)
+        try validate(response: response, data: body)
+        return try JSONDecoder().decode(UploadedBackground.self, from: body).path
+    }
+
     func uiBackground(path rel: String) async throws -> Data {
         var components = URLComponents()
         components.path = "/api/v1/ui/background"
@@ -217,6 +251,21 @@ final class AgenthailAPI: @unchecked Sendable {
         let (data, response) = try await session.data(for: authorizedRequest(path: path))
         try validate(response: response, data: data)
         return data
+    }
+
+    func uploadSnapshot(id: String, png: Data) async throws {
+        guard let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: "/api/v1/ui/snapshot/" + encoded)
+        request.httpMethod = "POST"
+        request.httpBody = png
+        request.setValue("image/png", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+    }
+
+    func failSnapshot(id: String, reason: String) async throws {
+        guard let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { throw AgenthailAPIError.invalidResponse }
+        let _: EmptyResponse = try await post("/api/v1/ui/snapshot/" + encoded, body: ["error": reason])
     }
 
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, attachments: [String] = [], idempotencyKey: String? = nil) async throws -> ActionReceipt {
@@ -257,6 +306,13 @@ final class AgenthailAPI: @unchecked Sendable {
         var components = URLComponents()
         components.path = "/api/v1/session-options/claude-usage"
         components.queryItems = [URLQueryItem(name: "root", value: root)] + (host.map { [URLQueryItem(name: "host", value: $0)] } ?? [])
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+    func codexUsage(host: String? = nil) async throws -> CodexUsage {
+        var components = URLComponents()
+        components.path = "/api/v1/session-options/codex-usage"
+        if let host { components.queryItems = [URLQueryItem(name: "host", value: host)] }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
@@ -405,6 +461,10 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/pairings", body: ["name": name, "scopes": ["read", "control"]])
     }
 
+    func createLoginLink(remote: Bool) async throws -> LoginLinkResponse {
+        try await post("/api/v1/dashboard/login-links", body: ["remote": remote])
+    }
+
     static func completePairing(endpoint: URL, secret: String, name: String, session: URLSession = .shared) async throws -> PairedDeviceResponse {
         var request = URLRequest(url: URL(string: "/api/v1/pair", relativeTo: endpoint)!)
         request.httpMethod = "POST"
@@ -513,9 +573,56 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "permission-mode", "sessionId": sessionID, "permissionMode": mode])
     }
 
-    func projectAction(_ action: String, projectID: String? = nil, path: String? = nil) async throws -> ProjectIdentity? {
-        let response: ProjectActionResponse = try await postAction(ProjectActionRequest(action: action, projectId: projectID, path: path))
-        return response.project
+    func projectAction(_ action: String, projectID: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": action, "projectId": projectID])
+    }
+
+    func addProject(path: String, title: String? = nil, host: String? = nil) async throws -> (project: ProjectIdentity?, created: Bool) {
+        var body: [String: Any] = ["action": "project-add", "path": path]
+        if let title, !title.isEmpty { body["title"] = title }
+        if let host { body["host"] = host }
+        let response: ProjectAddResponse = try await projectRequest(body)
+        return (response.project, response.created ?? true)
+    }
+
+    func renameProject(_ projectID: String, title: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": "project-rename", "projectId": projectID, "title": title])
+    }
+
+    func makeLead(sessionID: String, replace: Bool) async throws -> ProjectLead {
+        var body: [String: Any] = ["action": "coordinator-set", "sessionId": sessionID]
+        if replace { body["replace"] = true }
+        let response: LeadResponse = try await projectRequest(body)
+        return response.coordinator
+    }
+
+    func startLead(surface: String, folder: String, host: String?, name: String?, replace: Bool) async throws -> ProjectLead {
+        var body: [String: Any] = ["action": "coordinator-new", "surface": surface, "cwd": folder]
+        if let host { body["host"] = host }
+        if let name, !name.isEmpty { body["name"] = name }
+        if replace { body["replace"] = true }
+        let response: LeadResponse = try await projectRequest(body)
+        return response.coordinator
+    }
+
+    func clearLead(projectID: String) async throws {
+        let _: EmptyResponse = try await projectRequest(["action": "coordinator-clear", "projectId": projectID])
+    }
+
+    private func projectRequest<T: Decodable>(_ body: [String: Any]) async throws -> T {
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: nil)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
+            throw ProjectActionError(status: http.statusCode, data: data)
+        }
+        if T.self == EmptyResponse.self { return EmptyResponse() as! T }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     func postAction<Body: Encodable, Response: Decodable>(_ body: Body, idempotencyKey: String? = nil) async throws -> Response {
@@ -689,11 +796,14 @@ final class AgenthailAPI: @unchecked Sendable {
                     message = detail
                 }
                 if let detail = object["error"] as? String, !detail.isEmpty {
-                    if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
+                    if object["unknown"] as? Bool == true || object["code"] as? String == "create_unknown" { throw AgenthailAPIError.outcomeUnknown(detail) }
                     message = detail
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "control_failed",
                    (object["result"] as? [String: Any])?["evidence"] as? String == "unknown" {
+                    throw AgenthailAPIError.outcomeUnknown(message)
+                }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "host_outcome_unknown" {
                     throw AgenthailAPIError.outcomeUnknown(message)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "stale" {
@@ -771,14 +881,13 @@ private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
 }
 
-private struct ProjectActionRequest: Encodable {
-    let action: String
-    let projectId: String?
-    let path: String?
+private struct ProjectAddResponse: Decodable {
+    let project: ProjectIdentity?
+    let created: Bool?
 }
 
-private struct ProjectActionResponse: Decodable {
-    let project: ProjectIdentity?
+private struct LeadResponse: Decodable {
+    let coordinator: ProjectLead
 }
 
 struct ActionReceipt: Decodable {

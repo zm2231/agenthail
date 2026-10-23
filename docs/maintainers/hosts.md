@@ -14,6 +14,15 @@ The default name is the short hostname. `agenthail hosts name <name>` renames
 it. `GET /api/v1/version` reports both, so a peer can tell it reached the host
 it paired with.
 
+`GET /api/v1/version` also names the build the daemon runs: `version`,
+`revision` (the commit) and `modified` (built from a tree with uncommitted
+changes). Release builds stamp all three. A daemon reports each paired host's
+build in its host list, and the apps show it as information only: hosts may run
+different builds as long as their protocol and federation ranges overlap.
+`agenthail doctor` and the Mac app compare the local daemon's build with their
+own and report a mismatch only when both name an unmodified commit and the
+commits differ; the fix is to restart the daemon.
+
 ## Pairing
 
 Pairing reuses the device-token model the phone uses.
@@ -194,7 +203,13 @@ folders of its recent sessions that no project holds, the most recent first,
 at most 12. A client offers those folders when adding a project on that host;
 the host reveals no other path.
 `GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
-with their reasoning efforts. `session-create` with `host` starts the
+with their reasoning efforts.
+`GET /api/v1/session-options/codex-usage?host=<host>` is the limits of the
+Codex account on that host, as its newest rollout recorded them:
+`usage{fetchedAt, limits[{kind, percent, resetsAt}]}`, where `kind` is `5h`,
+`weekly`, or `<n>m` for another window, and `fetchedAt` is when that rollout
+last wrote them. With no rollout that records them, `usage` is null and
+`usageProblem` says so. `session-create` with `host` starts the
 session there. The web dashboard, the Mac app and the iPhone app show one
 host button in the new session form once a host is paired. It opens a short
 list of this machine and each paired host (hosts that are not connected are

@@ -26,7 +26,7 @@ const context = {
   labels: { codex: "Codex", claude: "Claude Code" },
   escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"),
   displayName: (session) => session.name, rawDisplayName: (session) => session.name,
-  presenceTone: () => "idle", presenceLabel: () => "Ready",
+  presenceTone: () => "idle", presenceLabel: () => "Ready", livePlan: () => null,
 };
 vm.runInNewContext(source.slice(start, end), context);
 const ids = (list) => list.map((session) => session.id).join(",");
@@ -38,6 +38,7 @@ assert(ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "Sh
 const { html, count } = vm.runInContext('renderProjects("")', context);
 assert.equal(count, 2);
 const widgetSection = html.slice(0, html.indexOf("</section>"));
+assert.match(widgetSection, /<span class="project-name">widget<\/span><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header counts its sessions");
 for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
 assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");
 assert.match(widgetSection, /Show 2 more/);
@@ -92,7 +93,7 @@ console.log("dashboard projects view tests passed");
 const metaStart = source.indexOf("function conversationMeta(");
 const metaEnd = source.indexOf("function surfaceIcon(", metaStart);
 assert(metaStart >= 0 && metaEnd > metaStart);
-const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, timeAgo: () => "now" };
+const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, workingLabel: () => "Working", timeAgo: () => "now" };
 vm.runInNewContext(source.slice(metaStart, metaEnd), metaContext);
 const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
 assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includes("config folder work · currently signed in as work@example.com"), "a session's config folder shows its current login");

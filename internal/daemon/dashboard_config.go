@@ -110,19 +110,10 @@ func validateCodexRecentHours(hours int) error {
 	return nil
 }
 
-func DashboardURL() (string, error) {
-	config, err := LoadDashboardConfig()
-	if err != nil {
-		return "", err
-	}
-	if !config.Enabled {
-		return "", fmt.Errorf("dashboard is disabled; run 'agenthail dashboard enable'")
-	}
-	token, err := dashboardToken()
-	if err != nil {
-		return "", err
-	}
-	return "http://" + config.Listen + "/?token=" + token, nil
+// DashboardBaseURL is the dashboard's address. It carries no token: a browser
+// signs in with a login link from 'agenthail dashboard'.
+func DashboardBaseURL(config DashboardConfig) string {
+	return "http://" + config.Listen + "/"
 }
 
 func dashboardToken() (string, error) {
@@ -133,12 +124,36 @@ func dashboardToken() (string, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("read dashboard token: %w", err)
 	}
+	return writeNewDashboardToken()
+}
+
+// RotateDashboardToken replaces the token the local CLI and the Mac app use.
+// The running daemon reads it at start, so it takes effect on restart.
+func RotateDashboardToken() error {
+	_, err := writeNewDashboardToken()
+	return err
+}
+
+func writeNewDashboardToken() (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("generate dashboard token: %w", err)
 	}
 	token := hex.EncodeToString(raw)
-	if err := os.WriteFile(DashboardTokenPath(), []byte(token), 0600); err != nil {
+	path := DashboardTokenPath()
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".dashboard.token-*")
+	if err != nil {
+		return "", fmt.Errorf("write dashboard token: %w", err)
+	}
+	defer os.Remove(temporary.Name())
+	if _, err := temporary.WriteString(token); err != nil {
+		temporary.Close()
+		return "", fmt.Errorf("write dashboard token: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return "", fmt.Errorf("write dashboard token: %w", err)
+	}
+	if err := os.Rename(temporary.Name(), path); err != nil {
 		return "", fmt.Errorf("write dashboard token: %w", err)
 	}
 	return token, nil

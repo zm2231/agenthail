@@ -38,7 +38,7 @@ func TestDashboardSessionColdConcurrentReadsShareOneJournalSeed(t *testing.T) {
 	d, _, fake, from, _ := daemonFixture(t)
 	adapter := &coldPageSurface{daemonSurface: fake, started: make(chan struct{}, 1)}
 	d.Surfaces = []surface.Surface{adapter}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	type result struct {
 		status int
 		body   string
@@ -49,7 +49,7 @@ func TestDashboardSessionColdConcurrentReadsShareOneJournalSeed(t *testing.T) {
 		go func() {
 			<-start
 			request := httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil)
-			request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+			request.AddCookie(browserCookie(t, d.Registry))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			results <- result{status: response.Code, body: response.Body.String()}
@@ -149,7 +149,7 @@ func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+from.ID+"&timeline=1&timelineBefore=2", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()

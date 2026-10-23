@@ -64,7 +64,7 @@ func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"sessionId":"`+r.URL.Query().Get("id")+`","model":"gpt-remote","goal":{"objective":"ship the remote picker","status":"active"}}`)
 	case "/api/v1/history":
 		f.gets = append(f.gets, r.URL.RequestURI())
-		_, _ = io.WriteString(w, `{"items":[{"id":4,"createdAt":"2026-10-19T10:00:00Z","kind":"delivered","target":"@builder","message":"synthetic history line","evidence":"delivered"}],"hasMore":false}`)
+		_, _ = io.WriteString(w, `{"items":[{"id":5,"createdAt":"2026-10-19T10:01:00Z","kind":"delivered","target":"@builder","message":"/compact","evidence":"delivered","operation":"compact"},{"id":4,"createdAt":"2026-10-19T10:00:00Z","kind":"delivered","target":"@builder","message":"synthetic history line","evidence":"delivered","operation":"message"}],"hasMore":false}`)
 	case "/api/v1/hosts":
 		body, _ := io.ReadAll(r.Body)
 		var request map[string]any
@@ -263,8 +263,14 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	if output := run("queue", "vps::@builder", "when", "idle"); !strings.Contains(output, "sent to vps::@builder") {
 		t.Fatalf("queue output=%q", output)
 	}
-	if output := run("history", "vps::@builder", "150"); !strings.Contains(output, "vps::@builder synthetic history line") {
+	if output := run("history", "vps::@builder", "150"); !strings.Contains(output, "vps::@builder synthetic history line") || !strings.Contains(output, "vps::@builder operation=compact /compact") {
 		t.Fatalf("history output=%q", output)
+	}
+	if _, err := app.Registry.QueueCompact("local-1"); err != nil {
+		t.Fatal(err)
+	}
+	if output := run("history"); !strings.Contains(output, "local-1 operation=compact ") {
+		t.Fatalf("local history output=%q", output)
 	}
 	run("thread", "stop", "vps::@builder")
 	run("thread", "resume", "vps::@builder")

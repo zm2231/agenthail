@@ -35,7 +35,12 @@ type Device struct {
 	LastSeenAt  string `json:"lastSeenAt,omitempty"`
 	RevokedAt   string `json:"revokedAt,omitempty"`
 	PushEnabled bool   `json:"pushEnabled"`
+	// Browser marks a browser signed in with a dashboard login link. It is
+	// forgotten after BrowserIdleLimit without use; native devices never are.
+	Browser bool `json:"browser"`
 }
+
+const BrowserIdleLimit = 30 * 24 * time.Hour
 
 type DevicePairing struct {
 	ID        string    `json:"id"`
@@ -80,6 +85,9 @@ func (r *Registry) CreateDevicePairing(name string, scopes []string, ttl time.Du
 	if err := r.pruneDevicePairings(time.Now().UTC()); err != nil {
 		return DevicePairing{}, fmt.Errorf("prune device pairings: %w", err)
 	}
+	if err := r.pruneIdleBrowsers(time.Now().UTC()); err != nil {
+		return DevicePairing{}, fmt.Errorf("prune idle browsers: %w", err)
+	}
 	secret, err := randomDeviceSecret(32)
 	if err != nil {
 		return DevicePairing{}, err
@@ -100,7 +108,21 @@ func (r *Registry) pruneDevicePairings(now time.Time) error {
 	return err
 }
 
+// BrowserScopes are the scopes of a dashboard login link: a browser signed in
+// with one can do everything the dashboard offers.
+var BrowserScopes = []string{"control", "read", "settings"}
+
 func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, string, error) {
+	return r.completeDevicePairing(secret, name, hostID, false)
+}
+
+// CompleteBrowserPairing redeems a dashboard login link for a browser token. It
+// refuses pairings made for anything else, such as another host.
+func (r *Registry) CompleteBrowserPairing(secret string) (Device, string, error) {
+	return r.completeDevicePairing(secret, "", "", true)
+}
+
+func (r *Registry) completeDevicePairing(secret, name, hostID string, browser bool) (Device, string, error) {
 	secret = strings.TrimSpace(secret)
 	if secret == "" {
 		return Device{}, "", ErrPairingInvalid
@@ -117,6 +139,9 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	}
 	if err != nil {
 		return Device{}, "", err
+	}
+	if browser && storedScopes != strings.Join(BrowserScopes, ",") {
+		return Device{}, "", ErrPairingInvalid
 	}
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
 	if err != nil || !time.Now().UTC().Before(expires) {
@@ -144,7 +169,7 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	}
 	token := deviceTokenPrefix + tokenSecret
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now}
+	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now, Browser: browser}
 	result, err := tx.Exec(`UPDATE device_pairings SET consumed_at=?, device_id=? WHERE id=? AND consumed_at=''`, now, device.ID, pairingID)
 	if err != nil {
 		return Device{}, "", err
@@ -152,7 +177,7 @@ func (r *Registry) CompleteDevicePairing(secret, name, hostID string) (Device, s
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return Device{}, "", ErrPairingInvalid
 	}
-	if _, err := tx.Exec(`INSERT INTO paired_devices (id,name,token_hash,scopes,host_id,created_at) VALUES (?,?,?,?,?,?)`, device.ID, device.Name, hashDeviceSecret(token), strings.Join(scopes, ","), device.HostID, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO paired_devices (id,name,token_hash,scopes,host_id,created_at,browser) VALUES (?,?,?,?,?,?,?)`, device.ID, device.Name, hashDeviceSecret(token), strings.Join(scopes, ","), device.HostID, now, browser); err != nil {
 		return Device{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -198,18 +223,21 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	}
 	var device Device
 	var scopes string
-	err := r.read.QueryRow(`SELECT id,name,scopes,host_id,created_at,last_seen_at,revoked_at FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt)
+	err := r.read.QueryRow(`SELECT id,name,scopes,host_id,created_at,last_seen_at,revoked_at,browser FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser)
 	if errors.Is(err, sql.ErrNoRows) || device.RevokedAt != "" {
 		return Device{}, ErrDeviceDenied
 	}
 	if err != nil {
 		return Device{}, err
 	}
+	now := time.Now().UTC()
+	if device.Browser && device.idleSince(now) >= BrowserIdleLimit {
+		return Device{}, ErrDeviceDenied
+	}
 	device.Scopes = splitDeviceScopes(scopes)
 	if requiredScope != "" && !deviceHasScope(device.Scopes, requiredScope) {
 		return Device{}, ErrDeviceDenied
 	}
-	now := time.Now().UTC()
 	// Each authenticated request would otherwise be a write; last-seen is
 	// shown to the minute, so a recent stamp is left as is.
 	if lastSeen, err := time.Parse(time.RFC3339Nano, device.LastSeenAt); err == nil && now.Sub(lastSeen) < deviceLastSeenResolution {
@@ -299,8 +327,31 @@ func (s *deviceSeen) keep(failed map[string]string) {
 	}
 }
 
+func (device Device) idleSince(now time.Time) time.Duration {
+	last := device.LastSeenAt
+	if last == "" {
+		last = device.CreatedAt
+	}
+	seen, err := time.Parse(time.RFC3339Nano, last)
+	if err != nil {
+		return 0
+	}
+	return now.Sub(seen)
+}
+
+// pruneIdleBrowsers forgets browsers unused for BrowserIdleLimit. Revoking one
+// stays available until then from the devices list.
+func (r *Registry) pruneIdleBrowsers(now time.Time) error {
+	cutoff := now.Add(-BrowserIdleLimit).Format(time.RFC3339Nano)
+	_, err := r.db.Exec(`DELETE FROM paired_devices WHERE browser=1 AND datetime(CASE WHEN last_seen_at<>'' THEN last_seen_at ELSE created_at END)<datetime(?)`, cutoff)
+	return err
+}
+
 func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
-	query := `SELECT d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at,
+	if err := r.pruneIdleBrowsers(time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("prune idle browsers: %w", err)
+	}
+	query := `SELECT d.id,d.name,d.scopes,d.host_id,d.created_at,d.last_seen_at,d.revoked_at,d.browser,
 		EXISTS(SELECT 1 FROM device_push_targets p WHERE p.device_id=d.id AND p.enabled=1)
 		FROM paired_devices d`
 	if !includeRevoked {
@@ -317,7 +368,7 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 		var device Device
 		var scopes string
 		var pushEnabled int
-		if err := rows.Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &pushEnabled); err != nil {
+		if err := rows.Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser, &pushEnabled); err != nil {
 			return nil, err
 		}
 		device.Scopes = splitDeviceScopes(scopes)

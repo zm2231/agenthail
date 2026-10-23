@@ -236,6 +236,72 @@ say. The limit outranks a wait read from the process record, which is stale
 once the turn has ended. The clients list the session under Needs you with
 its reset time, and the transcript notice names it too.
 
+## Activity of a working turn
+
+A working session also carries `activity{busySince, lastProgressAt,
+tool{name, startedAt}, noProcess}` on the session and the dashboard projection,
+which federates it to paired hosts. It never changes the session's status and
+nothing acts on it; it lets a client say how long a working turn has been
+quiet.
+
+`busySince` is when the open turn started. `lastProgressAt` is its newest
+transcript record, or the session record's `statusUpdatedAt` when that is
+later. `tool` is the turn's newest tool call without a result yet, so a long
+build reads as running Bash since it started rather than as stuck. A session
+record that says idle clears `activity`, as does a wait on the person.
+`noProcess` marks a turn the transcript leaves open when there is neither a
+pid nor a live session record for the conversation, so nothing is running it.
+
+The status pass republishes a row for its activity only when the turn, the
+tool or `noProcess` changed, or `lastProgressAt` moved by a minute or more
+(`surface.ActivityProgressStep`). After ten minutes without progress the Mac,
+iOS and web clients add `no activity for 12 min · running Bash since 10:02`
+(or `· no Claude process`) to Working, as plain secondary text.
+
+A Codex session carries the same `activity`, read from its rollout by the
+discovery and status passes alike. `busySince` is the open turn's
+`task_started` record, `lastProgressAt` its newest record (or the rollout's
+last write when records carry no timestamp), and `tool` its newest
+`function_call` or `custom_tool_call` without a matching output. The rollout
+alone counts a turn as busy only within 15 minutes of its last write; past
+that a session the runtime still reports busy keeps the turn's activity, so a
+hung Codex turn reads as quiet the same way. `noProcess` is never set for
+Codex: a turn the runtime does not report running is not working.
+
+## Task progress
+
+A session whose agent keeps a task list carries `plan{done, total, current}` on
+the session and the dashboard projection. `current` is the step in progress,
+as its active form when the agent gave one. Older clients ignore the field and
+clients treat its absence as no plan.
+
+Claude keeps the list itself in `<config root>/tasks/<list id>/<n>.json`, one
+file per task. The list id is `CLAUDE_CODE_TASK_LIST_ID`, else the agent
+team's name, else the session id, with anything outside `[a-zA-Z0-9_-]`
+replaced by `-`. The transcript only shows the calls: a `TaskCreate` result
+names the task's id and subject, a `TaskUpdate` result its id. The daemon
+reads the directory named for the session id, and only on an observation that
+follows a new task result, never on a scan that brings none. It counts the
+list as the session's own only when it agrees with every task the transcript
+shows the session creating: each one it still has is there under the same
+subject (following any rename by `TaskUpdate`), each one it deleted is gone,
+and it created at least one. A list kept under another id, as with
+`CLAUDE_CODE_TASK_LIST_ID` or a team, fails that check and the session shows
+no plan rather than someone else's.
+A `TodoWrite` call carries the whole list and sets the plan directly.
+
+Codex sends its plan with `update_plan`, as a function call or, in code mode,
+as `tools.update_plan({plan: [...]})` inside an `exec` call. The daemon reads
+the newest one from the rollout's last 4 MB on first sight and then only what
+was appended. A plan built from a variable cannot be read, and shows none
+rather than the previous one. A complete listing forgets the plans of rollouts it no
+longer reads.
+
+The status pass republishes a row for its plan only when `done`, `total` or
+`current` changed. The plan stays on the row once the session closes; clients
+show a `3/5` badge only while the session is open, not offline, and has steps
+left, so a session that stopped part way does not keep a badge.
+
 ## Background tasks
 
 A turn can end with work still running: a Bash call run in the background, an
@@ -374,13 +440,26 @@ for them. The model and permission mode change through the host instead.
 beside the `agenthail` binary as `claude-host/`. The SDK's bundled Claude
 binaries are optional dependencies and are omitted; the remaining dependencies
 are plain JavaScript, so one tree serves every platform, and the script fails
-if a native module appears. The Mac package runs the host with its bundled
-Node. Release archives and `install.sh` installs use `node` from `PATH`.
+if a native module appears. Every install ships Node 22 as
+`runtime/node/bin/node` beside `claude-host/`, and the daemon runs the host and
+the cookie bridge with that file only, never a `node` from `PATH`.
+`scripts/fetch-node.sh` pins the version and checksums and stages it for the
+Mac package, the release archives and `install.sh`; run it with no arguments
+in a checkout for source builds and tests. It keeps the verified archive in
+`AGENTHAIL_BUILD_CACHE` (default `~/Library/Caches/agenthail-build` on a Mac,
+`~/.cache/agenthail-build` elsewhere), downloads from
+`AGENTHAIL_NODE_DIST_URL` (default `https://nodejs.org/dist`) into a fresh file
+for each of up to four attempts, and keeps a download only when its SHA-256
+matches the pin; a failed attempt prints the checksum it got.
+`scripts/test-fetch-node.sh` serves it a dropped transfer and corrupt bodies
+through a cache path with a quote, a dollar and a backslash.
 `AGENTHAIL_CLAUDE_HOST` overrides the script path.
 
 ## Tests
 
 ```bash
+scripts/fetch-node.sh
+scripts/test-fetch-node.sh
 npm ci --prefix claude-host --omit=optional
 npm test --prefix claude-host
 go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon/ -run 'Host|Ensure|Subscribe|Client' -race

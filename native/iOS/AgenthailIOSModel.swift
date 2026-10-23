@@ -14,6 +14,12 @@ struct PairedHostStatus: Identifiable, Equatable {
     let peers: [HostHealth]
     let notifications: String
     var person: PersonState? = nil
+    var build: AgenthailBuild? = nil
+}
+
+struct ListedProject: Equatable {
+    let state: ProjectState
+    let hostID: String
 }
 
 @MainActor
@@ -35,6 +41,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
     @Published private(set) var hosts: [PairedHostStatus] = []
     @Published private(set) var creationHosts: [CreationHost] = []
+    @Published private(set) var projects: [String: ListedProject] = [:]
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     @Published var selectedDetail: SessionDetail?
     @Published var sessionRequests: SessionRequests?
@@ -215,8 +222,16 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
                              surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
                              peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
-                             person: connection.snapshot?.person)
+                             person: connection.snapshot?.person, build: connection.build)
         }
+        var listed: [String: ListedProject] = [:]
+        for connection in ordered {
+            for project in connection.snapshot?.projects ?? [] {
+                let id = HostCatalog.qualify(connection.id, project.id)
+                if listed[id] == nil { listed[id] = ListedProject(state: project, hostID: connection.id) }
+            }
+        }
+        if projects != listed { projects = listed }
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
         }
@@ -360,7 +375,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         case "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
-        case "held": return "Delivery held. Review it in Inbox before retrying."
+        case "held": return "Held by the receiver."
         case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
@@ -548,6 +563,104 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         return rekeys.resolve(qualified.flatMap { known.contains($0) ? $0 : nil } ?? item.sessionId)
     }
 
+    func addProject(path: String, title: String?, host: String?) async -> ProjectChange {
+        await projectChange(refreshing: host) {
+            let (api, target) = try self.reach(host)
+            let (project, created) = try await api.addProject(path: path, title: title, host: target.remote)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
+    }
+
+    func addFolder(of session: SessionState) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            let (connection, _) = try self.resolveServer(session.id)
+            let owner = HostCatalog.owner(of: session.id)
+            let (project, created) = try await connection.api.addProject(path: session.cwd ?? "", host: owner == connection.id ? nil : owner)
+            let name = project?.displayName ?? "This folder"
+            return created ? "Added project \(name)." : "\(name) is already a project."
+        }
+    }
+
+    func makeLead(_ sessionID: String, replace: Bool) async -> ProjectChange {
+        await projectChange(refreshing: nil) {
+            let (api, route) = try self.resolve(sessionID)
+            let lead = try await api.makeLead(sessionID: route.sessionID, replace: replace)
+            return "@\(lead.name) leads \(lead.projectRoot)."
+        }
+    }
+
+    func renameProject(_ project: ListedProject, to title: String) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).renameProject(project.state.id, title: title)
+            return "Renamed to \(title)."
+        }
+    }
+
+    func removeProject(_ projectID: String, of project: ListedProject) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).projectAction("project-remove", projectID: projectID)
+            return "Project removed."
+        }
+    }
+
+    func clearLead(of project: ListedProject) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            try await self.listingAPI(project).clearLead(projectID: project.state.id)
+            return "\(project.state.displayName) has no lead now."
+        }
+    }
+
+    func startLead(of project: ListedProject, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool) async -> ProjectChange {
+        await projectChange(refreshing: project.hostID) {
+            let lead = try await self.listingAPI(project).startLead(surface: surface, folder: checkout.rootPath, host: ProjectMenu.host(of: checkout), name: name, replace: replace)
+            return "@\(lead.name) leads \(project.state.displayName); its first message starts it."
+        }
+    }
+
+    func listed(_ state: ProjectState) -> ListedProject? {
+        projects.values.first { $0.state == state }
+    }
+
+    func canAddFolder(_ session: SessionState) -> Bool {
+        ProjectMenu.canAddFolder(session) && catalog.route(for: session.id) != nil
+    }
+
+    func canMakeLead(_ session: SessionState) -> Bool {
+        guard ProjectMenu.canMakeLead(session, projects: []), catalog.route(for: session.id) != nil else { return false }
+        return !projects.values.contains { listed in
+            listed.state.leads.contains { lead in
+                guard let sessionID = lead.sessionId else { return false }
+                let owner = lead.host.map { $0.state == "local" ? listed.hostID : $0.id } ?? listed.hostID
+                return HostCatalog.qualify(owner, sessionID) == session.id
+            }
+        }
+    }
+
+    func settle(_ change: ProjectChange) {
+        switch change {
+        case .done: operationError = nil
+        case .confirmReplace(let message), .failed(let message): operationError = message
+        }
+    }
+
+    func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
+        ProjectMenu.host(of: checkout) ?? project.hostID
+    }
+
+    private func listingAPI(_ project: ListedProject) throws -> AgenthailAPI {
+        guard let connection = connections[project.hostID], connection.reachable else {
+            throw AgenthailAPIError.unavailable("\(connections[project.hostID]?.name ?? "That computer") can't be reached.")
+        }
+        return connection.api
+    }
+
+    private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
+        let change = await ProjectChange.run(body)
+        if let hostID, connections[hostID] != nil { await refresh(host: hostID) } else { _ = await refresh(fresh: true) }
+        return change
+    }
+
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
         let (api, target) = try reach(host)
         return try await api.sessionOptions(host: target.remote)
@@ -584,21 +697,33 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             creationRequestKey = UUID().uuidString
         }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey)
-            guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey, failureReceipts: true)
+            if receipt.outcomeUnknown && receipt.id == nil {
+                creationError = SessionCreationReceipt.unknownOutcomeMessage
+                return false
+            }
+            if !receipt.ok && !receipt.outcomeUnknown && receipt.accepted != true {
+                creationError = receipt.error ?? "The session didn't start."
+                // The daemon replays a stored failure under the same key, so a retry needs a new one.
+                if receipt.id == nil { creationRequestIdentity = nil; creationRequestKey = nil }
+                return false
+            }
             if receipt.status == "submitted" && receipt.id == nil {
-                creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
+                creationWarning = receipt.warning ?? "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
             if let created = receipt.id, !created.isEmpty {
                 let id = HostCatalog.qualify(target.remote ?? target.hostID, created)
                 let launched = receipt.launcher ?? launcher?.id ?? surface
-                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.outcomeUnknown ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
             return true
+        } catch AgenthailAPIError.outcomeUnknown {
+            creationError = SessionCreationReceipt.unknownOutcomeMessage
+            return false
         } catch {
             if case AgenthailAPIError.unavailable(let detail) = error, detail == "Terminal sessions do not support advanced launch settings." {
                 creationError = detail
@@ -924,7 +1049,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
             case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
             case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
-            case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
+            case "held": deliveryStatus[sessionID] = "Held by the receiver."
             case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
             default: continue
             }
@@ -1046,11 +1171,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         attachmentProblem = (problem ?? added.problem)?.message
     }
 
-    func paste(_ providers: [NSItemProvider]) async {
-        guard let pasted = await ComposerAttachments.pasted(from: providers) else {
-            addAttachments([], problem: .unreadable("The pasted image"))
-            return
-        }
+    func paste(_ pasted: PastedAttachments) {
         addAttachments(pasted.attachments, problem: pasted.problem)
     }
 
@@ -1175,16 +1296,40 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func setProjectArchived(_ projectID: String, _ archived: Bool) async {
+        let action = archived ? "project-archive" : "project-unarchive"
         do {
-            guard let owner = HostCatalog.owner(of: projectID) else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+            guard let owner = HostCatalog.owner(of: projectID) else {
+                try await setRepositoryArchived(projectID, action: action)
+                operationError = nil
+                return
+            }
             let (api, target) = try reach(owner)
             let id = target.remote == nil ? String(projectID.dropFirst(owner.count + HostCatalog.separator.count)) : projectID
-            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: id)
+            try await api.projectAction(action, projectID: id)
             operationError = nil
             await refresh(host: target.hostID)
         } catch {
             operationError = error.localizedDescription
         }
+    }
+
+    // A repository project has one id on every computer; each computer that
+    // serves one of its sessions archives its own checkout.
+    private func setRepositoryArchived(_ projectID: String, action: String) async throws {
+        let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
+        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.reachable == true }
+        guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        var failures: [String] = []
+        for hostID in reachable {
+            guard let connection = connections[hostID] else { continue }
+            do {
+                try await connection.api.projectAction(action, projectID: projectID)
+            } catch {
+                failures.append("\(connection.name): \(AgenthailAPIError.userMessage(error))")
+            }
+            await refresh(host: hostID)
+        }
+        if !failures.isEmpty { throw AgenthailAPIError.unavailable(failures.joined(separator: "\n")) }
     }
 
     func removeHost(_ hostID: String) {

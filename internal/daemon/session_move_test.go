@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
@@ -54,7 +55,7 @@ func moveNodeOn(t *testing.T, host *claudehosttest.Fixture) *moveNode {
 	allowLoopbackHosts(t)
 	host.Start(t)
 	claude := surfaces.NewClaude(nil, host.Home)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

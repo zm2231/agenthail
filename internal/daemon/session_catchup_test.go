@@ -48,7 +48,7 @@ type pageExchange struct {
 func readDashboardExchanges(t *testing.T, handler http.Handler, sessionID, query string) []pageExchange {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/session?id="+sessionID+"&timeline=1"+query, nil)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	addBrowserCookie(handler, request)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -104,7 +104,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 || got[0].User != "first question" || got[0].Assistant != "first answer" {
 		t.Fatalf("first page exchanges=%+v", got)
@@ -159,7 +159,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 		t.Fatal(err)
 	}
 	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 || got[0].Assistant != "READY" {
 		t.Fatalf("first page exchanges=%+v", got)
 	}

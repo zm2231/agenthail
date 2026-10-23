@@ -31,6 +31,10 @@ SOURCE_DATA="$SOURCE_HOME/data"
 SOURCE_GOCACHE="$(go env GOCACHE)"
 SOURCE_GO_BIN="$(dirname "$(command -v go)")"
 SOURCE_GOMODCACHE="$(go env GOMODCACHE)"
+node_dist="$("$ROOT/scripts/fetch-node.sh" --dist "$(uname -s | tr '[:upper:]' '[:lower:]')" "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')")"
+export AGENTHAIL_BUILD_CACHE="$TMP/build cache odd\" dollar\$ back\\slash"
+mkdir -p "$AGENTHAIL_BUILD_CACHE"
+cp "$node_dist.tar.gz" "$AGENTHAIL_BUILD_CACHE/"
 
 cleanup() {
 	[ -z "$OTHER_HOME_DAEMON" ] || kill "$OTHER_HOME_DAEMON" 2>/dev/null || true
@@ -288,10 +292,10 @@ HOME="$SUPERVISED_HOME" "$FAKE_BIN/launchctl" bootout "gui/$UID/com.agenthail.da
 sleep 600 &
 OTHER_HOME_DAEMON="$!"
 echo "$OTHER_HOME_DAEMON" >"$SUPERVISED_HOME/.fake-agenthail-launchd-last-pid"
-echo "/Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+echo "/Users/demo/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
 touch "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
 install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_1" >"$TMP/other-home-service.log"
-grep -Fq 'leaving the supervised daemon loaded from /Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
+grep -Fq 'leaving the supervised daemon loaded from /Users/demo/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
 if grep -Fq 'supervised daemon for upgrade' "$TMP/other-home-service.log" || grep -Fq 'reinstalling supervised daemon' "$TMP/other-home-service.log"; then
 	echo "error: install with another HOME's launchd service loaded replaced that service" >&2
 	exit 1

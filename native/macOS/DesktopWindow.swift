@@ -6,21 +6,30 @@ import UniformTypeIdentifiers
 struct DesktopWindow: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    private let snapshot: SnapshotProbe?
 
-    init(model: AgenthailModel) {
+    /// A snapshot draws an offscreen copy that leaves the person's window, focus and saved layout alone.
+    init(model: AgenthailModel, snapshot: SnapshotProbe? = nil) {
         self.model = model
-        self.pane = model.mainPane
+        self.pane = snapshot?.pane ?? model.mainPane
+        self.snapshot = snapshot
     }
 
     var body: some View {
         WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
             splitView
         }
+        .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
         .environmentObject(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
+        .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
+        .alert(pane.projectConfirmation?.message ?? "", isPresented: Binding(get: { pane.projectConfirmation != nil }, set: { if !$0 { pane.projectConfirmation = nil } }), presenting: pane.projectConfirmation) { confirmation in
+            Button(confirmation.action, role: .destructive) { pane.confirm(confirmation) }
+            Button("Cancel", role: .cancel) {}
+        }
         .overlay(alignment: .top) {
             if model.paletteVisible {
                 ZStack(alignment: .top) {
@@ -39,29 +48,67 @@ struct DesktopWindow: View {
             }
         }
         .focusedSceneObject(pane)
-        .onAppear { model.windowAppeared() }
-        .onDisappear { model.windowDisappeared() }
+        .background { if snapshot == nil { MainWindowReader(model: model) } }
+        .onAppear { if snapshot == nil { model.windowAppeared() } }
+        .onDisappear { if snapshot == nil { model.windowDisappeared() } }
     }
 
-    private var splitView: some View {
+    @ViewBuilder private var splitView: some View {
+        // The sidebar collapses to a column of no width rather than through
+        // the split view's visibility: hiding and showing a column there
+        // resizes the window to keep the conversation's width.
+        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
         NavigationSplitView {
-            SessionSidebar(model: model, pane: pane)
-                .belowWindowChrome()
-                .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
+            Group {
+                if pane.sidebarDocks {
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                } else {
+                    Color.clear
+                }
+            }
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
+                .hidesSplitDividers()
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
-                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
-                .inspector(isPresented: Binding(get: { pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
+                .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
+                .overlay(alignment: .trailing) {
+                    if !pane.inspectorDocks && pane.inspectorOverlay && pane.displayedSession != nil {
+                        SessionInspector(model: model, pane: pane)
+                            .frame(width: DesktopColumns.inspector.ideal)
+                            .belowWindowChrome()
+                            .ignoresSafeArea(.container, edges: .top)
+                            .shadow(color: .black.opacity(0.18), radius: 16, x: -4)
+                            .transition(.move(edge: .trailing))
+                    }
+                }
+                .inspector(isPresented: Binding(get: { pane.inspectorDocks && pane.inspectorVisible && pane.displayedSession != nil }, set: { if pane.inspectorDocks && pane.displayedSession != nil { pane.inspectorVisible = $0 } })) {
                     SessionInspector(model: model, pane: pane)
                         .belowWindowChrome()
                         .ignoresSafeArea(.container, edges: .top)
-                        .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
+                        .inspectorColumnWidth(min: DesktopColumns.inspector.min, ideal: DesktopColumns.inspector.ideal, max: DesktopColumns.inspector.max)
                 }
         }
+        .overlay(alignment: .leading) {
+            if !pane.sidebarDocks && pane.sidebarOverlay {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { pane.closeSidebarOverlay() }
+                    SessionSidebar(model: model, pane: pane)
+                        .belowWindowChrome()
+                        .frame(width: DesktopColumns.sidebar.ideal)
+                        .shadow(color: .black.opacity(0.18), radius: 16, x: 4)
+                        .transition(.move(edge: .leading))
+                }
+            }
+        }
+        .onChange(of: pane.selectedSessionID) { pane.closeSidebarOverlay() }
+        .onChange(of: pane.newSession != nil) { pane.closeSidebarOverlay() }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pane.fitWindow(width: $0) }
     }
 }
 
@@ -79,6 +126,14 @@ private struct WindowChromeLayout<Content: View>: View {
                 .overlay(alignment: .top) {
                     if tabs {
                         TitleBarStrip(model: model, pane: pane, interface: interface)
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if !tabs && !pane.sidebarDocks {
+                        SidebarToggle(pane: pane)
+                            .frame(height: ConversationHeader.height)
+                            .padding(.leading, TitleBarStrip.buttonsWidth)
                             .ignoresSafeArea(.container, edges: .top)
                     }
                 }
@@ -101,84 +156,21 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
-    @FocusState private var searchFocused: Bool
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
-            HStack(spacing: DesktopSpace.m) {
-                ForEach(SessionFilter.allCases) { filter in
-                    Button {
-                        model.sessionFilter = filter
-                    } label: {
-                        HStack(spacing: DesktopSpace.xs) {
-                            Text(filter.rawValue)
-                                .fontWeight(model.sessionFilter == filter ? .semibold : .regular)
-                                .foregroundStyle(model.sessionFilter == filter ? DesktopPalette.text : DesktopPalette.text2)
-                            Text("\(tree.counts[filter] ?? 0)")
-                                .font(.system(size: DesktopType.caption))
-                                .foregroundStyle(DesktopPalette.text2)
-                        }
-                        .lineLimit(1)
-                        .fixedSize()
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .help(shortcuts.help("\(SessionFacts.filterSummary(filter, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", filter.command))
-                }
-                Spacer()
-                SessionRefinementMenu(model: model)
-                Button {
-                    model.openNewSession()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.text2)
-                .help(shortcuts.help("New session", .newSession))
-                .accessibilityLabel("New session")
-            }
-            .font(.system(size: DesktopType.body))
-            .padding(.horizontal, DesktopSpace.l)
-            .padding(.top, DesktopSpace.xs)
-            .padding(.bottom, DesktopSpace.s)
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: DesktopType.caption))
-                    .foregroundStyle(DesktopPalette.text2)
-                TextField("Search sessions", text: Binding(get: { model.searchQuery }, set: { model.search($0) }))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: DesktopType.body))
-                    .focused($searchFocused)
-                    .onKeyPress(.escape) {
-                        model.search("")
-                        searchFocused = false
-                        return .handled
-                    }
-                if !model.searchQuery.isEmpty {
-                    Button {
-                        model.search("")
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(DesktopPalette.muted)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(DesktopPalette.fill, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            .padding(.horizontal, DesktopSpace.m)
-            .padding(.bottom, 10)
-            .background {
-                Button("") { searchFocused = true }
-                    .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
-                    .hidden()
-            }
+            SessionSidebarHeader(
+                model: model,
+                counts: tree.counts,
+                help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
+                newSessionHelp: shortcuts.help("New session", .newSession),
+                findShortcut: shortcuts.keyboardShortcut(.findSession),
+                addProject: { pane.projectSheet = .add(host: nil, folder: "") }
+            )
             SessionRefinementBar(model: model)
+                .scrimText("sidebar-refinement")
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -198,10 +190,14 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.listedSessionCount)
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
+                                        if let state = model.projects.first(where: { $0.id == identity.id }) {
+                                            Divider()
+                                            ProjectMenuButtons(model: model, pane: pane, project: state)
+                                        }
                                     }
                                 }
                             ForEach(shown.checkouts) { checkout in
@@ -224,7 +220,15 @@ struct SessionSidebar: View {
                             }
                         }
                     }
-                    if tree.projects.isEmpty {
+                    ForEach(projectsWithoutSessions(tree)) { project in
+                        ProjectHeaderView(name: project.displayName, host: project.checkouts.contains { $0.host.state == "local" } ? nil : project.checkouts.first.map { ProjectMenu.shortHostName($0.host.name) }, branch: nil, dirty: false, archived: false)
+                            .contextMenu {
+                                Button("Archive Project") { model.setProjectArchived(project.id, true) }
+                                Divider()
+                                ProjectMenuButtons(model: model, pane: pane, project: project)
+                            }
+                    }
+                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
@@ -234,9 +238,11 @@ struct SessionSidebar: View {
                 }
                 .padding(.horizontal, DesktopSpace.s)
                 .padding(.bottom, DesktopSpace.l)
+                .scrimText("sidebar-rows")
             }
 
             ConnectionFooter(model: model)
+                .scrimText("sidebar-footer")
         }
         .glassPane("sidebar", .sidebar, fallback: DesktopPalette.side)
         .background {
@@ -375,6 +381,12 @@ extension SessionSidebar {
         }
     }
 
+    private func projectsWithoutSessions(_ tree: SessionTree) -> [ProjectState] {
+        guard model.sessionFilter == .recent || model.sessionFilter == .all, !model.sessionRefinement.isActive else { return [] }
+        let listed = Set(tree.projects.compactMap(\.identity?.id))
+        return model.projects.filter { $0.archived != true && !listed.contains($0.id) }
+    }
+
     private func step(_ order: [String], by offset: Int) {
         guard !order.isEmpty else { return }
         let current = pane.selectedSessionID.flatMap { order.firstIndex(of: $0) }
@@ -410,8 +422,11 @@ extension SessionSidebar {
             }
             Divider()
             Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
-            if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
-                Button("Add Folder as Project") { model.addProject(path: cwd) }
+            if ProjectMenu.canAddFolder(session), let cwd = session.cwd {
+                Button("Add Folder as Project") { pane.changeProject { _ in await model.addProject(path: cwd, host: ProjectMenu.host(of: session)) } }
+            }
+            if ProjectMenu.canMakeLead(session, projects: model.projects) {
+                Button("Make Project Lead") { pane.changeProject { await model.makeLead(session.id, replace: $0) } }
             }
         }
     }
@@ -436,6 +451,7 @@ struct ProjectHeaderView: View {
     var branch: String? = nil
     var dirty = false
     var archived = false
+    var sessionCount = 0
 
     var body: some View {
         HStack(spacing: 7) {
@@ -462,6 +478,13 @@ struct ProjectHeaderView: View {
             if dirty {
                 Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
+            }
+            if sessionCount > 0 {
+                Spacer(minLength: 4)
+                Text("\(sessionCount)")
+                    .font(.system(size: DesktopType.caption).monospacedDigit())
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityLabel(SessionTree.sessionCountLabel(sessionCount))
             }
         }
         .padding(.horizontal, DesktopSpace.s)
@@ -535,6 +558,16 @@ struct SessionRowView: View {
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+                    TimelineView(.everyMinute) { context in
+                        if let note = activity.quietNote(now: context.date) {
+                            Text(note)
+                                .font(.system(size: DesktopType.meta))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
                 }
             }
             if let host = session.shortRemoteHostName {
@@ -551,6 +584,17 @@ struct SessionRowView: View {
                 .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.working : DesktopPalette.text2)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
+            }
+            if let plan = session.livePlan {
+                HStack(spacing: 3) {
+                    Image(systemName: "checklist")
+                    Text(plan.badge)
+                }
+                .font(.system(size: DesktopType.caption).monospacedDigit())
+                .foregroundStyle(DesktopPalette.text2)
+                .help(plan.detail)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(plan.spokenLabel)
             }
             if session.queueCount > 0 {
                 Text(SessionFacts.queuedLabel(session.queueCount))
@@ -634,6 +678,12 @@ struct ConnectionFooter: View {
                 .accessibilityHidden(true)
             Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)
             Spacer()
+            if model.isConnected, let notice = model.daemonBuildNotice {
+                Button("Restart for this version") { model.restartDaemon() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.failed)
+                    .help(notice)
+            }
             if !model.isConnected && !model.reconnecting && !model.daemonSlow {
                 Button("Start") { model.restartDaemon() }
                     .buttonStyle(.plain)
@@ -678,6 +728,7 @@ struct ConversationPane: View {
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     @EnvironmentObject private var voice: VoiceController
+    @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -685,11 +736,12 @@ struct ConversationPane: View {
             TranscriptView(model: model, pane: pane, session: session)
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.modelLabel, context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
                     })
+                    .scrimText("conversation-header")
                     .backdropSurface(DesktopPalette.window, paneID: "content")
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -702,6 +754,7 @@ struct ConversationPane: View {
                                                   open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil,
                                                   restart: { model.stopAndResume(session.id) })
                                     .id(waiting.id)
+                                    .scrimText("dock-wait")
                                     .frame(maxWidth: 720)
                                     .padding(.horizontal, DesktopSpace.l)
                                     .padding(.top, DesktopSpace.s)
@@ -710,6 +763,7 @@ struct ConversationPane: View {
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
                                 .id(request.id)
+                                .scrimText("dock-request")
                                 .frame(maxWidth: 720)
                                 .padding(.horizontal, DesktopSpace.l)
                                 .padding(.top, DesktopSpace.s)
@@ -727,7 +781,6 @@ struct ConversationPane: View {
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
-                .glassPane("content", .content, fallback: DesktopPalette.window)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -797,6 +850,8 @@ struct ConversationHeader: View {
     var onFocusTerminal: () -> Void = {}
     var onCall: (() -> Void)?
 
+    static let height: CGFloat = 52
+
     var body: some View {
         HStack(spacing: DesktopSpace.m) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -812,7 +867,9 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.waitingPlace?.label ?? (session.isWorking ? "Working" : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                TimelineView(.everyMinute) { context in
+                    Text(session.waitingPlace?.label ?? (session.isWorking ? session.workingLabel(now: context.date) : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                }
             }
             .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
@@ -855,7 +912,7 @@ struct ConversationHeader: View {
         }
         .padding(.leading, leadingInset)
         .padding(.trailing, 14)
-        .frame(height: 52)
+        .frame(height: Self.height)
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
     }
 }
@@ -867,6 +924,8 @@ struct TranscriptView: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var underfilled = false
+    @State private var textHeight: CGFloat = 0
+    private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
@@ -906,7 +965,9 @@ struct TranscriptView: View {
                 if session.isWorking {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
-                        Text(session.waitingPlace?.label ?? "Working")
+                        TimelineView(.everyMinute) { context in
+                            Text(session.waitingPlace?.label ?? session.workingLabel(now: context.date))
+                        }
                     }
                     .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
@@ -922,9 +983,21 @@ struct TranscriptView: View {
             .frame(maxWidth: 700)
             .padding(.horizontal, DesktopSpace.xxl)
             .padding(.top, 28)
-            .padding(.bottom, 12)
+            .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
+        }
+        .background {
+            Color.clear
+                .frame(maxWidth: 700)
+                .frame(height: textHeight)
+                .scrimText("transcript-column")
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            min(geometry.contentSize.height - Self.bottomPadding - max(geometry.contentOffset.y, 0), geometry.containerSize.height).rounded()
+        } action: { _, height in
+            textHeight = max(height, 0)
         }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -1438,6 +1511,7 @@ struct ComposerView: View {
                         ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, DesktopSpace.s) }
                     }
                 }
+                .scrimText("dock-attention")
             }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
@@ -1474,6 +1548,7 @@ struct ComposerView: View {
                         }
                     }
                 }
+                .scrimText("dock-notices")
                 if !slashSuggestions.isEmpty {
                     SlashCommandMenu(suggestions: slashSuggestions, roundedTop: queued.isEmpty) { choice in
                         draft.text = choice
@@ -1572,6 +1647,7 @@ struct ComposerView: View {
                     .padding(.bottom, DesktopSpace.s)
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+                .scrimText("composer")
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
@@ -1586,6 +1662,7 @@ struct ComposerView: View {
                 Text(error)
                     .font(.system(size: DesktopType.meta))
                     .foregroundStyle(DesktopPalette.failed)
+                    .scrimText("composer-error")
                     .padding(.top, 6)
             } else if model.pendingForks.contains(session.id) {
                 HStack(spacing: DesktopSpace.s) {
@@ -1597,6 +1674,7 @@ struct ComposerView: View {
                         .help("Start another fork instead of waiting for this one")
                 }
                 .font(.system(size: DesktopType.meta))
+                .scrimText("composer-fork")
                 .padding(.top, 6)
             }
         }
@@ -1998,6 +2076,7 @@ struct SessionInspector: View {
             .font(.system(size: DesktopType.body))
             .padding(.horizontal, DesktopSpace.l)
             .frame(height: 52)
+            .scrimText("inspector-tabs")
             .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
             if let session = pane.displayedSession {
                 ScrollView {
@@ -2010,6 +2089,7 @@ struct SessionInspector: View {
                     .font(.system(size: DesktopType.body))
                     .padding(DesktopSpace.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .scrimText("inspector-content")
                 }
             } else {
                 Spacer()

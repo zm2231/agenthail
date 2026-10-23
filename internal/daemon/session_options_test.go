@@ -16,7 +16,7 @@ import (
 
 func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	for _, authorized := range []bool{false, true} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 		if authorized {
@@ -86,7 +86,7 @@ func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	if _, err := registry.DeadLetterMessage(id, errors.New("delivery rejected [invalid request]: bad")); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()

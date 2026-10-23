@@ -39,7 +39,7 @@ func TestClaudeRootsAPIReportsEachRootsSigninAndLiveUsage(t *testing.T) {
 		return 404, "{}", nil
 	})
 	d.Surfaces = []surface.Surface{claude}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 
 	var listing struct {
 		Claude []surface.ClaudeConfigRoot `json:"claude"`
@@ -66,9 +66,9 @@ func TestClaudeRootsAPIReportsEachRootsSigninAndLiveUsage(t *testing.T) {
 		t.Fatalf("the new-session form must get the roots without waiting on claude.ai: calls=%d roots=%+v", claudeCalls.Load()-before, options.ClaudeConfigRoots)
 	}
 	var usage struct {
-		Root         string               `json:"root"`
-		Usage        *surface.ClaudeUsage `json:"usage"`
-		UsageProblem string               `json:"usageProblem"`
+		Root         string         `json:"root"`
+		Usage        *surface.Usage `json:"usage"`
+		UsageProblem string         `json:"usageProblem"`
 	}
 	if code := api.do(http.MethodGet, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(options.ClaudeConfigRoots[0].Root), "", &usage); code != http.StatusOK {
 		t.Fatalf("claude-usage status=%d", code)
@@ -91,10 +91,10 @@ func TestClaudeRootUsageSaysALoginHasNoProfileWithoutNamingTheProfiles(t *testin
 	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(profiles), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
 		return 200, `{"uuid":"acct-personal","email_address":"personal@example.com"}`, nil
 	})}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	var usage struct {
-		Usage        *surface.ClaudeUsage `json:"usage"`
-		UsageProblem string               `json:"usageProblem"`
+		Usage        *surface.Usage `json:"usage"`
+		UsageProblem string         `json:"usageProblem"`
 	}
 	if code := api.do(http.MethodGet, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(filepath.Join(home, ".claude")), "", &usage); code != http.StatusOK {
 		t.Fatalf("status=%d", code)
@@ -124,7 +124,7 @@ func TestClaudeRootUsageSaysClaudeAICouldNotBeAskedWhenTheAccountCheckFails(t *t
 	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates([]signin.Source{{ProfileID: "sp_work", Label: "work", Browser: signin.Chrome, Dir: "/work"}}), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
 		return 503, `{"type":"error"}`, nil
 	})}
-	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
+	api := signinAPIClient{t: t, handler: dashboardRouter(d), token: "secret"}
 	var usage struct {
 		UsageProblem string `json:"usageProblem"`
 	}

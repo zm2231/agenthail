@@ -29,7 +29,7 @@ func TestSessionAdoptActionOpensAClaudeSessionInTheHostAndReRegistersIt(t *testi
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	adopt := func(stopTerminal bool) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]any{"action": "session-adopt", "sessionId": conversation, "stopTerminal": stopTerminal})
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
@@ -71,7 +71,7 @@ func TestTheSnapshotOffersAdoptionForTerminalAndBackgroundSessionsUntilTheHostRu
 	const conversation = "6a2e9c1d-4b3f-4e8a-9d07-c1b2a3f4e5d6"
 	fixture.Transcript(conversation, fixture.Home)
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
 		request.Header.Set("Authorization", "Bearer secret")
@@ -135,7 +135,7 @@ func TestAnExitedSessionWhoseFileDiscoveryMissedIsOfferedAndAdopted(t *testing.T
 		t.Fatal(err)
 	}
 	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, fixture.Home)})
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	serve := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
 		request.Header.Set("Authorization", "Bearer secret")

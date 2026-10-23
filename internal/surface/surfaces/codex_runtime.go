@@ -90,17 +90,19 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 			Backend:   "desktop",
 		}
 	}
+	problem, remediation := c.desktopProblem()
 	bridge := surface.RuntimeStatus{
 		Name:        "Codex Desktop bridge",
-		Problem:     surface.RuntimeBridgeUnavailable,
+		Problem:     problem,
 		Detail:      desktopErr.Error(),
-		Remediation: codexLaunchRemediation,
+		Remediation: remediation,
 	}
 	if !c.managed {
 		return bridge
 	}
+	desktopExpected := install.Desktop != "" || c.desktopURL != "" && !codexDesktopRunsHere
 	if install.Daemon == "" {
-		if install.Desktop != "" {
+		if desktopExpected {
 			return bridge
 		}
 		return surface.RuntimeStatus{
@@ -134,15 +136,25 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 			daemon.Remediation = "run 'agenthail daemon install'"
 		}
 	}
-	if install.Desktop == "" {
+	if !desktopExpected {
 		return daemon
 	}
 	if daemon.Reachable {
-		daemon.Notes = append(daemon.Notes, surface.RuntimeNote{Problem: surface.RuntimeBridgeUnavailable, Message: "Codex Desktop conversations need the Desktop bridge: " + desktopErr.Error(), Remediation: codexLaunchRemediation})
+		daemon.Notes = append(daemon.Notes, surface.RuntimeNote{Problem: problem, Message: "Codex Desktop conversations need the Desktop bridge: " + desktopErr.Error(), Remediation: remediation})
 		return daemon
 	}
 	bridge.Notes = append(bridge.Notes, surface.RuntimeNote{Problem: surface.RuntimeStopped, Message: "Codex's app-server daemon is not running: " + daemon.Detail, Remediation: codexDaemonRemediation})
 	return bridge
+}
+
+// desktopProblem names an unavailable Desktop bridge and its remedy. Only a
+// Desktop on this Mac's loopback port is one `agenthail launch codex` can
+// start; any other endpoint must be made reachable where it runs.
+func (c *Codex) desktopProblem() (surface.RuntimeProblem, string) {
+	if codexDesktopRunsHere && c.managed {
+		return surface.RuntimeBridgeUnavailable, codexLaunchRemediation
+	}
+	return surface.RuntimeDesktopUnreachable, "make the Codex Desktop debugging endpoint " + c.desktopURL + " reachable from this machine"
 }
 
 // EnsureRuntime starts Codex's app-server daemon when it is not serving its

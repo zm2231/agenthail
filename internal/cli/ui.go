@@ -22,7 +22,8 @@ const uiUsage = `usage:
   agenthail ui diff [<rev>]
   agenthail ui undo [<rev>]
   agenthail ui show-defaults [--docs]
-  agenthail ui path`
+  agenthail ui path
+  agenthail ui snapshot [--session <id>] [--size <W>x<H>] [--name <device>] <out.png>`
 
 type uiArgs struct {
 	positional []string
@@ -30,6 +31,8 @@ type uiArgs struct {
 	name       string
 	message    string
 	limit      int
+	session    string
+	size       string
 	resolved   bool
 	json       bool
 	docs       bool
@@ -60,6 +63,10 @@ func parseUIArgs(args []string) (uiArgs, error) {
 			parsed.name, err = value()
 		case "--message":
 			parsed.message, err = value()
+		case "--session":
+			parsed.session, err = value()
+		case "--size":
+			parsed.size, err = value()
 		case "--limit":
 			var text string
 			if text, err = value(); err == nil {
@@ -103,6 +110,8 @@ func (a *App) cmdUI(args []string) error {
 			return err
 		}
 		return a.printUIProblems(uiconf.Parse(text).Problems, "ui.conf: no problems")
+	case "snapshot":
+		return a.uiSnapshot(parsed)
 	}
 	store, err := uiconf.Open(a.uiDir())
 	if err != nil {
@@ -190,6 +199,9 @@ func (a *App) uiGet(store *uiconf.Store, parsed uiArgs) error {
 			}
 		}
 		fmt.Fprintf(os.Stdout, "%s = %v\n", key.Name, value)
+		if key.Name == "background" {
+			fmt.Fprintf(os.Stdout, "background.light = %v\n", values["background.light"])
+		}
 	}
 	return a.printUIProblems(state.Parsed.Problems, "")
 }

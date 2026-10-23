@@ -51,7 +51,7 @@ func TestRootsListsEachClaudeRootsCurrentLogin(t *testing.T) {
 
 func TestDescribeClaudeConfigRootNamesAnExhaustedLimit(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	root := surface.ClaudeConfigRoot{SignedInAs: &surface.ClaudeLogin{Email: "me@example.com", Plan: "max"}, Usage: &surface.ClaudeUsage{FetchedAt: now, Limits: []surface.ClaudeUsageLimit{{Kind: "session", Percent: 100, ResetsAt: now.Add(time.Hour)}}}}
+	root := surface.ClaudeConfigRoot{SignedInAs: &surface.ClaudeLogin{Email: "me@example.com", Plan: "max"}, Usage: &surface.Usage{FetchedAt: now, Limits: []surface.UsageWindow{{Kind: "session", Percent: 100, ResetsAt: now.Add(time.Hour)}}}}
 	got := describeClaudeConfigRoot(root, now)
 	if !strings.Contains(got, "currently signed in as me@example.com (max)") || !strings.Contains(got, "out of usage until") || !strings.Contains(got, "session 100%") {
 		t.Fatalf("got %q", got)

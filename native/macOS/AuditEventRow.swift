@@ -12,7 +12,7 @@ struct AuditEventRow: View {
                 Circle()
                     .fill(failed ? DesktopPalette.failed : DesktopPalette.text2)
                     .frame(width: 6, height: 6)
-                Text(AuditFacts.kindLabel(entry.kind))
+                Text(AuditFacts.heading(entry))
                 Spacer()
                 Text(relativeAge(entry.createdAt))
                     .font(.system(size: DesktopType.caption))

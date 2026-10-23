@@ -43,8 +43,8 @@ final class WorkflowParityTests: XCTestCase {
         ParityProtocol.state.reset(unknown: true)
         let model = makeModel()
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
-        XCTAssertTrue(created); XCTAssertNil(model.requestedSessionID)
-        XCTAssertNil(model.creationError)
+        XCTAssertFalse(created); XCTAssertNil(model.requestedSessionID)
+        XCTAssertEqual(model.creationError, SessionCreationReceipt.unknownOutcomeMessage)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
     }
 
@@ -166,17 +166,50 @@ final class WorkflowParityTests: XCTestCase {
     @MainActor
     func testFailedCreationReceiptsStayErrorsUnlessRequested() async throws {
         ParityProtocol.state.reset(failReceipt: true)
-        let model = makeModel()
-        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
-        XCTAssertFalse(created)
-        XCTAssertNotNil(model.creationError)
-        XCTAssertNil(model.requestedSessionID)
-
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ParityProtocol.self]
         let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: config))
+        do {
+            _ = try await api.createSession(surface: "codex", message: "Build", cwd: "/project", model: "")
+            XCTFail("a failure receipt is an error unless requested")
+        } catch {}
         let receipt = try await api.createSession(surface: "codex", message: "Build", cwd: "/project", model: "", failureReceipts: true)
         XCTAssertEqual(receipt.error, "launcher busy")
         XCTAssertEqual(receipt.accepted, true)
+    }
+
+    @MainActor
+    func testAnUnknownCreateKeepsItsKeyAndADefiniteFailureReleasesIt() async throws {
+        let unknown = SessionCreationReceipt.unknownOutcomeMessage
+        let cases: [(reply: (Int, String), error: String, sameKey: Bool)] = [
+            ((502, #"{"ok":false,"status":"unknown","code":"create_unknown","unknown":true,"retryable":false,"error":"no answer"}"#), unknown, true),
+            ((502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"ambiguous"}"#), unknown, true),
+            ((504, #"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#), unknown, true),
+            ((502, #"{"ok":false,"status":"failed","code":"create_failed","unknown":false,"retryable":false,"error":"launcher refused"}"#), "launcher refused", false),
+            ((502, #"{"ok":false,"status":"failed","code":"initial_turn_failed","retryable":false,"session":{"id":"s1","surface":"codex","name":"","status":"idle","lastActive":"2026-10-23T00:00:00Z"},"error":"first turn rejected"}"#), "first turn rejected", true),
+        ]
+        for entry in cases {
+            ParityProtocol.state.reset(create: entry.reply)
+            let model = makeModel()
+            let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+            XCTAssertFalse(created, entry.reply.1)
+            XCTAssertEqual(model.creationError, entry.error)
+            XCTAssertNil(model.requestedSessionID)
+            _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+            let keys = ParityProtocol.state.actionIdempotencyKeys
+            XCTAssertEqual(keys.count, 2)
+            XCTAssertEqual(keys[0] == keys[1], entry.sameKey, entry.reply.1)
+        }
+    }
+
+    @MainActor
+    func testAnAcceptedLaunchShowsWhatTheLauncherDidNotKeep() async throws {
+        let warning = "Submitted to cmux. Its name @x wasn't kept; name it once it appears in the sidebar."
+        ParityProtocol.state.reset(create: (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"cmux","warning":"\#(warning)"}"#))
+        let model = makeModel()
+        let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
+        XCTAssertFalse(created)
+        XCTAssertNil(model.creationError)
+        XCTAssertEqual(model.creationWarning, warning)
     }
 
     @MainActor
@@ -301,6 +334,69 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(model.composer, "second")
     }
 
+    @MainActor
+    func testProjectsAreManagedThroughTheComputerThatListsThem() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let capabilities = #""capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}"#
+        let project = #"{"id":"p1","displayName":"one","rootPath":"/p1","kind":"git","added":true}"#
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data("""
+        {"updatedAt":"now","daemon":{"running":true,"hosts":[{"id":"hpeer","name":"peer","state":"connected"}]},"surfaces":[],"sessions":[
+          {"id":"s-lead","surface":"claude","name":"lead","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/p1","project":\(project)},
+          {"id":"s2","surface":"claude","name":"helper","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/p1","project":\(project)},
+          {"id":"m1","surface":"codex","name":"remote","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/tool","host":{"id":"hpeer","name":"peer","state":"connected"}},
+          {"id":"m2","surface":"claude","name":"remote lead","status":"idle","queueCount":0,"open":true,"current":false,\(capabilities),"cwd":"/srv/repo","host":{"id":"hpeer","name":"peer","state":"connected"},"project":{"id":"repo:shared","displayName":"shared","rootPath":"/srv/repo","kind":"git"}}],
+         "totalSessions":4,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":5,
+         "projects":[
+          {"id":"p1","displayName":"one","checkouts":[{"host":{"id":"computer","name":"computer","state":"local"},"projectId":"p1","rootPath":"/p1","added":true},{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"hpeer::p1","rootPath":"/srv/p1","added":true}],"coordinators":[{"host":{"id":"computer","name":"computer","state":"local"},"name":"lead","surface":"claude","sessionId":"s-lead"}]},
+          {"id":"repo:shared","displayName":"shared","checkouts":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"projectId":"repo:shared","rootPath":"/srv/repo"}],"coordinators":[{"host":{"id":"hpeer","name":"peer","state":"connected"},"name":"remote","surface":"claude","sessionId":"m2"}]},
+                    {"id":"p-empty","displayName":"empty","checkouts":[{"host":{"id":"computer","name":"computer","state":"local"},"projectId":"p-empty","rootPath":"/empty","added":true}],"coordinators":[]}]}
+        """.utf8)))
+        XCTAssertEqual(Set(model.projects.keys), ["computer::p1", "repo:shared", "computer::p-empty"])
+        let sessions = try XCTUnwrap(model.snapshot?.sessions)
+        let lead = try XCTUnwrap(sessions.first { $0.id == "computer::s-lead" })
+        let helper = try XCTUnwrap(sessions.first { $0.id == "computer::s2" })
+        let remote = try XCTUnwrap(sessions.first { $0.id == "hpeer::m1" })
+        XCTAssertFalse(model.canMakeLead(lead))
+        XCTAssertTrue(model.canMakeLead(helper))
+        XCTAssertTrue(model.canAddFolder(remote))
+        let mirroredLead = try XCTUnwrap(sessions.first { $0.id == "hpeer::m2" })
+        XCTAssertFalse(model.canMakeLead(mirroredLead), "a lead reached through a mirror is not offered to lead again")
+        XCTAssertEqual(model.projects[try XCTUnwrap(mirroredLead.project?.id)]?.state.id, "repo:shared")
+
+        let asked = await model.makeLead(helper.id, replace: false)
+        XCTAssertEqual(asked, .confirmReplace("/p1 already has coordinator @lead; replace it to take over. Replace it?"))
+        let replaced = await model.makeLead(helper.id, replace: true)
+        XCTAssertEqual(replaced, .done("@helper leads /p1."))
+        XCTAssertEqual(ParityProtocol.state.actions.last?["sessionId"] as? String, "s2")
+
+        _ = await model.addFolder(of: remote)
+        let added = try XCTUnwrap(ParityProtocol.state.actions.last)
+        XCTAssertEqual(added["action"] as? String, "project-add")
+        XCTAssertEqual(added["path"] as? String, "/srv/tool")
+        XCTAssertEqual(added["host"] as? String, "hpeer")
+
+        let listed = try XCTUnwrap(model.projects["computer::p1"])
+        _ = await model.removeProject("hpeer::p1", of: listed)
+        XCTAssertEqual(ParityProtocol.state.actions.last?["action"] as? String, "project-remove")
+        XCTAssertEqual(ParityProtocol.state.actions.last?["projectId"] as? String, "hpeer::p1")
+        XCTAssertEqual(model.creationHost(for: listed.state.checkouts[1], of: listed), "hpeer")
+        XCTAssertEqual(model.creationHost(for: listed.state.checkouts[0], of: listed), "computer")
+    }
+
+    @MainActor
+    func testArchivingARepositoryProjectUsesItsSharedID() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"s1","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"project":{"id":"repo:github.com/acme/widget","displayName":"widget","rootPath":"/w","kind":"git"}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        XCTAssertEqual(model.snapshot?.sessions.first?.project?.id, "repo:github.com/acme/widget")
+        await model.setProjectArchived("repo:github.com/acme/widget", true)
+        XCTAssertNil(model.operationError)
+        let archived = try XCTUnwrap(ParityProtocol.state.actions.last)
+        XCTAssertEqual(archived["action"] as? String, "project-archive")
+        XCTAssertEqual(archived["projectId"] as? String, "repo:github.com/acme/widget")
+    }
+
     private static let codexSessionSnapshot = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#
 
     @MainActor
@@ -328,23 +424,29 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var fail = false
         private var accepted = false
         private var failReceipt = false
+        private var create: (Int, String)?
         private var actionKeys: [String?] = []
         private var queries: [String] = []
         var promptQueries: [String] { lock.withLock { queries } }
         func recordQuery(_ query: String) { lock.withLock { queries.append(query) } }
         var actions: [[String:Any]] { lock.withLock { records } }
         var actionIdempotencyKeys: [String?] { lock.withLock { actionKeys } }
-        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false, failReceipt: Bool = false) { lock.withLock { records = []; actionKeys = []; queries = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted; self.failReceipt = failReceipt } }
+        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false, failReceipt: Bool = false, create: (Int, String)? = nil) { lock.withLock { records = []; actionKeys = []; queries = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted; self.failReceipt = failReceipt; self.create = create } }
         func respond(_ body: [String:Any], idempotencyKey: String?) -> (Int,String) { lock.withLock {
             records.append(body)
             actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if failReceipt { return (409,#"{"ok":false,"accepted":true,"retryable":false,"launcher":"tmux","error":"launcher busy"}"#) }
+            if body["action"] as? String == "coordinator-set" {
+                if body["replace"] as? Bool != true { return (409, #"{"error":{"code":"coordinator_exists","message":"/p1 already has coordinator @lead; replace it to take over"}}"#) }
+                return (200, #"{"ok":true,"coordinator":{"name":"helper","projectRoot":"/p1"}}"#)
+            }
             if body["action"] as? String == "session-fork" {
                 return (200, #"{"ok":true,"result":{"session":{"id":"forked"}}}"#)
             }
             if (body["action"] as? String)?.contains("create") == true {
-                if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
+                if let create { return create }
+                if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"Submitted to tmux."}"#) }
                 if body["surface"] as? String == "claude" {
                     return unknown ? (202, #"{"ok":false,"unknown":true,"session":null,"error":"registration delayed"}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
                 }

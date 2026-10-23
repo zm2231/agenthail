@@ -78,6 +78,7 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 	stoppedDaemon := "#!/bin/sh\nexit 1\n"
 	for _, test := range []struct {
 		name        string
+		offMacOS    bool
 		bridge      bool
 		desktop     bool
 		cli         string
@@ -91,8 +92,12 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 		{name: "Desktop closed, no daemon CLI", desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex"},
 		{name: "daemon stopped, no Desktop", cli: stoppedDaemon, problem: surface.RuntimeStopped, remediation: "starts it"},
 		{name: "daemon stopped, Desktop closed", cli: stoppedDaemon, desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex", notes: []surface.RuntimeProblem{surface.RuntimeStopped}},
+		{name: "off macOS, daemon stopped, configured Desktop closed", offMacOS: true, cli: stoppedDaemon, problem: surface.RuntimeDesktopUnreachable, remediation: "reachable from this machine", notes: []surface.RuntimeProblem{surface.RuntimeStopped}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			restore := codexDesktopRunsHere
+			t.Cleanup(func() { codexDesktopRunsHere = restore })
+			codexDesktopRunsHere = !test.offMacOS
 			home := t.TempDir()
 			t.Setenv("CODEX_HOME", home)
 			isolateCodexInstalls(t, test.desktop)

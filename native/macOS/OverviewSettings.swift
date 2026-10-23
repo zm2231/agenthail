@@ -213,28 +213,32 @@ struct RecentOutcomesSection: View {
 
 struct BrowserAccessSection: View {
     let remote: RemoteAccessState
-    @State private var qrVisible = false
+    let createLink: @MainActor () async -> String?
+    @State private var qrLink: String?
     @State private var hideTask: Task<Void, Never>?
     @State private var copied = false
 
+    private var qrVisible: Bool { qrLink != nil }
+
     var body: some View {
-        if remote.enabled, let link = remote.url {
+        if remote.enabled {
             Section {
                 HStack(alignment: .top, spacing: 14) {
-                    if qrVisible, let image = QRCodeImage.make(link) {
+                    if let qrLink, let image = QRCodeImage.make(qrLink) {
                         Image(nsImage: image).interpolation(.none).resizable().frame(width: 128, height: 128)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text(qrVisible ? remote.dnsName ?? "Browser link" : "Browser link hidden")
-                        Text("The link signs in to this Agenthail. Share it only with your own devices. On iPhone, open it, tap Share, then Add to Home Screen.")
+                        Text("Each link signs one browser in to this Agenthail, once, within 15 minutes. Share it only with your own devices. On iPhone, open it, tap Share, then Add to Home Screen.")
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                         HStack {
                             Button(copied ? "Copied" : "Copy Browser Link") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(link, forType: .string)
-                                copied = true
                                 Task {
+                                    guard let link = await createLink() else { return }
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(link, forType: .string)
+                                    copied = true
                                     try? await Task.sleep(for: .seconds(2))
                                     copied = false
                                 }
@@ -253,17 +257,18 @@ struct BrowserAccessSection: View {
 
     private func reveal() {
         hideTask?.cancel()
-        qrVisible = true
         hideTask = Task {
+            guard let link = await createLink(), !Task.isCancelled else { return }
+            qrLink = link
             try? await Task.sleep(for: .seconds(60))
-            if !Task.isCancelled { qrVisible = false }
+            if !Task.isCancelled { qrLink = nil }
         }
     }
 
     private func hide() {
         hideTask?.cancel()
         hideTask = nil
-        qrVisible = false
+        qrLink = nil
         copied = false
     }
 }

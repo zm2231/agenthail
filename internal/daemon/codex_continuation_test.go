@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -96,7 +97,7 @@ func visibleJournalMessages(t *testing.T, reg *registry.Registry, sessionID stri
 
 func TestARevertedCodexThreadCatchesUpFromItsContinuationAfterARestart(t *testing.T) {
 	fixture := writeRevertOriginal(t)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 	sessionTranscriptMoveCheck = 20 * time.Millisecond
 	t.Cleanup(func() { sessionTranscriptMoveCheck = previous })
 	fixture := writeRevertOriginal(t)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +189,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 
 func TestARevertWhoseLineageCannotBeProvenReloadsFromTheNewRolloutWithANotice(t *testing.T) {
 	fixture := writeRevertOriginal(t)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +270,7 @@ func TestARevertBeforeTheSeededWindowJournalsItsRetainedHistoryWithNoOlderCursor
 		t.Fatal(err)
 	}
 	fixture := revertFixture{original: original, cut: len(meta + first)}
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

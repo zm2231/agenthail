@@ -30,10 +30,14 @@ targets:
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: UIConfig.swift
+      - path: PaletteTokens.swift
+      - path: Backdrop.swift
+      - path: ScrimField.swift
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
       - path: ComposerTextSync.swift
       - path: SessionSelection.swift
+      - path: ProjectActions.swift
       - path: SessionTree.swift
       - path: MetadataOverlay.swift
       - path: EventRetryBackoff.swift

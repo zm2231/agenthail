@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	_ "modernc.org/sqlite"
@@ -102,7 +103,7 @@ func (*fakeSurface) EnsureWritable(_ context.Context, session *surface.Session) 
 }
 
 func TestDispatcherAcceptedAndQueued(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 }
 
 func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +174,7 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 }
 
 func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +194,7 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 }
 
 func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 }
 
 func TestDispatcherBaselinesFirstAcceptedDelivery(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +239,7 @@ func TestDispatcherBaselinesFirstAcceptedDelivery(t *testing.T) {
 }
 
 func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +297,7 @@ func (unwritableSurface) EnsureWritable(context.Context, *surface.Session) error
 }
 
 func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +325,7 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 }
 
 func TestDispatcherReceiptNeverClaimsMoreThanTheDurableIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestDispatcherReceiptNeverClaimsMoreThanTheDurableIntent(t *testing.T) {
 }
 
 func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +373,7 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 }
 
 func TestDispatcherBusySteerUnknownKeepsSubmittedIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +398,7 @@ func TestDispatcherBusySteerUnknownKeepsSubmittedIntent(t *testing.T) {
 }
 
 func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +439,7 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+			r, err := registry.Open(registrytest.Path(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -539,7 +540,7 @@ func TestDispatcherQueueStorageFailureDiscardsSubmittedIntent(t *testing.T) {
 }
 
 func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +568,7 @@ func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {
 }
 
 func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +594,7 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 }
 
 func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +619,7 @@ func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 }
 
 func TestDispatcherPreflightsBusyClaudePeerBeforeTransportAcceptance(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +636,7 @@ func TestDispatcherPreflightsBusyClaudePeerBeforeTransportAcceptance(t *testing.
 }
 
 func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,7 +674,7 @@ func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 }
 
 func TestDispatcherSendsEachIntentUnderItsOwnUUID(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +712,7 @@ func TestDispatcherSendsEachIntentUnderItsOwnUUID(t *testing.T) {
 }
 
 func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +750,7 @@ func TestPeerMessageToABusyOrWaitingClaudeSessionGoesOverTheSocket(t *testing.T)
 		{Status: surface.StatusBusy, ActiveTurnID: "turn"},
 		{Status: surface.StatusBusy, ActiveTurnID: "turn", WaitingOn: &surface.Waiting{Kind: surface.WaitingQuestion, ID: "question"}},
 	} {
-		r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+		r, err := registry.Open(registrytest.Path(t))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -100,6 +100,61 @@ func (l *UsageLimit) Lifted(now time.Time) bool {
 	return l != nil && !l.ResetsAt.IsZero() && !now.Before(l.ResetsAt)
 }
 
+// Activity is how a working session's turn is going: when it started, when
+// it last wrote anything, and the tool it is running. NoProcess marks a turn
+// its transcript leaves open with no Claude process or session record behind
+// it. Clients use it to say how long a session has been quiet; it never
+// changes the session's status.
+type Activity struct {
+	BusySince      time.Time    `json:"busySince,omitzero"`
+	LastProgressAt time.Time    `json:"lastProgressAt,omitzero"`
+	Tool           *RunningTool `json:"tool,omitempty"`
+	NoProcess      bool         `json:"noProcess,omitempty"`
+}
+
+// RunningTool is a tool call a turn started and has not had a result for.
+type RunningTool struct {
+	Name      string    `json:"name"`
+	StartedAt time.Time `json:"startedAt,omitzero"`
+}
+
+// ActivityProgressStep is how far progress must move before a reading counts
+// as changed, so a working session's row is not republished on every write.
+const ActivityProgressStep = time.Minute
+
+// SameActivity reports whether two readings say the same thing to a person:
+// the same turn, tool and process, and progress within ActivityProgressStep.
+func SameActivity(left, right *Activity) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if !left.BusySince.Equal(right.BusySince) || left.NoProcess != right.NoProcess {
+		return false
+	}
+	if (left.Tool == nil) != (right.Tool == nil) || left.Tool != nil && (left.Tool.Name != right.Tool.Name || !left.Tool.StartedAt.Equal(right.Tool.StartedAt)) {
+		return false
+	}
+	moved := left.LastProgressAt.Sub(right.LastProgressAt)
+	return moved < ActivityProgressStep && moved > -ActivityProgressStep
+}
+
+// Plan is how far a session is through the task list its agent keeps:
+// TaskCreate and TaskUpdate (or TodoWrite) for Claude, update_plan for Codex.
+// Current is the step in progress, when one is.
+type Plan struct {
+	Done    int    `json:"done"`
+	Total   int    `json:"total"`
+	Current string `json:"current,omitempty"`
+}
+
+// SamePlan reports whether two readings show the same progress.
+func SamePlan(left, right *Plan) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
 // SameUsageLimit reports whether two readings name the same limit.
 func SameUsageLimit(left, right *UsageLimit) bool {
 	if left == nil || right == nil {
@@ -149,6 +204,8 @@ type Session struct {
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
+	Activity              *Activity         `json:"activity,omitempty"`
+	Plan                  *Plan             `json:"plan,omitempty"`
 	Transcript            string            `json:"transcript"`
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
@@ -693,10 +750,11 @@ type HealthChecker interface {
 type RuntimeProblem string
 
 const (
-	RuntimeBridgeUnavailable RuntimeProblem = "bridge-unavailable"
-	RuntimeCodexMissing      RuntimeProblem = "codex-missing"
-	RuntimeStopped           RuntimeProblem = "runtime-stopped"
-	RuntimeUnsupervised      RuntimeProblem = "unsupervised"
+	RuntimeBridgeUnavailable  RuntimeProblem = "bridge-unavailable"
+	RuntimeDesktopUnreachable RuntimeProblem = "desktop-unreachable"
+	RuntimeCodexMissing       RuntimeProblem = "codex-missing"
+	RuntimeStopped            RuntimeProblem = "runtime-stopped"
+	RuntimeUnsupervised       RuntimeProblem = "unsupervised"
 )
 
 type RuntimeStatus struct {
@@ -733,6 +791,8 @@ type TurnObservation struct {
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
+	Activity        *Activity        `json:"activity,omitempty"`
+	Plan            *Plan            `json:"plan,omitempty"`
 	// LimitStop is a last turn a usage limit refused, kept after the limit
 	// resets since nothing has run in the session since.
 	LimitStop *LimitStop `json:"limitStop,omitempty"`

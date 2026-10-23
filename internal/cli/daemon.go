@@ -76,6 +76,7 @@ func (a *App) daemonRun() error {
 	if err != nil {
 		return err
 	}
+	d.SetBuild(a.build())
 	hostVersion := a.Version + "+" + a.Revision
 	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
 		return surfaces.ClaudeHostLaunch(home, hostVersion)
@@ -86,7 +87,7 @@ func (a *App) daemonRun() error {
 func (a *App) cmdDashboard(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]] [options]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]|token rotate] [options]")
 	}
 	action := "open"
 	if len(positional) > 0 {
@@ -130,16 +131,12 @@ func (a *App) cmdDashboard(args []string) error {
 			fmt.Println("dashboard: disabled (run 'agenthail dashboard enable')")
 			return nil
 		}
-		url, err := daemon.DashboardURL()
-		if err != nil {
-			return err
-		}
 		fmt.Printf("dashboard: enabled on %s\n", config.Listen)
 		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
 		if _, running := daemon.IsRunning(); !running {
 			fmt.Println("daemon: not running (start it with 'agenthail daemon start')")
 		} else {
-			fmt.Printf("open: %s\n", url)
+			fmt.Printf("address: %s (sign in with 'agenthail dashboard')\n", daemon.DashboardBaseURL(config))
 		}
 		return nil
 	case "config":
@@ -163,6 +160,8 @@ func (a *App) cmdDashboard(args []string) error {
 		return nil
 	case "remote":
 		return a.cmdDashboardRemote(args, positional[1:])
+	case "token":
+		return a.cmdDashboardToken(positional[1:])
 	case "open":
 		if !config.Enabled {
 			return fmt.Errorf("dashboard is disabled; run 'agenthail dashboard enable'")
@@ -172,23 +171,23 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		return a.openDashboard()
 	default:
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]] [options]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]|token rotate] [options]")
 	}
 }
 
 func (a *App) openDashboard() error {
-	url, err := daemon.DashboardURL()
+	link, err := a.createDashboardLoginLink(false)
 	if err != nil {
 		return err
 	}
 	if runtime.GOOS != "darwin" {
-		fmt.Printf("dashboard: %s\n", url)
+		fmt.Printf("sign in: %s (%s)\n", link.URL, link.validity())
 		return nil
 	}
-	if err := exec.Command("open", url).Run(); err != nil {
+	if err := exec.Command("open", link.URL).Run(); err != nil {
 		return fmt.Errorf("open dashboard: %w", err)
 	}
-	fmt.Printf("opened dashboard: %s\n", url)
+	fmt.Println("opened the dashboard in your browser")
 	return nil
 }
 

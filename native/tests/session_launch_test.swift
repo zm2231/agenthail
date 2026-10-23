@@ -34,6 +34,12 @@ struct SessionLaunchTest {
         let ambiguous = try decide(#"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}"#)
         check(ambiguous == .unconfirmed(nil), "an ambiguous outcome without a session stays unconfirmed")
 
+        let coded = try decide(#"{"ok":false,"status":"unknown","code":"create_unknown","retryable":false,"error":"no answer"}"#)
+        check(coded == .unconfirmed(nil), "a create_unknown code is unconfirmed without the unknown flag")
+
+        let failedCode = try decide(#"{"ok":false,"status":"failed","code":"create_failed","unknown":false,"retryable":false,"error":"launcher refused"}"#)
+        check(failedCode == .failed("launcher refused"), "a create_failed code is a definite failure")
+
         let initial = try decide(#"{"ok":false,"status":"failed","retryable":false,"session":{"id":"s4","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"initial message rejected"}"#)
         check(initial == .halted("initial message rejected"), "a created session whose first turn failed halts")
 

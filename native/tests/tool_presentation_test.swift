@@ -38,6 +38,11 @@ struct ToolPresentationTest {
         let bare = ToolPresentation(name: "Bash", text: json(["command": "swift test\n--filter X"]))
         check(bare.object.text == "swift test" && bare.object.isCode, "a bare command shows its first line as code")
         check(ToolPresentation(name: "Read", text: json(["file_path": "/a/b.txt"])).object.text == "b.txt", "a read names its file")
+        let created = ToolPresentation(name: "TaskCreate", text: json(["subject": "Parse the list", "description": "A long description of the work", "activeForm": "Parsing"]))
+        check(created.verb == "Add task" && created.object.text == "Parse the list" && created.intent == nil && created.symbol == "checklist", "a new task reads by its subject: \(created.verb) \(created.object.text)")
+        let updated = ToolPresentation(name: "TaskUpdate", text: json(["taskId": "2", "status": "in_progress"]))
+        check(updated.verb == "Update task" && updated.object.text == "Task 2 · in progress", "a task update names the task and its status: \(updated.object.text)")
+        check(ToolPresentation(name: "send_email", text: json(["subject": "Hi", "description": "Weekly note"])).object.text == "Weekly note", "other tools keep their description")
 
         func call(_ index: Int) -> TimelineItem {
             TimelineItem(id: "c\(index)", kind: "toolCall", role: nil, title: "Bash", text: "{}", timestamp: nil, callId: "c\(index)", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)

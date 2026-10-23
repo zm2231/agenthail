@@ -110,37 +110,41 @@ func TestCodexListAndLocalStatusShareTranscriptPrecedence(t *testing.T) {
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_started"}}`)
 	codex := &Codex{}
 	listed := surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path}
-	codex.reconcileLocalStatus(&listed)
+	codex.reconcileLocalStatus(context.Background(), &listed)
 	local, err := codex.LocalStatus(context.Background(), surface.Session{ID: "synthetic", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Transcript: path})
 	if err != nil || listed.Status != surface.StatusBusy || local.Status != listed.Status {
 		t.Fatalf("listed=%s local=%s err=%v", listed.Status, local.Status, err)
 	}
 	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
 	listed.Status = surface.StatusBusy
-	codex.reconcileLocalStatus(&listed)
+	codex.reconcileLocalStatus(context.Background(), &listed)
 	if listed.Status != surface.StatusIdle {
 		t.Fatalf("provider busy overrode completed transcript: %s", listed.Status)
 	}
 }
 
-func TestClaudeLocalStatusDatesWorkingSessionByTranscriptWrites(t *testing.T) {
+// A working session's last activity is the progress its activity reports, so
+// a row never shows recent activity beside a note that the turn went quiet.
+func TestClaudeLocalStatusDatesWorkingSessionByItsLastProgress(t *testing.T) {
 	home := t.TempDir()
 	claude := NewClaude(nil, home)
 	pid := os.Getpid()
 	started := time.Now().Add(-40 * time.Minute).Truncate(time.Millisecond)
+	progressed := time.Now().Add(-15 * time.Minute).Truncate(time.Millisecond)
 	transcript := filepath.Join(t.TempDir(), "conversation-1.jsonl")
 	appendLine(t, transcript, `{"type":"user","uuid":"u1","timestamp":"`+started.UTC().Format(time.RFC3339Nano)+`","message":{"role":"user","content":"work"}}`)
+	appendLine(t, transcript, `{"type":"assistant","uuid":"a1","timestamp":"`+progressed.UTC().Format(time.RFC3339Nano)+`","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}]}}`)
 	written := time.Now().Add(-time.Minute).Truncate(time.Second)
 	if err := os.Chtimes(transcript, written, written); err != nil {
 		t.Fatal(err)
 	}
-	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "updatedAt": float64(started.UnixMilli())}
+	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "updatedAt": float64(started.UnixMilli()), "peerFeatures": []any{"notify_idle"}}
 	writePeerRecord(t, home, pid, record)
 	session := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: pid, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true}
 
 	busy, err := claude.LocalStatus(context.Background(), session)
-	if err != nil || busy.Status != surface.StatusBusy || !busy.LastActive.Equal(written) {
-		t.Fatalf("busy status=%s lastActive=%s want %s err=%v", busy.Status, busy.LastActive, written, err)
+	if err != nil || busy.Status != surface.StatusBusy || busy.Activity == nil || !busy.LastActive.Equal(progressed) || !busy.LastActive.Equal(busy.Activity.LastProgressAt) {
+		t.Fatalf("busy status=%s lastActive=%s activity=%+v want %s err=%v", busy.Status, busy.LastActive, busy.Activity, progressed, err)
 	}
 
 	finished := written.Add(-30 * time.Second)

@@ -119,6 +119,62 @@ struct BackdropTest {
         return 0
     }
 
+    /// A pane with text in one corner: the text reads at 4.5:1, and the far
+    /// side of the pane keeps the pane's minimum tint, so the background
+    /// shows there instead of the tint the text needs.
+    static func localText() -> Int {
+        let size = CGSize(width: 420, height: 260), scale: CGFloat = 2
+        let wallpaper = hostileWallpaper(width: 600, height: 400)
+        let pane = CGRect(x: 8, y: 8, width: 404, height: 244)
+        let text = CGRect(x: 24, y: 24, width: 120, height: 40)
+        let far = CGRect(x: 300, y: 170, width: 80, height: 60)
+        var failures = 0
+        let cases: [(ScrimField.Polarity, [BackdropRGB], BackdropRGB)] = [
+            (.dark, [0xECECEE, 0xA3A3A8, 0x8E8E93].map(rgb), rgb(0x17181A)),
+            (.light, [0x1D1D1F, 0x5F6066, 0x6E6E76].map(rgb), rgb(0xFFFFFF)),
+        ]
+        for (polarity, roles, ground) in cases {
+            func spec(texts: [CGRect], paneTexts: [CGRect], readability: Bool = true) -> BackdropSpec {
+                BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: 0, paneTint: ground, polarity: polarity, ground: ground, roles: roles, size: size, scale: scale,
+                             panes: [.init(id: "content", rect: pane, radius: 0, minimum: 0.1, strength: 1)], texts: texts, paneTexts: paneTexts, readability: readability)
+            }
+            let local = BackdropRenderer.render(spec(texts: [text], paneTexts: [text]))!
+            let bare = BackdropRenderer.render(BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: 0, paneTint: ground, polarity: polarity, ground: ground, roles: roles, size: size, scale: scale))!
+            let contrast = worst(local.image, scale: scale, in: [text], roles: roles)
+            if contrast < 4.5 {
+                print("FAIL: \(polarity) text inside a pane reads at \(contrast):1")
+                failures += 1
+            }
+            let expected = mean(bare.image, scale: scale, in: far) * 0.9 + ScrimField.luminance(ground.x, ground.y, ground.z) * 0.1
+            let shown = mean(local.image, scale: scale, in: far)
+            if abs(shown - expected) > 0.03 {
+                print("FAIL: \(polarity) pane away from text reads \(shown), want the background under the minimum tint, \(expected)")
+                failures += 1
+            }
+            let clipped = CGRect(x: 0, y: 120, width: 70, height: 30)
+            let edge = BackdropRenderer.render(spec(texts: [clipped], paneTexts: [clipped]))!
+            let edgeContrast = worst(edge.image, scale: scale, in: [clipped.intersection(pane)], roles: roles)
+            if edgeContrast < 4.5 {
+                print("FAIL: \(polarity) text clipped by the pane edge reads at \(edgeContrast):1 inside the pane")
+                failures += 1
+            }
+            let chrome = BackdropRenderer.render(spec(texts: [text], paneTexts: []))!
+            let chromeFar = worst(chrome.image, scale: scale, in: [far], roles: roles)
+            if chromeFar < 4.5 {
+                print("FAIL: \(polarity) a pane with no text of its own reads at \(chromeFar):1 away from other text; it should stay text throughout")
+                failures += 1
+            }
+            let off = BackdropRenderer.render(spec(texts: [text], paneTexts: [text], readability: false))!
+            let offText = mean(off.image, scale: scale, in: text)
+            let offExpected = mean(bare.image, scale: scale, in: text) * 0.9 + ScrimField.luminance(ground.x, ground.y, ground.z) * 0.1
+            if abs(offText - offExpected) > 0.03 {
+                print("FAIL: \(polarity) readability off still raises the tint behind text: \(offText) want \(offExpected)")
+                failures += 1
+            }
+        }
+        return failures
+    }
+
     static func main() {
         let size = CGSize(width: 420, height: 260)
         let scale: CGFloat = 2
@@ -170,6 +226,7 @@ struct BackdropTest {
             }
         }
         failures += spikes()
+        failures += localText()
         failures += masks()
         if failures > 0 { exit(1) }
         print("backdrop: every text role reads at 4.5:1 or better on the rendered pixels")

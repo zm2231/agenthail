@@ -42,6 +42,8 @@ jobs:
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
       - name: Race tests
         run: go test ./... -race -count=1 -timeout 25m
       - name: Build
@@ -54,6 +56,8 @@ jobs:
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-dashboard-waiting.mjs
+          node scripts/test-dashboard-activity.mjs
+          node scripts/test-dashboard-plan.mjs
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-audit.mjs
           node scripts/test-dashboard-rekeys.mjs
@@ -95,7 +99,7 @@ jobs:
         run: scripts/ci-self-hosted.sh cleanup
 
   native:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
@@ -105,6 +109,8 @@ jobs:
         run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
       - name: Native helper tests
         run: scripts/test-native-helpers.sh
+      - name: Simulator run guard tests
+        run: scripts/test-ios-simulator.sh
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
@@ -131,6 +137,14 @@ jobs:
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+      - name: Stage the shipped Node
+        run: scripts/fetch-node.sh
+      - name: Shipped Node download test
+        run: scripts/test-fetch-node.sh
       - name: Race tests
         run: go test ./... -race -count=1 -timeout 25m
       - name: Build Linux archives
@@ -139,9 +153,14 @@ jobs:
             GOOS=linux GOARCH=$arch AGENTHAIL_VERSION=v0.0.0-ci scripts/package-release.sh
           done
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
+          mkdir -p "$RUNNER_TEMP/inspect"
+          tar -xzf dist/agenthail-v0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP/inspect"
+          root="$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-amd64"
+          test "$("$root/runtime/node/bin/node" --version)" = v22.23.1
+          (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
   installer:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 30
     steps:
@@ -155,13 +174,19 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
+      - uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
+      - name: Shipped Node download test
+        run: PATH="$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/bin:/bin" scripts/test-fetch-node.sh
       - name: Install and upgrade test
         run: |
           scripts/test-pkg-component-plist.sh
           scripts/test-install-upgrade.sh
 
   package:
-    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 45
     steps:
@@ -172,6 +197,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Build package
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"

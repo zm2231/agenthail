@@ -35,7 +35,7 @@ enum AgenthailProcess {
             environment["AGENTHAIL_PYTHON"] = "\(root)/runtime/python/bin/python3"
             environment["AGENTHAIL_MAC_APP"] = Bundle.main.executableURL?.path
             environment["PYTHONPATH"] = "\(root)/pydeps" + environmentSuffix(environment["PYTHONPATH"])
-            environment["PATH"] = "\(root)/runtime/node/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" + environmentSuffix(environment["PATH"])
+            environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" + environmentSuffix(environment["PATH"])
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
         }
         process.environment = environment

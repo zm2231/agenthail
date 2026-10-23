@@ -49,7 +49,7 @@ func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 	}
 	terminalIDs[canceledID] = struct{}{}
 
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()

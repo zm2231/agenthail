@@ -72,6 +72,7 @@ struct SessionTreeTest {
         expect(familyTree.projects.flatMap { $0.checkouts.flatMap(\.sessions) }.map(\.id).sorted() == ["claude-lead", "lead"], "a family with a working subagent is running and shows its root")
         let allFamilies = SessionTree.build(family, filter: .all, attention: [:])
         expect(allFamilies.counts[.all] == 2, "All counts families: \(allFamilies.counts)")
+        expect(allFamilies.projects.map(\.listedSessionCount) == [5] && allFamilies.projects[0].sessionCountLabel == "5 sessions", "a project header counts every session it lists, subagents included: \(allFamilies.projects.map(\.listedSessionCount))")
         let capFamily = allFamilies.projects[0].limited(to: 1, keeping: "euclid")
         expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
 

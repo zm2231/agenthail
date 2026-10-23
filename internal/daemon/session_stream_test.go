@@ -47,7 +47,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	if calls := adapter.calls.Load(); calls != 1 {
 		t.Fatalf("initial provider stream calls=%d", calls)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
 	}
 	adapter.caps.Stream = false
 	d = newTestDaemon(t, reg, []surface.Surface{adapter})
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T)
 	if err != nil || !inserted || updated.Seq <= first.Seq {
 		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after="+strconv.FormatUint(first.Seq, 10), nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -171,7 +171,7 @@ func TestAPISessionStreamReturnsTypedGap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=1", nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -191,7 +191,7 @@ func TestAPISessionStreamBodyRequiresReadAuthorizationAndBoundsRanges(t *testing
 	if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "body", Payload: []byte(`{"itemId":"body","version":1,"bodyRef":"opaque"}`), BodyRef: "opaque", FullBody: []byte(body)}, registry.SessionJournalRetention{Count: 2, Bytes: sessionJournalRetentionBytes}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	unauthorized, err := http.Get(server.URL + "/api/v1/session-stream-body?id=" + from.ID + "&ref=opaque&start=0")
 	if err != nil {
@@ -258,7 +258,7 @@ func TestASessionStreamCarriesEachRowAsTheSessionPageReadsIt(t *testing.T) {
 	if paged["context-1"].Kind != "instructions" {
 		t.Fatalf("the page reads injected context as instructions: %+v", paged["context-1"])
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

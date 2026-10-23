@@ -26,7 +26,7 @@ func TestStreamsSendBodyBytesBeforeTheFirstKeepalive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	server := httptest.NewServer(dashboardRouter(d))
 	defer server.Close()
 	for name, path := range map[string]string{
 		"events":  "/api/v1/events",

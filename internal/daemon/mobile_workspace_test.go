@@ -17,7 +17,7 @@ func TestMobileWorkspaceSurvivesSnapshotAndSearch(t *testing.T) {
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	handler := dashboardRouter(d)
 	for _, path := range []string{"/api/v1/snapshot?fresh=1", "/api/v1/search?surface=codex&q=release"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer secret")

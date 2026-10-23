@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -22,9 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type federatedSurface struct {
@@ -33,6 +35,16 @@ type federatedSurface struct {
 	messages []string
 	sources  []string
 	persons  []string
+	usage    *surface.Usage
+}
+
+func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.usage == nil {
+		return nil, surfaces.ErrNoCodexUsage
+	}
+	return s.usage, nil
 }
 
 func (f *federatedSurface) record(message string) {
@@ -155,7 +167,7 @@ func allowLoopbackHosts(t *testing.T) {
 func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	t.Helper()
 	allowLoopbackHosts(t)
-	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +315,7 @@ func (n *federationNode) request(t *testing.T, method, target string, body any) 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
-	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+	request.AddCookie(browserCookie(t, n.reg))
 	response := httptest.NewRecorder()
 	n.handler.ServeHTTP(response, request)
 	return response
@@ -1138,4 +1150,22 @@ func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing
 	if got := remote.fake.delivered(); len(got) != 0 {
 		t.Fatalf("a pick the paired host refused was delivered: %v", got)
 	}
+}
+
+func TestAPairedHostReportsTheBuildItRuns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	remote := newFederationNode(t, "remote-a")
+	remote.daemon.SetBuild(buildinfo.Identity{Version: "v0.2.68", Revision: "e387b0d87b52f557"})
+	remote.serve(t, nil)
+	local := newFederationNode(t, "local-a")
+	local.start(t, testRoots(remote.server))
+	record := local.pair(t, remote, "vps")
+	awaitFederation(t, "the host's build reported", func() bool {
+		for _, host := range local.daemon.hostSummaries() {
+			if host.ID == record.ID && host.Build != nil {
+				return host.Build.Version == "v0.2.68" && host.Build.Revision == "e387b0d87b52f557"
+			}
+		}
+		return false
+	})
 }

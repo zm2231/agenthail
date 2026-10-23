@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -47,7 +48,7 @@ func TestAQueuedMessageIsDeliveredWhenTheStatusPassSeesTheTargetGoIdle(t *testin
 	agent.write(t, "sender", surface.StatusIdle)
 	agent.write(t, "target", surface.StatusBusy)
 	t.Setenv("HOME", t.TempDir())
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

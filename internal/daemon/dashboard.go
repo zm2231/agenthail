@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	_ "embed"
 	"encoding/base64"
@@ -61,6 +60,7 @@ type dashboardServer struct {
 	cancel        context.CancelFunc
 	listen        string
 	token         string
+	devices       browserDevices
 	stateMu       sync.Mutex
 	stateAt       time.Time
 	stateVersion  atomic.Uint64
@@ -100,6 +100,8 @@ type dashboardSession struct {
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
 	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
+	Activity          *surface.Activity          `json:"activity,omitempty"`
+	Plan              *surface.Plan              `json:"plan,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
@@ -240,6 +242,7 @@ type dashboardHistory struct {
 	Result          string                   `json:"result,omitempty"`
 	Error           string                   `json:"error,omitempty"`
 	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
+	Operation       registry.QueueOperation  `json:"operation,omitempty"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -295,6 +298,7 @@ func (d *dashboardServer) shutdown() error {
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	d.dashboard = dashboard
+	dashboard.devices = d.Registry
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
@@ -430,17 +434,16 @@ func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	config, err := LoadDashboardConfig()
+	link, err := d.createLoginLink(true)
+	if err == errRemoteAccessOff {
+		http.Error(w, "remote access is not enabled", http.StatusConflict)
+		return
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := RemoteAccessStatusForConfig(config)
-	if !status.Enabled || status.URL == "" {
-		http.Error(w, "remote access is not enabled", http.StatusConflict)
-		return
-	}
-	image, err := RemoteAccessQR(status.URL)
+	image, err := RemoteAccessQR(link.URL)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -517,7 +520,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
-	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: d.publicSessionID(entry.SessionID), SourceSessionID: d.publicSessionID(entry.SourceSessionID), Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: d.publicSessionID(entry.SessionID), SourceSessionID: d.publicSessionID(entry.SourceSessionID), Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence, Operation: entry.Operation}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
@@ -747,13 +750,12 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if supplied := r.URL.Query().Get("token"); supplied != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(dashboard.token)) == 1 {
-		http.SetCookie(w, &http.Cookie{Name: "agenthail_dashboard", Value: dashboard.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: dashboardCookieMaxAge})
-		http.Redirect(w, r, "/", http.StatusFound)
+	if secret := r.URL.Query().Get("login"); secret != "" {
+		dashboard.login(w, r, secret)
 		return
 	}
 	if !dashboard.authorized(r) {
-		http.Error(w, "dashboard access token required; run 'agenthail dashboard'", http.StatusUnauthorized)
+		http.Error(w, "sign in with a link from 'agenthail dashboard'", http.StatusUnauthorized)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -773,11 +775,6 @@ func (dashboard *dashboardServer) guard(next http.HandlerFunc) http.HandlerFunc 
 		}
 		next(w, r)
 	}
-}
-
-func (dashboard *dashboardServer) authorized(r *http.Request) bool {
-	cookie, err := r.Cookie("agenthail_dashboard")
-	return err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(dashboard.token)) == 1
 }
 
 func sameOrigin(r *http.Request) bool {
@@ -1005,6 +1002,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 				entry.ObservedSubagents = saved.ObservedSubagents
 				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 				entry.Holders = saved.Holders
+				entry.Activity = saved.Activity
+				entry.Plan = saved.Plan
 			}
 		}
 		entry.HiddenSubagents, entry.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)
@@ -2189,15 +2188,10 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		cancel()
 	} else if timelineBefore > 0 {
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
-	} else if atOnce, err := d.sources.servesPageAtOnce(session, adapter); err == nil && atOnce {
-		// What the source catches up arrives on the session stream after the
-		// page's seq.
-		if err := d.sources.start(session, adapter); err != nil {
-			d.log.Printf("start session source %s: %s", d.resolveDisplay(session.ID), err)
-		}
-		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
 	} else {
-		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
+		// What the source catches up after the wait arrives on the session
+		// stream after the page's seq.
+		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, sessionPageCatchUpWait))
 		seedErr := d.sources.seed(seedCtx, session, adapter)
 		cancel()
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)

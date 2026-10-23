@@ -195,7 +195,7 @@ agenthail relay add @investigator @builder --when goal_completed
 
 When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. A handoff to a closed Claude Code session resumes it and delivers once.
 
-`turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
+`turn_finished` (the default) forwards each successful matching completion, holding a turn that leaves background work running until that work clears; ambient monitors do not hold it. With `--once` it forwards the latest matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
 New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue until it can be delivered. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
@@ -305,7 +305,7 @@ Turn on phone access with `agenthail dashboard remote`, then show a pairing code
 
 The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. `agenthail devices` lists the phones paired with the computer and `agenthail devices remove <device>` disconnects one. The computer is not opened to the public internet.
 
-`agenthail dashboard remote` also opens the web dashboard on the phone in the browser, over the same Tailscale connection.
+`agenthail dashboard remote` also prints a sign-in link and QR code for the web dashboard on the phone, over the same Tailscale connection. Each link signs in one browser, once, within 15 minutes; the browser then appears in `agenthail devices` and can be removed like a phone.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through

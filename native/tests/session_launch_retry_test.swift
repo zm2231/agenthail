@@ -17,9 +17,17 @@ struct SessionLaunchRetryTest {
         model = makeModel([.unknown, .unknown])
         let unknown = await model.launchSession(a)
         _ = await model.launchSession(a)
-        check(unknown == .unconfirmed("This session may still be starting. It will appear in the sidebar when ready."), "an unknown receipt says the session may still be starting")
+        check(unknown == .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage), "an unknown receipt with no session says to check the sidebar")
         check(unknown.offersStartAgain, "an unknown receipt offers Start again")
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after an unknown receipt reuses the key")
+
+        for reply in [ScriptedProtocol.Reply.unknownCoded, .hostUnknown] {
+            model = makeModel([reply, .lost])
+            let outcome = await model.launchSession(a)
+            _ = await model.launchSession(a)
+            check(outcome == .unconfirmed(SessionCreationReceipt.unknownOutcomeMessage), "\(reply) says to check the sidebar")
+            check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after \(reply) reuses the key")
+        }
 
         model = makeModel([.unknown, .unknown, .accepted])
         _ = await model.launchSession(a)
@@ -117,6 +125,8 @@ final class ScriptedProtocol: URLProtocol {
         case unreachable
         case timedOut
         case unknown
+        case unknownCoded
+        case hostUnknown
         case refused
         case failedReceipt
         case createdFailure
@@ -141,6 +151,10 @@ final class ScriptedProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
         case .unknown:
             reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"synthetic ambiguous start"}"#)
+        case .unknownCoded:
+            reply(502, #"{"ok":false,"status":"unknown","code":"create_unknown","unknown":true,"retryable":false,"error":"synthetic ambiguous start"}"#)
+        case .hostUnknown:
+            reply(504, #"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#)
         case .refused:
             reply(400, "no such folder")
         case .failedReceipt:

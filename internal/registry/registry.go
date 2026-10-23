@@ -28,6 +28,14 @@ type Registry struct {
 	now        func() time.Time
 	busyPolicy func() (deliverypolicy.Mode, error)
 	seen       deviceSeen
+	// retryBackoff is QueueRetryBackoff unless SetRetryBackoff changed it.
+	retryBackoff time.Duration
+}
+
+// SetRetryBackoff sets how long this handle's failed or deferred messages
+// wait before their next attempt, in place of QueueRetryBackoff.
+func (r *Registry) SetRetryBackoff(backoff time.Duration) {
+	r.retryBackoff = backoff
 }
 
 // SetBusyPolicy sets the live busy-delivery policy. A queued message records
@@ -57,7 +65,10 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 35
+	// schemaVersion names one schema: a registry at it is opened without
+	// migrating, so any change to the schema or migrateTx takes a new version
+	// (TestTheSchemaChangesOnlyWithItsVersion).
+	schemaVersion   = 38
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -125,6 +136,16 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Every command opens the registry, so a current one must not wait for the
+	// write lock behind the daemon and every other command.
+	current, err := r.current()
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	if current {
+		return r, nil
+	}
 	if err := r.migrate(allowUpgrade); err != nil {
 		r.Close()
 		return nil, err
@@ -166,6 +187,18 @@ func OpenCurrent(path string) (*Registry, error) {
 	return r, nil
 }
 
+func (r *Registry) current() (bool, error) {
+	var version int
+	if err := r.read.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return false, err
+	}
+	var mode string
+	if err := r.read.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		return false, err
+	}
+	return version == schemaVersion && mode == "wal", nil
+}
+
 func connect(path string) (*Registry, error) {
 	sep := "?"
 	if strings.Contains(path, "?") {
@@ -184,7 +217,7 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, path: path, now: time.Now}, nil
+	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
 func (r *Registry) Path() string { return r.path }
@@ -220,6 +253,8 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 		return err
 	}
 	switch {
+	case version == schemaVersion:
+		return nil
 	case version > schemaVersion:
 		return r.newerSchemaError(version)
 	case version > 0 && version < schemaVersion && !allowUpgrade:
@@ -268,6 +303,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal_state", "derived_version", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	for _, column := range []struct {
@@ -468,6 +506,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "paired_devices", "host_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "paired_devices", "browser", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "device_pairings", "device_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -879,7 +920,8 @@ CREATE TABLE IF NOT EXISTS delivery_history (
 	completion_id TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL DEFAULT '',
 	result TEXT NOT NULL DEFAULT '',
-	error TEXT NOT NULL DEFAULT ''
+	error TEXT NOT NULL DEFAULT '',
+	operation TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS attention_items (
@@ -912,7 +954,8 @@ CREATE TABLE IF NOT EXISTS paired_devices (
 	host_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_seen_at TEXT NOT NULL DEFAULT '',
-	revoked_at TEXT NOT NULL DEFAULT ''
+	revoked_at TEXT NOT NULL DEFAULT '',
+	browser INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 CREATE TABLE IF NOT EXISTS device_push_targets (
@@ -1906,6 +1949,7 @@ type HistoryEntry struct {
 	Result          string                   `json:"result,omitempty"`
 	Error           string                   `json:"error,omitempty"`
 	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
+	Operation       QueueOperation           `json:"operation,omitempty"`
 }
 
 func boundHistoryText(value string) string {
@@ -1919,9 +1963,11 @@ func (r *Registry) RecordHistory(entry HistoryEntry) error {
 	if entry.Kind == "" {
 		return fmt.Errorf("history kind is required")
 	}
-	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error) VALUES(?,?,?,?,?,?,?,?,?)`,
+	// The operation is copied from the queue row at write time: deleting a session
+	// cascades to its queue rows, while history outlives them.
+	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error,operation) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,COALESCE(NULLIF(?10,''),(SELECT operation FROM message_queue WHERE id=?5 AND ?5>0),''))`,
 		entry.Kind, entry.SessionID, entry.SourceSessionID, entry.RouteID, entry.QueueID, entry.CompletionID,
-		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error))
+		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error), entry.Operation)
 	if err != nil {
 		return err
 	}
@@ -1940,13 +1986,13 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	if limit > 200 {
 		limit = 200
 	}
-	query := `SELECT id,created_at,kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error FROM delivery_history`
+	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation FROM delivery_history h`
 	args := []any{}
 	if sessionID != "" {
-		query += ` WHERE session_id=? OR source_session_id=?`
+		query += ` WHERE h.session_id=? OR h.source_session_id=?`
 		args = append(args, sessionID, sessionID)
 	}
-	query += ` ORDER BY id DESC LIMIT ?`
+	query += ` ORDER BY h.id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := r.read.Query(query, args...)
 	if err != nil {
@@ -1956,7 +2002,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	entries := make([]HistoryEntry, 0)
 	for rows.Next() {
 		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation); err != nil {
 			return nil, err
 		}
 		entry.Evidence = historyEvidence(entry)
@@ -1972,7 +2018,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	if limit > 100 {
 		limit = 100
 	}
-	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error FROM delivery_history h`
+	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation FROM delivery_history h`
 	args := []any{}
 	conditions := []string{}
 	if beforeID > 0 {
@@ -2003,7 +2049,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	entries := make([]HistoryEntry, 0, limit+1)
 	for rows.Next() {
 		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation); err != nil {
 			return nil, false, err
 		}
 		entry.Evidence = historyEvidence(entry)
@@ -2653,7 +2699,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 		if shift > 6 {
 			shift = 6
 		}
-		available = now.Add(QueueRetryBackoff * time.Duration(1<<shift))
+		available = now.Add(r.retryBackoff * time.Duration(1<<shift))
 	}
 	message := ""
 	if cause != nil {
@@ -2714,7 +2760,7 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, er
 	if began {
 		refusal++
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(QueueRetryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(r.retryBackoff*time.Duration(1<<shift)).UnixMilli(), refused, refusal, id)
 	if err != nil {
 		return 0, err
 	}

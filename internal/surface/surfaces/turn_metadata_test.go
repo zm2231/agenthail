@@ -263,26 +263,33 @@ func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
 	wantTurn(t, "streamed", done, codexCompletedTurn)
 }
 
-func streamedClaudeTurns(t *testing.T, head, rest string) map[string]*surface.TurnMetadata {
+// streamedClaudeTurns streams rest after head until the last turn ends, and
+// returns every turn that ended on the way.
+func streamedClaudeTurns(t *testing.T, head, rest, last string) map[string]*surface.TurnMetadata {
 	t.Helper()
 	path := writeTranscript(t, head)
 	session := seededClaudeStreamSession(t, path, "")
 	appendRecords(t, path, rest)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	turns := map[string]*surface.TurnMetadata{}
-	err := NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+	err := NewClaude(nil, t.TempDir()).Stream(ctx, session, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
 			turns[event.TurnID] = event.Turn
+			if event.TurnID == last {
+				cancel()
+			}
 		}
-	}, 150*time.Millisecond)
-	if !errors.Is(err, surface.ErrStreamWindow) {
-		t.Fatalf("err=%v", err)
+	}, 5*time.Second)
+	if _, ended := turns[last]; !ended || !errors.Is(err, context.Canceled) {
+		t.Fatalf("turn %s ended=%v err=%v", last, ended, err)
 	}
 	return turns
 }
 
 func TestClaudeCompactionsBetweenTurnsBelongToTheNextTurnWhereverAReaderJoins(t *testing.T) {
 	split := strings.Index(claudeTurnTail, `{"type":"user","uuid":"u2"`)
-	turns := streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:split], claudeTurnTail[split:])
+	turns := streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:split], claudeTurnTail[split:], "u2")
 	if len(turns) != 1 {
 		t.Fatalf("turns=%v", turns)
 	}
@@ -293,7 +300,7 @@ func TestClaudeCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 	limit := turnScanLimit
 	turnScanLimit = 1
 	t.Cleanup(func() { turnScanLimit = limit })
-	turns := streamedClaudeTurns(t, claudeTurnHead, claudeTurnTail)
+	turns := streamedClaudeTurns(t, claudeTurnHead, claudeTurnTail, "u2")
 	wantTurn(t, "after a turn joined midway", turns["u2"], claudeInterruptedTurn)
 }
 
@@ -341,7 +348,7 @@ func streamedCodexTurns(t *testing.T, head, rest string, want int) []*surface.Tu
 
 func TestAReaderJoiningAfterACompactionReportsTheTurnsWholeCompactionHistory(t *testing.T) {
 	claudeSplit := strings.Index(claudeTurnTail, `{"type":"assistant","uuid":"a5"`)
-	wantTurn(t, "claude", streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:claudeSplit], claudeTurnTail[claudeSplit:])["u2"], claudeInterruptedTurn)
+	wantTurn(t, "claude", streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:claudeSplit], claudeTurnTail[claudeSplit:], "u2")["u2"], claudeInterruptedTurn)
 	records := codexTurnRecords + codexTurnRest
 	codexSplit := strings.Index(records, `{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count"`)
 	wantTurn(t, "codex", streamedCodexTurns(t, records[:codexSplit], records[codexSplit:], 1)[0], codexAbortedTurn)
@@ -363,7 +370,7 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	start = strings.Index(claude, `{"type":"user","uuid":"u2"`)
 	split = strings.Index(claude, `{"type":"assistant","uuid":"a5"`)
 	turnScanLimit = int64(split - start + 1)
-	turn = streamedClaudeTurns(t, claude[:split], claude[split:])["u2"]
+	turn = streamedClaudeTurns(t, claude[:split], claude[split:], "u2")["u2"]
 	if turn == nil || turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
 		t.Fatalf("claude turn=%s, want its compactions unavailable", turnJSON(t, turn))
 	}

@@ -565,14 +565,24 @@ private struct AgenthailMenuContent: View {
 
 private struct AgenthailMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = AgenthailModel()
-    @StateObject private var voice = VoiceController()
+    @StateObject private var model: AgenthailModel
+    @StateObject private var voice: VoiceController
+
+    init() {
+        let model = AgenthailModel()
+        let voice = VoiceController()
+        model.onSnapshotRequest = { [weak model, weak voice] request, api in
+            guard let model, let voice else { return }
+            WindowSnapshot.answer(request, model: model, voice: voice, api: api)
+        }
+        model.onSnapshotClosed = { WindowSnapshot.cancel($0) }
+        _model = StateObject(wrappedValue: model)
+        _voice = StateObject(wrappedValue: voice)
+    }
 
     var body: some Scene {
         Window("Agenthail", id: "main") {
-            DesktopWindow(model: model)
-                .frame(minHeight: 560)
-                .environmentObject(voice)
+            MainWindowContent(model: model, voice: voice)
         }
         .defaultSize(width: 1440, height: 900)
         .windowStyle(.hiddenTitleBar)

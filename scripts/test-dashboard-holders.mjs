@@ -36,6 +36,7 @@ const context = {
     return { ok: true, json: async () => ({ ok: true }) };
   },
 };
+vm.runInNewContext(source.slice(source.indexOf("function livePlan"), source.indexOf("function presenceLabel")), context);
 vm.runInNewContext(`${source.slice(holdersStart, holdersEnd)}\n${source.slice(actionStart, actionEnd)}\nglobalThis.renderHolderPicker = renderHolderPicker;\nglobalThis.sessionButton = sessionButton;\nglobalThis.runAction = action;\nglobalThis.runLogicalAction = logicalAction;`, context);
 
 const shared = {
@@ -59,6 +60,8 @@ assert.equal(elements["#holder-picker"].hidden, false, "a conversation in two te
 assert.match(select.innerHTML, /pid 4101, pts\/1, idle/);
 assert.match(select.innerHTML, /pid 4102, ttys002, busy/);
 assert.match(context.sessionButton(shared), />2 terminals</, "the row names how many terminals hold it");
+assert.match(context.sessionButton({ ...shared, open: true, status: "busy", plan: { done: 3, total: 5, current: "Running gates" } }), /title="3 of 5 tasks done · Running gates"><span aria-hidden="true">3\/5<\/span><span class="sr-only">3 of 5 tasks done · Running gates<\/span>/, "an open row part way through its tasks shows the count and names the step");
+assert.doesNotMatch(context.sessionButton({ ...shared, open: false, status: "idle", plan: { done: 3, total: 5 } }), /tasks done/, "a closed row keeps no badge");
 await context.runAction("send", { message: "unpicked" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "no terminal picked sends no pin, so the daemon refuses it");
 

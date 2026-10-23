@@ -11,6 +11,8 @@ struct DesktopSettings: View {
                 .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
             GeneralSettings(model: model)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceSettings(model: model)
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
             KeyboardSettings()
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
             DevicesSettings(model: model)
@@ -57,6 +59,17 @@ struct GeneralSettings: View {
                 }
                 if let pid = model.snapshot?.daemon.pid {
                     LabeledContent("Process", value: String(pid))
+                }
+                if let build = model.daemonBuild {
+                    LabeledContent("Daemon build") {
+                        Text(build.label).font(.system(size: DesktopType.secondary, design: .monospaced)).textSelection(.enabled)
+                    }
+                }
+                if let notice = model.daemonBuildNotice {
+                    Text(notice)
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.failed)
+                        .textSelection(.enabled)
                 }
                 if let listen = model.settings?.dashboard.listen {
                     LabeledContent("Local listener") {
@@ -194,7 +207,7 @@ struct DevicesSettings: View {
                 }
             }
             if let remote = model.settings?.remoteAccess {
-                BrowserAccessSection(remote: remote)
+                BrowserAccessSection(remote: remote, createLink: model.createLoginLink)
             }
             Section("Pair an iPhone") {
                 Button("Show Pairing Code") { model.createPairing() }
@@ -254,6 +267,12 @@ private struct HostsSection: View {
                     if let detail = host.detail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: DesktopType.secondary))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .textSelection(.enabled)
+                    }
+                    if let build = host.build {
+                        Text(build.label)
+                            .font(.system(size: DesktopType.secondary, design: .monospaced))
                             .foregroundStyle(DesktopPalette.text2)
                             .textSelection(.enabled)
                     }
