@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,6 +150,20 @@ type workerResponse struct {
 	Status int    `json:"status"`
 	Body   string `json:"body"`
 	Error  string `json:"error"`
+}
+
+// startFailure names a working folder that is gone. A command in its own
+// process group skips os.StartProcess's check of its folder, so the child's
+// failed chdir reports the program as missing instead.
+func startFailure(cmd *exec.Cmd, err error) error {
+	var path *fs.PathError
+	if cmd.Dir == "" || !errors.As(err, &path) {
+		return err
+	}
+	if info, statErr := os.Stat(cmd.Dir); statErr == nil && info.IsDir() {
+		return err
+	}
+	return surface.DeliveryUnavailable(fmt.Errorf("the folder %s is gone", cmd.Dir))
 }
 
 func processGroupCommand(ctx context.Context, path string, args ...string) *exec.Cmd {

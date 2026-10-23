@@ -31,10 +31,7 @@ type claudeBackground struct {
 
 // backgroundCommand runs claude against one config root; "" is the primary.
 // Only a root other than the primary is named in the command's environment.
-// A command that names no folder runs in the home folder. A folder that is
-// gone is reported as such: the process group the command runs in makes Go
-// skip its own check, and the child's failed chdir would read as a missing
-// claude binary.
+// A command that names no folder runs in the home folder.
 func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
@@ -42,8 +39,6 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	}
 	if cwd == "" {
 		cwd = c.home
-	} else if info, err := os.Stat(cwd); err != nil || !info.IsDir() {
-		return nil, surface.DeliveryUnavailable(fmt.Errorf("the folder %s is gone", cwd))
 	}
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
@@ -52,7 +47,8 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	if dir := surface.ClaudeLaunchConfigDir(c.home, root); dir != "" {
 		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+dir)
 	}
-	return cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
+	return output, startFailure(cmd, err)
 }
 
 // claudeCommandEnv is the environment of every Claude Agenthail launches.

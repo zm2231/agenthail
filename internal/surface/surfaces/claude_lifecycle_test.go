@@ -220,3 +220,15 @@ func TestClaudeCreationInAFolderThatIsGoneSaysSo(t *testing.T) {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
 }
+
+func TestClaudeModelCatalogInAFolderThatIsGoneSaysSo(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	home := filepath.Join(t.TempDir(), "removed")
+	if _, err := NewClaude(nil, home).Models(context.Background()); err == nil || !strings.Contains(err.Error(), "folder "+home+" is gone") {
+		t.Fatalf("err=%v", err)
+	}
+}
