@@ -243,3 +243,23 @@ func TestAMissingFolderInTheHomeFolderIsLeftToTheTicker(t *testing.T) {
 		t.Fatalf("followed %v, want the home folder left unwatched", followed)
 	}
 }
+
+func TestAMissingFolderInALinkToTheHomeFolderIsLeftToTheTicker(t *testing.T) {
+	home, links := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	link := filepath.Join(links, "config")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{filepath.Join(link, "sessions")} })
+	followed := []string{}
+	wakes := newCatalogWakes([]surface.Surface{claude}, func(dir string) *filewake.Wake {
+		followed = append(followed, dir)
+		return filewake.FollowDir(dir)
+	})
+	defer wakes.close()
+	wakes.sync()
+	if len(followed) != 0 {
+		t.Fatalf("followed %v, want the home folder left unwatched through a link", followed)
+	}
+}

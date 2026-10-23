@@ -189,6 +189,12 @@ func holdsHome(dir string) bool {
 	if err != nil {
 		return false
 	}
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	relative, err := filepath.Rel(dir, filepath.Clean(home))
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
