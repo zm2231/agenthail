@@ -34,27 +34,18 @@ async function show(message) {
 // in the background" notice. So an answered marker is shown silently and
 // closed at once, which the system removes before presenting it. The marker
 // has its own tag: under the question's tag it would replace a notification
-// still on screen instead of arriving new. A browser whose close leaves the
-// question shown, as Safari's does, is reported so it gets no more withdraws:
-// each would leave one more notification.
+// still on screen instead of arriving new. Safari refuses to close a
+// notification in its first 30 seconds, so there the marker stays until the
+// next withdraw closes it with the question; the daemon sends a withdraw only
+// once its question is past that age.
 async function withdraw(message) {
   if (!message.collapseId) return;
-  const shown = await self.registration.getNotifications({ tag: message.collapseId });
-  for (const notification of shown) notification.close();
   const marker = `${message.collapseId}:answered`;
+  for (const notification of await self.registration.getNotifications()) {
+    if (notification.tag === message.collapseId || notification.tag.endsWith(":answered")) notification.close();
+  }
   await self.registration.showNotification("Agenthail", { body: "Answered", icon, badge: icon, tag: marker, silent: true });
   for (const notification of await self.registration.getNotifications({ tag: marker })) notification.close();
-  if (shown.length > 0 && (await self.registration.getNotifications({ tag: message.collapseId })).length > 0) await reportCannotClose();
-}
-
-async function reportCannotClose() {
-  const subscription = await self.registration.pushManager.getSubscription();
-  if (!subscription) return;
-  await fetch("/api/v1/browser/push", {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ endpoint: subscription.endpoint, withdraw: false }),
-  }).catch(() => {});
 }
 
 // A click opens the session in a dashboard window. The worker's scope is

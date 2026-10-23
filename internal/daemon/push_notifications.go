@@ -160,13 +160,7 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, notif
 // here removes one; a browser is removed only when its push service says the
 // subscription is gone, as on a send.
 func (d *Daemon) withdrawFromPairedDevices(ctx context.Context, collapseID string) {
-	var wait sync.WaitGroup
-	wait.Add(1)
-	go func() {
-		defer wait.Done()
-		d.withdrawFromBrowsers(ctx, collapseID)
-	}()
-	defer wait.Wait()
+	d.withdrawFromBrowsers(collapseID)
 	targets, err := d.Registry.DevicePushTargets()
 	if err != nil {
 		d.log.Printf("load device push targets: %s", err)

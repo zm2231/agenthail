@@ -76,6 +76,7 @@ type Daemon struct {
 	// WithdrawNotification outside tests.
 	withdrawDesktop func(identifier string) error
 	background      *backgroundWork
+	browserShown    browserShownTimes
 	events          *eventHub
 	catalog         *catalogHub
 	// catalogLiveMu guards catalogLive, which discovery replaces and the

@@ -33,19 +33,8 @@ func TestABrowserManagesOnlyItsOwnPushSubscription(t *testing.T) {
 	if response := serveDashboardRequest(handler, http.MethodPut, "/api/v1/browser/push", subscription); response.Code != http.StatusOK {
 		t.Fatalf("PUT status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := status(); !got.Subscribed || !got.Withdraw {
-		t.Fatalf("status=%+v", got)
-	}
-	for _, report := range []string{`{"endpoint":"https://push.example/capability","withdraw":true}`, `{"endpoint":"https://push.example/capability"}`, `{"withdraw":false}`} {
-		if response := serveDashboardRequest(handler, http.MethodPatch, "/api/v1/browser/push", report); response.Code != http.StatusBadRequest {
-			t.Fatalf("PATCH %s status=%d", report, response.Code)
-		}
-	}
-	if response := serveDashboardRequest(handler, http.MethodPatch, "/api/v1/browser/push", `{"endpoint":"https://push.example/capability","withdraw":false}`); response.Code != http.StatusOK {
-		t.Fatalf("PATCH status=%d body=%s", response.Code, response.Body.String())
-	}
-	if got := status(); !got.Subscribed || got.Withdraw {
-		t.Fatalf("after the report status=%+v", got)
+	if !status().Subscribed {
+		t.Fatal("the subscription was not kept")
 	}
 	if body := serveDashboardRequest(handler, http.MethodGet, "/api/v1/devices", "").Body.String(); strings.Contains(body, "push.example") || !strings.Contains(body, `"pushEnabled":true`) {
 		t.Fatalf("devices list: %s", body)

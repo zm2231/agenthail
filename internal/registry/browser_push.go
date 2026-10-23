@@ -15,16 +15,10 @@ type BrowserPushSubscription struct {
 	Endpoint string
 	P256DH   string
 	Auth     string
-	// Withdraw is whether this browser can close a shown notification. One
-	// that cannot is never sent withdraws: each would only add a notification.
-	Withdraw bool
 }
 
 // SaveBrowserPushSubscription records the subscription of an active browser,
-// replacing the one it had. Revoking or forgetting the browser removes it. A
-// browser found unable to close notifications keeps that finding while its
-// endpoint stays the same; a new endpoint, as a browser update may bring, is
-// tried again.
+// replacing the one it had. Revoking or forgetting the browser removes it.
 func (r *Registry) SaveBrowserPushSubscription(subscription BrowserPushSubscription) error {
 	deviceID := strings.TrimSpace(subscription.DeviceID)
 	endpoint := strings.TrimSpace(subscription.Endpoint)
@@ -41,8 +35,7 @@ func (r *Registry) SaveBrowserPushSubscription(subscription BrowserPushSubscript
 	}
 	result, err := r.db.Exec(`INSERT INTO browser_push_subscriptions (device_id,endpoint,p256dh,auth,updated_at)
 		SELECT id,?,?,?,? FROM paired_devices WHERE id=? AND browser=1 AND revoked_at=''
-		ON CONFLICT(device_id) DO UPDATE SET withdraw=CASE WHEN endpoint=excluded.endpoint THEN withdraw ELSE 1 END,
-			endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at`, endpoint, p256dh, auth, time.Now().UTC().Format(time.RFC3339Nano), deviceID)
+		ON CONFLICT(device_id) DO UPDATE SET endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at`, endpoint, p256dh, auth, time.Now().UTC().Format(time.RFC3339Nano), deviceID)
 	if err != nil {
 		return err
 	}
@@ -65,23 +58,9 @@ func (r *Registry) RemoveBrowserPushEndpoint(deviceID, endpoint string) error {
 	return err
 }
 
-// StopBrowserPushWithdraws records that a browser cannot close the
-// notifications it shows. It applies only while the subscription still has
-// endpoint, so a report from a replaced subscription changes nothing.
-func (r *Registry) StopBrowserPushWithdraws(deviceID, endpoint string) error {
-	_, err := r.db.Exec(`UPDATE browser_push_subscriptions SET withdraw=0 WHERE device_id=? AND endpoint=?`, strings.TrimSpace(deviceID), endpoint)
-	return err
-}
-
-// BrowserPushSubscriptionState is whether a browser has a subscription and,
-// if so, whether it is sent withdraws.
-func (r *Registry) BrowserPushSubscriptionState(deviceID string) (found, withdraw bool, err error) {
-	err = r.read.QueryRow(`SELECT count(*)>0, coalesce(max(withdraw),0)=1 FROM browser_push_subscriptions WHERE device_id=?`, strings.TrimSpace(deviceID)).Scan(&found, &withdraw)
-	return found, withdraw, err
-}
-
 func (r *Registry) HasBrowserPushSubscription(deviceID string) (bool, error) {
-	found, _, err := r.BrowserPushSubscriptionState(deviceID)
+	var found bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM browser_push_subscriptions WHERE device_id=?)`, strings.TrimSpace(deviceID)).Scan(&found)
 	return found, err
 }
 
@@ -89,7 +68,7 @@ func (r *Registry) HasBrowserPushSubscription(deviceID string) (bool, error) {
 // in. A browser past BrowserIdleLimit is left out even before it is pruned.
 func (r *Registry) BrowserPushSubscriptions() ([]BrowserPushSubscription, error) {
 	cutoff := time.Now().UTC().Add(-BrowserIdleLimit).Format(time.RFC3339Nano)
-	rows, err := r.read.Query(`SELECT b.device_id,b.endpoint,b.p256dh,b.auth,b.withdraw=1
+	rows, err := r.read.Query(`SELECT b.device_id,b.endpoint,b.p256dh,b.auth
 		FROM browser_push_subscriptions b JOIN paired_devices d ON d.id=b.device_id
 		WHERE d.revoked_at='' AND d.browser=1
 			AND datetime(CASE WHEN d.last_seen_at<>'' THEN d.last_seen_at ELSE d.created_at END)>=datetime(?)
@@ -101,7 +80,7 @@ func (r *Registry) BrowserPushSubscriptions() ([]BrowserPushSubscription, error)
 	subscriptions := []BrowserPushSubscription{}
 	for rows.Next() {
 		var subscription BrowserPushSubscription
-		if err := rows.Scan(&subscription.DeviceID, &subscription.Endpoint, &subscription.P256DH, &subscription.Auth, &subscription.Withdraw); err != nil {
+		if err := rows.Scan(&subscription.DeviceID, &subscription.Endpoint, &subscription.P256DH, &subscription.Auth); err != nil {
 			return nil, err
 		}
 		subscriptions = append(subscriptions, subscription)

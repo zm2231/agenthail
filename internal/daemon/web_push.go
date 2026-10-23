@@ -30,6 +30,46 @@ const webPushQuestionTTL = 15 * 60
 
 var webPushHTTPClient webpush.HTTPClient = &http.Client{Timeout: 12 * time.Second}
 
+// webPushCloseAge is how long after sending a question to browsers its
+// withdraw waits. Safari refuses to close a service worker's notification in
+// its first 30 seconds, so an earlier withdraw would leave it shown; the rest
+// covers the push service's delivery.
+var webPushCloseAge = 35 * time.Second
+
+// browserShownTimes is when each question was last sent to browsers, kept
+// only while it is younger than webPushCloseAge.
+type browserShownTimes struct {
+	mu    sync.Mutex
+	shown map[string]time.Time
+}
+
+func (s *browserShownTimes) record(collapseID string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shown == nil {
+		s.shown = map[string]time.Time{}
+	}
+	for key, at := range s.shown {
+		if now.Sub(at) >= webPushCloseAge {
+			delete(s.shown, key)
+		}
+	}
+	s.shown[collapseID] = now
+}
+
+// closableIn is how long until the notification sent under collapseID can
+// be closed. One this daemon did not send is taken to be old enough.
+func (s *browserShownTimes) closableIn(collapseID string, now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.shown[collapseID]
+	if !ok {
+		return 0
+	}
+	delete(s.shown, collapseID)
+	return max(0, webPushCloseAge-now.Sub(at))
+}
+
 type webPushKeys struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
@@ -126,6 +166,9 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 		CollapseID: boundedNotificationText(notification.CollapseID, 64),
 		RequestID:  boundedNotificationText(notification.RequestID, 240),
 	}
+	if message.CollapseID != "" {
+		d.browserShown.record(message.CollapseID, time.Now())
+	}
 	urgency := webpush.UrgencyNormal
 	if notification.EventType == "session.waiting" {
 		urgency = webpush.UrgencyHigh
@@ -134,11 +177,27 @@ func (d *Daemon) notifyBrowsers(ctx context.Context, notification mobileNotifica
 }
 
 // withdrawFromBrowsers closes the notification each browser shows under
-// collapseID. A message with the same topic also replaces an undelivered
-// one, so a browser that was offline never shows the answered question. A
-// browser whose worker found it cannot close notifications is left out.
-func (d *Daemon) withdrawFromBrowsers(ctx context.Context, collapseID string) {
-	d.sendToBrowsers(ctx, webPushMessage{Type: "withdraw", CollapseID: boundedNotificationText(collapseID, 64)}, webpush.UrgencyNormal, "withdraw browser notification")
+// collapseID, once it is old enough for every browser to close it; until
+// then it waits in the background, so a phone's withdraw is not held up. A
+// message with the same topic also replaces an undelivered one, so a browser
+// that was offline never shows the answered question.
+func (d *Daemon) withdrawFromBrowsers(collapseID string) {
+	collapseID = boundedNotificationText(collapseID, 64)
+	wait := d.browserShown.closableIn(collapseID, time.Now())
+	d.background.start(func(ctx context.Context) {
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+		sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		d.sendToBrowsers(sendCtx, webPushMessage{Type: "withdraw", CollapseID: collapseID}, webpush.UrgencyNormal, "withdraw browser notification")
+	})
 }
 
 func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urgency webpush.Urgency, what string) {
@@ -146,15 +205,6 @@ func (d *Daemon) sendToBrowsers(ctx context.Context, message webPushMessage, urg
 	if err != nil {
 		d.log.Printf("load browser push subscriptions: %s", err)
 		return
-	}
-	if message.Type == "withdraw" {
-		withdrawable := subscriptions[:0]
-		for _, subscription := range subscriptions {
-			if subscription.Withdraw {
-				withdrawable = append(withdrawable, subscription)
-			}
-		}
-		subscriptions = withdrawable
 	}
 	if len(subscriptions) == 0 {
 		return
