@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -75,7 +76,7 @@ func (c *voiceCall) said(text string) bool {
 func connectVoice(t *testing.T, f *orphanFixture, target string) (*voice.Service, *voiceCall) {
 	t.Helper()
 	call := &voiceCall{}
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, f.r.RegisterSession, "/fixture/agenthail", f.daemon.resolveVoiceTarget, f.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: f.daemon})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, f.daemon.registerVoiceOperator, "/fixture/agenthail", f.daemon.resolveVoiceTarget, f.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: f.daemon})
 	t.Cleanup(service.Close)
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "select", TargetID: target}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {
 		if _, err := service.Apply(context.Background(), "phone", action); err != nil {
@@ -198,5 +199,31 @@ func TestVoiceTargetTakesTheLiveSessionForItsExactIDAndOnlyWakingSurfacesTakeACl
 	delete(fake.sessions, registered.ID)
 	if _, err := d.resolveVoiceTarget(context.Background(), registered.ID); err == nil {
 		t.Fatal("a surface that cannot wake a session accepted its closed row")
+	}
+}
+
+func TestPrepareRegistersASavedOperatorAsItsSurfaceCarriesItNow(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.sessions["operator"] = surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: "managed", Status: surface.StatusIdle}
+	path := filepath.Join(t.TempDir(), "voice", "operator.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	saved := `{"state":{"protocol":1,"session":{"id":"operator","surface":"codex","name":"Voice operator","status":"idle","source":"agenthail","transport":"desktop"},"phase":"ended","events":[]}}`
+	if err := os.WriteFile(path, []byte(saved), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(path, &voiceCall{}, d.registerVoiceOperator, "/fixture/agenthail", d.resolveVoiceTarget, d.dispatcher(), nil, daemonVoiceStreamProvider{daemon: d})
+	t.Cleanup(service.Close)
+	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "prepare"}); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	registered, err := r.Session("operator")
+	if err != nil || registered.RuntimeKind != surface.RuntimeCodexAppServer || registered.Transport != "managed" || registered.Name != "Voice operator" {
+		t.Fatalf("registered=%+v err=%v", registered, err)
+	}
+	delete(fake.sessions, "operator")
+	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "prepare"}); err == nil || !strings.Contains(err.Error(), "verify voice operator") {
+		t.Fatalf("prepare registered an operator its surface no longer has: %v", err)
 	}
 }
