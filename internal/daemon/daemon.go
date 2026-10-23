@@ -35,6 +35,7 @@ const (
 
 type Daemon struct {
 	Registry             *registry.Registry
+	sessionFiles         sessionFileLists
 	claudeConfigRootsMu  sync.Mutex
 	claudeConfigRootsAt  time.Time
 	claudeConfigRootList []surface.ClaudeConfigRoot
