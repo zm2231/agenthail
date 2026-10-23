@@ -39,7 +39,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `version` | `1` | File format version. |
 | `theme` | `system` | `system`, `dark`, `light`. |
 | `theme.accent` | `system` | Accent for links, focus and working state: `system` or `#rrggbb`. |
-| `background` | `art: tide` | What fills the window. See [Backgrounds](#backgrounds). |
+| `background` | `art: field` | What fills the window. See [Backgrounds](#backgrounds). |
 | `background.fit` | `cover` | How an image fills the window: `cover`, `contain`, `center`, `tile`. |
 | `background.position` | `center` | Which part of an image stays in view: `center`, `top`, `bottom`, `left`, `right`. |
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
@@ -72,7 +72,7 @@ Whatever the background, text keeps at least `contrast.target` contrast: the app
 
 - `none`: the plain window colour.
 - `desktop`: the desktop picture shows through.
-- `art: <name>`: a built-in picture: `tide`, `aurora`, `dawn` or `field`. Each has a dark and a light version, and the app shows the one that matches its appearance.
+- `art: <name>`: a built-in picture: `field`, `tide`, `aurora` or `dawn`. Each has a dark and a light version, and the app shows the one that matches its appearance.
 - `image: <path>`: a PNG, JPEG, HEIC or WebP image under 30 MB. `agenthail ui set` copies an image from anywhere into `~/.agenthail/ui/backgrounds/` and writes that path, so the image is versioned with the file. The Mac app's Appearance settings upload a chosen or dropped image the same way, also to a remote computer.
 - `gradient: <preset>`: one of `dusk`, `slate`, `forest`, `ember`, `violet`, `mono`. Each has a dark and a light version, like the built-in pictures.
 - `gradient: <angle>deg, <colour> <pos>%, <colour> <pos>%, ...`: a linear gradient with at least two stops, for example `gradient: 135deg, #1b2230 0%, #4a2c8a 100%`.

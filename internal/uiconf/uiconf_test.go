@@ -77,8 +77,12 @@ func TestResolveFillsDefaultsAndExpandsPresets(t *testing.T) {
 			t.Fatalf("missing default for %s", key.Name)
 		}
 	}
-	if values["background"] != "image: art/tide-dark.jpg" || values["background.light"] != "image: art/tide-light.jpg" {
+	if values["background"] != "image: art/field-dark.jpg" || values["background.light"] != "image: art/field-light.jpg" {
 		t.Fatalf("default background = %v, light %v", values["background"], values["background.light"])
+	}
+	tide := Parse("background = art: tide").Resolve(Device{Class: "mac"})
+	if tide["background"] != "image: art/tide-dark.jpg" || tide["background.light"] != "image: art/tide-light.jpg" {
+		t.Fatalf("a chosen tide = %v, light %v", tide["background"], tide["background.light"])
 	}
 	slate := Parse("background = gradient: slate").Resolve(Device{Class: "mac"})
 	if slate["background"] != Presets["slate"].Dark || slate["background.light"] != Presets["slate"].Light || Presets["slate"].Dark == Presets["slate"].Light {
