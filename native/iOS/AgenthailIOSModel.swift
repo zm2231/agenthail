@@ -1018,8 +1018,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     /// Files an `@` in this session's draft can name, from the computer that
     /// runs it; nil when that computer can't be asked.
     func sessionFiles(_ id: String, query: String) async -> [SessionFile]? {
-        guard let resolved = try? resolve(id) else { return nil }
-        return try? await resolved.api.sessionFiles(id: resolved.route.sessionID, query: query).files
+        guard case let (connection, route)? = try? resolveServer(id) else { return nil }
+        let files = try? await connection.api.sessionFiles(id: route.sessionID, query: query).files
+        return server(for: id) === connection ? files : nil
     }
 
     private func loadCommands(_ id: String) {

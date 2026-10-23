@@ -66,4 +66,21 @@ final class ComposerCompletionTests: XCTestCase {
         view.undoManager?.undo()
         XCTAssertEqual(draft, "ask @co then")
     }
+
+    func testAcceptingDuringAKeyboardCompositionKeepsTheComposedText() async throws {
+        let (view, coordinator) = composer()
+        _ = coordinator
+        view.insertText("see ")
+        view.setMarkedText("@no", selectedRange: NSRange(location: 3, length: 0))
+        await settle()
+        let token = try XCTUnwrap(CompletionToken.at(draft, caret: 7))
+        let item = CompletionItem(id: "file:notes.md", title: "notes.md", detail: "", insertion: "@notes.md")
+        let change = ComposerCompletion.edit(item, in: draft, at: token)
+        let editor = IOSComposerEditor()
+        editor.textView = view
+        editor.replace(change.range, with: change.replacement, caret: change.caret)
+        XCTAssertNil(view.markedTextRange)
+        XCTAssertEqual(view.text, "see @notes.md ")
+        XCTAssertEqual(draft, "see @notes.md ")
+    }
 }

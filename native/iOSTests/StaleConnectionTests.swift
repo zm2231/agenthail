@@ -184,6 +184,35 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testMentionFilesFromAComputerReplacedMidRequestAreDropped() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        ServedSessionProtocol.state.hold("old", ["/api/v1/session-files"])
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let request = Task { await model.sessionFiles("hsrv::demo", query: "a") }
+        for _ in 0..<150 where !ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ServedSessionProtocol.state.holding)
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        ServedSessionProtocol.state.release()
+        let stale = await request.value
+        XCTAssertNil(stale)
+        var current: [SessionFile]?
+        for _ in 0..<150 where current == nil {
+            current = await model.sessionFiles("hsrv::demo", query: "a")
+            if current == nil { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        XCTAssertEqual(current, [SessionFile(path: "new/demo/a", dir: false)])
+        model.forgetHost("hsrv")
+    }
+
+    @MainActor
     func testReconnectingAComputerDropsItsOldRequestsAndOlderActivity() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -631,7 +660,10 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let id = items.first { $0.name == "id" }?.value ?? ""
             let query = items.first { $0.name == "q" }?.value ?? ""
-            respond(#"{"files":[{"path":"\#(host)/\#(id)/\#(query)","dir":false}],"truncated":false}"#)
+            DispatchQueue.global().async { [self] in
+                Self.state.waitIfHeld(host, path)
+                respond(#"{"files":[{"path":"\#(host)/\#(id)/\#(query)","dir":false}],"truncated":false}"#)
+            }
         case "/api/v1/session-stream":
             Self.state.open(host, self)
             open()

@@ -150,6 +150,7 @@ final class IOSComposerEditor {
 
     func replace(_ range: NSRange, with text: String, caret: Int) {
         guard let textView, NSMaxRange(range) <= (textView.text as NSString).length else { return }
+        if textView.markedTextRange != nil { textView.unmarkText() }
         textView.selectedRange = range
         textView.insertText(text)
         textView.selectedRange = NSRange(location: min(caret, (textView.text as NSString).length), length: 0)
