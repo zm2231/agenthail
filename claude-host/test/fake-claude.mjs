@@ -43,7 +43,7 @@ const contextReport = () => {
   const window = Number.isInteger(settings.autoCompactWindow) ? Math.min(settings.autoCompactWindow, modelWindow) : modelWindow;
   return { model, maxTokens: window, rawMaxTokens: window, autoCompactThreshold: window - 33000, isAutoCompactEnabled: true, autocompactSource: Number.isInteger(settings.autoCompactWindow) ? 'settings' : 'auto' };
 };
-fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null, todoTools: process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS ?? null }) + '\n');
+fs.appendFileSync(path.join(dir, 'spawns.jsonl'), JSON.stringify({ pid: process.pid, sessionId, argv, cwd: process.cwd(), env: Object.keys(process.env), configDir: process.env.CLAUDE_CONFIG_DIR ?? null, todoTools: process.env.CLAUDE_CODE_ENABLE_TODO_TOOLS ?? null, claudeaiMcp: process.env.ENABLE_CLAUDEAI_MCP_SERVERS ?? null }) + '\n');
 // A refuse-<session id> file makes the CLI exit before it starts, printing the
 // file's text the way Claude reports a session it cannot open.
 const refusal = path.join(dir, `refuse-${sessionId}`);
@@ -57,6 +57,20 @@ process.stderr.write(`fake-claude: session ${sessionId} started\n`);
 const seen = new Set(
   fs.existsSync(transcript) ? fs.readFileSync(transcript, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).uuid) : [],
 );
+
+// The commands Claude reports while it starts: two rows can share a name, and
+// Claude's own row is the one /name runs. A SKILLS turn reports a new list, as
+// Claude does when it finds a skill mid-session. FAKE_CLAUDE_TERMINAL_COMMANDS
+// names commands the first turn's init message marks terminal-only.
+const commands = [
+  { name: 'review', description: 'A project command that shares a name', argumentHint: '' },
+  { name: 'review', description: 'Review a pull request', argumentHint: '[pr]', builtin: true },
+  { name: 'compact', description: 'Compact the conversation', argumentHint: '<instructions>', builtin: true },
+  { name: 'statusline', description: 'Set up the status line', argumentHint: '', builtin: true },
+  { name: '__internal', description: '', argumentHint: '', builtin: true },
+  { name: 'l5-probe', description: 'A project skill', argumentHint: '' },
+];
+let initSent = false;
 
 const write = (message) => {
   try {
@@ -129,8 +143,17 @@ async function turn(message) {
   seen.add(uuid);
   const text = typeof message.message.content === 'string' ? message.message.content : JSON.stringify(message.message.content);
   await runHooks('UserPromptSubmit', { prompt: text });
+  if (!initSent) {
+    initSent = true;
+    const terminal = process.env.FAKE_CLAUDE_TERMINAL_COMMANDS;
+    write({ type: 'system', subtype: 'init', session_id: sessionId, uuid: crypto.randomUUID(), slash_commands: commands.map((c) => c.name), ...(terminal ? { terminal_slash_commands: terminal.split(',') } : {}) });
+  }
   state('running');
   let reply = `echo:${text}`;
+  if (text.startsWith('SKILLS')) {
+    commands.push({ name: 'found-later', description: 'A skill found mid-session', argumentHint: '' });
+    write({ type: 'system', subtype: 'commands_changed', commands, uuid: crypto.randomUUID(), session_id: sessionId });
+  }
   if (text.startsWith('TOOL')) {
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'true' }], behavior: 'allow', destination: 'session' }];
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake', title: 'Claude wants to run true', ...(text.includes('ALWAYS') ? { permission_suggestions: suggestions } : {}) });
@@ -351,11 +374,13 @@ lines.on('line', (line) => {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
     }
     const responses = {
-      initialize: { commands: [], models: [], account: {}, output_style: 'default', available_output_styles: [] },
+      initialize: { commands, models: [], account: {}, output_style: 'default', available_output_styles: [] },
       get_context_usage: { ...contextReport(), totalTokens: 1000, categories: [] },
     };
     const response = responses[subtype] ?? {};
     const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });
+    // FAKE_CLAUDE_INITIALIZE_MS delays starting, as a slow disk or many plugins may.
+    if (subtype === 'initialize' && process.env.FAKE_CLAUDE_INITIALIZE_MS) return void setTimeout(answer, Number(process.env.FAKE_CLAUDE_INITIALIZE_MS));
     // FAKE_CLAUDE_CONTEXT_REPORT_MS delays the context report, as a busy Claude may.
     if (subtype === 'get_context_usage' && process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS) setTimeout(answer, Number(process.env.FAKE_CLAUDE_CONTEXT_REPORT_MS));
     else answer();

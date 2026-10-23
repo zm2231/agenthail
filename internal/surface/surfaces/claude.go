@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -526,7 +527,8 @@ type claudeSessionRecord struct {
 
 // records returns the config roots and the session records of Claude
 // processes that are alive in any of them, excluding the records Agenthail
-// writes for its own peer workers and relays.
+// writes for its own peer workers and relays, and those of the processes the
+// host starts only to list commands.
 func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
@@ -551,7 +553,7 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 				continue
 			}
 			var m map[string]any
-			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
+			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" || strings.HasPrefix(str(m, "sessionId"), claudehost.ListingSessionPrefix) {
 				continue
 			}
 			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
@@ -1239,6 +1241,7 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	var commands claudeCommandsStream
 	path, err := c.sessionTranscript(sess)
 	if err != nil {
 		return err
@@ -1383,6 +1386,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if changed {
 				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
 			}
+			commands.emit(ctx, c, sess, onEvent)
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {
