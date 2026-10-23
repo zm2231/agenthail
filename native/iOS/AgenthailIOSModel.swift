@@ -1486,11 +1486,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
             detail.context = event.data.context
+            selectedDetail = detail
+            return
         } else if event.data.kind == "goal" {
             sessionMetadata.stream(goal: event.data.goal)
             detail.goal = event.data.goal
+            selectedDetail = detail
+            return
         }
-        selectedDetail = detail
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
             return
