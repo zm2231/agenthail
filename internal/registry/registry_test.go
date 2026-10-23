@@ -25,8 +25,7 @@ var testRegistryTemplate struct {
 }
 
 // openTestRegistry opens a new registry copied from one migrated once per test
-// process. The copy gets its own host id before it is opened and its own host
-// epoch on its first catalog write.
+// process. The copy gets its own host id and host epoch before it is opened.
 func openTestRegistry(t *testing.T) *Registry {
 	t.Helper()
 	testRegistryTemplate.once.Do(func() { testRegistryTemplate.data, testRegistryTemplate.err = buildTestRegistryTemplate() })
@@ -37,7 +36,7 @@ func openTestRegistry(t *testing.T) *Registry {
 	if err := os.WriteFile(path, testRegistryTemplate.data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := giveTestRegistryItsOwnHostID(path); err != nil {
+	if err := giveTestRegistryItsOwnIdentity(path); err != nil {
 		t.Fatal(err)
 	}
 	r, err := Open(path)
@@ -59,29 +58,48 @@ func buildTestRegistryTemplate() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, deleteErr := r.db.Exec(`DELETE FROM catalog_state`)
 	_, checkpointErr := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
-	if err := errors.Join(deleteErr, checkpointErr, r.Close()); err != nil {
+	if err := errors.Join(checkpointErr, r.Close()); err != nil {
 		return nil, err
 	}
 	return os.ReadFile(path)
 }
 
-// giveTestRegistryItsOwnHostID replaces the host id copied from the template.
-// Open does not touch a registry already at this schema, so the copy must not
-// share the template's id.
-func giveTestRegistryItsOwnHostID(path string) error {
+// giveTestRegistryItsOwnIdentity replaces the host id and catalog host epoch
+// copied from the template. Open does not touch a registry already at this
+// schema, so the copy must not share the template's.
+func giveTestRegistryItsOwnIdentity(path string) error {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return err
 	}
-	raw := make([]byte, 6)
+	raw := make([]byte, 6+16)
 	_, randErr := rand.Read(raw)
-	var updateErr error
+	var hostErr, epochErr error
 	if randErr == nil {
-		_, updateErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw))
+		_, hostErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw[:6]))
+		_, epochErr = db.Exec(`UPDATE catalog_state SET host_epoch=? WHERE id=1`, hex.EncodeToString(raw[6:]))
 	}
-	return errors.Join(randErr, updateErr, db.Close())
+	return errors.Join(randErr, hostErr, epochErr, db.Close())
+}
+
+func TestEachTestRegistryHasItsOwnHostIdentityAndEpoch(t *testing.T) {
+	var ids, epochs []string
+	for range 2 {
+		r := openTestRegistry(t)
+		identity, err := r.HostIdentity()
+		if err != nil || !ValidHostID(identity.ID) {
+			t.Fatalf("identity=%+v err=%v", identity, err)
+		}
+		epoch, _, err := r.CatalogState()
+		if err != nil || epoch == "" {
+			t.Fatalf("epoch=%q err=%v", epoch, err)
+		}
+		ids, epochs = append(ids, identity.ID), append(epochs, epoch)
+	}
+	if ids[0] == ids[1] || epochs[0] == epochs[1] {
+		t.Fatalf("copies share ids=%v epochs=%v", ids, epochs)
+	}
 }
 
 func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {
