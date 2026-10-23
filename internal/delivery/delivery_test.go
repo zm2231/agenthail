@@ -187,7 +187,7 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
-	if err != nil || intent.SenderSessionID != registry.OperatorSessionID {
+	if err != nil || intent.SenderSessionID != surface.CLISessionID {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 }
@@ -269,7 +269,7 @@ func assertSynchronousRefusalLeavesNoProblem(t *testing.T, r *registry.Registry,
 	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 		t.Fatalf("synchronous refusal became a durable problem: problems=%+v err=%v", problems, err)
 	}
-	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("synchronous refusal injected %d failure notices", got)
 	}
 	if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
@@ -306,7 +306,7 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 		t.Fatal(err)
 	}
 	adapter := unwritableSurface{&fakeSurface{capabilities: surface.Capabilities{Steer: true}}}
-	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "focus"); err == nil {
+	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "focus", ""); err == nil {
 		t.Fatal("expected read-only refusal")
 	}
 	if len(adapter.steered) != 0 {
@@ -315,7 +315,7 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
-	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("read-only refusal injected %d failure notices", got)
 	}
 	if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
@@ -414,7 +414,7 @@ func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
 	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
-	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+	if got := r.QueueCount(surface.CLISessionID); got != 0 {
 		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
 	}
 }
@@ -430,7 +430,7 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 			return d.Deliver(context.Background(), a, s, "probe", "")
 		}, &fakeSurface{err: unavailable}},
 		{"steer", func(d Dispatcher, a *fakeSurface, s *surface.Session) (*Receipt, error) {
-			return d.Steer(context.Background(), a, s, "probe")
+			return d.Steer(context.Background(), a, s, "probe", "")
 		}, &fakeSurface{steerErr: unavailable, capabilities: surface.Capabilities{Steer: true}}},
 		{"busy steer", func(d Dispatcher, a *fakeSurface, s *surface.Session) (*Receipt, error) {
 			return d.DeliverWithOptions(context.Background(), a, s, "probe", "", surface.SendOptions{BusyDelivery: "steer"})
@@ -453,7 +453,7 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 				t.Fatalf("problems=%+v err=%v", problems, err)
 			}
-			if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+			if got := r.QueueCount(surface.CLISessionID); got != 0 {
 				t.Fatalf("did-not-start refusal injected %d failure notices", got)
 			}
 			if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
@@ -558,7 +558,7 @@ func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {
 		t.Fatalf("provider was called after intent persistence failed: %v", adapter.sent)
 	}
 	steerAdapter := &fakeSurface{}
-	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), steerAdapter, session, "must not steer"); err == nil {
+	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), steerAdapter, session, "must not steer", ""); err == nil {
 		t.Fatal("expected steer intent persistence failure")
 	}
 	if len(steerAdapter.steered) != 0 {
@@ -578,7 +578,7 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 		}
 	}
 	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
-	receipt, err := (Dispatcher{Registry: r}).Steer(surface.WithSourceSessionID(context.Background(), "steer-source"), adapter, &surface.Session{ID: "steer-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "focus")
+	receipt, err := (Dispatcher{Registry: r}).Steer(surface.WithSourceSessionID(context.Background(), "steer-source"), adapter, &surface.Session{ID: "steer-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "focus", "")
 	if err != nil || receipt == nil || receipt.DeliveryID == 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
@@ -688,7 +688,7 @@ func TestDispatcherSendsEachIntentUnderItsOwnUUID(t *testing.T) {
 		}
 		receipts = append(receipts, receipt)
 	}
-	steered, err := dispatcher.Steer(context.Background(), adapter, session, "three")
+	steered, err := dispatcher.Steer(context.Background(), adapter, session, "three", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
 			callbackErr = fmt.Errorf("provider callback saw intent %+v", intent)
 		}
 	}
-	receipt, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "steer callback")
+	receipt, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "steer callback", "")
 	if callbackErr != nil || err != nil || receipt == nil || receipt.DeliveryID != seenID {
 		t.Fatalf("callbackErr=%v err=%v receipt=%+v seenID=%d", callbackErr, err, receipt, seenID)
 	}

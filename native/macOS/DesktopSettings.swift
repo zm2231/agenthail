@@ -401,7 +401,7 @@ struct DeliverySettings: View {
                         Button("Delete Channel", role: .destructive) { model.performOperation(action: "channel-delete", channel: selectedChannel) }
                         Spacer()
                         Button("Send") {
-                            model.performOperation(action: "channel-send", message: channelMessage, channel: selectedChannel)
+                            model.performOperation(action: "channel-send", message: channelMessage, channel: selectedChannel, author: "person")
                             channelMessage = ""
                         }
                         .disabled(channelMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

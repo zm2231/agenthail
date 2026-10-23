@@ -2104,7 +2104,7 @@ async function send(requestedAction = "send") {
     const commandActions = {
       "/compact": ["compact", {}],
       "/stop": ["interrupt", {}],
-      "/steer": ["steer", { message: argument }],
+      "/steer": ["steer", { message: argument, author: "person" }],
       "/model": ["model", { model: argument }],
       "/goal": ["goal-set", { message: argument }],
       "/name": ["alias", { alias: argument }],
@@ -2114,7 +2114,7 @@ async function send(requestedAction = "send") {
       throw Error(`${command} needs a value`);
     const sendPayload = { message, author: "person", ...selectedTurnOptions() };
     const result = composerAction === "steer"
-      ? await action("steer", { message })
+      ? await action("steer", { message, author: "person" })
       : commandAction
       ? await action(commandAction[0], commandAction[1])
       : await logicalAction("send", "send", sendPayload);
@@ -2307,7 +2307,7 @@ document.addEventListener("click", async (event) => {
     if (!message || !message.trim()) return;
     projectMessage.disabled = true;
     try {
-      const result = await action("channel-send", { channel: `#${projectMessage.dataset.projectMessage}`, message }, crypto.randomUUID(), "");
+      const result = await action("channel-send", { channel: `#${projectMessage.dataset.projectMessage}`, message, author: "person" }, crypto.randomUUID(), "");
       const names = (result.recipients || []).map((recipient) => recipient.coordinator || displayName(app.state.sessions.find((session) => session.id === recipient.sessionId) || { id: recipient.sessionId }));
       toast(`Sent to ${names.length}: ${names.join(", ")}.`);
     } catch (error) {

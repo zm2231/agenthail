@@ -132,6 +132,7 @@ type controlRequest struct {
 	Message      string `json:"message"`
 	ReplySocket  string `json:"replySocket,omitempty"`
 	MsgID        string `json:"msgId,omitempty"`
+	PersonName   string `json:"personName,omitempty"`
 }
 
 type controlResponse struct {
@@ -174,7 +175,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	if err != nil {
 		return fmt.Errorf("read process start: %w", err)
 	}
-	claudeID := canonicalID(c.Session.Surface, c.Session.ID)
+	claudeID := surface.PeerUUID(c.Session.Surface, c.Session.ID)
 	socketPath := filepath.Join(c.SocketDir, strconv.Itoa(pid)+".sock")
 	controlPath := c.ControlPath
 	if controlPath == "" {
@@ -334,7 +335,7 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	if err := conn.SetDeadline(time.Now().Add(readDeadline)); err != nil {
 		return nil, err
 	}
-	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx)})
+	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)})
 	if _, err := conn.Write(append(req, '\n')); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -486,10 +487,6 @@ func normalizeConfig(c Config) (Config, error) {
 		c.Generation = "direct"
 	}
 	return c, nil
-}
-
-func canonicalID(kind surface.SurfaceKind, id string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(string(kind)+":"+id)).String()
 }
 
 func status(s surface.Session) string {
@@ -1265,7 +1262,17 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			}
 			senderSocket = req.ReplySocket
 		}
-		content := peerContent(c.HostName, *session, senderSocket, "", req.Message)
+		sender := *session
+		if sender.ID == surface.PersonSessionID {
+			if sender.Name = req.PersonName; sender.Name == "" {
+				if sender.Name, err = reg.PersonName(); err != nil {
+					resp.Error = classifyControlError(err)
+					_ = json.NewEncoder(conn).Encode(resp)
+					return
+				}
+			}
+		}
+		content := peerContent(c.HostName, sender, senderSocket, "", req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
@@ -1473,10 +1480,16 @@ func peerContent(hostName string, session surface.Session, socket, fromMode, mes
 	if runes := []rune(name); len(runes) > 64 {
 		name = string(runes[:64]) + "…"
 	}
+	switch session.ID {
+	case surface.PersonSessionID:
+		message = session.Name + " wrote this in Agenthail. They read your reply here in this session; answer in your reply, not with SendMessage.\n\n" + message
+	case surface.CLISessionID:
+		message = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n" + message
+	}
 	message = closingPeerTag.ReplaceAllString(message, `<\$1`)
 	mode := ""
 	if fromMode == "bypass" || fromMode == "prompting" {
 		mode = ` from-mode="` + fromMode + `"`
 	}
-	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, canonicalID(session.Surface, session.ID), name, mode, message)
+	return fmt.Sprintf("<cross-session-message from=\"uds:%s\" from-session=\"%s\" from-name=\"%s\"%s>\n%s\n</cross-session-message>", socket, surface.PeerUUID(session.Surface, session.ID), name, mode, message)
 }

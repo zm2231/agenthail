@@ -830,6 +830,45 @@ func (d *Daemon) sessionRelativeTo(owner *pairedHost, ref string) (string, error
 // the host whose token sent the request, and becomes its mirrored row when
 // that host is paired back, otherwise a sender with no reply address.
 func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
+	if author, present := request["author"]; present {
+		source, _ := request["sourceSessionId"].(string)
+		if author != string(surface.AuthorPerson) && author != "" {
+			return false, fmt.Errorf(`author must be "person" when set`)
+		}
+		if author == string(surface.AuthorPerson) && strings.TrimSpace(source) != "" {
+			return false, fmt.Errorf("a person's message cannot also name a source session")
+		}
+	}
+	named, err := d.routePersonName(ctx, request, target)
+	if err != nil {
+		return false, err
+	}
+	rewritten, err := d.routeSender(ctx, request, target)
+	return named || rewritten, err
+}
+
+// routePersonName lets the person's message keep the name its own host has
+// for them. A forwarding host names the person; only a paired host may.
+func (d *Daemon) routePersonName(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
+	rewritten := false
+	if _, named := request["personName"]; named {
+		if _, fromHost := requestingHost(ctx); !fromHost {
+			delete(request, "personName")
+			rewritten = true
+		}
+	}
+	if _, named := request["personName"]; named || target == nil || request["author"] != string(surface.AuthorPerson) {
+		return rewritten, nil
+	}
+	name, err := d.Registry.PersonName()
+	if err != nil {
+		return false, err
+	}
+	request["personName"] = name
+	return true, nil
+}
+
+func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target *pairedHost) (bool, error) {
 	source, _ := request["sourceSessionId"].(string)
 	source = strings.TrimSpace(source)
 	senderName, _ := request["sourceName"].(string)
@@ -838,6 +877,10 @@ func (d *Daemon) routeSource(ctx context.Context, request map[string]any, target
 		return senderName != "", nil
 	}
 	if target != nil {
+		delete(request, "sourceSessionId")
+		if own, err := d.Registry.ForwardSender(request, source); err != nil || own {
+			return own, err
+		}
 		routed, rawID, err := d.routeSession(source)
 		if err != nil {
 			return false, err

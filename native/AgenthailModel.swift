@@ -509,11 +509,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil) {
+    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, author: String? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, handoff: handoff, relayID: relayID)
+                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, handoff: handoff, relayID: relayID, author: author)
                 operationError = nil
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)
@@ -836,7 +836,7 @@ final class AgenthailModel: ObservableObject {
                 return
             }
             do {
-                let receipt = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
+                let receipt = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message, author: "person")
                 localSends[item.sessionId, default: []].append(LocalSend(text: item.message, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, evidence: receipt.result?.evidence)))
                 operationError = nil
             } catch {

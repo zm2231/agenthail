@@ -29,6 +29,9 @@ type Controller interface {
 // SteerWithEvidence treats a surface without request-linked controls as
 // confirming the steer when Steer returns.
 func SteerWithEvidence(ctx context.Context, adapter Surface, session *Session, message string) (*ControlResult, error) {
+	if _, routed := adapter.(Router); !routed {
+		message = LabelCLI(ctx, message)
+	}
 	if controller, ok := adapter.(Controller); ok {
 		return controller.Control(ctx, session, ControlRequest{Action: "steer", Value: message})
 	}

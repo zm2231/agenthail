@@ -266,7 +266,7 @@ func TestCmdSteerReadsMessageFromStdin(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "target", "-"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.steered) != 1 || fake.steered[0] != "focus on the parser\nthen report" {
+	if len(fake.steered) != 1 || fake.steered[0] != surface.CLILabel+"focus on the parser\nthen report" {
 		t.Fatalf("steered=%q", fake.steered)
 	}
 }
@@ -298,7 +298,7 @@ func TestSendFlagValidation(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:target", "--", "--literal"}) }); err != nil {
 		t.Fatalf("terminator rejected: %v", err)
 	}
-	if len(fake.sent) != 2 || fake.sent[1] != "--literal" {
+	if len(fake.sent) != 2 || fake.sent[1] != surface.CLILabel+"--literal" {
 		t.Fatalf("sent=%q", fake.sent)
 	}
 }
@@ -1451,16 +1451,19 @@ func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}, caps: surface.Capabilities{Send: true}}
 	app, store := cliFixture(t, fake)
-	if err := store.EnsureOperatorSession(); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{surface.PersonSessionID, surface.CLISessionID} {
+		if err := store.EnsureSender(id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	unrepliable, err := store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for target, reason := range map[string]string{
-		registry.OperatorSessionID: "Agenthail operator",
-		unrepliable:                "agenthail send h0123456789ab::worker-1",
+		surface.PersonSessionID: "Put your answer in your reply",
+		surface.CLISessionID:    "Agenthail CLI",
+		unrepliable:             "agenthail send h0123456789ab::worker-1",
 	} {
 		_, err := captureStdout(t, func() error { return app.Run([]string{"send", target, "please rerun the build"}) })
 		if err == nil || !strings.Contains(err.Error(), "not delivered") || !strings.Contains(err.Error(), reason) {

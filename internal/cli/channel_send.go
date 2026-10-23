@@ -51,7 +51,7 @@ func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) 
 		fromLabel = a.resolveDisplay(sourceID)
 	}
 	if fromLabel == "" {
-		fromLabel = "hail"
+		fromLabel = "the Agenthail CLI"
 	}
 	broadcaster := broadcast.Broadcaster{Registry: a.registry(), Coordinators: service, Delivery: cliBroadcastDelivery{app: a, sender: coordinator.Sender{Service: service}}}
 	result, err := broadcaster.Send(ctx, target, message, fromLabel, sourceID)

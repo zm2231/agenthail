@@ -1148,6 +1148,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
+		PersonName      string                     `json:"personName"`
 		PID             int                        `json:"pid"`
 		PIDStartedAt    int64                      `json:"pidStartedAt"`
 		ProjectID       string                     `json:"projectId"`
@@ -1174,7 +1175,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.HasPrefix(request.Action, "coordinator-") {
-		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message})
+		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
 		return
 	}
 	if request.Action == "delivery-dismiss" {
@@ -1334,7 +1335,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
-				d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
+				d.writeStartedSessionOutcome(w, session, creator, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
 				return
 			}
 			launchFields["ok"] = true
@@ -1381,7 +1382,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but who started it could not be recorded: %s; do not retry automatically", originErr), nil)
 				return
 			}
-			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)
+			d.writeStartedSessionOutcome(w, session, creator, alias, messageUUID, request.Message, sent, startErr, nil)
 			return
 		}
 		if startErr == nil {
@@ -1490,13 +1491,24 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
+		if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+			http.Error(w, "author must be \"person\" and name no source session when set", http.StatusBadRequest)
+			return
+		}
 		service := d.coordinator()
-		label := "the dashboard"
-		if request.SourceSessionID != "" {
-			label = d.resolveDisplay(service.Canonical(request.SourceSessionID))
+		source, label := request.SourceSessionID, "the Agenthail CLI"
+		switch {
+		case source != "":
+			label = d.resolveDisplay(service.Canonical(source))
+		case request.Author == surface.AuthorPerson:
+			source = surface.PersonSessionID
+			if label, err = d.Registry.PersonName(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
-		result, err := broadcaster.Send(operationCtx, target, request.Message, label, request.SourceSessionID)
+		result, err := broadcaster.Send(operationCtx, target, request.Message, label, source)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1825,7 +1837,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 			return
 		}
-		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
 		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
@@ -1837,6 +1849,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
 			return
 		}
+		if request.Author != "" && request.Author != surface.AuthorPerson {
+			http.Error(w, "author must be \"person\" when set", http.StatusBadRequest)
+			return
+		}
+		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+			http.Error(w, "a person's message cannot also name a source session", http.StatusBadRequest)
+			return
+		}
 		if request.SourceSessionID != "" {
 			if _, sourceErr := d.Registry.Session(request.SourceSessionID); sourceErr != nil {
 				http.Error(w, "source session not found", http.StatusBadRequest)
@@ -1844,7 +1864,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
 		}
-		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message)
+		if request.PersonName != "" {
+			ctx = surface.WithPersonName(ctx, request.PersonName)
+		}
+		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message, request.Author)
 	case "interrupt":
 		if !effective.Interrupt {
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
@@ -2345,9 +2368,9 @@ func (d *Daemon) writeUnstartedSession(w http.ResponseWriter, message string, st
 	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": detail})
 }
 
-func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
+func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, creator, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
 	if startErr != nil {
-		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, messageUUID, message)
+		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator, Author: surface.AuthorPerson}.Sender(), messageUUID, message)
 		if intentErr != nil {
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: fmt.Sprintf("%s; durable delivery intent failed: %s", startErr, intentErr)})
 			writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr), extra)

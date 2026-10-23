@@ -741,8 +741,8 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	if err != nil || len(problems) != 1 || problems[0].Status != "failed" || problems[0].SessionID != "started" {
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
-	if got := registry.QueueCount(registrypkg.OperatorSessionID); got != 0 {
-		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
+	if got := registry.QueueCount(surface.PersonSessionID); got != 0 {
+		t.Fatalf("%d failure notices queued for the person, who reads the session itself", got)
 	}
 	events, err := registry.CatalogEventsAfter(0, 20)
 	if err != nil || len(events.Events) == 0 {
@@ -763,7 +763,7 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 			break
 		}
 	}
-	if problem.DeliveryID <= 0 || problem.SessionID != "started" || problem.SourceSessionID != registrypkg.OperatorSessionID || problem.Reason != "initial message rejected" {
+	if problem.DeliveryID <= 0 || problem.SessionID != "started" || problem.SourceSessionID != surface.PersonSessionID || problem.Reason != "initial message rejected" {
 		t.Fatalf("problem payload=%+v", problem)
 	}
 	live := receiveCatalogEvent(t, liveEvents)

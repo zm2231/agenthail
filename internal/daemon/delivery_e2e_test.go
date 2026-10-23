@@ -512,7 +512,7 @@ func TestSendToIdleSessionDeliversOnce(t *testing.T) {
 		t.Fatalf("receipt=%v", receipt)
 	}
 	settle()
-	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "run the build" {
+	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != surface.CLILabel+"run the build" {
 		t.Fatalf("delivered=%+v", got)
 	}
 }
@@ -725,7 +725,7 @@ func TestSteerSendToBusySessionSteersActiveTurnOnce(t *testing.T) {
 	agent.setStatus("target", surface.StatusIdle)
 	settle()
 	got := agent.deliveredTo("target")
-	if len(got) != 1 || !got[0].steered || got[0].text != "also check the docs" {
+	if len(got) != 1 || !got[0].steered || got[0].text != surface.CLILabel+"also check the docs" {
 		t.Fatalf("delivered=%+v", got)
 	}
 }
@@ -793,16 +793,19 @@ func TestRelayToBusyTargetQueuesOnceThenDeliversOnce(t *testing.T) {
 
 func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 	h := startRunningDaemon(t, newScriptedAgent("target"))
-	if err := h.store.EnsureOperatorSession(); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{surface.PersonSessionID, surface.CLISessionID} {
+		if err := h.store.EnsureSender(id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	unrepliable, err := h.store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for target, reason := range map[string]string{
-		registry.OperatorSessionID: "Agenthail operator",
-		unrepliable:                "agenthail send h0123456789ab::worker-1",
+		surface.PersonSessionID: "Put your answer in your reply",
+		surface.CLISessionID:    "Agenthail CLI",
+		unrepliable:             "agenthail send h0123456789ab::worker-1",
 	} {
 		status, body := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": target, "message": "please rerun the build"})
 		var decoded struct {
@@ -817,7 +820,7 @@ func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
 			t.Fatalf("send %s status=%d body=%s", target, status, body)
 		}
 	}
-	if count := h.store.QueueCount(registry.OperatorSessionID) + h.store.QueueCount(unrepliable); count != 0 {
+	if count := h.store.QueueCount(surface.PersonSessionID) + h.store.QueueCount(surface.CLISessionID) + h.store.QueueCount(unrepliable); count != 0 {
 		t.Fatalf("queued %d messages for sessions nothing reads", count)
 	}
 }

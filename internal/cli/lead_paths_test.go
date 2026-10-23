@@ -44,7 +44,7 @@ func TestLeadPathAddressesTheCoordinatorsSubagents(t *testing.T) {
 			t.Fatalf("%s queued %d messages for %s, want 1", target, count, want)
 		}
 	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead/Ada", "hello Ada"}) }); err != nil || len(fake.sent) != 1 || fake.sent[0] != "hello Ada" {
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead/Ada", "hello Ada"}) }); err != nil || len(fake.sent) != 1 || fake.sent[0] != surface.CLILabel+"hello Ada" {
 		t.Fatalf("send err=%v sent=%v", err, fake.sent)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "@lead/Nobody", "lost"}) }); err == nil || !strings.Contains(err.Error(), "Nobody") {

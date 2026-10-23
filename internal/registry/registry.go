@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 33
+	schemaVersion   = 34
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -233,6 +233,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"refused", `INTEGER NOT NULL DEFAULT 0`},
 		{"refusal", `INTEGER NOT NULL DEFAULT 0`},
 		{"refusal_announced", `INTEGER NOT NULL DEFAULT 0`},
+		{"person_name", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "message_queue", column.name, column.decl); err != nil {
 			return err
@@ -455,6 +456,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 19 {
 		if err := recordObservedSubagents(tx); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		if err := splitOperator(tx); err != nil {
 			return err
 		}
 	}
@@ -712,7 +718,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	uploads TEXT NOT NULL DEFAULT '[]',
 	refused INTEGER NOT NULL DEFAULT 0,
 	refusal INTEGER NOT NULL DEFAULT 0,
-	refusal_announced INTEGER NOT NULL DEFAULT 0
+	refusal_announced INTEGER NOT NULL DEFAULT 0,
+	person_name TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -1688,7 +1695,7 @@ func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey
 	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
 		options.BusyDelivery = "queue"
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -1768,6 +1775,7 @@ type QueuedMessage struct {
 	BusyDelivery    string
 	Author          surface.Author
 	Uploads         surface.Uploads
+	PersonName      string
 }
 
 const (
@@ -2435,7 +2443,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author,uploads FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author,uploads,person_name FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author, &item.Uploads, &item.PersonName)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

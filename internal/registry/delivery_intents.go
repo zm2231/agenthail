@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/user"
 	"strings"
 	"time"
 
@@ -17,22 +19,73 @@ const sqlRandomUUID = `lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || 
 
 type DeliveryIntentStatus string
 
-const OperatorSessionID = "agenthail-operator"
-
 // readsNotices reports whether a sender has a session that reads a delivery
-// notice. The operator and an unrepliable sender have none, so a notice queued
-// to them would stay pending forever.
+// notice. The person reads the target session itself, and the Agenthail CLI
+// and an unrepliable sender have no session, so a notice queued to them would
+// stay pending forever.
 func readsNotices(senderSessionID string) bool {
-	return senderSessionID != "" && senderSessionID != OperatorSessionID && !surface.IsUnrepliableSender(senderSessionID)
+	if _, ok := surface.AgenthailSender(senderSessionID, ""); ok {
+		return false
+	}
+	return senderSessionID != "" && !surface.IsUnrepliableSender(senderSessionID)
 }
 
-func (r *Registry) EnsureOperatorSession() error {
-	if _, err := r.Session(OperatorSessionID); err == nil {
+// EnsureSender records the person or the Agenthail CLI the first time either
+// sends, and does nothing for any other sender.
+func (r *Registry) EnsureSender(id string) error {
+	sender, ok := surface.AgenthailSender(id, "")
+	if !ok {
+		return nil
+	}
+	if _, err := r.Session(id); err == nil {
 		return nil
 	} else if err != sql.ErrNoRows {
 		return err
 	}
-	return r.RegisterSession(surface.Session{ID: OperatorSessionID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator, Name: "Agenthail operator"})
+	return r.RegisterSession(sender)
+}
+
+// PersonName is what sessions call the person: the name set with agenthail
+// person name, else the full name of the account Agenthail runs under, else
+// its login.
+func (r *Registry) PersonName() (string, error) {
+	name, err := r.PersonNameSetting()
+	if err != nil || name != "" {
+		return name, err
+	}
+	return accountName(), nil
+}
+
+// PersonNameSetting is the name set with agenthail person name, empty when
+// none is.
+func (r *Registry) PersonNameSetting() (string, error) {
+	var name string
+	err := r.db.QueryRow(`SELECT name FROM sessions WHERE id=?`, surface.PersonSessionID).Scan(&name)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// SetPersonName sets the name sessions call the person; an empty name goes
+// back to the account's.
+func (r *Registry) SetPersonName(name string) error {
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(`UPDATE sessions SET name=?, updated_at=datetime('now') WHERE id=?`, strings.TrimSpace(name), surface.PersonSessionID)
+	return err
+}
+
+func accountName() string {
+	account, err := user.Current()
+	if err != nil {
+		return os.Getenv("USER")
+	}
+	if name, _, _ := strings.Cut(account.Name, ","); strings.TrimSpace(name) != "" {
+		return strings.TrimSpace(name)
+	}
+	return account.Username
 }
 
 // EnsureUnrepliableSender records a session on a host this daemon has not
@@ -239,15 +292,16 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 	return intent, tx.Commit()
 }
 
-// RecordSessionCreationIntent records a new session's first message under the
-// uuid it was sent with, so the intent names the turn it may have started.
-func (r *Registry) RecordSessionCreationIntent(sessionID, messageUUID, message string) (*DeliveryIntent, error) {
-	if err := r.EnsureOperatorSession(); err != nil {
+// RecordSessionCreationIntent records a new session's first message from its
+// creator under the uuid it was sent with, so the intent names the turn it may
+// have started.
+func (r *Registry) RecordSessionCreationIntent(sessionID, creatorID, messageUUID, message string) (*DeliveryIntent, error) {
+	if err := r.EnsureSender(creatorID); err != nil {
 		return nil, err
 	}
 	return r.RecordDeliveryIntent(DeliveryIntentInput{
 		UUID:            messageUUID,
-		SenderSessionID: OperatorSessionID,
+		SenderSessionID: creatorID,
 		TargetSessionID: sessionID,
 		Message:         message,
 		Status:          DeliveryIntentSubmitted,
@@ -349,7 +403,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return 0, 0, err
