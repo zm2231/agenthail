@@ -338,3 +338,51 @@ func awaitCondition(t *testing.T, what string, condition func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestABrowserUnusedForThirtyDaysIsForgottenButAPhoneIsNot(t *testing.T) {
+	r := openTestRegistry(t)
+	pair := func(scopes []string, browser bool) (Device, string) {
+		t.Helper()
+		pairing, err := r.CreateDevicePairing("device", scopes, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		complete := func() (Device, string, error) { return r.CompleteDevicePairing(pairing.Secret, "", "") }
+		if browser {
+			complete = func() (Device, string, error) { return r.CompleteBrowserPairing(pairing.Secret) }
+		}
+		device, token, err := complete()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return device, token
+	}
+	idleBrowser, idleBrowserToken := pair(BrowserScopes, true)
+	activeBrowser, activeBrowserToken := pair(BrowserScopes, true)
+	phone, phoneToken := pair([]string{"read", "control"}, false)
+	longAgo := time.Now().UTC().Add(-BrowserIdleLimit - time.Hour).Format(time.RFC3339Nano)
+	for _, id := range []string{idleBrowser.ID, phone.ID} {
+		if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=?`, longAgo, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.AuthenticateDevice(idleBrowserToken, "read"); !errors.Is(err, ErrDeviceDenied) {
+		t.Fatalf("idle browser authenticated: %v", err)
+	}
+	for name, token := range map[string]string{"phone": phoneToken, "active browser": activeBrowserToken} {
+		if _, err := r.AuthenticateDevice(token, "read"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	devices, err := r.ListDevices(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, device := range devices {
+		listed[device.ID] = device.Browser
+	}
+	if _, found := listed[idleBrowser.ID]; found || len(listed) != 2 || !listed[activeBrowser.ID] || listed[phone.ID] {
+		t.Fatalf("devices after pruning = %+v", devices)
+	}
+}

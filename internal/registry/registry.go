@@ -57,7 +57,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 35
+	schemaVersion   = 36
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -468,6 +468,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "paired_devices", "host_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "paired_devices", "browser", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "device_pairings", "device_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -912,7 +915,8 @@ CREATE TABLE IF NOT EXISTS paired_devices (
 	host_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	last_seen_at TEXT NOT NULL DEFAULT '',
-	revoked_at TEXT NOT NULL DEFAULT ''
+	revoked_at TEXT NOT NULL DEFAULT '',
+	browser INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS paired_devices_active ON paired_devices(revoked_at, created_at DESC);
 CREATE TABLE IF NOT EXISTS device_push_targets (
