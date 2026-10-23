@@ -55,56 +55,22 @@ struct NewSessionView: View {
     }
 
     @ViewBuilder private var options: some View {
-        chip(draft.form.agent.capitalized, symbol: "sparkle", help: "Agent") {
+        chip(agentLabel, symbol: "sparkle", help: "Agent, account and model") {
             Picker("Agent", selection: Binding(get: { draft.form.agent }, set: { draft.form.switchAgent(to: $0) })) {
                 ForEach(draft.agents, id: \.self) { Text($0.capitalized).tag($0) }
             }
             .pickerStyle(.inline)
-        }
-        if draft.hosts.isVisible {
-            chip(draft.hostName, symbol: "desktopcomputer", help: "Choose the machine this session starts on") {
-                ForEach(draft.hosts.hosts) { host in
-                    Button {
-                        draft.selectHost(host.id)
-                    } label: {
-                        if host.id == draft.hosts.selectedHost?.id {
-                            Label(host.name, systemImage: "checkmark")
-                        } else {
-                            Text(host.isAvailable ? host.name : "\(host.name) (\(host.stateLabel))")
-                        }
-                    }
-                    .disabled(!host.isAvailable)
-                }
-            }
-        }
-        if draft.form.usesFolder {
-            folderChip
-        }
-        if !draft.launchers.isEmpty {
-            chip(draft.form.launcher?.label ?? "Default", symbol: "terminal", help: "Where the agent runs") {
-                Picker("Runs in", selection: Binding(get: { draft.form.launcher?.id }, set: { id in draft.form.selectLauncher(draft.launchers.first { $0.id == id }) })) {
-                    Text("Default").tag(nil as String?)
-                    ForEach(draft.launchers) { option in
-                        Text(option.available ? option.label : "\(option.label) (unavailable)")
-                            .tag(Optional(option.id))
-                            .selectionDisabled(!option.available)
-                    }
-                }
-                .pickerStyle(.inline)
-            }
-        }
-        if draft.claudeConfigRoots.count > 1 {
-            chip(draft.claudeConfigRoots.first { $0.choice == draft.form.configRoot }?.name ?? "Config folder", symbol: "person.crop.circle", help: "Config folder") {
-                Picker("Config folder", selection: $draft.form.configRoot) {
+            if draft.claudeConfigRoots.count > 1 {
+                Divider()
+                Picker("Account", selection: $draft.form.configRoot) {
                     ForEach(draft.claudeConfigRoots) { root in
                         Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
                     }
                 }
                 .pickerStyle(.inline)
             }
-        }
-        if draft.form.listsModels {
-            chip(modelSummary, symbol: "cpu", help: "Model") {
+            if draft.form.listsModels {
+                Divider()
                 Picker("Model", selection: Binding(get: { draft.form.model }, set: { draft.form.selectModel($0) })) {
                     if draft.listedDefault == nil { Text("Runtime default").tag("") }
                     ForEach(draft.agentModels) { option in
@@ -119,37 +85,67 @@ struct NewSessionView: View {
                     }
                 }
             }
+            if !draft.launchers.isEmpty && draft.form.launcher == nil {
+                Divider()
+                launcherPicker
+            }
+        }
+        placeChip
+        if !draft.launchers.isEmpty, let launcher = draft.form.launcher {
+            chip(launcher.label, symbol: "terminal", help: "Where the agent runs") { launcherPicker }
         }
     }
 
-    @ViewBuilder private var folderChip: some View {
-        if draft.startsOnThisMac {
-            chip(folderLabel, symbol: "folder", help: draft.form.folder) {
-                ForEach(draft.hosts.projects) { project in
-                    Button(project.displayName) { draft.form.folder = project.rootPath }
-                }
-                Divider()
-                Button("Choose…", action: chooseFolder)
+    private var launcherPicker: some View {
+        Picker("Runs in", selection: Binding(get: { draft.form.launcher?.id }, set: { id in draft.form.selectLauncher(draft.launchers.first { $0.id == id }) })) {
+            Text("Default").tag(nil as String?)
+            ForEach(draft.launchers) { option in
+                Text(option.available ? option.label : "\(option.label) (unavailable)")
+                    .tag(Optional(option.id))
+                    .selectionDisabled(!option.available)
             }
-        } else {
-            HStack(spacing: 4) {
-                Image(systemName: "folder").foregroundStyle(DesktopPalette.text2)
-                TextField("Folder on \(draft.hostName)", text: $draft.form.folder)
-                    .textFieldStyle(.plain)
-                    .frame(width: 180)
-                if !draft.hosts.projects.isEmpty {
-                    Menu {
-                        ForEach(draft.hosts.projects) { project in Button(project.displayName) { draft.form.folder = project.rootPath } }
-                    } label: { EmptyView() }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .accessibilityLabel("Projects on \(draft.hostName)")
+        }
+    }
+
+    @ViewBuilder private var placeChip: some View {
+        if draft.form.usesFolder || draft.hosts.isVisible {
+            chip(placeLabel, symbol: draft.startsOnThisMac ? "folder" : "desktopcomputer", help: draft.form.folder.isEmpty ? "Choose the computer and project" : "\(draft.hostName): \(draft.form.folder)") {
+                if draft.hosts.isVisible {
+                    Section("Computer") {
+                        ForEach(draft.hosts.hosts) { host in
+                            Button {
+                                draft.selectHost(host.id)
+                            } label: {
+                                if host.id == draft.hosts.selectedHost?.id {
+                                    Label(host.name, systemImage: "checkmark")
+                                } else {
+                                    Text(host.isAvailable ? host.name : "\(host.name) (\(host.stateLabel))")
+                                }
+                            }
+                            .disabled(!host.isAvailable)
+                        }
+                    }
+                }
+                if draft.form.usesFolder {
+                    Section("Project") {
+                        ForEach(draft.hosts.projects) { project in
+                            Button(project.displayName) { draft.form.folder = project.rootPath }
+                        }
+                        if draft.startsOnThisMac {
+                            Button("Choose…", action: chooseFolder)
+                        }
+                    }
                 }
             }
-            .font(.system(size: DesktopType.secondary))
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .overlay(Capsule().strokeBorder(DesktopPalette.line))
+        }
+        if draft.form.usesFolder && !draft.startsOnThisMac {
+            TextField("Folder on \(draft.hostName)", text: $draft.form.folder)
+                .textFieldStyle(.plain)
+                .font(.system(size: DesktopType.secondary))
+                .frame(width: 180)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .overlay(Capsule().strokeBorder(DesktopPalette.line))
         }
     }
 
@@ -219,10 +215,14 @@ struct NewSessionView: View {
         return (draft.form.folder as NSString).lastPathComponent
     }
 
-    private var modelSummary: String {
+    private var agentLabel: String {
         let chosen = draft.form.model.isEmpty ? draft.listedDefault : draft.agentModels.first { $0.id == draft.form.model }
-        let name = chosen?.displayName ?? "Runtime default"
-        return draft.form.effort.isEmpty ? name : "\(name) · \(draft.form.effort.capitalized)"
+        let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot)
+        return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen?.displayName ?? "Default model" : nil, effort: draft.form.effort, account: account)
+    }
+
+    private var placeLabel: String {
+        draft.form.usesFolder ? NewSessionLabels.place(folderLabel, host: draft.startsOnThisMac ? nil : draft.hostName) : draft.hostName
     }
 
     private func chooseFolder() {
