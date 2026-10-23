@@ -438,4 +438,7 @@ func TestAJournalReplacedWithNothingReportsAGapToCursorsBeforeItsNewest(t *testi
 	if window, err := r.SessionJournalAfter("s", 0, 10); err != nil || window.Gap {
 		t.Fatalf("from the start = %+v err=%v, want no gap", window, err)
 	}
+	if window, err := r.SessionJournalAfter("s", 4, 10); err != nil || !window.Gap {
+		t.Fatalf("after a cursor past the newest = %+v err=%v, want a gap", window, err)
+	}
 }

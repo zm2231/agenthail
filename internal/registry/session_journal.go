@@ -349,13 +349,13 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	// upserted row keeps its place under a newer seq. pruned_seq is the
 	// highest seq any trim dropped, so a cursor below it missed a row.
 	var earliest, latest sql.NullInt64
-	var prunedSeq uint64
-	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0) FROM session_journal WHERE session_id=?`, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq); err != nil {
+	var prunedSeq, nextSeq uint64
+	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0),COALESCE((SELECT next_seq FROM session_journal_state WHERE session_id=?),0) FROM session_journal WHERE session_id=?`, sessionID, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq, &nextSeq); err != nil {
 		return SessionJournalWindow{}, err
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
 	if !earliest.Valid || !latest.Valid {
-		window.Gap = after > 0 && after < prunedSeq
+		window.Gap = after > 0 && (after < prunedSeq || after > nextSeq)
 		return window, nil
 	}
 	window.EarliestSeq = uint64(earliest.Int64)
