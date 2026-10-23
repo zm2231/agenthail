@@ -36,7 +36,7 @@ func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
 	}
 
 	takeover := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"to","name":"other-lead"}`)
-	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "@"+name) || !strings.Contains(takeover.Body.String(), "--replace") {
+	if takeover.Code != http.StatusConflict || !strings.Contains(takeover.Body.String(), "@"+name) || apiErrorCode(t, takeover) != "coordinator_exists" {
 		t.Fatalf("takeover: %d %s", takeover.Code, takeover.Body)
 	}
 	if current, _ := r.Coordinator(answer.Coordinator.ProjectID); current.SessionID != "from" {
@@ -266,7 +266,7 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 				answered <- laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "laptop-other", "name": "new-lead", "replace": true})
 			}()
 			awaitFederation(t, "the clear reaching vps", func() bool { return hold.waiting.Load() == 1 })
-			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead", "replace": true}); response.Code != http.StatusOK {
+			if response := vps.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "coordinator-set", "sessionId": "vps-a", "name": "peer-lead-now", "replace": true}); response.Code != http.StatusOK {
 				t.Fatalf("vps changes its coordinator: %d %s", response.Code, response.Body)
 			}
 			var aliasErr registry.CoordinatorAliasError

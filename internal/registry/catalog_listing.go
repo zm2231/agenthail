@@ -11,7 +11,8 @@ import (
 // that is not a subagent is listed. A subagent is listed only while it works
 // or is current and its parent is listed, so it always sits under a listed
 // row and never at the top level. Each hidden subagent counts toward its
-// nearest listed ancestor's rollup.
+// nearest listed ancestor's rollup, and toward its live rollup while it works
+// or is current.
 //
 // Retired rows are listed but belong to history rather than the current
 // list: an offline session that nothing makes current, and every listed row
@@ -21,6 +22,7 @@ type CatalogListing struct {
 	Hidden          map[string]bool
 	Retired         map[string]bool
 	Rollups         map[string]surface.SubagentRollup
+	live            map[string]surface.SubagentRollup
 	descendants     map[string]surface.SubagentRollup
 	hiddenEntities  map[string]bool
 	retiredEntities map[string]bool
@@ -64,7 +66,7 @@ func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 }
 
 func catalogListing(byID map[string]catalogListingRow) CatalogListing {
-	listing := CatalogListing{Hidden: map[string]bool{}, Retired: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}, hiddenEntities: map[string]bool{}, retiredEntities: map[string]bool{}}
+	listing := CatalogListing{Hidden: map[string]bool{}, Retired: map[string]bool{}, Rollups: map[string]surface.SubagentRollup{}, live: map[string]surface.SubagentRollup{}, descendants: map[string]surface.SubagentRollup{}, hiddenEntities: map[string]bool{}, retiredEntities: map[string]bool{}}
 	listed := map[string]bool{}
 	var decide func(id string, path map[string]bool) bool
 	decide = func(id string, path map[string]bool) bool {
@@ -136,6 +138,14 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 					rollup.Working++
 				}
 				listing.Rollups[ancestor] = rollup
+				if row.active {
+					live := listing.live[ancestor]
+					live.Count++
+					if row.busy {
+						live.Working++
+					}
+					listing.live[ancestor] = live
+				}
 				break
 			}
 		}
@@ -145,6 +155,16 @@ func catalogListing(byID map[string]catalogListingRow) CatalogListing {
 
 func (l CatalogListing) HiddenSubagents(id string) *surface.SubagentRollup {
 	rollup, found := l.Rollups[id]
+	if !found {
+		return nil
+	}
+	return &rollup
+}
+
+// LiveHiddenSubagents counts the hidden subagents under a listed row that
+// work or are current.
+func (l CatalogListing) LiveHiddenSubagents(id string) *surface.SubagentRollup {
+	rollup, found := l.live[id]
 	if !found {
 		return nil
 	}

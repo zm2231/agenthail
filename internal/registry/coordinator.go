@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var ErrNoCoordinator = errors.New("this project has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'")
+var ErrNoCoordinator = errors.New("this project has no coordinator")
 
 // ErrCoordinatorChanged refuses a clear whose caller saw an older version of
 // the coordinator than the one stored.
@@ -84,7 +84,7 @@ func (e CoordinatorExistsError) Error() string {
 	for _, spec := range e.Existing {
 		names = append(names, "@"+spec.Name)
 	}
-	return fmt.Sprintf("the project already has coordinator %s; use --replace to take over", strings.Join(names, " and "))
+	return fmt.Sprintf("the project already has coordinator %s; replace it to take over", strings.Join(names, " and "))
 }
 
 // CoordinatorAliasError refuses to rename, unname or reuse a name that is

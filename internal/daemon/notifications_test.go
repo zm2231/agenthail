@@ -125,3 +125,32 @@ func TestNotificationConfigConcurrentWritesRemainValid(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAnOldAppCopyInTheHomeFolderNeverPostsNotifications(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGENTHAIL_MAC_APP", "")
+	for _, stale := range []string{
+		filepath.Join(home, "Applications", "Agenthail.app", "Contents", "MacOS", "Agenthail"),
+		filepath.Join(home, ".local", "share", "agenthail", "Agenthail.app", "Contents", "MacOS", "Agenthail"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(stale), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(stale, []byte("#!/bin/sh\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if path, err := notificationHelperPath(); err == nil && path != installedMacApp {
+		t.Fatalf("helper=%s, want only the installed app", path)
+	}
+
+	installed := filepath.Join(t.TempDir(), "Agenthail")
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_MAC_APP", installed)
+	if path, err := notificationHelperPath(); err != nil || path != installed {
+		t.Fatalf("helper=%s err=%v, want the app the installer named", path, err)
+	}
+}

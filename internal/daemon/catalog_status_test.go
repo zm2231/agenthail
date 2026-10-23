@@ -721,3 +721,57 @@ func TestStatusPassWakesTheObserverOnceForManyTransitions(t *testing.T) {
 		t.Fatalf("two transitions in one pass woke the observer %d times", got)
 	}
 }
+
+// limitStatusSurface reports a usage limit until it resets, as Claude does
+// when it reads a refused turn.
+type limitStatusSurface struct {
+	*localStatusSurface
+	resetsAt time.Time
+}
+
+func (s *limitStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
+	session, err := s.localStatusSurface.LocalStatus(ctx, session)
+	session.UsageLimit = nil
+	if session.ID == "from" && time.Now().Before(s.resetsAt) {
+		session.UsageLimit = &surface.UsageLimit{ResetsAt: s.resetsAt}
+	}
+	return session, err
+}
+
+func (s *limitStatusSurface) List(ctx context.Context) ([]surface.Session, error) {
+	sessions, err := s.localStatusSurface.List(ctx)
+	for index := range sessions {
+		sessions[index], _ = s.LocalStatus(ctx, sessions[index])
+	}
+	return sessions, err
+}
+
+func TestTheStatusPassDropsAUsageLimitOnceItResetsWithoutAFileChange(t *testing.T) {
+	d, store, local := localStatusFixture(t)
+	source := &limitStatusSurface{localStatusSurface: local, resetsAt: time.Now().Add(300 * time.Millisecond)}
+	d.Surfaces = []surface.Surface{source}
+	d.discoverCatalog(context.Background())
+	limit := func() *surface.UsageLimit {
+		t.Helper()
+		snapshot, err := store.CatalogSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range snapshot.Sessions {
+			if state.Session.ID == "from" {
+				return state.Session.UsageLimit
+			}
+		}
+		t.Fatal("no catalog row for the limited session")
+		return nil
+	}
+	d.refreshCatalogStatus(context.Background())
+	if limit() == nil {
+		t.Fatal("the catalog row lacks the usage limit before it resets")
+	}
+	time.Sleep(time.Until(source.resetsAt) + 50*time.Millisecond)
+	d.refreshCatalogStatus(context.Background())
+	if got := limit(); got != nil {
+		t.Fatalf("usage limit %+v still published after it reset", got)
+	}
+}

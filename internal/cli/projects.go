@@ -14,6 +14,7 @@ import (
 const projectUsage = `usage: agenthail project list [--all] [--json]
        agenthail project add <path> [--name <title>] [--host <host>] [--json]
        agenthail project remove <name|id|path> [--json]
+       agenthail project rename <name|id|path> <new name> [--json]
        agenthail project <archive|unarchive> <name|id|path> [--json]
 
 A project is a folder you add, and it may be a folder inside a repository. A
@@ -178,12 +179,17 @@ func (a *App) cmdProject(args []string) error {
 				RootPath    string `json:"rootPath"`
 				Kind        string `json:"kind"`
 			} `json:"project"`
+			Created bool `json:"created"`
 		}
 		if err := projectAction(ctx, client, payload, &answer); err != nil {
 			return err
 		}
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(answer)
+		}
+		if !answer.Created {
+			fmt.Printf("%s is already project %s\n", answer.Project.RootPath, answer.Project.DisplayName)
+			return nil
 		}
 		fmt.Printf("added project %s (%s)\n", answer.Project.DisplayName, answer.Project.RootPath)
 		return nil
@@ -207,6 +213,27 @@ func (a *App) cmdProject(args []string) error {
 			return json.NewEncoder(os.Stdout).Encode(answer)
 		}
 		fmt.Printf("removed project %s on %s\n", checkout.RootPath, checkout.Host.Name)
+		return nil
+	case "rename":
+		if len(positional) != 3 {
+			return fmt.Errorf("%s", projectUsage)
+		}
+		projects, err := daemonProjects(ctx, client)
+		if err != nil {
+			return err
+		}
+		project, err := resolveProject(projects, positional[1])
+		if err != nil {
+			return err
+		}
+		var answer map[string]any
+		if err := projectAction(ctx, client, map[string]any{"action": "project-rename", "projectId": project.ID, "title": positional[2]}, &answer); err != nil {
+			return err
+		}
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(answer)
+		}
+		fmt.Printf("renamed project %s to %s\n", project.DisplayName, strings.TrimSpace(positional[2]))
 		return nil
 	case "archive", "unarchive":
 		if len(positional) != 2 {
@@ -285,7 +312,7 @@ func projectAction(ctx context.Context, client *daemonAPIClient, payload map[str
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("%s", strings.TrimSpace(string(data)))
+		return actionError(data)
 	}
 	return json.Unmarshal(data, answer)
 }

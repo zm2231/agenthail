@@ -138,7 +138,7 @@ func TestASeededJournalServesItsPageAtOnceAndCatchesUpOverTheStreamInTranscriptO
 	if strings.Join(answers, ",") != "3,4,5,6" {
 		t.Fatalf("stream answers %v, want 3,4,5 caught up then 6 live", answers)
 	}
-	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 6 })
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 6 && got[5].Assistant == "answer 6" })
 	for index, exchange := range got {
 		if exchange.Assistant != "answer "+strconvUint(uint64(index+1)) {
 			t.Fatalf("page after catch-up and live: %+v", got)

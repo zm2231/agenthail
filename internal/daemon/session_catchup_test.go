@@ -127,7 +127,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-two", "sessionId": conversation, "timestamp": second.Add(time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-two", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "second answer"}}}}),
 	)
 
-	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 })
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 && got[1].Assistant == "second answer" })
 	if len(got) != 2 || got[0].User != "first question" || got[0].Assistant != "first answer" || got[1].User != "second question" || got[1].Assistant != "second answer" {
 		t.Fatalf("page after the source stopped=%+v", got)
 	}
@@ -170,7 +170,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "command", "parentUuid": "caveat", "sessionId": conversation, "timestamp": ran.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>"}}),
 		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "local_command", "uuid": "output", "parentUuid": "command", "isMeta": false, "sessionId": conversation, "timestamp": ran.Add(time.Second).Format(time.RFC3339Nano), "content": "<local-command-stdout>## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)</local-command-stdout>"}),
 	)
-	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 })
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 && got[1].Assistant != "" })
 	if len(got) != 2 || got[1].User != "/context" || got[0].Command || !got[1].Command || got[1].Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || !got[1].Timestamp.Equal(ran) {
 		t.Fatalf("the built-in is not the latest exchange: %+v", got)
 	}

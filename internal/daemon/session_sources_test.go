@@ -1496,3 +1496,25 @@ func followJournal(t *testing.T, manager *sessionSourceManager, sessionID string
 	}()
 	return entries
 }
+
+type stoppingSeedSurface struct{ *daemonSurface }
+
+func (s *stoppingSeedSurface) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestASourceStoppedWhileSeedingRecordsNoSourceError(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	manager := newTestSourceManager(t, reg)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := &sessionSource{manager: manager, session: from, adapter: &stoppingSeedSurface{daemonSurface: fake}, ctx: ctx, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	if err := source.seedJournal(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("seed err=%v", err)
+	}
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 0 {
+		t.Fatalf("a source stopping mid-seed journaled %+v err=%v", page.Entries, err)
+	}
+}

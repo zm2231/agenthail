@@ -287,8 +287,12 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 		writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 		return
 	}
+	if len(existing) == 1 && sameCoordinator(existing[0], spec, sessionID) {
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "coordinator": existing[0], "replaced": []registry.CoordinatorSpec{}})
+		return
+	}
 	if len(existing) > 0 && !request.Replace {
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; use --replace to take over", spec.ProjectRoot, d.coordinatorRefs(r, existing)))
+		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; replace it to take over", spec.ProjectRoot, d.coordinatorRefs(r, existing)))
 		return
 	}
 	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, OverPeers: true, ChangedBy: changedBy}
@@ -306,13 +310,13 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 		if err := d.clearPeerCoordinator(r.Context(), current, changedBy); err != nil {
 			message := fmt.Sprintf("cannot replace %s: %s", d.coordinatorRef(r, current), err)
 			if cleared > 0 {
-				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and another --replace resolves it", stored.Name))
+				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and replacing again resolves it", stored.Name))
 				return
 			}
 			undoErr := d.Registry.WithdrawCoordinator(undo, changedBy)
 			d.flushCatalog("coordinator " + spec.ProjectID)
 			if undoErr != nil {
-				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s stays here alongside it because it could not be withdrawn (%s), and another --replace resolves it", stored.Name, undoErr))
+				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s stays here alongside it because it could not be withdrawn (%s), and replacing again resolves it", stored.Name, undoErr))
 				return
 			}
 			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", message+"; nothing changed")
@@ -331,11 +335,11 @@ func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, er
 	var aliasReserved registry.AliasReservedError
 	switch {
 	case errors.As(err, &exists):
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; use --replace to take over", d.coordinatorRefs(r, exists.Existing)))
+		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; replace it to take over", d.coordinatorRefs(r, exists.Existing)))
 	case errors.As(err, &nameTaken):
-		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another --name", d.coordinatorRef(r, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
+		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another name", d.coordinatorRef(r, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
 	case errors.As(err, &aliasTaken):
-		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another --name", aliasTaken.Name, aliasTaken.Owner))
+		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another name", aliasTaken.Name, aliasTaken.Owner))
 	case errors.As(err, &aliasReserved):
 		writeAPIError(w, http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, registry.ErrReservedAlias):
@@ -387,8 +391,12 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared})
 		return
 	}
-	if _, fromHost := requestingHost(r.Context()); fromHost || len(remote) == 0 {
+	if _, fromHost := requestingHost(r.Context()); fromHost {
 		writeCoordinatorError(w, r, d, registry.ErrNoCoordinator)
+		return
+	}
+	if len(remote) == 0 {
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": nil})
 		return
 	}
 	if len(remote) > 1 {
@@ -400,6 +408,20 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": remote[0]})
+}
+
+// sameCoordinator reports whether current, this host's coordinator, is what
+// spec asks for, so setting it again changes nothing. A conversation made
+// the coordinator must be the same one; a coordinator defined to start on
+// its first message must start the same way.
+func sameCoordinator(current, spec registry.CoordinatorSpec, sessionID string) bool {
+	if current.HostID != "" || current.Name != spec.Name || current.Surface != spec.Surface || current.PermissionMode != spec.PermissionMode || current.Instructions != spec.Instructions {
+		return false
+	}
+	if sessionID != "" {
+		return current.SessionID == sessionID
+	}
+	return current.Cwd == spec.Cwd && current.Model == spec.Model
 }
 
 // clearPeerCoordinator asks the paired host that owns a coordinator to clear

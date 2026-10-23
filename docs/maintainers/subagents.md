@@ -49,15 +49,20 @@ identity keeps the stored one. `rootId` is empty only when a nested Codex
 subagent's rollout could not be read; clients then walk `parentId`.
 
 `surface.Session.Subagents` (`count`, `working`) is the rollup of subagents a
-provider observes without listing them as sessions. Claude discovery sets it
-for every live session with subagents. Catalog rows (`/api/v1/snapshot`,
+provider observes without listing them as sessions. It counts live state
+only: subagents that work or were active within `surface.ActiveWindow`
+(24 hours). Claude discovery sets it for every live session with such
+subagents. A catalog row's `subagents` adds `liveHiddenSubagents`, the hidden
+subagent rows under it that work or are current; `hiddenSubagents` counts
+every hidden subagent row, so clients know there are rows to fetch. Catalog rows (`/api/v1/snapshot`,
 `/api/v1/catalog-events`) carry both fields as `subagent` and `subagents`.
 `/api/v1/session-metadata` lists a Claude session's subagents in
 `claudeSubagents` with `agentType`, `description`, `toolUseId`, `depth`,
 `working`, and `lastActive`.
 
-Clients compute a Codex parent's rollup from the subagent rows they hold:
-every descendant counts, and a busy descendant counts as working. Counts of
+Clients compute a Codex parent's rollup from the subagent rows they hold plus
+the row's `subagents`: every listed descendant counts, and a busy descendant
+counts as working. Counts of
 working agents count families: a family is working when its root or any
 subagent is working.
 

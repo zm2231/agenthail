@@ -896,7 +896,6 @@ struct TranscriptView: View {
                 }
                 ForEach(blocks) { block in
                     TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
-                        .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
@@ -1032,23 +1031,42 @@ struct TranscriptBlockView: View {
     let block: TranscriptBlock
     var onEdit: ((String) -> Void)? = nil
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
+
+    private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
 
     var body: some View {
         switch block.kind {
         case .user(let text, let files):
-            UserBubble(text: text, receipt: nil, files: files, onEdit: onEdit)
+            UserBubble(text: text, receipt: note, files: files, onEdit: onEdit)
         case .assistant(let text):
-            AssistantReply(text: text)
+            AssistantReply(text: text, note: note)
         case .peer(let sender, let text):
-            UserBubble(text: text, receipt: nil, sender: sender)
+            UserBubble(text: text, receipt: note, sender: sender)
         case .tools(let items):
             ToolRunView(items: items, expanded: $expanded)
+        default:
+            VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+                record
+                if let note {
+                    Text(note)
+                        .font(.system(size: DesktopType.caption))
+                        .foregroundStyle(DesktopPalette.muted)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var record: some View {
+        switch block.kind {
+        case .user, .assistant, .peer, .tools:
+            EmptyView()
         case .annotation(let text):
             Text(text)
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
         case .notice(let text):
-            Button { expanded.toggle() } label: {
+            Button { holdPlace(); expanded.toggle() } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "info.circle")
                     Text(text)
@@ -1066,7 +1084,7 @@ struct TranscriptBlockView: View {
             AttachmentImageView(attachment: attachment)
         case .instructions(let text):
             VStack(alignment: .leading, spacing: 6) {
-                Button { expanded.toggle() } label: {
+                Button { holdPlace(); expanded.toggle() } label: {
                     HStack(spacing: 6) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         Text("Instructions")
@@ -1164,6 +1182,7 @@ struct UserBubble: View {
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
     @State private var editing = false
     @State private var hovering = false
 
@@ -1205,7 +1224,7 @@ struct UserBubble: View {
             .padding(.vertical, 9)
             .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
         if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
-            Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+            Button(expanded ? "Show less" : "Show more") { holdPlace(); expanded.toggle() }
                 .buttonStyle(.plain)
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
@@ -1280,15 +1299,23 @@ struct AttachedFileChip: View {
 
 struct AssistantReply: View {
     let text: String
+    var note: String? = nil
     @State private var hovering = false
 
     var body: some View {
-        StructuredText(markdown: text)
-            .font(.system(size: DesktopType.prose))
-            .lineSpacing(DesktopType.proseLineSpacing)
-            .foregroundStyle(DesktopPalette.text)
-            .textual.textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: DesktopSpace.xs) {
+            StructuredText(markdown: text)
+                .font(.system(size: DesktopType.prose))
+                .lineSpacing(DesktopType.proseLineSpacing)
+                .foregroundStyle(DesktopPalette.text)
+                .textual.textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note)
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.muted)
+            }
+        }
             .overlay(alignment: .bottomLeading) {
                 MessageActions(text: text, revealed: hovering)
                     .offset(y: MessageActions.height)
@@ -1300,12 +1327,14 @@ struct AssistantReply: View {
 struct ToolRunView: View {
     let items: [TimelineItem]
     @Binding var expanded: Bool
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let entries = ToolRunSummary.entries(items)
         let failed = items.filter(ToolRunSummary.isFailure).count
         VStack(alignment: .leading, spacing: 6) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(spacing: 7) {
@@ -1329,6 +1358,11 @@ struct ToolRunView: View {
                     case .output(let result):
                         ToolOutputBlock(result: result)
                             .padding(.leading, 21)
+                            .contextMenu {
+                                if let id = result.callId, !id.isEmpty {
+                                    Button("Copy call ID") { copyToPasteboard(id) }
+                                }
+                            }
                     case .reasoning(let item):
                         ReasoningRow(item: item)
                     }
@@ -1345,6 +1379,7 @@ struct ToolCallRow: View {
     let call: TimelineItem
     let results: [TimelineItem]
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
 
@@ -1372,6 +1407,7 @@ struct ToolCallRow: View {
         let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1403,7 +1439,7 @@ struct ToolCallRow: View {
                         .padding(DesktopSpace.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                    TimelineMetaLine(item: call)
+                    ShortenedNote(item: call)
                     if results.isEmpty {
                         Text("No result yet")
                             .font(.system(size: DesktopType.meta))
@@ -1421,6 +1457,9 @@ struct ToolCallRow: View {
             if !results.isEmpty {
                 Button("Copy output") { copyToPasteboard(results.map(\.text).joined(separator: "\n\n")) }
             }
+            if let id = call.callId, !id.isEmpty {
+                Button("Copy call ID") { copyToPasteboard(id) }
+            }
         }
     }
 }
@@ -1428,10 +1467,12 @@ struct ToolCallRow: View {
 struct ReasoningRow: View {
     let item: TimelineItem
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1456,7 +1497,7 @@ struct ReasoningRow: View {
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
                         .textual.textSelection(.enabled)
-                    TimelineMetaLine(item: item)
+                    ShortenedNote(item: item)
                 }
                 .padding(.leading, 21)
             }
@@ -1467,6 +1508,7 @@ struct ReasoningRow: View {
 struct ToolOutputBlock: View {
     let result: TimelineItem
     @State private var showAll = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let failed = ToolRunSummary.isFailure(result)
@@ -1479,7 +1521,7 @@ struct ToolOutputBlock: View {
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
                 Spacer()
                 if preview.count < text.count {
-                    Button(showAll ? "Show less output" : "Show full output") { showAll.toggle() }
+                    Button(showAll ? "Show less output" : "Show full output") { holdPlace(); showAll.toggle() }
                 }
                 Button("Copy output") { copyToPasteboard(text) }
             }
@@ -1492,33 +1534,19 @@ struct ToolOutputBlock: View {
                 .padding(DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-            TimelineMetaLine(item: result)
+            ShortenedNote(item: result)
         }
     }
 }
 
-extension View {
-    @ViewBuilder func timelineDetails(_ item: TimelineItem?) -> some View {
-        let fields = item.map(TimelineMetadata.fields) ?? []
-        if fields.isEmpty {
-            self
-        } else {
-            self.help(fields.joined(separator: " · "))
-                .accessibilityHint(fields.joined(separator: ", "))
-        }
-    }
-}
-
-struct TimelineMetaLine: View {
+struct ShortenedNote: View {
     let item: TimelineItem
 
     var body: some View {
-        let fields = TimelineMetadata.fields(item)
-        if !fields.isEmpty {
-            Text(fields.joined(separator: " · "))
+        if let note = TimelineMetadata.note(item) {
+            Text(note)
                 .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.muted)
-                .textSelection(.enabled)
         }
     }
 }

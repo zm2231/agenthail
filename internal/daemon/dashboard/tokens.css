@@ -824,6 +824,68 @@ select {
 .project-header .link-button:focus-visible {
   opacity: 1;
 }
+.project-menu {
+  position: relative;
+}
+.project-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.project-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.project-menu[open] > summary {
+  opacity: 1;
+}
+.project-menu-items {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px var(--shadow-strong);
+}
+.project-menu-items button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+}
+.project-menu-items button:hover,
+.project-menu-items button:focus-visible {
+  background: var(--raised);
+}
+.projects-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 12px;
+}
+.projects-toolbar .link-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.voice-route select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--raised);
+}
+.project-dialog-error {
+  color: var(--bad);
+  font-size: 13px;
+}
 .project-more {
   margin-left: 29px;
   padding: 4px 0;

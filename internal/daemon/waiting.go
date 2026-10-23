@@ -28,16 +28,75 @@ func (d *Daemon) lockWaiting(sessionID string) func() {
 }
 
 // observeTurn reads the session's turn and records what it is waiting on as
-// one step.
-// A changed record asks the catalog for a discovery pass, so its rows show
-// the change without waiting for the next scheduled one.
+// one step. A changed record is published to the session's catalog row
+// before it returns, so a client reading right after sees the change. The
+// waiting lock is released first: the publish takes it again, as every
+// catalog row write does.
 func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, session *surface.Session) (*surface.TurnObservation, error) {
-	defer d.lockWaiting(session.ID)()
+	unlock := d.lockWaiting(session.ID)
 	observation, changed, err := d.observeTurnLocked(ctx, adapter, session)
+	unlock()
 	if changed {
-		d.requestCatalogDiscovery()
+		d.publishWaiting(ctx, session.ID, observation.WaitingOn)
 	}
 	return observation, err
+}
+
+// publishWaiting writes a session's catalog row with what it waits on now,
+// through the entry the last discovery pass left for status refreshes. A
+// session without one, or whose row did not commit, waits for a discovery
+// pass instead.
+func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *surface.Waiting) {
+	d.catalogLiveMu.Lock()
+	live := d.catalogLive[sessionID]
+	var session surface.Session
+	if live != nil {
+		session = live.session
+	}
+	d.catalogLiveMu.Unlock()
+	if live == nil {
+		d.requestCatalogDiscovery()
+		return
+	}
+	session.WaitingOn = waiting
+	if waiting != nil {
+		session.Status = surface.StatusBusy
+	}
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		d.log.Printf("catalog config: %s", err)
+		d.requestCatalogDiscovery()
+		return
+	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		d.requestCatalogDiscovery()
+		return
+	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		d.log.Printf("catalog view state: %s", err)
+		d.requestCatalogDiscovery()
+		return
+	}
+	defer d.publishUnarchivedProjects()
+	current := func() bool {
+		d.catalogLiveMu.Lock()
+		defer d.catalogLiveMu.Unlock()
+		return d.catalogLive[sessionID] == live
+	}
+	d.publishCatalogSession(ctx, live.adapter, session, live.identity, live.alias, counts[sessionID], live.open, config, view, time.Now().UTC(), current, func(committed bool) {
+		d.catalogLiveMu.Lock()
+		defer d.catalogLiveMu.Unlock()
+		if !committed {
+			d.requestCatalogDiscovery()
+			return
+		}
+		if d.catalogLive[sessionID] == live {
+			live.session = session
+		}
+	})
 }
 
 func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface, session *surface.Session) (*surface.TurnObservation, bool, error) {
@@ -148,10 +207,18 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 			mobile.RequestID = request.ID
 			actions = request.Actions()
 		}
-		if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
-			d.log.Printf("desktop notification: %s", err)
-		}
+		// The desktop notification goes through a helper app that can take
+		// seconds to start, so the phone is told alongside it.
+		var desktop sync.WaitGroup
+		desktop.Add(1)
+		go func() {
+			defer desktop.Done()
+			if err := d.notifyDesktop("Agenthail", desktopMessage, mobile.SessionID, "agenthail-"+key, mobile.RequestID, actions); err != nil {
+				d.log.Printf("desktop notification: %s", err)
+			}
+		}()
 		d.notifyPairedDevices(notificationCtx, mobile)
+		desktop.Wait()
 		if ctx.Err() != nil {
 			return
 		}

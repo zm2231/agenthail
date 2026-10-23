@@ -544,7 +544,7 @@ func boundedSessionSourceReason(value string) string {
 
 func (s *sessionSource) seedJournal() error {
 	err := s.loadSeed()
-	if err != nil {
+	if err != nil && s.ctx.Err() == nil {
 		s.appendSourceError(err)
 	}
 	return err

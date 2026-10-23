@@ -168,11 +168,19 @@ type DeliveryProblem struct {
 	At                 time.Time            `json:"at"`
 }
 
+// settledDeliveryFailure matches a failure that no longer needs anyone: a
+// later message from the same sender reached the same target, or it is more
+// than a day old. A held message stays until its target releases or drops it.
+const settledDeliveryFailure = `di.status='failed' AND (di.updated_at<datetime('now','-1 day') OR EXISTS (
+	SELECT 1 FROM delivery_intents later
+	WHERE later.sender_session_id=di.sender_session_id AND later.target_session_id=di.target_session_id
+		AND later.id>di.id AND later.status IN ('sent','delivered')))`
+
 func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
 		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered'
 		FROM delivery_intents di LEFT JOIN message_queue mq ON mq.id=di.notification_queue_id
-		WHERE di.status IN (?,?) AND COALESCE(di.dismissed_at,'')=''
+		WHERE di.status IN (?,?) AND COALESCE(di.dismissed_at,'')='' AND NOT (`+settledDeliveryFailure+`)
 		ORDER BY di.updated_at DESC, di.id DESC
 		LIMIT 50`, DeliveryIntentFailed, DeliveryIntentHeld)
 	if err != nil {
@@ -210,6 +218,57 @@ func deliveryAttentionSession(senderSessionID string, notified bool) string {
 		return ""
 	}
 	return senderSessionID
+}
+
+// SettleDeliveryProblems dismisses the failures ListDeliveryProblems no
+// longer lists and tells live clients, which drop them from the session rows.
+// The failed message stays in the queue and delivery history.
+func (r *Registry) SettleDeliveryProblems() (int, error) {
+	const query = `SELECT di.id,di.target_session_id,di.retries FROM delivery_intents di WHERE COALESCE(di.dismissed_at,'')='' AND ` + settledDeliveryFailure
+	var pending bool
+	if err := r.read.QueryRow(`SELECT EXISTS (` + query + `)`).Scan(&pending); err != nil || !pending {
+		return 0, err
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	type settled struct {
+		id      int64
+		target  string
+		retries int
+	}
+	rows, err := tx.Query(query)
+	if err != nil {
+		return 0, err
+	}
+	var found []settled
+	for rows.Next() {
+		var item settled
+		if err := rows.Scan(&item.id, &item.target, &item.retries); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		found = append(found, item)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	for _, item := range found {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=?`, item.id); err != nil {
+			return 0, err
+		}
+		payload, err := json.Marshal(map[string]any{"deliveryId": item.id})
+		if err != nil {
+			return 0, err
+		}
+		if _, _, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.settled:%d:%d", item.id, item.retries), Type: "delivery.dismissed", EntityID: item.target, Payload: payload, CreatedAt: now}); err != nil {
+			return 0, err
+		}
+	}
+	return len(found), tx.Commit()
 }
 
 func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {

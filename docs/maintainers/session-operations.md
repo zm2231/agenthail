@@ -177,11 +177,15 @@ carries one choice or one line of text; opening the notification opens the
 session with the request above its message box. The push stays generic and
 adds only the request ID; the phone fetches the prompt and buttons from
 `GET /api/v1/requests`, which returns each open request with `prompt` and
-`actions`. A button answers with `respond` and `decision.choice`, plus
+`actions`. It answers for every session whose provider takes answers through
+Agenthail, with an empty list when none is open, as for a terminal session
+right after its question was answered. A button answers with `respond` and
+`decision.choice`, plus
 `decision.message` for `reply`, which answers a question with that text or
 denies an approval with it as the reason. A choice is resolved against the
 request as it is then: one it no longer offers is refused, and an answered
-request is `stale`. While a target waits, nothing is
+request is `stale`. `respond` returns once the session's catalog row no longer
+shows the request it answered. While a target waits, nothing is
 steered into it, and a peer socket message is not held: Claude keeps it queued
 behind the question or prompt without answering or dismissing it. `send` under
 the `steer` policy to a target without a peer socket, and `steer`, queue a steer,

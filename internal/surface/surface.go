@@ -95,6 +95,11 @@ type UsageLimit struct {
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
 }
 
+// Lifted reports a limit whose reset time has passed.
+func (l *UsageLimit) Lifted(now time.Time) bool {
+	return l != nil && !l.ResetsAt.IsZero() && !now.Before(l.ResetsAt)
+}
+
 // SameUsageLimit reports whether two readings name the same limit.
 func SameUsageLimit(left, right *UsageLimit) bool {
 	if left == nil || right == nil {

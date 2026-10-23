@@ -266,7 +266,7 @@ Usage:
 Session commands:
   codex [args]                  Start a writable Codex terminal session
   codex --repair-managed-runtime Restart a stale managed Codex runtime
-  thread create <codex|claude> "msg"    Create a conversation
+  thread create <codex|claude> "msg" [--cwd <folder>]  Create a conversation
   thread fork <target>         Fork a Codex conversation
   thread <status|stop|resume|logs> <target>  Manage a Claude session (logs: claude-bg jobs)
   thread <archive|unarchive> <target>  Hide a session until it is active again
@@ -275,8 +275,8 @@ Session commands:
   list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide]
                                  List current sessions (with the daemon: --all or --archived);
                                  --cwd lists the project that holds that folder
-  project list|add <path>|remove <name>|archive <name>|unarchive <name>
-                                 List, add or remove project folders, or hide a project
+  project list|add <path>|remove <name>|rename <name> <new>|archive <name>|unarchive <name>
+                                 List, add, rename or remove project folders, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Who the calling session is, who it reports to, how it reaches the person
   help agent                    What the calling session can do through Agenthail

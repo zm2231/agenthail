@@ -145,6 +145,36 @@ func TestClaudeSubagentStateFollowsAppendedRecordsAndNewFiles(t *testing.T) {
 	}
 }
 
+func TestTheClaudeSubagentCountLeavesOutSubagentsFinishedBeforeTheRecentWindow(t *testing.T) {
+	fixture := newClaudeSubagentFixture(t, "transcript-1")
+	old := time.Now().Add(-surface.ActiveWindow - time.Hour)
+	for _, id := range []string{"old1", "old2"} {
+		path := fixture.write(t, id, "", subagentRecord("transcript-1", id, "user", ""), subagentRecord("transcript-1", id, "assistant", "end_turn"))
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observer := newClaudeSubagentObserver()
+	session := &surface.Session{ID: "transcript-1", Transcript: fixture.transcript}
+	if rollup, err := observer.rollup(context.Background(), session); err != nil || rollup != nil {
+		t.Fatalf("only old subagents: rollup = %+v, %v", rollup, err)
+	}
+
+	fixture.write(t, "recent", "", subagentRecord("transcript-1", "recent", "user", ""), subagentRecord("transcript-1", "recent", "assistant", "end_turn"))
+	fixture.write(t, "running", "", subagentRecord("transcript-1", "running", "user", ""))
+	later := time.Now().Add(time.Second)
+	if err := os.Chtimes(fixture.dir, later, later); err != nil {
+		t.Fatal(err)
+	}
+	rollup, err := observer.rollup(context.Background(), session)
+	if err != nil || rollup == nil || *rollup != (surface.SubagentRollup{Count: 2, Working: 1}) {
+		t.Fatalf("rollup = %+v, %v", rollup, err)
+	}
+	if links, err := observer.observeSession(context.Background(), session); err != nil || len(links) != 4 {
+		t.Fatalf("the subagent list keeps every subagent: %d, %v", len(links), err)
+	}
+}
+
 func TestClaudeSubagentsRejectMismatchedIdentityAndIgnoreMissingDirectories(t *testing.T) {
 	fixture := newClaudeSubagentFixture(t, "transcript-1")
 	fixture.write(t, "a1", "", `{"sessionId":"other","agentId":"a1"}`)

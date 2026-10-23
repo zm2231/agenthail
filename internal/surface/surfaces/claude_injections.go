@@ -111,8 +111,9 @@ func claudeRecordedOrigin(text string) string {
 	}
 }
 
-// claudeQueuedCommandItems renders a prompt queued into a running turn. Human
-// prompts keep their existing presentation and are not rendered here.
+// claudeQueuedCommandItems renders a prompt queued into a running turn. A
+// person's prompt that Claude Code absorbs into the turn is recorded only as
+// this attachment, so it is their message here.
 func claudeQueuedCommandItems(record map[string]any) []surface.TimelineItem {
 	attachment, _ := record["attachment"].(map[string]any)
 	if str(attachment, "type") != "queued_command" {
@@ -125,7 +126,7 @@ func claudeQueuedCommandItems(record map[string]any) []surface.TimelineItem {
 	origin, _ := attachment["origin"].(map[string]any)
 	kind := claudePromptOrigin(origin, prompt)
 	if kind == claudeOriginHuman {
-		return nil
+		return []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: prompt}}
 	}
 	return []surface.TimelineItem{claudeInjectedItem(kind, origin, prompt)}
 }

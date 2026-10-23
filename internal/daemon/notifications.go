@@ -213,27 +213,22 @@ func runNotificationHelper(timeout time.Duration, args ...string) ([]byte, error
 	return output, nil
 }
 
+// installedMacApp is where the macOS package installs Agenthail.app.
+const installedMacApp = "/Applications/Agenthail.app/Contents/MacOS/Agenthail"
+
+// notificationHelperPath is the installed Agenthail app that posts and
+// withdraws desktop notifications: the one the installer names in
+// AGENTHAIL_MAC_APP, or the package's copy in /Applications. Other copies,
+// such as an old one left in ~/Applications, are never used.
 func notificationHelperPath() (string, error) {
-	if value := strings.TrimSpace(os.Getenv("AGENTHAIL_MAC_APP")); value != "" {
-		if isExecutableFile(value) {
-			return value, nil
-		}
-		return "", fmt.Errorf("Agenthail macOS app helper is unavailable at %s", value)
+	path := strings.TrimSpace(os.Getenv("AGENTHAIL_MAC_APP"))
+	if path == "" {
+		path = installedMacApp
 	}
-	home, _ := os.UserHomeDir()
-	executable, _ := os.Executable()
-	candidates := []string{
-		filepath.Join(filepath.Dir(executable), "Agenthail.app", "Contents", "MacOS", "Agenthail"),
-		filepath.Join(home, ".local", "share", "agenthail", "Agenthail.app", "Contents", "MacOS", "Agenthail"),
-		filepath.Join(home, "Applications", "Agenthail.app", "Contents", "MacOS", "Agenthail"),
-		filepath.Join("/Applications", "Agenthail.app", "Contents", "MacOS", "Agenthail"),
+	if !isExecutableFile(path) {
+		return "", fmt.Errorf("the Agenthail macOS app is not installed at %s; reinstall Agenthail to enable notifications", path)
 	}
-	for _, candidate := range candidates {
-		if isExecutableFile(candidate) {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("Agenthail macOS app is not installed; reinstall Agenthail to enable notifications")
+	return path, nil
 }
 
 func isExecutableFile(path string) bool {

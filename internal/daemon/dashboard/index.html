@@ -10,7 +10,7 @@
     <title>Agenthail</title>
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/logo.png" />
-    <link rel="stylesheet" href="/tokens.css?v=16" />
+    <link rel="stylesheet" href="/tokens.css?v=17" />
   </head>
   <body>
     <main class="shell">
@@ -570,7 +570,24 @@
         <audio id="voice-audio" autoplay playsinline></audio>
       </form>
     </dialog>
+    <dialog class="voice-dialog" id="project-dialog" aria-labelledby="project-dialog-title">
+      <form class="voice-dialog-card" id="project-form">
+        <header>
+          <h2 id="project-dialog-title">Add project</h2>
+          <button class="icon-button" type="button" id="project-dialog-close" aria-label="Close">×</button>
+        </header>
+        <label class="voice-route" data-project-field="host"><span>Host</span><select name="host"></select></label>
+        <label class="voice-route" data-project-field="folder"><span>Folder</span><input name="path" list="project-folders" autocomplete="off" required placeholder="A folder on that host" /><datalist id="project-folders"></datalist></label>
+        <label class="voice-route" data-project-field="title"><span>Name <small>optional when adding</small></span><input name="title" maxlength="120" autocomplete="off" /></label>
+        <label class="voice-route" data-project-field="checkout"><span>Where it runs</span><select name="checkout"></select></label>
+        <label class="voice-route" data-project-field="surface"><span>Agent</span><select name="surface"><option value="claude">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label class="voice-route" data-project-field="name"><span>Lead name <small>optional</small></span><input name="name" maxlength="80" autocomplete="off" placeholder="&lt;project&gt;-lead" /></label>
+        <p class="voice-help" id="project-dialog-help" hidden></p>
+        <p class="project-dialog-error" id="project-dialog-error" role="alert" hidden></p>
+        <div class="voice-actions"><button class="primary-button" type="submit">Save</button></div>
+      </form>
+    </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=17"></script>
+    <script src="/app.js?v=18"></script>
   </body>
 </html>
