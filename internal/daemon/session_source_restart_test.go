@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,33 +9,15 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// scriptedStreamSurface runs one scripted stream per call and keeps when
-// each call started and returned.
+// scriptedStreamSurface runs one scripted stream per call.
 type scriptedStreamSurface struct {
 	*flakySeedSurface
 	script func(call int32, ctx context.Context, onEvent func(surface.StreamEvent)) error
 	calls  atomic.Int32
-	mu     sync.Mutex
-	starts []time.Time
-	ends   []time.Time
 }
 
 func (s *scriptedStreamSurface) Stream(ctx context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
-	call := s.calls.Add(1)
-	s.mu.Lock()
-	s.starts = append(s.starts, time.Now())
-	s.mu.Unlock()
-	err := s.script(call, ctx, onEvent)
-	s.mu.Lock()
-	s.ends = append(s.ends, time.Now())
-	s.mu.Unlock()
-	return err
-}
-
-func (s *scriptedStreamSurface) times() (starts, ends []time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]time.Time(nil), s.starts...), append([]time.Time(nil), s.ends...)
+	return s.script(s.calls.Add(1), ctx, onEvent)
 }
 
 func turnText(turn, text string) surface.StreamEvent {
@@ -44,8 +25,13 @@ func turnText(turn, text string) surface.StreamEvent {
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(text)), Operation: "upsert", TurnID: turn, Kind: "text", Role: "assistant", Text: text}
 }
 
+// followScripted follows a session through the script with a restart pause
+// far longer than the test waits, so a source that pauses cannot pass.
 func followScripted(t *testing.T, script func(call int32, ctx context.Context, onEvent func(surface.StreamEvent)) error) (*scriptedStreamSurface, func() []string) {
 	t.Helper()
+	previous := sessionStreamRestartPause
+	sessionStreamRestartPause = time.Minute
+	t.Cleanup(func() { sessionStreamRestartPause = previous })
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &scriptedStreamSurface{flakySeedSurface: &flakySeedSurface{daemonSurface: fake}, script: script}
 	adapter.caps.Stream = true
@@ -66,7 +52,7 @@ func followScripted(t *testing.T, script func(call int32, ctx context.Context, o
 }
 
 func TestALiveSourceFollowsTheNextTurnAsSoonAsAStreamEndsWithItsTurn(t *testing.T) {
-	adapter, bodies := followScripted(t, func(call int32, ctx context.Context, onEvent func(surface.StreamEvent)) error {
+	_, bodies := followScripted(t, func(call int32, ctx context.Context, onEvent func(surface.StreamEvent)) error {
 		if call == 1 {
 			onEvent(turnText("turn-1", "first reply"))
 			return nil
@@ -76,10 +62,6 @@ func TestALiveSourceFollowsTheNextTurnAsSoonAsAStreamEndsWithItsTurn(t *testing.
 		return ctx.Err()
 	})
 	waitFor(t, 5*time.Second, func() bool { return len(bodies()) == 2 })
-	starts, ends := adapter.times()
-	if gap := starts[1].Sub(ends[0]); gap >= 200*time.Millisecond {
-		t.Fatalf("the source waited %v after a turn's stream ended before reading the next turn", gap)
-	}
 }
 
 func TestALiveSourceWaitsBeforeStreamingAgainWhenAStreamEndsAtOnceWithNothingNew(t *testing.T) {
@@ -101,9 +83,9 @@ func TestALiveSourceWaitsBeforeStreamingAgainWhenAStreamEndsAtOnceWithNothingNew
 				return surface.ErrStreamWindow
 			})
 			waitFor(t, 5*time.Second, func() bool { return adapter.calls.Load() >= test.calls })
-			time.Sleep(sessionStreamRestartPause / 2)
+			time.Sleep(200 * time.Millisecond)
 			if calls := adapter.calls.Load(); calls != test.calls {
-				t.Fatalf("a stream that ended at once was called %d times within half the pause, want %d", calls, test.calls)
+				t.Fatalf("a stream that ended at once was called %d times before the pause ran out, want %d", calls, test.calls)
 			}
 		})
 	}
