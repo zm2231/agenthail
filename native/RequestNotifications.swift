@@ -49,7 +49,7 @@ enum RequestNotifications {
         return RequestNotice(prompt: prompt, actions: actions)
     }
 
-    /// Reads a request from the paired Mac within fetchTimeout, well inside
+    /// Reads a request from the paired computer within fetchTimeout, well inside
     /// the time a notification service has before iOS shows the notification
     /// as it arrived.
     static func fetchNotice(endpoint: URL, token: String, sessionID: String, requestID: String, session: URLSession = fetchSession) async -> RequestNotice? {
