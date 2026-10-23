@@ -1,9 +1,11 @@
 import XCTest
 
 /// Toolbar items draw at 36 pt on iOS 26, so their accessibility frames are
-/// smaller than the area that takes a tap: the navigation bar row, 44 pt tall.
-/// These tests tap points about 22 pt from each target's centre, the edges of
-/// a 44 pt square, and check the right target answers.
+/// smaller than the area that takes a tap. Probing the voice button with AXe
+/// taps a point at a time on an iPhone 17 Pro simulator found it answers across
+/// the navigation bar row, y 63-106 and x 16-70: 44 pt tall and 54 pt wide, at
+/// the default and the largest text size. These tests tap near those edges and
+/// near the edges of a 44 pt square on each tab, and check the right target answers.
 @MainActor
 final class TabHitAreaUITests: XCTestCase {
     func testTabsAndVoiceTakeTapsAcrossAFullSizeTarget() {
@@ -32,7 +34,7 @@ final class TabHitAreaUITests: XCTestCase {
             XCTAssertFalse(voice.frame.intersects(tab.frame), "voice overlaps \(tab.label)")
         }
         let window = app.windows.firstMatch
-        for (dx, dy) in [(0.0, -21.0), (0.0, 21.0), (-22.0, 0.0), (22.0, 0.0)] {
+        for (dx, dy) in [(0.0, -21.0), (0.0, 21.0), (-25.0, 0.0), (25.0, 0.0)] {
             tap(window, at: voice.frame, dx: dx, dy: dy)
             XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5), "voice misses a tap at \(dx), \(dy)")
             app.buttons["Done"].tapWhenReady()

@@ -42,14 +42,26 @@ struct SessionPreview: View {
     }
     var body: some View {
         AppearanceScope(appearance: model.appearance) { previewBody }
-            .onAppear { if let config = Self.previewAppearance { model.appearance.preview(config) } }
+            .onAppear {
+                guard let config = Self.previewAppearance else { return }
+                model.appearance.preview(config, wallpaper: Self.previewWallpaper(config))
+            }
+    }
+
+    /// An `image:` backdrop is read from the path in the argument, which the
+    /// harness places inside the app's own container.
+    static func previewWallpaper(_ config: UIConfig) -> WallpaperImage? {
+        guard case .image(let path) = config.background, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        let screen = UIScreen.main.nativeBounds.size
+        return WallpaperImage.decode(data, id: path, maxPixels: Int(max(screen.width, screen.height)))
     }
 
     static var previewAppearance: UIConfig? {
         guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-backdrop") else { return nil }
         let arguments = ProcessInfo.processInfo.arguments
         let background = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
-        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "values": ["background": background, "theme": "system"]]) else { return nil }
+        let theme = arguments.firstIndex(of: "--preview-theme").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "system"
+        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "chosen": [:], "overrides": [:], "values": ["background": background, "theme": theme]]) else { return nil }
         return try? JSONDecoder().decode(UIConfig.self, from: json)
     }
 

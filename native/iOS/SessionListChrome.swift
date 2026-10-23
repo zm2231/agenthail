@@ -29,7 +29,6 @@ struct SessionAvatar: View {
     let ring: SessionRing
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = 34
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var turning = false
 
     static func glyph(_ surface: String) -> String {
         switch surface {
@@ -52,6 +51,10 @@ struct SessionAvatar: View {
         .accessibilityHidden(true)
     }
 
+    static func turn(at date: Date) -> Angle {
+        .degrees(date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360)
+    }
+
     @ViewBuilder
     private var ringView: some View {
         switch ring {
@@ -65,12 +68,14 @@ struct SessionAvatar: View {
             if reduceMotion || ProcessInfo.processInfo.arguments.contains("--preview-session") {
                 Circle().stroke(PhonePalette.working, lineWidth: 2.5)
             } else {
-                Circle()
-                    .trim(from: 0, to: 0.7)
-                    .stroke(PhonePalette.working, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(turning ? 360 : 0))
-                    .animation(.linear(duration: 1.4).repeatForever(autoreverses: false), value: turning)
-                    .onAppear { turning = true }
+                // The angle comes from the clock, so every working ring turns in step and a
+                // row the list has not laid out does no work.
+                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                    Circle()
+                        .trim(from: 0, to: 0.7)
+                        .stroke(PhonePalette.working, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(Self.turn(at: context.date))
+                }
             }
         case .idle:
             EmptyView()
