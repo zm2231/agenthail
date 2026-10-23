@@ -59,7 +59,7 @@ func (c *voiceCall) Request(_ context.Context, _ *surface.Session, method string
 }
 
 func (c *voiceCall) Interrupt(context.Context, *surface.Session) error { return nil }
-func (c *voiceCall) Release(string)                                    {}
+func (c *voiceCall) Release(string, voice.Cursor)                      {}
 
 func (c *voiceCall) said(text string) bool {
 	c.mu.Lock()

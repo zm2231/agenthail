@@ -59,7 +59,7 @@ func (c *toolVoice) Request(context.Context, *surface.Session, string, map[strin
 }
 
 func (c *toolVoice) Interrupt(context.Context, *surface.Session) error { return nil }
-func (c *toolVoice) Release(string)                                    {}
+func (c *toolVoice) Release(string, voice.Cursor)                      {}
 
 func (c *toolVoice) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
 	c.mu.Lock()

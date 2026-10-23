@@ -34,6 +34,7 @@ type fixtureProvider struct {
 	speakingText string
 	respondErr   error
 	releases     []string
+	gate         *gate
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -42,6 +43,12 @@ type fixtureProvider struct {
 }
 
 type targetFixture struct {
+	mu   sync.Mutex
+	gate *gate
+	// perTurn gives each send its own turn, whose reply the test supplies.
+	perTurn         bool
+	turns           int
+	replies         map[string]chan string
 	session         surface.Session
 	sent            []string
 	stream          func(func(surface.StreamEvent))
@@ -71,26 +78,61 @@ func (f *targetFixture) RuntimeKinds() []surface.RuntimeKind {
 func (f *targetFixture) List(context.Context) ([]surface.Session, error) {
 	return []surface.Session{f.session}, nil
 }
-func (f *targetFixture) Resolve(_ context.Context, id string) (*surface.Session, error) {
+func (f *targetFixture) Resolve(ctx context.Context, id string) (*surface.Session, error) {
+	if err := f.gate.wait(ctx, "Resolve"); err != nil {
+		return nil, err
+	}
 	if id != f.session.ID {
 		return nil, errors.New("unknown target")
 	}
 	copy := f.session
 	return &copy, nil
 }
-func (f *targetFixture) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
+func (f *targetFixture) Observe(ctx context.Context, _ *surface.Session) (*surface.TurnObservation, error) {
+	if err := f.gate.wait(ctx, "Observe"); err != nil {
+		return nil, err
+	}
 	if f.observation != nil {
 		return f.observation, nil
 	}
 	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
 }
-func (f *targetFixture) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	if err := f.gate.wait(ctx, "Send"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	if f.perTurn {
+		f.turns++
+		turnID := fmt.Sprintf("turn-%d", f.turns)
+		if f.replies == nil {
+			f.replies = map[string]chan string{}
+		}
+		f.replies[turnID] = make(chan string, 1)
+		f.mu.Unlock()
+		return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+	}
+	f.mu.Unlock()
 	turnID := f.turnID
 	if turnID == "" {
 		turnID = "target-turn"
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+}
+
+// reply finishes a per-turn send's turn with text.
+func (f *targetFixture) reply(turnID, text string) {
+	f.mu.Lock()
+	reply := f.replies[turnID]
+	f.mu.Unlock()
+	reply <- text
+}
+
+func (f *targetFixture) sends() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.sent...)
 }
 func (f *targetFixture) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
 	return &surface.ReplyResult{}, nil
@@ -101,6 +143,21 @@ func (f *targetFixture) Tail(context.Context, *surface.Session, int) ([]surface.
 func (f *targetFixture) Stream(ctx context.Context, _ *surface.Session, turnID string, callback func(surface.StreamEvent), _ time.Duration) error {
 	if f.watchDone != nil {
 		go func() { <-ctx.Done(); close(f.watchDone) }()
+	}
+	if f.perTurn {
+		f.mu.Lock()
+		reply := f.replies[turnID]
+		f.mu.Unlock()
+		if reply == nil {
+			return errors.New("wrong turn")
+		}
+		select {
+		case text := <-reply:
+			callback(surface.StreamEvent{ID: "reply-" + turnID, Operation: "upsert", Final: true, Kind: "text", Text: text})
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	if turnID != "target-turn" {
 		return errors.New("wrong turn")
@@ -152,7 +209,10 @@ func (f *targetFixture) Capabilities() surface.Capabilities {
 	return surface.Capabilities{Send: true, Stream: true}
 }
 
-func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*surface.Session, error) {
+func (p *fixtureProvider) Create(ctx context.Context, cwd, instructions string) (*surface.Session, error) {
+	if err := p.gate.wait(ctx, "Create"); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.creates++
@@ -163,10 +223,16 @@ func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*
 	}
 	return &surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
 }
-func (p *fixtureProvider) Cursor(context.Context, *surface.Session) (Cursor, error) {
+func (p *fixtureProvider) Cursor(ctx context.Context, _ *surface.Session) (Cursor, error) {
+	if err := p.gate.wait(ctx, "Cursor"); err != nil {
+		return Cursor{}, err
+	}
 	return Cursor{Source: "fixture", Position: 10}, nil
 }
-func (p *fixtureProvider) Poll(_ context.Context, after Cursor, _ string) (Batch, error) {
+func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string) (Batch, error) {
+	if err := p.gate.wait(ctx, "Poll"); err != nil {
+		return Batch{}, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	b := Batch{Cursor: after}
@@ -191,6 +257,9 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID, _
 	return p.respondErr
 }
 func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
+	if err := p.gate.wait(ctx, method); err != nil {
+		return err
+	}
 	p.mu.Lock()
 	speaking, speakingText := p.speaking, p.speakingText
 	p.mu.Unlock()
@@ -205,14 +274,18 @@ func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, metho
 	p.params = append(p.params, params)
 	return p.err
 }
-func (p *fixtureProvider) Interrupt(context.Context, *surface.Session) error {
+func (p *fixtureProvider) Interrupt(ctx context.Context, _ *surface.Session) error {
+	if err := p.gate.wait(ctx, "Interrupt"); err != nil {
+		return err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.interrupts++
 	return nil
 }
 
-func (p *fixtureProvider) Release(threadID string) {
+func (p *fixtureProvider) Release(threadID string, _ Cursor) {
+	_ = p.gate.wait(context.Background(), "Release")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.releases = append(p.releases, threadID)
@@ -270,6 +343,85 @@ type voiceFixture struct {
 	ticks    chan time.Time
 	mu       sync.Mutex
 	now      time.Time
+	cycles   chan struct{}
+	gate     *gate
+	target   *targetFixture
+}
+
+// gate holds a fixture call by name until the test releases it or the
+// call's context ends.
+type gate struct {
+	mu      sync.Mutex
+	held    map[string]chan struct{}
+	entered chan string
+	waiting int
+}
+
+func (g *gate) waiters() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.waiting
+}
+
+func (g *gate) hold(name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.held == nil {
+		g.held = map[string]chan struct{}{}
+	}
+	g.held[name] = make(chan struct{})
+}
+
+func (g *gate) release(name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if held := g.held[name]; held != nil {
+		close(held)
+		delete(g.held, name)
+	}
+}
+
+func (g *gate) wait(ctx context.Context, name string) error {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	held := g.held[name]
+	g.mu.Unlock()
+	if held == nil {
+		return nil
+	}
+	g.mu.Lock()
+	g.waiting++
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		g.waiting--
+		g.mu.Unlock()
+	}()
+	g.entered <- name
+	select {
+	case <-held:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// reached waits until a held call named name is waiting.
+func (g *gate) reached(t *testing.T, name string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-g.entered:
+			if got == name {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("%s was never called", name)
+		}
+	}
 }
 
 func fixture(t *testing.T) (*voiceFixture, *fixtureProvider) {
@@ -279,14 +431,16 @@ func fixture(t *testing.T) (*voiceFixture, *fixtureProvider) {
 
 func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
-	f := &voiceFixture{t: t, provider: &fixtureProvider{polled: make(chan struct{}, 1)}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
+	g := &gate{entered: make(chan string, 16)}
+	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{polled: make(chan struct{}, 1), gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
 	var resolver TargetResolver
 	if options.path != "" {
 		f.path = options.path
 	}
 	if target := options.target; target != nil {
-		resolver = func(_ context.Context, id string) (*Target, error) {
-			resolved, err := target.Resolve(context.Background(), id)
+		target.gate = g
+		resolver = func(ctx context.Context, id string) (*Target, error) {
+			resolved, err := target.Resolve(ctx, id)
 			if err != nil {
 				return nil, err
 			}
@@ -302,6 +456,13 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 		ticker: func() (<-chan time.Time, func()) { return f.ticks, func() {} },
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
+	f.cycles = make(chan struct{}, 16)
+	f.service.cycled = func() {
+		select {
+		case f.cycles <- struct{}{}:
+		default:
+		}
+	}
 	t.Cleanup(func() { close(f.ticks) })
 	t.Cleanup(f.service.Close)
 	return f
@@ -331,13 +492,10 @@ func (f *voiceFixture) tick() {
 	case <-time.After(time.Second):
 		f.t.Fatal("call observer did not poll")
 	}
-	// Taking the service lock waits for the cycle that polled to complete.
-	done := make(chan struct{})
-	go func() { f.service.mu.Lock(); f.service.unlock(); close(done) }()
 	select {
-	case <-done:
-	case <-time.After(time.Second):
-		f.t.Fatal("call observer retained the service lock")
+	case <-f.cycles:
+	case <-time.After(5 * time.Second):
+		f.t.Fatal("call observer did not finish its cycle")
 	}
 }
 
@@ -392,7 +550,7 @@ func targetSelected(t *testing.T, target *targetFixture) *voiceFixture {
 
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for !condition() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
@@ -555,12 +713,18 @@ func TestDeviceLeaseRejectsTakeoverAndHidesSDP(t *testing.T) {
 }
 
 func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
+	var mu sync.Mutex
 	var calls []string
 	f := newFixture(t, fixtureOptions{operatorSource: func(session *surface.Session, active bool) {
+		mu.Lock()
+		defer mu.Unlock()
 		calls = append(calls, session.ID+":"+strconv.FormatBool(active))
 	}})
 	connectFixture(t, f)
 	hangUp(t, f)
+	f.service.Close()
+	mu.Lock()
+	defer mu.Unlock()
 	if !reflect.DeepEqual(calls, []string{"operator:true", "operator:false"}) {
 		t.Fatalf("operator source calls=%v", calls)
 	}
@@ -698,8 +862,10 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
 	f.observe(spoken)
 	f.observe(spoken)
-	if !reflect.DeepEqual(target.sent, []string{"Inspect this session"}) {
-		t.Fatalf("spoken transcript was not delivered exactly once: %v", target.sent)
+	waitFor(t, "the spoken request", func() bool { return len(target.sends()) > 0 })
+	f.service.Close()
+	if sends := target.sends(); !reflect.DeepEqual(sends, []string{"Inspect this session"}) {
+		t.Fatalf("spoken transcript was not delivered exactly once: %v", sends)
 	}
 }
 
@@ -782,11 +948,12 @@ func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("a control action waited past the speech deadline")
+	case <-time.After(time.Second):
+		t.Fatal("a hangup waited on speech the operator had not accepted")
 	}
-	if v := f.View(); !hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
-		t.Fatalf("expired speech was not recorded before the stop: %+v", v)
+	f.service.Close()
+	if v := f.View(); hasEvent(v, "voice/delegation/final") || hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
+		t.Fatalf("speech the hangup cancelled was recorded: %+v", v)
 	}
 }
 
@@ -824,6 +991,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	p := f.provider
 	connectFixture(t, f)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
+	waitFor(t, "the transfer's answer", func() bool { return len(p.answers()) == 1 })
 	if got := f.View().Target; got == nil || got.ID != "target-a" {
 		t.Fatalf("transfer did not select target: %+v", got)
 	}
@@ -833,6 +1001,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	}
 	p.mu.Unlock()
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-b", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
+	waitFor(t, "the return's answer", func() bool { return len(p.answers()) == 2 })
 	if got := f.View().Target; got != nil {
 		t.Fatalf("return did not clear target: %+v", got)
 	}
@@ -1055,6 +1224,16 @@ func TestClosingTheServiceReleasesTheCall(t *testing.T) {
 	}
 }
 
+func (p *fixtureProvider) answers() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var ids []string
+	for _, call := range p.toolCalls {
+		ids = append(ids, call.requestID)
+	}
+	return ids
+}
+
 func waitForRelease(t *testing.T, p *fixtureProvider, threadID string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -1114,9 +1293,7 @@ func TestAStartWhoseStateCannotBeSavedReleasesTheCall(t *testing.T) {
 	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err == nil {
 		t.Fatal("a start with unpersistable state was accepted")
 	}
-	if releases := p.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
-		t.Fatalf("releases=%v", releases)
-	}
+	waitForRelease(t, p, "operator")
 	if requests, _, _ := p.snapshot(); len(requests) != 0 {
 		t.Fatalf("realtime was started with unpersistable state: %v", requests)
 	}
@@ -1220,9 +1397,7 @@ func TestACallStartCodexRefusesEndsTheCallWithTheReason(t *testing.T) {
 	if view.Phase != "ended" || view.TerminalReason != "start_rejected" || !strings.Contains(view.Message, "codex login") {
 		t.Fatalf("view=%+v", view)
 	}
-	if releases := provider.released(); !reflect.DeepEqual(releases, []string{"operator"}) {
-		t.Fatalf("a refused call kept its event source: %v", releases)
-	}
+	waitForRelease(t, provider, "operator")
 	provider.failRequests(nil)
 	if _, err := f.Apply(Action{Action: "start", AttemptID: "call-b", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}); err != nil {
 		t.Fatalf("the next call was refused after a definite rejection: %v", err)

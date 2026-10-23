@@ -109,7 +109,7 @@ func (ownerFixtureProvider) Request(context.Context, *surface.Session, string, m
 	return nil
 }
 func (ownerFixtureProvider) Interrupt(context.Context, *surface.Session) error { return nil }
-func (ownerFixtureProvider) Release(string)                                    {}
+func (ownerFixtureProvider) Release(string, voice.Cursor)                      {}
 
 // The web dashboard and the Mac app both hold the dashboard token, but the web
 // route and the v1 route derive different owners from it, so neither can take
