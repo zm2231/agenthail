@@ -46,7 +46,7 @@ func ProbeOnce[T any](ctx context.Context, key any, probe func() (T, error)) (T,
 		if !found {
 			value, err := probe()
 			pass.mu.Lock()
-			if err != nil && ctx.Err() != nil {
+			if ctx.Err() != nil {
 				delete(pass.results, key)
 			} else {
 				result.shared, result.value, result.err = true, value, err

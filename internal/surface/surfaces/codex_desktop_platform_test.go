@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
@@ -34,5 +35,28 @@ func TestCodexProbesTheDefaultDesktopPortOnlyWhereDesktopRuns(t *testing.T) {
 	}
 	if err := NewCodex(endpoint.Port()).DesktopReady(context.Background()); err != nil || desktop.Lookups() != 1 {
 		t.Fatalf("a configured port: err=%v lookups=%d", err, desktop.Lookups())
+	}
+}
+
+func TestOnlyALocalDesktopOnAMacIsRepairedByLaunchingCodex(t *testing.T) {
+	restore := codexDesktopRunsHere
+	t.Cleanup(func() { codexDesktopRunsHere = restore })
+	for _, test := range []struct {
+		runsHere bool
+		endpoint string
+		want     surface.RuntimeProblem
+	}{
+		{runsHere: true, endpoint: "", want: surface.RuntimeBridgeUnavailable},
+		{runsHere: true, endpoint: "9300", want: surface.RuntimeBridgeUnavailable},
+		{runsHere: true, endpoint: "ws://laptop.example:9231", want: surface.RuntimeDesktopUnreachable},
+		{runsHere: false, endpoint: "9300", want: surface.RuntimeDesktopUnreachable},
+		{runsHere: false, endpoint: "ws://laptop.example:9231", want: surface.RuntimeDesktopUnreachable},
+	} {
+		codexDesktopRunsHere = test.runsHere
+		codex := NewCodex(test.endpoint)
+		problem, remediation := codex.desktopProblem()
+		if problem != test.want || (problem == surface.RuntimeDesktopUnreachable) != strings.Contains(remediation, codex.desktopURL+" reachable") {
+			t.Errorf("runsHere=%v endpoint=%q: problem=%s remediation=%q", test.runsHere, test.endpoint, problem, remediation)
+		}
 	}
 }

@@ -41,3 +41,13 @@ func TestACatalogPassLooksUpCodexDesktopOnceAndStillFindsIt(t *testing.T) {
 		t.Fatalf("health=%+v runtime=%+v", health, health.Runtime)
 	}
 }
+
+func TestAnUnreachableDesktopAgenthailCannotLaunchOffersNoLaunchRepair(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewCodex("ws://127.0.0.1:1")})
+	d.discoverCatalog(context.Background())
+	health, _ := d.observedSurfaceHealth(surface.KindCodex)
+	if health.Runtime == nil || health.Runtime.Problem != surface.RuntimeDesktopUnreachable || health.RepairAction != "" {
+		t.Fatalf("health=%+v runtime=%+v", health, health.Runtime)
+	}
+}

@@ -53,7 +53,7 @@ Agenthail starts the daemon with `codex app-server daemon start` only for a mana
 
 Agenthail runs lifecycle commands with the binary Codex's daemon installed for itself (`$CODEX_HOME/packages/app-server-daemon/current/bin/codex`, or the older `$CODEX_HOME/packages/standalone/current/codex`), otherwise the first `codex` on `PATH`, never the copy inside a Desktop app bundle. Codex decides whether that CLI can start its daemon: 0.163 installs its own package on first start, while 0.151 requires the standalone runtime and says so with its install command, which Agenthail reports unchanged and never runs.
 
-Runtime status carries a typed `problem` that selects the repair: `bridge-unavailable` (launch Desktop through Agenthail), `runtime-stopped` (the daemon is not running; the dashboard can start it), `unsupervised`, and `codex-missing` (no Codex CLI and no Desktop).
+Runtime status carries a typed `problem` that selects the repair: `bridge-unavailable` (launch Desktop through Agenthail), `desktop-unreachable` (a configured Desktop endpoint Agenthail cannot launch, such as one off macOS or on another machine, is unreachable; no repair is offered), `runtime-stopped` (the daemon is not running; the dashboard can start it), `unsupervised`, and `codex-missing` (no Codex CLI and no Desktop).
 
 Turns run inside the app-server, so they survive Agenthail restarts. The next send to an idle thread resumes it first. If the daemon dies mid-turn, Codex reports that turn as `interrupted` after the daemon restarts, and the next send resumes the thread and starts a new turn (verified against Codex 0.163). A turn or steer whose request was written but whose response was lost stays unknown and is never retried automatically.
 

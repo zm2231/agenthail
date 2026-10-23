@@ -38,3 +38,15 @@ func TestProbeOnceDoesNotShareAProbeItsCallerAbandoned(t *testing.T) {
 		t.Fatalf("value=%q err=%v", value, err)
 	}
 }
+
+func TestProbeOnceDoesNotShareAnAnswerItsCallerStoppedWaitingFor(t *testing.T) {
+	pass := WithProbePass(context.Background())
+	abandoned, cancel := context.WithCancel(pass)
+	_, _ = ProbeOnce(abandoned, "desktop", func() (string, error) {
+		cancel()
+		return "stale", nil
+	})
+	if value, _ := ProbeOnce(pass, "desktop", func() (string, error) { return "fresh", nil }); value != "fresh" {
+		t.Fatalf("a later call got the abandoned answer %q", value)
+	}
+}
