@@ -16,7 +16,7 @@ final class ActivityCollapseTests: XCTestCase {
         for _ in 0..<12 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
-        collapse.tap()
+        collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         // Give the scroll view time to settle before reading what it shows.
         RunLoop.current.run(until: Date().addingTimeInterval(1))
@@ -46,7 +46,7 @@ final class ActivityCollapseTests: XCTestCase {
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
         XCTAssertFalse(command.isHittable, "the command row should have scrolled above the screen before collapsing")
-        collapse.tap()
+        collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
         XCTAssertTrue(command.isHittable, "the collapsed command should be on screen, at \(command.frame) in \(timeline.frame)")

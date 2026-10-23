@@ -398,6 +398,7 @@ struct SessionScreen: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
+    @State private var position = ScrollPosition()
 
     private var displayTitle: String {
         session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
@@ -480,12 +481,14 @@ struct SessionScreen: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
-                .environment(\.revealRow) { id in Task { @MainActor in proxy.scrollTo(id, anchor: .top) } }
+                .environment(\.revealRow) { position.scrollTo(y: $0) }
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
+                .coordinateSpace(.named(TimelineGroup.contentSpace))
             }
+            .scrollPosition($position)
             .accessibilityIdentifier("session-timeline")
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
