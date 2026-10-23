@@ -83,3 +83,10 @@ const failed = await context.runLogicalAction("session-create", "session-create"
 assert.equal(context.creationFailureMessage(failed), "Error: model rejected");
 await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "no" });
 assert.notEqual(calls[14].key, calls[15].key, "a create that failed must clear its key");
+
+const silentHost = () => ({ ok: false, status: 504, text: async () => JSON.stringify({ error: { code: "host_outcome_unknown", message: "Host studio did not answer; the outcome is unknown" } }) });
+responses.push(silentHost(), ok());
+const silent = await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "far", host: "studio" }).catch((error) => error);
+assert.equal(context.creationFailureMessage(silent), "Agenthail can't tell whether this session started; check the sidebar before trying again.");
+await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "far", host: "studio" });
+assert.equal(calls[16].key, calls[17].key, "a create a paired host never answered must keep its key");
