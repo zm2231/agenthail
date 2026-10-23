@@ -147,3 +147,71 @@ func TestOnlyAgenthailsOwnHookCanPostAPrompt(t *testing.T) {
 		t.Fatalf("a prompt from another process was held: status=%d", status)
 	}
 }
+
+// What a phone reads right after answering a terminal question: the request
+// list, now empty, and a session that no longer shows the question. A repeat
+// of the answer is stale.
+func TestRightAfterAnAnswerTheSessionStopsShowingTheQuestionAndItsRequestsReadEmpty(t *testing.T) {
+	q := newClaudeQuestion(t)
+	h, _ := runDaemonWith(t, q.store, func(d *Daemon) { d.withdrawDesktop = (&withdrawals{}).record }, q.claude)
+	openRequests := func(when string) []surface.Request {
+		t.Helper()
+		status, payload := h.request(http.MethodGet, "/api/v1/requests?sessionId="+q.session.ID, nil)
+		var state surface.RequestState
+		if err := json.Unmarshal(payload, &state); status != http.StatusOK || err != nil {
+			t.Fatalf("requests %s: status=%d body=%s", when, status, payload)
+		}
+		return state.Requests
+	}
+	// Until a hook holds a prompt the session is like one without the hook
+	// installed: nothing to list and nothing to answer from here.
+	if open := openRequests("before the hook held one"); len(open) != 0 {
+		t.Fatalf("requests before the hook held one: %+v", open)
+	}
+	if h.sessionCapabilities(q.session.ID).Respond {
+		t.Fatal("a session with no prompt held offers to answer from Agenthail")
+	}
+	prompt := `{"session_id":"conversation-question","tool_name":"AskUserQuestion","tool_input":` + pickABranch + `}`
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.postPrompt(prompt, q.process.PID)
+	}()
+	var waiting *surface.Waiting
+	eventually(t, "the session to wait on the held prompt", func() bool {
+		waiting = h.sessionWaiting(q.session.ID)
+		return waiting != nil && strings.Contains(waiting.ID, ":held:")
+	})
+	answer := map[string]any{"action": "respond", "sessionId": q.session.ID, "requestId": waiting.ID, "decision": map[string]any{"behavior": "allow", "answers": map[string]string{"Which branch?": "next"}}}
+	if status, payload := h.request(http.MethodPost, "/api/v1/actions", answer); status != http.StatusOK {
+		t.Fatalf("respond status=%d body=%s", status, payload)
+	}
+	if open := openRequests("right after the answer"); len(open) != 0 {
+		t.Fatalf("requests right after the answer: %+v", open)
+	}
+	if shown := h.sessionWaiting(q.session.ID); shown != nil && shown.ID == waiting.ID {
+		t.Fatalf("right after the answer the session still shows the answered question: %+v", shown)
+	}
+	<-done
+	if status, payload := h.request(http.MethodPost, "/api/v1/actions", answer); status != http.StatusConflict || !strings.Contains(string(payload), `"stale"`) {
+		t.Fatalf("a repeat of the answer: status=%d body=%s", status, payload)
+	}
+}
+
+func (h *runningDaemon) sessionCapabilities(id string) surface.Capabilities {
+	h.t.Helper()
+	status, payload := h.request(http.MethodGet, "/api/v1/snapshot", nil)
+	var decoded struct {
+		Sessions []dashboardSession `json:"sessions"`
+	}
+	if err := json.Unmarshal(payload, &decoded); status != http.StatusOK || err != nil {
+		h.t.Fatalf("snapshot status=%d body=%s", status, payload)
+	}
+	for _, session := range decoded.Sessions {
+		if session.ID == id {
+			return session.Capabilities
+		}
+	}
+	h.t.Fatalf("session %s is not in the snapshot", id)
+	return surface.Capabilities{}
+}

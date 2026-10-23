@@ -15,7 +15,8 @@ import (
 )
 
 // requestsHandler reads a session's open requests and permission mode from
-// its provider now. Answers go through the respond action.
+// its provider now, none when nothing is open. Answers go through the respond
+// action.
 func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -31,8 +32,8 @@ func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
-	responder, ok := adapter.(surface.Responder)
-	if !ok || !surface.EffectiveCapabilities(adapter, session).Respond {
+	responder, ok := sessionResponder(adapter, session)
+	if !ok {
 		http.Error(w, "this session's requests are not answered through Agenthail", http.StatusBadRequest)
 		return
 	}
@@ -59,13 +60,22 @@ type openRequestView struct {
 	Actions []surface.RequestAction `json:"actions,omitempty"`
 }
 
+// sessionResponder is the provider that answers a session's requests through
+// Agenthail. Whether one is open right now does not matter: a session with
+// none lists none, and an answer to one no longer open is stale.
+func sessionResponder(adapter surface.Surface, session *surface.Session) (surface.Responder, bool) {
+	responder, ok := adapter.(surface.Responder)
+	return responder, ok && !surface.IsReadOnlySession(session)
+}
+
 // respond answers one open request and records who answered it. A request
 // that was already answered or has expired is a conflict, never a retry.
-// Either way the turn is observed again right away, so the session stops
-// showing a request nobody can answer any more.
+// Either way the turn is observed again and the session's catalog row
+// published before the reply, so a client reading right after sees it no
+// longer waiting on the request.
 func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) {
-	responder, ok := adapter.(surface.Responder)
-	if !ok || !surface.EffectiveCapabilities(adapter, session).Respond {
+	responder, ok := sessionResponder(adapter, session)
+	if !ok {
 		http.Error(w, "this session's requests are not answered through Agenthail", http.StatusBadRequest)
 		return
 	}
@@ -101,14 +111,23 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
 }
 
-// observeAfterAnswer records what the session waits on now, which clears the
-// waiting record and the catalog row of a request that is no longer open.
+// observeAfterAnswer records what the session waits on now and publishes its
+// catalog row, which clears the request that is no longer open from both.
+// The row is published even when this observation changed nothing: the
+// observation that the answer itself started may have cleared the record
+// first, and its publish may not have landed yet.
 func (d *Daemon) observeAfterAnswer(adapter surface.Surface, session *surface.Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := d.observeTurn(ctx, adapter, session); err != nil {
+	observation, err := d.observeTurn(ctx, adapter, session)
+	if err != nil {
 		d.log.Printf("observe %s after an answer: %s", d.resolveDisplay(session.ID), err)
+		return
 	}
+	if observation == nil {
+		return
+	}
+	d.publishWaiting(ctx, session.ID, observation.WaitingOn)
 }
 
 // openRequest finds a request that is still open. A notification button's
