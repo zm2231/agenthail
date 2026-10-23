@@ -512,8 +512,16 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
 	if cacheable && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
-		state := dashboard.state
+		state, tag := dashboard.state, dashboardSnapshotTag(dashboard.state, dashboard.cachedVersion, dashboard.stateAt)
 		dashboard.stateMu.Unlock()
+		if r.URL.RawQuery == "" {
+			w.Header().Set("ETag", tag)
+			if r.Header.Get("If-None-Match") == tag {
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
 		d.writeDashboardSnapshot(w, r, state)
 		return
 	}
@@ -545,9 +553,20 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		dashboard.state = state
 		dashboard.stateAt = time.Now()
 		dashboard.cachedVersion = version
+		tag := dashboardSnapshotTag(state, version, dashboard.stateAt)
 		dashboard.stateMu.Unlock()
+		if r.URL.RawQuery == "" {
+			w.Header().Set("ETag", tag)
+		}
 	}
 	d.writeDashboardSnapshot(w, r, state)
+}
+
+// dashboardSnapshotTag names one cached snapshot: the cached state is never
+// changed once stored, so its catalog position, state version and build time
+// identify the body a plain snapshot request receives.
+func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Time) string {
+	return fmt.Sprintf(`"%s-%d-%d-%d"`, state.HostEpoch, state.CatalogSeq, version, builtAt.UnixNano())
 }
 
 func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
