@@ -1032,6 +1032,7 @@ struct TranscriptBlockView: View {
     let block: TranscriptBlock
     var onEdit: ((String) -> Void)? = nil
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         switch block.kind {
@@ -1048,7 +1049,7 @@ struct TranscriptBlockView: View {
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.muted)
         case .notice(let text):
-            Button { expanded.toggle() } label: {
+            Button { holdPlace(); expanded.toggle() } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "info.circle")
                     Text(text)
@@ -1066,7 +1067,7 @@ struct TranscriptBlockView: View {
             AttachmentImageView(attachment: attachment)
         case .instructions(let text):
             VStack(alignment: .leading, spacing: 6) {
-                Button { expanded.toggle() } label: {
+                Button { holdPlace(); expanded.toggle() } label: {
                     HStack(spacing: 6) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         Text("Instructions")
@@ -1164,6 +1165,7 @@ struct UserBubble: View {
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
     @State private var editing = false
     @State private var hovering = false
 
@@ -1205,7 +1207,7 @@ struct UserBubble: View {
             .padding(.vertical, 9)
             .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
         if message.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || message.count > 700 {
-            Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+            Button(expanded ? "Show less" : "Show more") { holdPlace(); expanded.toggle() }
                 .buttonStyle(.plain)
                 .font(.system(size: DesktopType.meta))
                 .foregroundStyle(DesktopPalette.text2)
@@ -1300,12 +1302,14 @@ struct AssistantReply: View {
 struct ToolRunView: View {
     let items: [TimelineItem]
     @Binding var expanded: Bool
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let entries = ToolRunSummary.entries(items)
         let failed = items.filter(ToolRunSummary.isFailure).count
         VStack(alignment: .leading, spacing: 6) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(spacing: 7) {
@@ -1345,6 +1349,7 @@ struct ToolCallRow: View {
     let call: TimelineItem
     let results: [TimelineItem]
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
 
@@ -1372,6 +1377,7 @@ struct ToolCallRow: View {
         let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1428,10 +1434,12 @@ struct ToolCallRow: View {
 struct ReasoningRow: View {
     let item: TimelineItem
     @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             Button {
+                holdPlace()
                 expanded.toggle()
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -1467,6 +1475,7 @@ struct ReasoningRow: View {
 struct ToolOutputBlock: View {
     let result: TimelineItem
     @State private var showAll = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
 
     var body: some View {
         let failed = ToolRunSummary.isFailure(result)
@@ -1479,7 +1488,7 @@ struct ToolOutputBlock: View {
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.muted)
                 Spacer()
                 if preview.count < text.count {
-                    Button(showAll ? "Show less output" : "Show full output") { showAll.toggle() }
+                    Button(showAll ? "Show less output" : "Show full output") { holdPlace(); showAll.toggle() }
                 }
                 Button("Copy output") { copyToPasteboard(text) }
             }

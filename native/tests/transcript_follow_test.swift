@@ -15,6 +15,8 @@ final class Feed: ObservableObject {
     var following = true
 }
 
+@MainActor var renders: [String: Int] = [:]
+
 func rows(_ prefix: String, _ count: Int) -> [Row] {
     (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
 }
@@ -28,8 +30,7 @@ struct Transcript: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach(feed.rows) { row in
-                    Text(String(repeating: "transcript line\n", count: row.lines) + row.id)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    RowView(row: row)
                 }
             }
             .padding(24)
@@ -43,8 +44,26 @@ struct Transcript: View {
     }
 }
 
+struct RowView: View {
+    let row: Row
+    @State private var expanded = false
+    @Environment(\.holdTranscriptPlace) private var holdPlace
+
+    var body: some View {
+        let _ = renders[row.id, default: 0] += 1
+        Text(String(repeating: "transcript line\n", count: row.lines + (expanded ? 30 : 0)) + row.id)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onReceive(NotificationCenter.default.publisher(for: .toggleRow)) { note in
+                guard note.object as? String == row.id else { return }
+                holdPlace()
+                expanded.toggle()
+            }
+    }
+}
+
 extension Notification.Name {
     static let jumpToLatest = Notification.Name("jumpToLatest")
+    static let toggleRow = Notification.Name("toggleRow")
 }
 
 @main
@@ -159,6 +178,39 @@ struct TranscriptFollowTest {
         }
         spin(0.4)
         expectBottom(scroll, "a following reader sees streamed rows")
+
+        feed.transcript = "H"
+        feed.rows = rows("H", 40)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript shows the live edge")
+        let pinned = offset(scroll)
+        NotificationCenter.default.post(name: .toggleRow, object: "H38")
+        spin(0.6)
+        expect(abs(offset(scroll) - pinned) < 2 && !feed.following, "expanding a row while following keeps it where it was clicked, offset \(pinned) became \(offset(scroll))")
+        NotificationCenter.default.post(name: .toggleRow, object: "H38")
+        spin(0.6)
+        expect(abs(offset(scroll) - pinned) < 2, "collapsing it again keeps it where it was clicked, offset \(pinned) became \(offset(scroll))")
+
+        feed.transcript = "K"
+        feed.rows = rows("K", 3)
+        spin(0.4)
+        NotificationCenter.default.post(name: .toggleRow, object: "K1")
+        spin(0.4)
+        move(scroll, to: 0)
+        expect(!feed.following, "a reader scrolled to the top of an expanded row is not following")
+        NotificationCenter.default.post(name: .toggleRow, object: "K1")
+        spin(0.6)
+        expect(feed.following, "when everything fits after collapsing, there is nothing to jump to")
+
+        feed.transcript = "R"
+        feed.rows = rows("R", 40)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript shows the live edge")
+        let before = renders["R35", default: 0]
+        move(scroll, to: offset(scroll) - 150)
+        spin(0.3)
+        expect(!feed.following, "a reader who scrolled up a little is not following")
+        expect(renders["R35", default: 0] == before, "leaving the live edge does not redraw rows that stayed on screen, R35 drew \(renders["R35", default: 0] - before) more times")
     }
 
     @MainActor
