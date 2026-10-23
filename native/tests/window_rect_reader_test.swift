@@ -57,17 +57,44 @@ struct WindowRectReaderTest {
         }
 
         let backdrop = WindowBackdrop()
+        let rect = CGRect(x: 0, y: 0, width: 10, height: 10)
         backdrop.attach("late", probe: probe)
-        backdrop.remove("late")
-        backdrop.report("late", rect: CGRect(x: 0, y: 0, width: 10, height: 10), region: .text)
+        backdrop.remove("late", probe: probe)
+        backdrop.report("late", rect: rect, region: .text, from: probe)
         if backdrop.regions["late"] != nil {
             print("FAIL: a report queued before its region was removed brought the region back")
             failures += 1
         }
         backdrop.attach("late", probe: probe)
-        backdrop.report("late", rect: CGRect(x: 0, y: 0, width: 10, height: 10), region: .text)
+        backdrop.report("late", rect: rect, region: .text, from: probe)
         if backdrop.regions["late"] == nil {
             print("FAIL: a region that attached again after removal is ignored")
+            failures += 1
+        }
+
+        let replacement = WindowRectReader.RectProbe(frame: row.bounds)
+        backdrop.attach("late", probe: replacement)
+        backdrop.remove("late", probe: probe)
+        backdrop.report("late", rect: rect.offsetBy(dx: 5, dy: 0), region: .text, from: replacement)
+        if backdrop.regions["late"]?.rect.minX != 5 {
+            print("FAIL: the view a region moved to lost it when the old view disappeared, got \(String(describing: backdrop.regions["late"]))")
+            failures += 1
+        }
+        backdrop.report("late", rect: rect, region: .text, from: probe)
+        if backdrop.regions["late"]?.rect.minX != 5 {
+            print("FAIL: a replaced view still reports for the region")
+            failures += 1
+        }
+
+        let first = WindowRectReader.RectProbe(frame: row.bounds)
+        let second = WindowRectReader.RectProbe(frame: row.bounds)
+        backdrop.attach("overlap", probe: first)
+        backdrop.attach("overlap", probe: second)
+        backdrop.attach("overlap", probe: first)
+        backdrop.remove("overlap", probe: first)
+        backdrop.report("overlap", rect: rect, region: .text, from: second)
+        if backdrop.regions["overlap"] == nil {
+            print("FAIL: a view that outlived another reader of the same region cannot report it")
             failures += 1
         }
 
