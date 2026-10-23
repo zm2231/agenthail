@@ -535,6 +535,16 @@ struct SessionRowView: View {
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+                    TimelineView(.everyMinute) { context in
+                        if let note = activity.quietNote(now: context.date) {
+                            Text(note)
+                                .font(.system(size: DesktopType.meta))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
                 }
             }
             if let host = session.shortRemoteHostName {
@@ -812,7 +822,9 @@ struct ConversationHeader: View {
             Spacer()
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
-                Text(session.waitingPlace?.label ?? (session.isWorking ? "Working" : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                TimelineView(.everyMinute) { context in
+                    Text(session.waitingPlace?.label ?? (session.isWorking ? session.workingLabel(now: context.date) : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                }
             }
             .font(.system(size: DesktopType.secondary))
             .foregroundStyle(DesktopPalette.text2)
@@ -906,7 +918,9 @@ struct TranscriptView: View {
                 if session.isWorking {
                     HStack(spacing: DesktopSpace.s) {
                         StatusIndicator(session: session, needsYou: false)
-                        Text(session.waitingPlace?.label ?? "Working")
+                        TimelineView(.everyMinute) { context in
+                            Text(session.waitingPlace?.label ?? session.workingLabel(now: context.date))
+                        }
                     }
                     .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)

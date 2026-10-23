@@ -1107,7 +1107,12 @@ struct SessionSummary: View {
     }
     private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
-        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? "Working" : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
+        TimelineView(.everyMinute) { context in
+            statusLabel(now: context.date)
+        }
+    }
+    private func statusLabel(now: Date) -> some View {
+        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
               systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
@@ -1419,6 +1424,12 @@ struct IOSSessionRow: View {
             }
             if session.isUnavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
+            } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+                TimelineView(.everyMinute) { context in
+                    if let note = activity.quietNote(now: context.date) {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {

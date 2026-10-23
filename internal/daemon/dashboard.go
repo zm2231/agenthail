@@ -100,6 +100,7 @@ type dashboardSession struct {
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
 	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
+	Activity          *surface.Activity          `json:"activity,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
@@ -1000,6 +1001,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 				entry.ObservedSubagents = saved.ObservedSubagents
 				entry.Current, entry.CurrentReason = saved.Current, saved.CurrentReason
 				entry.Holders = saved.Holders
+				entry.Activity = saved.Activity
 			}
 		}
 		entry.HiddenSubagents, entry.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)

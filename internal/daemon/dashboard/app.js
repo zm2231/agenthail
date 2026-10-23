@@ -502,10 +502,37 @@ function limitResumeLabel(session) {
 function limitLabel(session) {
   return session.limitResume ? limitResumeLabel(session) : session.usageLimit ? usageLimitLabel(session) : "";
 }
-function presenceLabel(session) {
+// How long a working turn stays quiet before its row says so.
+const quietAfterMs = 10 * 60 * 1000;
+// "no activity for 12 min · running Bash since 10:02" once a working turn has
+// been quiet for quietAfterMs. It never changes the session's status.
+function quietNote(activity, now = Date.now()) {
+  const last = Date.parse(activity?.lastProgressAt || activity?.busySince || "");
+  if (!last || now - last < quietAfterMs) return "";
+  const parts = [`no activity for ${quietDuration(now - last)}`];
+  if (activity.noProcess) {
+    parts.push("no Claude process");
+  } else if (activity.tool?.name) {
+    const started = Date.parse(activity.tool.startedAt || "");
+    parts.push(`running ${activity.tool.name}${started ? ` since ${new Date(started).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`);
+  }
+  return parts.join(" · ");
+}
+function quietDuration(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} hr ${minutes % 60} min` : `${hours} hr`;
+}
+function workingLabel(session, now = Date.now()) {
+  const note = quietNote(session.activity, now);
+  return note ? `Working · ${note}` : "Working";
+}
+function presenceLabel(session, now = Date.now()) {
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
   if (limitLabel(session)) return limitLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
+  if (session.status === "busy") return workingLabel(session, now);
   return (
     {
       working: "Working",
@@ -523,7 +550,7 @@ function presenceTone(session) {
   return session.status;
 }
 function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
-  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : session.status === "busy" ? workingLabel(session) : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   const label = modelLabel(model, pendingModel);
   if (label) parts.push(label);

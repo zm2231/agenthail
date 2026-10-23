@@ -34,6 +34,16 @@ type claudeTurn struct {
 	APIError      string
 	UsageLimited  bool
 	UsageResetsAt time.Time
+	// LastAt is the newest record the turn wrote, and Tools the tool calls
+	// it started that have no result yet, oldest first.
+	LastAt time.Time
+	Tools  []claudeToolCall
+}
+
+type claudeToolCall struct {
+	ID        string
+	Name      string
+	StartedAt time.Time
 }
 
 type claudeRecord struct {
@@ -58,7 +68,7 @@ type claudeRecord struct {
 			ResetsAt float64 `json:"resetsAt"`
 		} `json:"rate_limit_info"`
 	} `json:"apiErrorParams"`
-	Origin            struct {
+	Origin struct {
 		Kind string `json:"kind"`
 	} `json:"origin"`
 	Message struct {
@@ -159,6 +169,59 @@ const claudeSyntheticModel = "<synthetic>"
 // block of the same message, or at turn_duration. An interrupt marker at that
 // point interrupts the turn instead of completing it.
 func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
+	turns = foldClaudeTurn(turns, record)
+	if len(turns) > 0 {
+		noteClaudeTurnActivity(&turns[len(turns)-1], record)
+	}
+	return turns
+}
+
+// noteClaudeTurnActivity records when a turn last wrote and which tool calls
+// it is still running. Tools is replaced rather than changed in place, since
+// observation snapshots share it.
+func noteClaudeTurnActivity(turn *claudeTurn, record claudeRecord) {
+	at, err := time.Parse(time.RFC3339Nano, record.Timestamp)
+	if err != nil {
+		return
+	}
+	if at.After(turn.LastAt) {
+		turn.LastAt = at
+	}
+	blocks, _ := record.Message.Content.([]any)
+	switch record.Type {
+	case "assistant":
+		for _, raw := range blocks {
+			block, _ := raw.(map[string]any)
+			if str(block, "type") == "tool_use" && str(block, "id") != "" {
+				turn.Tools = append(append([]claudeToolCall(nil), turn.Tools...), claudeToolCall{ID: str(block, "id"), Name: str(block, "name"), StartedAt: at})
+			}
+		}
+	case "user":
+		finished := map[string]bool{}
+		if record.Message.ToolUseID != "" {
+			finished[record.Message.ToolUseID] = true
+		}
+		for _, raw := range blocks {
+			block, _ := raw.(map[string]any)
+			if str(block, "type") == "tool_result" {
+				finished[str(block, "tool_use_id")] = true
+			}
+		}
+		if len(finished) == 0 || len(turn.Tools) == 0 {
+			return
+		}
+		running := make([]claudeToolCall, 0, len(turn.Tools))
+		for _, call := range turn.Tools {
+			if !finished[call.ID] {
+				running = append(running, call)
+			}
+		}
+		turn.Tools = running
+	}
+}
+
+// foldClaudeTurn applies one record to the turn sequence; see appendClaudeTurn.
+func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 	if len(turns) > 0 {
 		turn := &turns[len(turns)-1]
 		if turn.Closing && !claudeRecordContinuesMessage(record.Type, record.Message.ID, turn.MessageID) {

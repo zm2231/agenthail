@@ -444,6 +444,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
     var limitResume: LimitResumeState? = nil
+    var activity: SessionActivity? = nil
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
@@ -462,6 +463,10 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
 
     var isWorking: Bool { status == "busy" }
+    /// "Working", with how long the turn has been quiet once it has been.
+    func workingLabel(now: Date) -> String {
+        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
+    }
     var isWaitingOnYou: Bool { waitingOn != nil }
     var waitingPlace: WaitingPlace? {
         waitingOn.map { WaitingPlace($0, runtimeKind: runtimeKind, lifecycle: isReadOnly ? SessionLifecycle() : capabilities.lifecycle) }
@@ -623,6 +628,45 @@ struct LimitResumeState: Codable, Hashable {
         guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit, resumes when it lifts" }
         let time = Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
         return "Usage limit, resumes \(time)"
+    }
+}
+
+/// How a working session's turn is going, as its daemon reads it. It never
+/// changes the session's status; it only lets a quiet turn say how long it
+/// has been quiet and what it is running.
+struct SessionActivity: Codable, Hashable {
+    struct RunningTool: Codable, Hashable {
+        let name: String
+        var startedAt: String? = nil
+    }
+
+    var busySince: String? = nil
+    var lastProgressAt: String? = nil
+    var tool: RunningTool? = nil
+    var noProcess: Bool? = nil
+
+    /// How long a working turn stays quiet before its row says so.
+    static let quietAfter: TimeInterval = 10 * 60
+
+    /// "no activity for 12 min · running Bash since 10:02" once the turn has
+    /// been quiet for quietAfter, or nil before.
+    func quietNote(now: Date) -> String? {
+        guard let raw = lastProgressAt ?? busySince, let last = SessionTree.parseTimestamp(raw) else { return nil }
+        let quiet = now.timeIntervalSince(last)
+        guard quiet >= Self.quietAfter else { return nil }
+        var parts = ["no activity for " + Self.duration(quiet)]
+        if noProcess == true {
+            parts.append("no Claude process")
+        } else if let tool {
+            parts.append("running " + tool.name + (tool.startedAt.flatMap(SessionTree.parseTimestamp).map { " since " + $0.formatted(date: .omitted, time: .shortened) } ?? ""))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func duration(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval / 60)
+        guard minutes >= 60 else { return "\(minutes) min" }
+        return minutes % 60 == 0 ? "\(minutes / 60) hr" : "\(minutes / 60) hr \(minutes % 60) min"
     }
 }
 
@@ -1262,12 +1306,12 @@ struct SessionDetail: Decodable {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume, activity: session.activity)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
-            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume, newValue.activity)
         }
     }
 }
@@ -1290,20 +1334,21 @@ struct SessionLiveState: Equatable {
     var backgroundTasks: BackgroundTasks?
     var usageLimit: UsageLimitState?
     var limitResume: LimitResumeState?
+    var activity: SessionActivity?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
          capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
-         limitResume: LimitResumeState?) {
+         limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
-        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume) = (waitingOn, backgroundTasks, usageLimit, limitResume)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, limitResume, activity)
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume, activity: live.activity)
     }
 }
 
@@ -1321,7 +1366,13 @@ struct RawSession: Decodable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var activity: SessionActivity? = nil
     var runtimeKind: String? = nil
+
+    /// "Working", with how long the turn has been quiet once it has been.
+    func workingLabel(now: Date) -> String {
+        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
+    }
 }
 
 struct GoalState: Decodable {

@@ -714,12 +714,14 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.WaitingOn = nil
 	sess.BackgroundTasks = nil
 	sess.UsageLimit = nil
+	sess.Activity = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
 			sess.BackgroundTasks = observation.BackgroundTasks
 			sess.UsageLimit = observation.UsageLimit
+			sess.Activity = observation.Activity
 		}
 	}
 	advanceBusyActivityFromTranscript(sess)
@@ -907,6 +909,11 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surface.TurnObservation) {
 	record, live := c.liveRecord(*sess)
 	if !live {
+		// With no pid and no record, nothing runs the turn the transcript
+		// leaves open.
+		if observation.Activity != nil && sess.PID <= 0 && !claudeHosted(sess) {
+			observation.Activity.NoProcess = true
+		}
 		return
 	}
 	status := claudePeerStatus(record)
@@ -917,7 +924,28 @@ func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surf
 	if status != surface.StatusBusy {
 		observation.ActiveTurnID = ""
 		observation.WaitingOn = nil
+		observation.Activity = nil
+		return
 	}
+	if changed, ok := record["statusUpdatedAt"].(float64); ok && observation.Activity != nil {
+		if at := time.UnixMilli(int64(changed)); at.After(observation.Activity.LastProgressAt) {
+			observation.Activity.LastProgressAt = at
+		}
+	}
+}
+
+// claudeTurnActivity reads an open turn's start, its newest record and the
+// tool call it started last that has no result yet.
+func claudeTurnActivity(turn claudeTurn) *surface.Activity {
+	activity := &surface.Activity{BusySince: turn.StartedAt, LastProgressAt: turn.LastAt}
+	if activity.LastProgressAt.IsZero() {
+		activity.LastProgressAt = turn.StartedAt
+	}
+	if count := len(turn.Tools); count > 0 {
+		call := turn.Tools[count-1]
+		activity.Tool = &surface.RunningTool{Name: call.Name, StartedAt: call.StartedAt}
+	}
+	return activity
 }
 
 // observe reads the turn from the transcript and what it waits on from the
@@ -943,6 +971,7 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
+		observation.Activity = nil
 	}
 	if observation.Status != surface.StatusOffline {
 		observation.BackgroundTasks = c.claudeBackground(ctx, sess)
@@ -1018,6 +1047,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if !last.Done && !last.Interrupted && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = last.UserID
+		observation.Activity = claudeTurnActivity(last)
 	} else if (last.Done || last.Interrupted) && transcriptCanSetReady && !claudeBridgeActivityAfterTerminal(sess, last) {
 		observation.Status = surface.StatusIdle
 	}

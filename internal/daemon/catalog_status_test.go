@@ -775,3 +775,144 @@ func TestTheStatusPassDropsAUsageLimitOnceItResetsWithoutAFileChange(t *testing.
 		t.Fatalf("usage limit %+v still published after it reset", got)
 	}
 }
+
+// quietStatusSurface reports the activity its test sets, as Claude does
+// from a working turn's transcript.
+type quietStatusSurface struct {
+	*localStatusSurface
+	mu       sync.Mutex
+	activity *surface.Activity
+}
+
+func (s *quietStatusSurface) set(activity *surface.Activity) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activity = activity
+}
+
+func (s *quietStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
+	session, err := s.localStatusSurface.LocalStatus(ctx, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session.Activity = nil
+	if session.ID == "from" && s.activity != nil {
+		copied := *s.activity
+		session.Activity = &copied
+	}
+	return session, err
+}
+
+func (s *quietStatusSurface) List(ctx context.Context) ([]surface.Session, error) {
+	sessions, err := s.localStatusSurface.List(ctx)
+	for index := range sessions {
+		sessions[index], _ = s.LocalStatus(ctx, sessions[index])
+	}
+	return sessions, err
+}
+
+func TestAWorkingRowCarriesItsActivityAndRepublishesOnlyWhenItSaysSomethingNew(t *testing.T) {
+	d, store, local := localStatusFixture(t)
+	source := &quietStatusSurface{localStatusSurface: local}
+	d.Surfaces = []surface.Surface{source}
+	started := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	source.set(&surface.Activity{BusySince: started, LastProgressAt: started, Tool: &surface.RunningTool{Name: "Bash", StartedAt: started}})
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	activity := func() *surface.Activity {
+		t.Helper()
+		state, err := d.dashboardState(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range state.Sessions {
+			if session.ID == "from" {
+				return session.Activity
+			}
+		}
+		t.Fatal("no row for the working session")
+		return nil
+	}
+	if got := activity(); got == nil || got.Tool == nil || got.Tool.Name != "Bash" || !got.LastProgressAt.Equal(started) {
+		t.Fatalf("snapshot activity=%+v", got)
+	}
+
+	after := latestCatalogSeq(t, store)
+	source.set(&surface.Activity{BusySince: started, LastProgressAt: started.Add(30 * time.Second), Tool: &surface.RunningTool{Name: "Bash", StartedAt: started}})
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	if events := catalogStatusEvents(t, store, after, "from"); len(events) != 0 {
+		t.Fatalf("progress under a minute republished the row %d times", len(events))
+	}
+
+	source.set(&surface.Activity{BusySince: started, LastProgressAt: started.Add(2 * time.Minute), Tool: &surface.RunningTool{Name: "Read", StartedAt: started.Add(2 * time.Minute)}})
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	if events := catalogStatusEvents(t, store, after, "from"); len(events) != 1 {
+		t.Fatalf("a new tool published %d events, want 1", len(events))
+	}
+	if got := activity(); got == nil || got.Tool == nil || got.Tool.Name != "Read" {
+		t.Fatalf("snapshot activity after the new tool=%+v", got)
+	}
+
+	source.set(nil)
+	local.writeStatus(t, "from", surface.StatusIdle)
+	d.refreshCatalogStatus(context.Background())
+	if got := activity(); got != nil {
+		t.Fatalf("an idle row still carries activity %+v", got)
+	}
+}
+
+func TestAWaitPublishedOnAWorkingRowDropsItsActivity(t *testing.T) {
+	d, store, local := localStatusFixture(t)
+	source := &quietStatusSurface{localStatusSurface: local}
+	d.Surfaces = []surface.Surface{source}
+	started := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
+	source.set(&surface.Activity{BusySince: started, LastProgressAt: started, Tool: &surface.RunningTool{Name: "Bash", StartedAt: started}})
+	local.writeStatus(t, "from", surface.StatusBusy)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	row := func() surface.Session {
+		t.Helper()
+		snapshot, err := store.CatalogSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range snapshot.Sessions {
+			if state.Session.ID == "from" {
+				return state.Session
+			}
+		}
+		t.Fatal("no catalog row for the working session")
+		return surface.Session{}
+	}
+	activity := func() *surface.Activity {
+		t.Helper()
+		state, err := d.dashboardState(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range state.Sessions {
+			if session.ID == "from" {
+				return session.Activity
+			}
+		}
+		t.Fatal("no dashboard row for the working session")
+		return nil
+	}
+	if activity() == nil {
+		t.Fatal("the working row lacks its activity before the wait")
+	}
+
+	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "q1", Answerable: true}
+	if _, err := d.Registry.RecordWaiting("from", waiting, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d.publishWaiting(context.Background(), "from", waiting)
+	if got := row(); got.WaitingOn == nil || got.Status != surface.StatusBusy {
+		t.Fatalf("the wait was not published: status=%s waiting=%+v", got.Status, got.WaitingOn)
+	}
+	if got := activity(); got != nil {
+		t.Fatalf("a row waiting on the person kept its quiet note: %+v", got)
+	}
+}
