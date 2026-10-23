@@ -937,12 +937,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             streamOutranPage = false
-            sessionMetadata = MetadataOverlay()
             sessionStreamUnsupported = false
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
             let warm = store.open(id)
+            sessionMetadata = MetadataOverlay(allClaudeSubagents: warm?.allClaudeSubagents ?? false)
             let live = snapshot?.sessions.first { $0.id == id }
             selectedDetail = warm.map { SessionStore.live($0.detail, live) }
             sessionRequests = nil
@@ -1023,7 +1023,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private func keepSelectedSession() {
         guard let id = selectedSessionID, let detail = selectedDetail, detail.session.id == id else { return }
         let cursor = sessionStreamCursor > 0 && !streamOutranPage && detail.timeline != nil ? sessionStreamCursor : nil
-        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: cursor), for: id)
+        store.keep(WarmSession(detail: detail, older: olderActivity, olderCursor: activityCursor, cursor: cursor, allClaudeSubagents: sessionMetadata.allClaudeSubagents), for: id)
     }
 
     func refreshSession(_ id: String) async {
@@ -1183,6 +1183,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func showAllClaudeSubagents() {
         guard let id = selectedSessionID else { return }
         sessionMetadata.showAllClaudeSubagents()
+        store.update(id) { $0.allClaudeSubagents = true }
         startSessionMetadata(id)
     }
 

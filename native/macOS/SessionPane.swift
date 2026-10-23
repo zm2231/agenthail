@@ -365,7 +365,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadPending = false
         detailReloadTask?.cancel()
         detailReloadTask = nil
-        metadata = MetadataOverlay(seed: detail)
+        metadata = MetadataOverlay(seed: detail, allClaudeSubagents: warm?.allClaudeSubagents ?? false)
         if let cursor = appliedCursor, selectedSnapshot?.capabilities.stream == true {
             detailLoadTask?.cancel()
             streamAwaitsCursor = false
@@ -740,6 +740,7 @@ final class SessionPane: ObservableObject, Identifiable {
     func showAllClaudeSubagents() {
         guard let id = selectedSessionID else { return }
         metadata.showAllClaudeSubagents()
+        model.store.update(id) { $0.allClaudeSubagents = true }
         startMetadataLoad(id)
     }
 
@@ -961,7 +962,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func warm(_ detail: SessionDetail) -> WarmSession {
-        WarmSession(detail: detail, older: olderItems, olderCursor: olderCursor, cursor: appliedCursor)
+        WarmSession(detail: detail, older: olderItems, olderCursor: olderCursor, cursor: appliedCursor, allClaudeSubagents: metadata.allClaudeSubagents)
     }
 
     /// A stream resumed from a cached position brings the shown rows current

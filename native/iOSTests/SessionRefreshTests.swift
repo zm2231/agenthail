@@ -96,6 +96,26 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testACachedSessionReopensListingEverySubagentItShowed() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(journalSeq: 10)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.streamURLs.contains { $0.contains("id=demo") } }
+        model.showAllClaudeSubagents()
+        await model.loadSession("computer::other")
+        let metadataReads = SessionRefreshProtocol.state.metadataURLs.count
+
+        await model.loadSession("computer::demo")
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.metadataURLs.dropFirst(metadataReads).contains { $0.contains("id=demo") } }
+
+        XCTAssertTrue(model.showsAllClaudeSubagents)
+        let reopened = SessionRefreshProtocol.state.metadataURLs.dropFirst(metadataReads).filter { $0.contains("id=demo") }
+        XCTAssertTrue(reopened.allSatisfy { $0.contains("subagents=all") }, "\(reopened)")
+    }
+
+    @MainActor
     func testASessionWhoseSourceResetWhileShownReadsAPageWhenReopened() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         SessionRefreshProtocol.state.set(journalSeq: 10)
@@ -382,7 +402,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0; fields = "{}"; streamPaths = []
+                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []
                 condition.broadcast()
             }
         }
@@ -399,6 +419,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         private var streamPaths: [String] = []
         var streamURLs: [String] { condition.withLock { streamPaths } }
         func streamRequested(_ url: URL?) { condition.withLock { streams += 1; streamPaths.append(url?.absoluteString ?? "") } }
+        private var metadataPaths: [String] = []
+        var metadataURLs: [String] { condition.withLock { metadataPaths } }
+        func metadataRequested(_ url: URL?) { condition.withLock { metadataPaths.append(url?.absoluteString ?? "") } }
         func holdSnapshot() { condition.withLock { holdingSnapshot = true } }
         func passNextSnapshot() { condition.withLock { passing += 1 } }
         func holdDetail() { condition.withLock { holdingDetail = true } }
@@ -472,6 +495,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             }
             return
         case "/api/v1/session-metadata":
+            Self.state.metadataRequested(request.url)
             body = Self.metadata
         case "/api/v1/session-stream":
             Self.state.streamRequested(request.url)

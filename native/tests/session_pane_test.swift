@@ -580,6 +580,19 @@ struct SessionPaneTest {
         check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
         check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
 
+        warmPane.showAllClaudeSubagents()
+        warmPane.select("W2")
+        await waitForStream("W2", from: beforeReturn)
+        let beforeAll = warmRequests.count
+        warmPane.select("W1")
+        await waitForStream("W1", from: beforeAll)
+        let allDeadline = Date().addingTimeInterval(5)
+        while !warmRequests[beforeAll...].contains(where: { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") }), Date() < allDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let reopenedMetadata = warmRequests[beforeAll...].filter { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") }
+        check(warmPane.showsAllClaudeSubagents && !reopenedMetadata.isEmpty && reopenedMetadata.allSatisfy { $0.contains("subagents=all") }, "a cached session reopens listing every subagent it showed: \(reopenedMetadata)")
+
         warmPane.select("W2")
         await waitForStream("W2", from: beforeReturn)
         gapOnResume = true

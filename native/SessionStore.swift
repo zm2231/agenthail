@@ -7,6 +7,8 @@ struct WarmSession {
     /// The last journal row `detail` reflects; nil when only a page read can
     /// bring it current.
     var cursor: UInt64?
+    /// The inspector lists every Claude subagent, not the latest page.
+    var allClaudeSubagents = false
 
     var bytes: Int {
         (detail.timeline?.items ?? []).reduce(0) { $0 + Self.bytes($1) } + older.reduce(0) { $0 + Self.bytes($1) }
