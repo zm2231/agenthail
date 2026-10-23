@@ -224,8 +224,8 @@ final class SessionPane: ObservableObject, Identifiable {
         endOpenInterval("cleared")
     }
 
-    /// Marks a session open in Instruments, from the switch to the first
-    /// page the daemon returns for it.
+    /// Marks a session open in Instruments, from the switch until the
+    /// daemon's first page for it is shown or the open fails or is abandoned.
     private func beginOpenInterval(cached: Bool) {
         endOpenInterval("superseded")
         openInterval = Self.signposter.beginInterval("Session open", id: Self.signposter.makeSignpostID(), "cached \(cached)")
@@ -347,6 +347,7 @@ final class SessionPane: ObservableObject, Identifiable {
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), removedSession?.id != id, !error.isCancellation else { return true }
             detailLoadError = AgenthailAPIError.userMessage(error)
+            endOpenInterval("failed")
             if detail?.session.id == id {
                 detailStale = true
                 detailRefreshFailed = true
