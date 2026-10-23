@@ -65,7 +65,7 @@ func TestCodexRefusesAComposerCommandBeforeAnyTurnStarts(t *testing.T) {
 		_, err := codex.SendWithOptions(context.Background(), session, message, surface.SendOptions{})
 		assertComposerCommandRefused(t, err, strings.Fields(message)[0][1:])
 	}
-	_, _, err := codex.StartSession(context.Background(), surface.SessionStartOptions{Message: "  /l5-probe", Cwd: "/tmp/project"})
+	_, _, err := codex.StartSession(context.Background(), surface.SessionStartOptions{Message: "/l5-probe\n", Cwd: "/tmp/project"})
 	assertComposerCommandRefused(t, err, "l5-probe")
 	if methods := bridge.Methods(); countMethod(methods, "turn/start") != 0 || countMethod(methods, "thread/start") != 0 {
 		t.Fatalf("a composer command reached Codex: %v", methods)
@@ -80,6 +80,20 @@ func TestCodexRefusesAComposerCommandBeforeAnyTurnStarts(t *testing.T) {
 		text, _ := json.Marshal(message)
 		if request := bridge.Request("turn/start"); !strings.Contains(request, `"text":`+string(text)) {
 			t.Fatalf("prompt %q not sent verbatim: %s", message, request)
+		}
+	}
+}
+
+func TestCodexStartsAConversationWhoseFirstMessageOnlyLooksLikeACommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, message := range []string{" /status", "\u00a0/status", "/tmp/build.log shows the failure"} {
+		bridge := idleDesktopBridge(t)
+		_, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: message, Cwd: "/tmp/project"})
+		if err != nil || sent == nil || !sent.Accepted {
+			t.Fatalf("first message %q: sent=%+v err=%v", message, sent, err)
+		}
+		if methods := bridge.Methods(); countMethod(methods, "thread/start") != 1 || countMethod(methods, "turn/start") != 1 {
+			t.Fatalf("first message %q: methods=%v", message, methods)
 		}
 	}
 }

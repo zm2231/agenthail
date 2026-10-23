@@ -830,7 +830,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if message == "" {
 		return nil, nil, fmt.Errorf("message is required")
 	}
-	if err := refuseCodexComposerCommand(message); err != nil {
+	if err := refuseCodexComposerCommand(options.Message); err != nil {
 		return nil, nil, err
 	}
 	params := map[string]any{"threadSource": "agenthail", "serviceName": "agenthail"}
