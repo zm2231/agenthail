@@ -96,6 +96,10 @@ type Daemon struct {
 	identity                 registry.HostIdentity
 	federation               *federation
 	uploads                  *uploads.Store
+	limitResumes             *limitResumer
+	// limitResumeEnabled, when set, replaces the host's resume after limit
+	// setting.
+	limitResumeEnabled func() bool
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -150,6 +154,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		federation:        newFederation(),
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
+		limitResumes:      newLimitResumer(),
 	}
 	d.ui = newUIState(reg)
 	identity, err := reg.HostIdentity()
@@ -275,6 +280,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseClaudeHost(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go d.runLimitResumes(ctx)
 	uiDone := make(chan struct{})
 	go func() {
 		defer close(uiDone)

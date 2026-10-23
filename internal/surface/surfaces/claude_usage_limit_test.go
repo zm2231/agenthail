@@ -194,7 +194,7 @@ func TestObservingAUsageLimitedTurnReportsTheStopAfterTheLimitResets(t *testing.
 		t.Fatal(err)
 	}
 	stop := observation.LimitStop
-	if stop == nil || stop.TurnID != "u1" || stop.AccountKey != claudeTranscriptRoot(sess.Transcript) || !stop.ResetsAt.Equal(time.Unix(1791543600, 0)) || !stop.RefusedAt.Equal(time.Date(2026, 10, 9, 10, 11, 12, 653000000, time.UTC)) {
+	if stop == nil || stop.TurnID != "u1" || observation.UsageAccount != claudeTranscriptRoot(sess.Transcript) || !stop.ResetsAt.Equal(time.Unix(1791543600, 0)) || !stop.RefusedAt.Equal(time.Date(2026, 10, 9, 10, 11, 12, 653000000, time.UTC)) {
 		t.Fatalf("stop=%+v", stop)
 	}
 	if observation.UsageLimit != nil {

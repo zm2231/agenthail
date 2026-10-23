@@ -24,6 +24,15 @@ type DashboardConfig struct {
 	CodexRecentHours int                 `json:"codexRecentHours"`
 	BusyDelivery     deliverypolicy.Mode `json:"busyDelivery"`
 	RemoteAccess     RemoteAccessConfig  `json:"remoteAccess"`
+	// ResumeAfterLimit turns off resuming sessions a usage limit stopped
+	// when it is false; unset leaves it on.
+	ResumeAfterLimit *bool `json:"resumeAfterLimit,omitempty"`
+}
+
+// ResumesAfterLimit reports whether sessions a usage limit stopped resume
+// when it resets.
+func (c DashboardConfig) ResumesAfterLimit() bool {
+	return c.ResumeAfterLimit == nil || *c.ResumeAfterLimit
 }
 
 func DashboardConfigPath() string {

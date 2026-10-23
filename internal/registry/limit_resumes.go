@@ -8,15 +8,17 @@ import (
 )
 
 // LimitResumeState is where the resume of a session a usage limit stopped
-// stands. A waiting stop holds the session's queue; a released one has been
-// let go to deliver its queue or the resume notice; a canceled one is never
-// resumed.
+// stands. Every state but released holds the session's queue, so nothing is
+// sent to it automatically: a waiting stop is resumed when its limit resets,
+// a canceled one only when the person resumes it, and a lapsed one, whose
+// reset passed too long ago or never came, likewise.
 type LimitResumeState string
 
 const (
 	LimitResumeWaiting  LimitResumeState = "waiting"
 	LimitResumeReleased LimitResumeState = "released"
 	LimitResumeCanceled LimitResumeState = "canceled"
+	LimitResumeLapsed   LimitResumeState = "lapsed"
 )
 
 // LimitResume is one session whose last turn a usage limit refused.
@@ -31,24 +33,40 @@ type LimitResume struct {
 	UpdatedAt  time.Time
 }
 
-// limitHeldFilter matches a session whose waiting limit stop holds its queue.
-const limitHeldFilter = `EXISTS(SELECT 1 FROM limit_resumes lr WHERE lr.session_id=%s AND lr.state='waiting')`
+// limitHeldFilter matches a session whose limit stop holds its queue.
+const limitHeldFilter = `EXISTS(SELECT 1 FROM limit_resumes lr WHERE lr.session_id=%s AND lr.state!='released')`
 
 // RecordLimitStop records that session's last turn was refused by a usage
-// limit. The same refused turn keeps its state and attempts; a new refused
-// turn starts waiting again, and a later reset time replaces the stored one.
-func (r *Registry) RecordLimitStop(session surface.Session, stop surface.LimitStop) error {
+// limit on account. The same refused turn keeps its state and attempts. A
+// new refused turn waits again; when it refuses a resume, the resume's
+// attempts carry over, so retries are counted across refusals. A later reset
+// time also becomes the reset of every other session waiting on the account,
+// since they share the limit.
+func (r *Registry) RecordLimitStop(session surface.Session, account string, stop surface.LimitStop) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	now := time.Now().UnixMilli()
-	_, err := r.db.Exec(`INSERT INTO limit_resumes(session_id,turn_id,account_key,refused_at_ms,resets_at_ms,state,attempts,updated_at_ms)
+	if _, err := tx.Exec(`INSERT INTO limit_resumes(session_id,turn_id,account_key,refused_at_ms,resets_at_ms,state,attempts,updated_at_ms)
 		VALUES (?,?,?,?,?,'waiting',0,?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			state=CASE WHEN limit_resumes.turn_id=excluded.turn_id THEN limit_resumes.state ELSE 'waiting' END,
-			attempts=CASE WHEN limit_resumes.turn_id=excluded.turn_id THEN limit_resumes.attempts ELSE 0 END,
+			attempts=CASE WHEN limit_resumes.turn_id=excluded.turn_id OR limit_resumes.state='released' THEN limit_resumes.attempts ELSE 0 END,
 			updated_at_ms=CASE WHEN limit_resumes.turn_id=excluded.turn_id THEN limit_resumes.updated_at_ms ELSE excluded.updated_at_ms END,
 			resets_at_ms=CASE WHEN limit_resumes.turn_id=excluded.turn_id AND excluded.resets_at_ms=0 THEN limit_resumes.resets_at_ms ELSE excluded.resets_at_ms END,
 			turn_id=excluded.turn_id,account_key=excluded.account_key,refused_at_ms=excluded.refused_at_ms`,
-		session.ID, stop.TurnID, stop.AccountKey, unixMilli(stop.RefusedAt), unixMilli(stop.ResetsAt), now)
-	return err
+		session.ID, stop.TurnID, account, unixMilli(stop.RefusedAt), unixMilli(stop.ResetsAt), now); err != nil {
+		return err
+	}
+	if !stop.ResetsAt.IsZero() {
+		if _, err := tx.Exec(`UPDATE limit_resumes SET resets_at_ms=? WHERE account_key=? AND session_id!=? AND state='waiting' AND resets_at_ms<?`,
+			stop.ResetsAt.UnixMilli(), account, session.ID, stop.ResetsAt.UnixMilli()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ClearLimitStop forgets a stop once something ran after turnID; a stop for

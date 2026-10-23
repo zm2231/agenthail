@@ -720,6 +720,9 @@ type TurnObservation struct {
 	// LimitStop is a last turn a usage limit refused, kept after the limit
 	// resets since nothing has run in the session since.
 	LimitStop *LimitStop `json:"limitStop,omitempty"`
+	// UsageAccount names the usage account the session's turns draw on, so
+	// sessions on one account share its limits.
+	UsageAccount string `json:"usageAccount,omitempty"`
 	// SettledAt is when the last turn ended without an error.
 	SettledAt time.Time    `json:"settledAt,omitzero"`
 	Reply     *ReplyResult `json:"reply,omitempty"`
@@ -727,13 +730,10 @@ type TurnObservation struct {
 
 // LimitStop is a session's last turn, refused by a usage limit. TurnID is the
 // refused turn; ResetsAt is when the limit lifts, when the provider said.
-// AccountKey names the usage account the limit belongs to, so every session
-// on it shares the limit.
 type LimitStop struct {
-	TurnID     string    `json:"turnId"`
-	AccountKey string    `json:"accountKey,omitempty"`
-	RefusedAt  time.Time `json:"refusedAt"`
-	ResetsAt   time.Time `json:"resetsAt,omitzero"`
+	TurnID    string    `json:"turnId"`
+	RefusedAt time.Time `json:"refusedAt"`
+	ResetsAt  time.Time `json:"resetsAt,omitzero"`
 }
 
 type ReplyResult struct {

@@ -1017,8 +1017,9 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if last.Done && last.UsageLimited && (last.UsageResetsAt.IsZero() || time.Now().Before(last.UsageResetsAt)) {
 		observation.UsageLimit = &surface.UsageLimit{ResetsAt: last.UsageResetsAt}
 	}
+	observation.UsageAccount = claudeTranscriptRoot(path)
 	if last.Done && last.UsageLimited {
-		observation.LimitStop = &surface.LimitStop{TurnID: last.UserID, AccountKey: claudeTranscriptRoot(path), RefusedAt: last.TerminalAt, ResetsAt: last.UsageResetsAt}
+		observation.LimitStop = &surface.LimitStop{TurnID: last.UserID, RefusedAt: last.TerminalAt, ResetsAt: last.UsageResetsAt}
 	} else if last.Done && !last.Interrupted && last.APIError == "" {
 		observation.SettledAt = last.TerminalAt
 	}

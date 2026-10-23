@@ -17,8 +17,8 @@ func TestALimitStopHoldsTheQueueUntilItIsReleased(t *testing.T) {
 		t.Fatal(err)
 	}
 	resets := time.Date(2026, 10, 23, 3, 20, 0, 0, time.UTC)
-	stop := surface.LimitStop{TurnID: "u1", AccountKey: "/roots/work", RefusedAt: resets.Add(-time.Hour), ResetsAt: resets}
-	if err := r.RecordLimitStop(session, stop); err != nil {
+	stop := surface.LimitStop{TurnID: "u1", RefusedAt: resets.Add(-time.Hour), ResetsAt: resets}
+	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
 	now := resets.Add(-time.Minute)
@@ -34,13 +34,13 @@ func TestALimitStopHoldsTheQueueUntilItIsReleased(t *testing.T) {
 		t.Fatalf("resumes=%+v err=%v", resumes, err)
 	}
 
-	if err := r.RecordLimitStop(session, stop); err != nil {
+	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetLimitResumeState(session.ID, "u1", LimitResumeReleased, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RecordLimitStop(session, stop); err != nil {
+	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
 	if resumes, _ := r.LimitResumes(); resumes[0].State != LimitResumeReleased {
@@ -58,7 +58,7 @@ func TestANewRefusalStartsANewStopAndAClearedStopIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}
-	if err := r.RecordLimitStop(session, first); err != nil {
+	if err := r.RecordLimitStop(session, "", first); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetLimitResumeState(session.ID, "u1", LimitResumeReleased, time.Unix(2000, 0)); err != nil {
@@ -71,11 +71,11 @@ func TestANewRefusalStartsANewStopAndAClearedStopIsGone(t *testing.T) {
 		t.Fatalf("a state change for another turn applied: %+v", resumes)
 	}
 	second := surface.LimitStop{TurnID: "u2", RefusedAt: time.Unix(3000, 0), ResetsAt: time.Unix(9000, 0)}
-	if err := r.RecordLimitStop(session, second); err != nil {
+	if err := r.RecordLimitStop(session, "", second); err != nil {
 		t.Fatal(err)
 	}
 	resumes, err := r.LimitResumes()
-	if err != nil || len(resumes) != 1 || resumes[0].TurnID != "u2" || resumes[0].State != LimitResumeWaiting || resumes[0].Attempts != 0 {
+	if err != nil || len(resumes) != 1 || resumes[0].TurnID != "u2" || resumes[0].State != LimitResumeWaiting || resumes[0].Attempts != 1 {
 		t.Fatalf("resumes=%+v err=%v", resumes, err)
 	}
 	if err := r.ClearLimitStop(session.ID, "u1"); err != nil {
@@ -99,13 +99,13 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := surface.LimitStop{TurnID: "u1", RefusedAt: time.Unix(1000, 0)}
-	if err := r.RecordLimitStop(session, stop); err != nil {
+	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
 	if found, err := r.CancelLimitResume(session.ID); err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
-	if err := r.RecordLimitStop(session, stop); err != nil {
+	if err := r.RecordLimitStop(session, "/roots/work", stop); err != nil {
 		t.Fatal(err)
 	}
 	if resumes, _ := r.LimitResumes(); resumes[0].State != LimitResumeCanceled {
@@ -113,5 +113,36 @@ func TestACanceledResumeIsKeptForItsTurn(t *testing.T) {
 	}
 	if found, err := r.CancelLimitResume("absent"); err != nil || found {
 		t.Fatalf("found=%v err=%v", found, err)
+	}
+}
+
+func TestALaterResetOnAnAccountMovesEveryWaitingSessionOnIt(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, id := range []string{"first", "second", "elsewhere"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	early, late := time.Unix(5000, 0), time.Unix(9000, 0)
+	for _, row := range []struct{ id, account string }{{"first", "work"}, {"second", "work"}, {"elsewhere", "home"}} {
+		if err := r.RecordLimitStop(surface.Session{ID: row.id}, row.account, surface.LimitStop{TurnID: "t", RefusedAt: time.Unix(1000, 0), ResetsAt: early}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.RecordLimitStop(surface.Session{ID: "first"}, "work", surface.LimitStop{TurnID: "t2", RefusedAt: time.Unix(6000, 0), ResetsAt: late}); err != nil {
+		t.Fatal(err)
+	}
+	resumes, err := r.LimitResumes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resume := range resumes {
+		want := late
+		if resume.SessionID == "elsewhere" {
+			want = early
+		}
+		if !resume.ResetsAt.Equal(want) {
+			t.Fatalf("%s resets at %s, want %s", resume.SessionID, resume.ResetsAt, want)
+		}
 	}
 }
