@@ -192,8 +192,12 @@ final class PhoneAppearance: ObservableObject {
         return nil
     }
 
+    private func renderScale(_ key: Key) -> CGFloat {
+        key.surface == .list ? key.scale : 1
+    }
+
     func file(_ key: Key) -> URL? {
-        let name = [config.rev, wallpaper?.id ?? "", "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(key.scale)",
+        let name = [config.rev, wallpaper?.id ?? "", "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
                     key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)"].joined(separator: "-")
         let safe = name.map { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "@" ? $0 : "_" }
         return cache?.appendingPathComponent(String(safe) + ".png")
@@ -288,7 +292,7 @@ final class PhoneAppearance: ObservableObject {
             ground: ground,
             roles: roles,
             size: key.size,
-            scale: key.surface == .list ? key.scale : 1,
+            scale: renderScale(key),
             panes: panes,
             texts: texts,
             solidPanes: key.solid

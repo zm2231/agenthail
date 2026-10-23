@@ -158,6 +158,8 @@ final class PhoneAppearanceTests: XCTestCase {
         appearance.preview(try config(["background": "mesh: 2x2, #102030, #203040, #304050, #405060"], rev: "two"))
         XCTAssertNotEqual(first, appearance.file(key(.pane)))
         XCTAssertNotEqual(appearance.file(key(.pane)), appearance.file(key(.list)))
+        XCTAssertTrue(appearance.file(key(.cards))?.lastPathComponent.contains("@1.0") == true, "the file names the scale the image was rendered at")
+        XCTAssertTrue(appearance.file(key(.list))?.lastPathComponent.contains("@3.0") == true)
     }
 
     func testThemeAndAccentFollowTheConfig() throws {
