@@ -112,7 +112,7 @@ func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, item Pendi
 	}
 	named = item.Alias.Name != ""
 	if named {
-		if err := bindReservedAliasTx(tx, item.Alias, s.ID); err != nil {
+		if err := bindReservedAliasTx(tx, item.Alias, s.ID, r.now()); err != nil {
 			if !AliasRefused(err) {
 				return false, err
 			}

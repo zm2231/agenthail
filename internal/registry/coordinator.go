@@ -227,7 +227,7 @@ func (r *Registry) checkCoordinatorTx(tx *sql.Tx, spec CoordinatorSpec, change C
 		return nil, AliasTakenError{Name: spec.Name, Owner: owner}
 	}
 	if !freed {
-		if err := aliasReservedTx(tx, spec.Name, ""); err != nil {
+		if err := aliasReservedTx(tx, spec.Name, "", r.now()); err != nil {
 			return nil, err
 		}
 	}
