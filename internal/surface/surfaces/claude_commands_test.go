@@ -72,13 +72,16 @@ func TestClaudeGoalCommandIsAnExchangeOfItsOutputWithoutItsMarkup(t *testing.T) 
 			t.Fatalf("exchanges=%+v", read.Exchanges)
 		}
 	}
-	type want struct{ user, assistant string }
-	wants := []want{{"Reply with exactly: ready", "ready"}, {"/goal you have replied with exactly the word READY", "Goal set: you have replied with exactly the word READY"}, {"", "READY"}}
+	type want struct {
+		user, assistant string
+		command         bool
+	}
+	wants := []want{{"Reply with exactly: ready", "ready", false}, {"/goal you have replied with exactly the word READY", "Goal set: you have replied with exactly the word READY", true}, {"", "READY", false}}
 	if len(read.Exchanges) != len(wants) {
 		t.Fatalf("exchanges=%+v", read.Exchanges)
 	}
 	for index, expected := range wants {
-		if got := (want{read.Exchanges[index].User, read.Exchanges[index].Assistant}); got != expected {
+		if got := (want{read.Exchanges[index].User, read.Exchanges[index].Assistant, read.Exchanges[index].Command}); got != expected {
 			t.Fatalf("exchange %d = %+v want %+v", index, read.Exchanges[index], expected)
 		}
 	}
@@ -103,7 +106,10 @@ func TestAClaudeBuiltInRunBetweenTurnsReadsAsTheLatestExchange(t *testing.T) {
 	if len(read.Exchanges) != 2 || read.Exchanges[0].Assistant != "READY" {
 		t.Fatalf("exchanges=%+v", read.Exchanges)
 	}
-	if last := read.Exchanges[1]; last.User != "/context" || last.Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || last.Timestamp.IsZero() {
+	if read.Reply == nil || read.Reply.Text != "READY" {
+		t.Fatalf("the reply after a built-in is %+v, want the model's reply", read.Reply)
+	}
+	if last := read.Exchanges[1]; last.User != "/context" || !last.Command || last.Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || last.Timestamp.IsZero() {
 		t.Fatalf("the built-in and its output are not the latest exchange: %+v", last)
 	}
 }

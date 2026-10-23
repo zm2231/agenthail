@@ -67,7 +67,8 @@ runs it without a model turn.
 Between turns, such a command and its output make an exchange of their own,
 so the latest exchange (what `agenthail last` shows) is the command and what
 it printed. A command that prints nothing, or one inside a running turn,
-makes no exchange.
+makes no exchange. Such an exchange is marked `command`, and the latest reply
+(what `agenthail reply` returns) stays the model's last reply.
 
 Claude has no settable pause or token budget for a goal. The command takes only
 `[<condition> | clear]`; Claude pauses a goal itself, and any message

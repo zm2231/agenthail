@@ -136,7 +136,7 @@ func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadR
 
 func latestReply(session *Session, exchanges []Exchange, source string) *ReplyResult {
 	for index := len(exchanges) - 1; index >= 0; index-- {
-		if exchanges[index].Assistant == "" {
+		if exchanges[index].Assistant == "" || exchanges[index].Command {
 			continue
 		}
 		done := session == nil || session.Status != StatusBusy
@@ -227,7 +227,7 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 				command = index
 				continue
 			}
-			exchange, start := Exchange{Assistant: item.Text, Timestamp: at, Source: source}, index
+			exchange, start := Exchange{Assistant: item.Text, Timestamp: at, Source: source, Command: true}, index
 			if command >= 0 {
 				exchange.User, start = items[command].Text, command
 				if asked, err := time.Parse(time.RFC3339Nano, items[command].Timestamp); err == nil {

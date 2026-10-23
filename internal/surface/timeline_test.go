@@ -106,17 +106,23 @@ func TestABuiltInCommandRunBetweenTurnsIsAnExchangeOfItsOwn(t *testing.T) {
 		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t2"},
 	}
 	exchanges := ExchangesFromItems(items, "journal")
-	type want struct{ user, assistant string }
-	wants := []want{{"first", "one"}, {"/context", "## Context Usage"}, {"second", "two"}}
+	type want struct {
+		user, assistant string
+		command         bool
+	}
+	wants := []want{{"first", "one", false}, {"/context", "## Context Usage", true}, {"second", "two", false}}
 	if len(exchanges) != len(wants) {
 		t.Fatalf("exchanges=%+v", exchanges)
 	}
 	for index, expected := range wants {
-		if got := (want{exchanges[index].User, exchanges[index].Assistant}); got != expected || exchanges[index].Timestamp.IsZero() {
+		if got := (want{exchanges[index].User, exchanges[index].Assistant, exchanges[index].Command}); got != expected || exchanges[index].Timestamp.IsZero() {
 			t.Fatalf("exchange %d = %+v want %+v", index, exchanges[index], expected)
 		}
 	}
 	if got := ExchangeStarts(items); !reflect.DeepEqual(got, []int{0, 3, 6}) {
 		t.Fatalf("starts=%v, want [0 3 6]", got)
+	}
+	if reply := BoundSessionRead(nil, &SessionReadResult{Exchanges: exchanges[:2]}).Reply; reply.Text != "one" || reply.UserText != "first" {
+		t.Fatalf("the reply after a built-in is %+v, want the model's reply", reply)
 	}
 }

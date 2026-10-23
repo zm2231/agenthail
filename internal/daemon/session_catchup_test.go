@@ -42,6 +42,7 @@ type pageExchange struct {
 	User      string    `json:"user"`
 	Assistant string    `json:"assistant"`
 	Timestamp time.Time `json:"timestamp"`
+	Command   bool      `json:"command"`
 }
 
 func readDashboardExchanges(t *testing.T, handler http.Handler, sessionID, query string) []pageExchange {
@@ -170,7 +171,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "local_command", "uuid": "output", "parentUuid": "command", "isMeta": false, "sessionId": conversation, "timestamp": ran.Add(time.Second).Format(time.RFC3339Nano), "content": "<local-command-stdout>## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)</local-command-stdout>"}),
 	)
 	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 })
-	if len(got) != 2 || got[1].User != "/context" || got[1].Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || !got[1].Timestamp.Equal(ran) {
+	if len(got) != 2 || got[1].User != "/context" || got[0].Command || !got[1].Command || got[1].Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || !got[1].Timestamp.Equal(ran) {
 		t.Fatalf("the built-in is not the latest exchange: %+v", got)
 	}
 }
