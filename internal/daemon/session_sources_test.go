@@ -62,7 +62,7 @@ func TestCodexTranscriptReplacedBeforeCatchUpReloadsFromTheNewFileAfterRegistryR
 		t.Fatalf("checkpoint status=%q identity=%q err=%v", status, identity, err)
 	}
 	first.Cancel()
-	waitForSessionSourceGone(t, manager)
+	manager.shutdown()
 	if err := reg.Close(); err != nil {
 		t.Fatal(err)
 	}

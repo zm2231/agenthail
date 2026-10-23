@@ -328,14 +328,21 @@ func (s *sessionSource) run() {
 		current.TranscriptFromStart = s.session.TranscriptFromStart
 		streamContext, stopStream := context.WithCancel(s.ctx)
 		var moved atomic.Bool
+		watched := make(chan struct{})
 		if _, ok := s.adapter.(surface.TranscriptContinuer); ok && current.Transcript != "" {
-			go s.watchTranscriptMove(streamContext, current.Transcript, func() {
-				moved.Store(true)
-				stopStream()
-			})
+			go func() {
+				defer close(watched)
+				s.watchTranscriptMove(streamContext, current.Transcript, func() {
+					moved.Store(true)
+					stopStream()
+				})
+			}()
+		} else {
+			close(watched)
 		}
 		streamErr := s.adapter.Stream(streamContext, &current, "", s.append, 30*time.Minute)
 		stopStream()
+		<-watched
 		if moved.Load() {
 			streamErr = nil
 		}
