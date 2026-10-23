@@ -209,6 +209,54 @@ func TestDeviceAuthenticationDoesNotWaitForTheWriteLock(t *testing.T) {
 	})
 }
 
+// A stamp whose write fails, as when another process holds the write lock
+// past the busy timeout, is kept and written before the registry closes,
+// without another request.
+func TestAFailedLastSeenStampIsWrittenBeforeTheRegistryCloses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, token, err := r.CompleteDevicePairing(pairing.Secret, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`CREATE TRIGGER refuse_touch BEFORE UPDATE OF last_seen_at ON paired_devices BEGIN SELECT RAISE(ABORT, 'busy'); END`); err != nil {
+		t.Fatal(err)
+	}
+	seen, err := r.AuthenticateDevice(token, "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.seen.writes.Wait()
+	if _, err := r.db.Exec(`DROP TRIGGER refuse_touch`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openRegistryAt(t, path)
+	var stored string
+	if err := reopened.read.QueryRow(`SELECT last_seen_at FROM paired_devices WHERE id=?`, device.ID).Scan(&stored); err != nil || stored != seen.LastSeenAt {
+		t.Fatalf("stored=%q err=%v, want the stamp %q that failed to write", stored, err, seen.LastSeenAt)
+	}
+}
+
+func openRegistryAt(t *testing.T, path string) *Registry {
+	t.Helper()
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	return r
+}
+
 func TestAHostTokenBelongsToTheHostThatPaired(t *testing.T) {
 	r := openTestRegistry(t)
 	hostPairing, err := r.CreateDevicePairing("vps", []string{"read", "control", HostScope}, time.Minute)

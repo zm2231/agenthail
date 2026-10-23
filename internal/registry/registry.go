@@ -194,6 +194,11 @@ func (r *Registry) Close() error {
 	r.seen.closed = true
 	r.seen.mu.Unlock()
 	r.seen.writes.Wait()
+	r.seen.mu.Lock()
+	pending := r.seen.pending
+	r.seen.pending = nil
+	r.seen.mu.Unlock()
+	r.writeStamps(pending)
 	return errors.Join(r.read.Close(), r.db.Close())
 }
 

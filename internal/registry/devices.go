@@ -250,6 +250,9 @@ func (r *Registry) stampLastSeen(deviceID, stamp string) {
 	go r.writeLastSeen()
 }
 
+// writeLastSeen writes the pending stamps until none are left. A stamp that
+// fails stays pending, unless a newer one replaced it, and the writer stops:
+// the next request starts it again, and Close writes what is left.
 func (r *Registry) writeLastSeen() {
 	defer r.seen.writes.Done()
 	for {
@@ -262,9 +265,36 @@ func (r *Registry) writeLastSeen() {
 			return
 		}
 		r.seen.mu.Unlock()
-		for deviceID, stamp := range pending {
-			// A failed stamp is dropped: the next request stamps again.
-			_, _ = r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, deviceID)
+		if failed := r.writeStamps(pending); len(failed) > 0 {
+			r.seen.mu.Lock()
+			r.seen.keep(failed)
+			r.seen.writing = false
+			r.seen.mu.Unlock()
+			return
+		}
+	}
+}
+
+// writeStamps writes each stamp and returns the ones that failed.
+func (r *Registry) writeStamps(stamps map[string]string) map[string]string {
+	failed := map[string]string{}
+	for deviceID, stamp := range stamps {
+		if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, deviceID); err != nil {
+			failed[deviceID] = stamp
+		}
+	}
+	return failed
+}
+
+// keep puts failed stamps back as pending where no newer one replaced them.
+// The caller holds mu.
+func (s *deviceSeen) keep(failed map[string]string) {
+	if s.pending == nil {
+		s.pending = map[string]string{}
+	}
+	for deviceID, stamp := range failed {
+		if _, newer := s.pending[deviceID]; !newer {
+			s.pending[deviceID] = stamp
 		}
 	}
 }
