@@ -26,6 +26,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
         context.coordinator.sync = ComposerTextSync(text)
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
         textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }

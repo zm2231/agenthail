@@ -41,6 +41,26 @@ struct CompletionToken: Equatable {
     }
 }
 
+/// What a composer's completion knows about one session's draft.
+struct CompletionState {
+    let session: String
+    var caret: Int
+    var dismissed: String?
+    var highlighted = 0
+    var files: (query: String, files: [SessionFile])?
+
+    /// Another session's draft starts over, with the caret at its end where a
+    /// new text view puts it.
+    func scoped(to session: String, draft: String) -> CompletionState {
+        self.session == session ? self : CompletionState(session: session, caret: (draft as NSString).length)
+    }
+}
+
+struct MentionRequest: Equatable {
+    let session: String
+    let query: String
+}
+
 struct CompletionItem: Identifiable, Equatable {
     let id: String
     let title: String

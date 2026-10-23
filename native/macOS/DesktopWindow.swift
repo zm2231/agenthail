@@ -1479,10 +1479,7 @@ struct ComposerView: View {
     let session: SessionState
     @State private var focused = false
     @State private var dropTargeted = false
-    @State private var dismissedSlash: String?
-    @State private var caret = 0
-    @State private var highlighted = 0
-    @State private var mentionFiles: (query: String, files: [SessionFile])?
+    @State private var completionState = CompletionState(session: "", caret: 0)
     @State private var editor = ComposerEditor()
     @State private var modeChanged = false
     @State private var showingSent = false
@@ -1556,11 +1553,11 @@ struct ComposerView: View {
                 }
                 .scrimText("dock-notices")
                 if completionOpen {
-                    CompletionMenu(suggestions: completion.items, notice: completion.notice, highlighted: highlighted, roundedTop: queued.isEmpty, choose: accept)
+                    CompletionMenu(suggestions: completion.items, notice: completion.notice, highlighted: scopedCompletion.highlighted, roundedTop: queued.isEmpty, choose: accept)
                         .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret = $0 }, completionKey: completionKey) { submit(alternate: false) }
+                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
                         .id(session.id)
                         .padding(.horizontal, 15)
                         .padding(.top, 13)
@@ -1706,8 +1703,8 @@ struct ComposerView: View {
         }
         .onAppear { focused = true }
         .task(id: session.id) { await model.loadPrompts(for: session.id) }
-        .task(id: mentionQuery) { await loadMentionFiles(mentionQuery) }
-        .onChange(of: completion.items.map(\.id)) { highlighted = 0 }
+        .task(id: mentionRequest) { await loadMentionFiles(mentionRequest) }
+        .onChange(of: completion.items.map(\.id)) { updateCompletion { $0.highlighted = 0 } }
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
@@ -1716,7 +1713,7 @@ struct ComposerView: View {
     }
     private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
     private var modelSuggestions: [CompletionItem]? {
-        guard draft.attachments.isEmpty, dismissedSlash != draft.text, let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model else { return nil }
+        guard draft.attachments.isEmpty, scopedCompletion.dismissed != draft.text, let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model else { return nil }
         let options = pane.detail?.models ?? []
         if options.contains(where: { $0.id == query }) { return [] }
         return options
@@ -1725,12 +1722,12 @@ struct ComposerView: View {
     }
 
     private var completionToken: CompletionToken? {
-        guard dismissedSlash != draft.text, modelSuggestions == nil else { return nil }
-        return CompletionToken.at(draft.text, caret: min(caret, (draft.text as NSString).length))
+        guard scopedCompletion.dismissed != draft.text, modelSuggestions == nil else { return nil }
+        return CompletionToken.at(draft.text, caret: min(scopedCompletion.caret, (draft.text as NSString).length))
     }
 
-    private var mentionQuery: String? {
-        completionToken.flatMap { $0.trigger == .mention ? $0.query : nil }
+    private var mentionRequest: MentionRequest? {
+        completionToken.flatMap { $0.trigger == .mention ? MentionRequest(session: session.id, query: $0.query) : nil }
     }
 
     private var completion: (items: [CompletionItem], notice: String?) {
@@ -1741,7 +1738,7 @@ struct ComposerView: View {
         } : []
         let runtime = store.commands[session.id]
         let mentioning = token.trigger == .mention
-        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.knownSessions, from: session) : [], files: mentioning && mentionFiles?.query == token.query ? mentionFiles?.files ?? [] : [])
+        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.knownSessions, from: session) : [], files: mentioning && scopedCompletion.files?.query == token.query ? scopedCompletion.files?.files ?? [] : [])
         return (items, ComposerCompletion.notice(for: token, runtime: runtime))
     }
 
@@ -1755,9 +1752,10 @@ struct ComposerView: View {
     private func completionKey(_ key: CompletionKey) -> Bool {
         let items = completion.items
         guard !items.isEmpty else { return false }
+        let highlighted = scopedCompletion.highlighted
         switch key {
-        case .up: highlighted = (min(highlighted, items.count - 1) - 1 + items.count) % items.count
-        case .down: highlighted = (min(highlighted, items.count - 1) + 1) % items.count
+        case .up: updateCompletion { $0.highlighted = (min(highlighted, items.count - 1) - 1 + items.count) % items.count }
+        case .down: updateCompletion { $0.highlighted = (min(highlighted, items.count - 1) + 1) % items.count }
         case .accept:
             let item = items[min(highlighted, items.count - 1)]
             if let token = completionToken, (draft.text as NSString).substring(with: token.range) == item.insertion.trimmingCharacters(in: .whitespaces) { return false }
@@ -1766,13 +1764,21 @@ struct ComposerView: View {
         return true
     }
 
-    private func loadMentionFiles(_ query: String?) async {
-        guard let query, let api = model.api else { return }
+    private var scopedCompletion: CompletionState { completionState.scoped(to: session.id, draft: draft.text) }
+
+    private func updateCompletion(_ change: (inout CompletionState) -> Void) {
+        var state = scopedCompletion
+        change(&state)
+        completionState = state
+    }
+
+    private func loadMentionFiles(_ request: MentionRequest?) async {
+        guard let request, let api = model.api else { return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled else { return }
-        let found = try? await api.sessionFiles(id: session.id, query: query)
+        let found = try? await api.sessionFiles(id: request.session, query: request.query)
         guard !Task.isCancelled else { return }
-        mentionFiles = (query, found?.files ?? [])
+        updateCompletion { $0.files = (request.query, found?.files ?? []) }
     }
 
     private func accept(_ item: CompletionItem) {
@@ -1782,7 +1788,7 @@ struct ComposerView: View {
             let change = ComposerCompletion.edit(item, in: draft.text, at: token)
             editor.replace(change.range, with: change.replacement, caret: change.caret)
         }
-        highlighted = 0
+        updateCompletion { $0.highlighted = 0 }
         focused = true
     }
 
@@ -1806,7 +1812,8 @@ struct ComposerView: View {
             return false
         case .interrupt:
             if completionOpen {
-                dismissedSlash = draft.text
+                let text = draft.text
+                updateCompletion { $0.dismissed = text }
                 draft.escapeHandled()
                 return true
             }

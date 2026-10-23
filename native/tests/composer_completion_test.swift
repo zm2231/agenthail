@@ -8,6 +8,7 @@ struct ComposerCompletionTest {
         commands()
         mentions()
         insertion()
+        scoping()
         print("ok")
     }
 
@@ -70,6 +71,16 @@ struct ComposerCompletionTest {
         check(folder.text == "@src/" && folder.caret == 5, "a folder leaves the word open")
         let model = ComposerCompletion.apply(CompletionItem(id: "m", title: "", detail: "", insertion: "/model "), to: "/mo", at: CompletionToken.at("/mo", caret: 3)!)
         check(model.text == "/model ", "an insertion that ends in a space gets no second one")
+    }
+
+    static func scoping() {
+        var a = CompletionState(session: "hsrv::a", caret: 3)
+        a.dismissed = "/x"
+        a.highlighted = 2
+        a.files = ("", [SessionFile(path: "a.go", dir: false)])
+        check(a.scoped(to: "hsrv::a", draft: "/x").caret == 3 && a.scoped(to: "hsrv::a", draft: "/x").files?.files.count == 1, "the same session keeps its caret and files")
+        let b = a.scoped(to: "hsrv::b", draft: "hi 🙂")
+        check(b.session == "hsrv::b" && b.caret == 5 && b.dismissed == nil && b.highlighted == 0 && b.files == nil, "another session sees none of the first one's files, dismissal or highlight, and its caret is at the end of its draft")
     }
 
     static func session(_ id: String, alias: String?, open: Bool = true) -> SessionState {
