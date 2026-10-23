@@ -288,10 +288,10 @@ HOME="$SUPERVISED_HOME" "$FAKE_BIN/launchctl" bootout "gui/$UID/com.agenthail.da
 sleep 600 &
 OTHER_HOME_DAEMON="$!"
 echo "$OTHER_HOME_DAEMON" >"$SUPERVISED_HOME/.fake-agenthail-launchd-last-pid"
-echo "/Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
+echo "/Users/demo/Library/LaunchAgents/com.agenthail.daemon.plist" >"$SUPERVISED_HOME/.fake-agenthail-launchd-plist"
 touch "$SUPERVISED_HOME/.fake-agenthail-launchd-loaded"
 install_once "$SUPERVISED_HOME" "$SUPERVISED_BIN" "$SUPERVISED_DATA_1" >"$TMP/other-home-service.log"
-grep -Fq 'leaving the supervised daemon loaded from /Users/another-user/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
+grep -Fq 'leaving the supervised daemon loaded from /Users/demo/Library/LaunchAgents/com.agenthail.daemon.plist unchanged' "$TMP/other-home-service.log"
 if grep -Fq 'supervised daemon for upgrade' "$TMP/other-home-service.log" || grep -Fq 'reinstalling supervised daemon' "$TMP/other-home-service.log"; then
 	echo "error: install with another HOME's launchd service loaded replaced that service" >&2
 	exit 1
