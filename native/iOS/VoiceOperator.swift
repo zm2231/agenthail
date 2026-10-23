@@ -290,6 +290,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     }
                     if let provider = model.state?.audioProvider { LabeledContent("Audio provider", value: provider) }
                     LabeledContent("Audio", value: model.connectionTitle)
+                    if !model.hasLocalCall, let reason = model.callUnavailableReason { LabeledContent("Call unavailable", value: reason) }
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
                     Text("The call stays active when you close this screen, switch apps or lock your phone. Use Hang up or the system call controls to end audio. Force-quitting the app ends the call.")
                     if let state = model.state, let id = state.attemptId {
@@ -306,6 +307,12 @@ struct AgenthailVoiceOperatorSheet: View {
                     Section("Call lifecycle") {
                         LabeledContent("Attempt") { Text(attempt.id).font(.caption.monospaced()).textSelection(.enabled) }
                         if let cause = attempt.terminalCause { LabeledContent("Ended because", value: cause) }
+                        if let stage = attempt.failureStage {
+                            LabeledContent("Failed at", value: stage)
+                            LabeledContent("Error") {
+                                Text("\(attempt.failureDomain ?? "unknown") · \(attempt.failureCode ?? 0)").font(.caption.monospaced()).textSelection(.enabled)
+                            }
+                        }
                         ForEach(attempt.milestones.sorted { $0.value < $1.value }, id: \.key) { name, seconds in
                             LabeledContent(name, value: String(format: "%.2fs", seconds)).font(.caption.monospaced())
                         }

@@ -194,8 +194,11 @@ up local audio once per call, not on every refresh. Voice details shows the call
 ID and last host-close reason/event number for a completed call. These messages
 identify the teardown path, not the cause of an earlier host-side `closed` event.
 Capture those details before attributing an instant disconnect. The iPhone also
-keeps a local record of its last 20 call attempts (milestone times and the first
-terminal cause) under Call lifecycle in Voice details. An attempt the app never
+keeps a local record of its last 20 call attempts (milestone times, the first
+terminal cause, and for a failed attempt the step that failed with its error
+domain and code, never the error's text) under Call lifecycle in Voice details.
+The record starts when Call is pressed, so a failure choosing the target or
+preparing the operator is kept too. When Call is unavailable, Voice details says why. An attempt the app never
 finished, because it was force-quit or terminated, is labeled
 `process_terminated_or_unknown` on the next launch.
 

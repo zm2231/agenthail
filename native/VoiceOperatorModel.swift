@@ -46,7 +46,22 @@ final class VoiceOperatorModel: ObservableObject {
     private var workID = 0
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
     var committedRoute: String { state?.target?.name ?? "Agenthail orchestrator" }
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    // Why Call is unavailable, shown in Voice details so a disabled button
+    // can be explained.
+    var callUnavailableReason: String? {
+        if closed { return "This screen is closed." }
+        if !ready { return "Call audio is not ready." }
+        if working { return "Another voice action is in progress." }
+        if dialing { return "A call is starting." }
+        if audioConnected { return "A call is connected." }
+        if hostHangupPending { return "The host has not yet confirmed the last hangup." }
+        if hostHangupUnconfirmed { return "The host did not confirm the last hangup." }
+        if state?.hasCall == true { return "The host still has a call." }
+        if state?.phase == "blocked" { return "The host blocked voice calls." }
+        if let connectionError { return connectionError }
+        return nil
+    }
+    var canCall: Bool { callUnavailableReason == nil }
     var canStartNewConversation: Bool {
         state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
             && !closed && state?.hasCall != true && state?.occupied != true
@@ -256,16 +271,19 @@ final class VoiceOperatorModel: ObservableObject {
         let current = generation
         defer { endWork(work) }
         open()
+        let callID = UUID()
+        attemptID = callID.uuidString
+        diagnostics?.begin(id: callID.uuidString)
+        var stage = "target_select"
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
             guard !closed, generation == current else { return }
             state = selected
+            stage = "operator_prepare"
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
-            let callID = UUID()
-            attemptID = callID.uuidString
-            diagnostics?.begin(id: callID.uuidString)
+            stage = "native_audio_start"
             appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
             held = false; hostHasCall = false; reportedInputMuted = false; inputRevision = 0
             audio.configureCall(id: callID, name: committedRoute)
@@ -274,7 +292,8 @@ final class VoiceOperatorModel: ObservableObject {
             guard !closed, generation == current else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
             microphoneDenied = error is VoiceMicrophoneDenied
-            if let attemptID { diagnostics?.end(microphoneDenied ? "microphone_denied" : "local_start_failed", id: attemptID) }
+            diagnostics?.failure(error, stage: stage, id: callID.uuidString)
+            diagnostics?.end(microphoneDenied ? "microphone_denied" : "\(stage)_failed", id: callID.uuidString)
             dialing = false; attemptID = nil; audio.end()
         }
     }
@@ -307,6 +326,7 @@ final class VoiceOperatorModel: ObservableObject {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
                     self.error = error.localizedDescription
+                    diagnostics?.failure(error, stage: "host_start", id: id)
                     diagnostics?.end("host_start_rejected", id: id)
                     dialing = false
                     audio.end()
