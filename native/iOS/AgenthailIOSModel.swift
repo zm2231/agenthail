@@ -302,6 +302,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         Task { [weak self] in
             await self?.reloadSelectedSession()
             guard let self, self.selectedSessionID == id else { return }
+            self.loadCommands(id)
             self.startSessionMetadata(id)
             if let session = self.snapshot?.sessions.first(where: { $0.id == id }) { await self.syncRequests(for: session) }
         }
@@ -861,6 +862,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                     }
                     previous.stop()
                     clearStoredPush(hostID)
+                    store.prune { $0.hasPrefix(hostID + HostCatalog.separator) }
                 }
                 let credential = PairedHostCredential(hostID: hostID, hostName: response.host.name, endpoint: pendingPairing.endpoint, token: response.token, pairedAt: previous == nil ? Date() : PairedCredential.all().first { $0.hostID == hostID }?.pairedAt ?? Date())
                 try PairedCredential.save(credential)
@@ -993,9 +995,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func loadCommands(_ id: String) {
         guard case let (connection, route)? = try? resolveServer(id), let read = store.beginCommandsRead(id) else { return }
-        Task { [store] in
+        Task { [weak self, store] in
             do {
-                store.commandsRead(try await connection.api.sessionCommands(id: route.sessionID), for: id, read: read)
+                let commands = try await connection.api.sessionCommands(id: route.sessionID)
+                guard self?.server(for: id) === connection else {
+                    store.commandsRead(nil, for: id, read: read, retry: true)
+                    return
+                }
+                store.commandsRead(commands, for: id, read: read)
             } catch {
                 var olderHost = false
                 if case AgenthailAPIError.olderHost = error { olderHost = true }
@@ -1478,7 +1485,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         drafts = drafts.filter { !owned($0.key) }
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
-        store.ids.filter(owned).forEach(store.forget)
+        store.prune(removing: owned)
         stashes = stashes.filter { !owned($0.key) }
         pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }

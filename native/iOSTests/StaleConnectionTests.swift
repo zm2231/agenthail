@@ -141,6 +141,33 @@ final class StaleConnectionTests: XCTestCase {
     }
 
     @MainActor
+    func testReconnectingAComputerKeepsOnlyTheCommandsItsReplacementLists() async throws {
+        KeychainStore.removeAll()
+        ServedSessionProtocol.state.reset(holdDetailOn: nil)
+        ServedSessionProtocol.state.hold("old", ["/api/v1/session-commands"])
+        defer { ServedSessionProtocol.state.release(); KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hsrv", "https://old.tailnet.ts.net", name: "srv")
+        let model = AgenthailIOSModel(autoConnect: false, session: ServedSessionProtocol.session)
+        model.connect()
+        for _ in 0..<150 where model.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        await model.loadSession("hsrv::demo")
+        for _ in 0..<150 where !ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ServedSessionProtocol.state.holding)
+        model.handlePairingURL(AgenthailIOSTests.pairingLink("new", host: "hsrv", name: "srv"))
+        model.confirmPairing()
+        for _ in 0..<150 where model.completedPairings == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        model.connect()
+        for _ in 0..<150 where model.store.commands["hsrv::demo"] == nil { try await Task.sleep(for: .milliseconds(20)) }
+        ServedSessionProtocol.state.release()
+        for _ in 0..<150 where ServedSessionProtocol.state.holding { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.store.commands["hsrv::demo"]?.commands.map(\.name), ["new"])
+        XCTAssertEqual(ServedSessionProtocol.state.sessionRequests("new").filter { $0 == "/api/v1/session-commands" }.count, 1)
+        model.forgetHost("hsrv")
+        XCTAssertNil(model.store.commands["hsrv::demo"])
+    }
+
+    @MainActor
     func testReconnectingAComputerDropsItsOldRequestsAndOlderActivity() async throws {
         KeychainStore.removeAll()
         ServedSessionProtocol.state.reset(holdDetailOn: nil)
@@ -573,6 +600,11 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             DispatchQueue.global().async { [self] in
                 Self.state.waitIfHeld(host, path)
                 respond(#"{"permissionMode":"\#(host)","requests":[]}"#)
+            }
+        case "/api/v1/session-commands":
+            DispatchQueue.global().async { [self] in
+                Self.state.waitIfHeld(host, path)
+                respond(#"{"commands":[{"name":"\#(host)","description":"","argumentHint":"","insert":"/\#(host)"}],"unavailable":""}"#)
             }
         case "/api/v1/session-stream":
             Self.state.open(host, self)
