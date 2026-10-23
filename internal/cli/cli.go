@@ -2982,6 +2982,7 @@ func (a *App) cmdHistory(args []string) error {
 		} else {
 			fmt.Printf("%s %-18s %s", entry.CreatedAt, historyEvidenceLabel(entry), target)
 		}
+		fmt.Print(historyOperationField(string(entry.Operation)))
 		if entry.Message != "" {
 			fmt.Printf(" %s", truncate(strings.ReplaceAll(entry.Message, "\n", " "), 140))
 		}
@@ -2991,6 +2992,13 @@ func (a *App) cmdHistory(args []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func historyOperationField(operation string) string {
+	if operation == "" || operation == string(registry.QueueOperationMessage) {
+		return ""
+	}
+	return " operation=" + operation
 }
 
 func historyEvidenceLabel(entry registry.HistoryEntry) string {

@@ -205,6 +205,7 @@ func (a *App) historyRemote(ctx context.Context, remote *remoteTarget, limit int
 			Message   string `json:"message"`
 			Error     string `json:"error"`
 			Evidence  string `json:"evidence"`
+			Operation string `json:"operation"`
 		} `json:"items"`
 	}
 	query := url.Values{"sessionId": []string{remote.ID}, "limit": []string{fmt.Sprint(limit)}}
@@ -239,6 +240,7 @@ func (a *App) historyRemote(ctx context.Context, remote *remoteTarget, limit int
 		} else {
 			fmt.Printf("%s %-18s %s", entry.CreatedAt, label, target)
 		}
+		fmt.Print(historyOperationField(entry.Operation))
 		if entry.Message != "" {
 			fmt.Printf(" %s", truncate(strings.ReplaceAll(entry.Message, "\n", " "), 140))
 		}
