@@ -1,8 +1,17 @@
 import SwiftUI
 
+/// Stops following the live edge, so a row a person expands or collapses stays under the pointer.
+/// Equal for the life of a transcript, so rows that read it are not re-rendered on every scroll update.
+struct HoldTranscriptPlace: Equatable {
+    fileprivate var following: Binding<Bool>?
+
+    func callAsFunction() { following?.wrappedValue = false }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { (lhs.following == nil) == (rhs.following == nil) }
+}
+
 extension EnvironmentValues {
-    /// Stops following the live edge, so a row a person expands or collapses stays under the pointer.
-    @Entry var holdTranscriptPlace: () -> Void = {}
+    @Entry var holdTranscriptPlace = HoldTranscriptPlace()
 }
 
 struct TranscriptFollow<ID: Equatable>: ViewModifier {
@@ -43,7 +52,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     following = true
                 }
             }
-            .environment(\.holdTranscriptPlace) { following = false }
+            .environment(\.holdTranscriptPlace, HoldTranscriptPlace(following: $following))
             .onChange(of: transcript) {
                 generation &+= 1
                 placedLeadingRow = leadingRow
