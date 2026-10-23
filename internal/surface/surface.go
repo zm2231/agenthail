@@ -313,6 +313,14 @@ type LocalTranscriptProvider interface {
 	RequiresLocalTranscript(*Session) bool
 }
 
+// TranscriptContinuer is implemented by an adapter whose transcript can move
+// to a new file that continues the old one. It reports whether the session's
+// current transcript continues the one last read at trustedPath with file
+// identity trustedIdentity, and the items the move dropped from it.
+type TranscriptContinuer interface {
+	TranscriptContinuation(ctx context.Context, session *Session, trustedPath, trustedIdentity string) (dropped []TimelineItem, continues bool, err error)
+}
+
 // TranscriptItemReader is implemented by an adapter that can derive again,
 // from its transcript, every timeline item recorded at or after an offset.
 type TranscriptItemReader interface {

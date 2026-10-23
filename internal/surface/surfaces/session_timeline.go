@@ -62,7 +62,7 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit, nil)
+	page, err := readCodexTranscriptPage(ctx, codexTranscriptPath(session), session.ID, request.Before, request.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +367,13 @@ type transcriptRecord struct {
 // settled reports whether a Claude turn still closing at the end of the
 // transcript has ended, given the time of its end_turn block.
 func readTranscriptPage(ctx context.Context, path, source string, before int64, limit int, settled func(time.Time) bool) (*surface.SessionReadResult, error) {
+	return readTranscriptWindow(ctx, path, source, 0, before, limit, settled)
+}
+
+// readTranscriptWindow reads a page that ends at before and never reaches
+// below floor, a record boundary. A page that reached floor reports floor as
+// its NextBefore.
+func readTranscriptWindow(ctx context.Context, path, source string, floor, before int64, limit int, settled func(time.Time) bool) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript"}
 	if path == "" {
 		result.UnavailableReason = "Detailed activity is unavailable because this session has no local transcript."
@@ -399,13 +406,16 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	result.TranscriptOffset = completeEnd
 	result.TranscriptOffsetSet = true
 	result.TranscriptIdentity = transcriptFileIdentity(info)
-	start := max(int64(0), end-timelineReadBudget)
+	if floor > end {
+		return nil, fmt.Errorf("activity transcript changed; refresh the session")
+	}
+	start := max(floor, end-timelineReadBudget)
 	windowStart := start
 	data := make([]byte, end-start)
 	if _, err := file.ReadAt(data, start); err != nil && err != io.EOF {
 		return nil, err
 	}
-	if start > 0 {
+	if start > floor {
 		if first := bytes.IndexByte(data, '\n'); first >= 0 {
 			start += int64(first + 1)
 			data = data[first+1:]
