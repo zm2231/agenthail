@@ -246,3 +246,28 @@ func TestTheReplyOfAPageWhoseLatestTurnsHaveNoAnswerMatchesAReadOfTheWholeBudget
 		}
 	}
 }
+
+func TestARolloutSegmentPageAboveAFloorMatchesAReadOfTheWholeBudget(t *testing.T) {
+	transcript := writePageTranscript(t, codexPageRecords, 20000, 6)
+	rng := rand.New(rand.NewSource(8))
+	for sample := 0; sample < 12; sample++ {
+		high := len(transcript.boundaries)/2 + rng.Intn(len(transcript.boundaries)/2)
+		before := transcript.boundaries[high]
+		floor := transcript.boundaries[rng.Intn(len(transcript.boundaries)/2)]
+		if sample%2 == 1 {
+			// A floor inside the first window, so the page stops at the floor.
+			floor = transcript.boundaries[high-1-rng.Intn(200)]
+		}
+		read := func(window int64) *surface.SessionReadResult {
+			previous := timelineFirstWindow
+			timelineFirstWindow = window
+			defer func() { timelineFirstWindow = previous }()
+			page, err := readTranscriptWindow(context.Background(), transcript.path, "codex", floor, before, 0, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return page
+		}
+		samePage(t, fmt.Sprintf("floor=%d before=%d", floor, before), read(timelineFirstWindow), read(timelineReadBudget))
+	}
+}
