@@ -66,6 +66,7 @@ final class PhoneAppearance: ObservableObject {
         var dark: Bool
         var solid: Bool
         var target: Float
+        var readable = true
 
         func hash(into hasher: inout Hasher) {
             hasher.combine(surface)
@@ -75,6 +76,7 @@ final class PhoneAppearance: ObservableObject {
             hasher.combine(dark)
             hasher.combine(solid)
             hasher.combine(target)
+            hasher.combine(readable)
         }
     }
 
@@ -198,7 +200,7 @@ final class PhoneAppearance: ObservableObject {
 
     func file(_ key: Key) -> URL? {
         let name = [config.rev, wallpaper?.id ?? "", "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
-                    key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)"].joined(separator: "-")
+                    key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)", key.readable ? "readable" : "plain"].joined(separator: "-")
         let safe = name.map { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "@" ? $0 : "_" }
         return cache?.appendingPathComponent(String(safe) + ".png")
     }
@@ -239,7 +241,7 @@ final class PhoneAppearance: ObservableObject {
     private static func read(_ url: URL, size: CGSize) -> BackdropImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        return BackdropImage(image: image, size: size, paneMaxima: [:], paneTint: BackdropRGB(0, 0, 0))
+        return BackdropImage(image: image, size: size)
     }
 
     static func contrastTarget(_ config: UIConfig, increased: Bool) -> Float {
@@ -295,7 +297,8 @@ final class PhoneAppearance: ObservableObject {
             scale: renderScale(key),
             panes: panes,
             texts: texts,
-            solidPanes: key.solid
+            solidPanes: key.solid,
+            readability: key.readable
         )
     }
 
@@ -404,7 +407,8 @@ private struct PhoneBackdropBody<Content: View>: View {
 
     private func key(_ surface: PhoneAppearance.Surface) -> PhoneAppearance.Key {
         PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark, solid: reduceTransparency,
-                            target: PhoneAppearance.contrastTarget(appearance.config, increased: contrast == .increased))
+                            target: PhoneAppearance.contrastTarget(appearance.config, increased: contrast == .increased),
+                            readable: appearance.config.readability || contrast == .increased)
     }
 
     private var keys: [PhoneAppearance.Key] {

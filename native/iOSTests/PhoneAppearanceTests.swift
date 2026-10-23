@@ -18,7 +18,7 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     private func config(_ values: [String: Any], rev: String = "r1") throws -> UIConfig {
-        let data = try JSONSerialization.data(withJSONObject: ["rev": rev, "values": values, "problems": []])
+        let data = try JSONSerialization.data(withJSONObject: ["rev": rev, "values": values, "chosen": [String: String](), "overrides": [String: String](), "problems": []])
         return try JSONDecoder().decode(UIConfig.self, from: data)
     }
 
@@ -44,7 +44,7 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testLoadAsksForThisDeviceClassAndKeepsTheConfigForTheNextLaunch() async throws {
-        UIConfigURLProtocol.state.body = #"{"rev":"abc","values":{"background":"gradient: 135deg, #1b2230 0%, #4a2c8a 100%","glass.opacity":0.3},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"abc","values":{"background":"gradient: 135deg, #1b2230 0%, #4a2c8a 100%","glass.opacity":0.3},"chosen":{},"overrides":{},"problems":[]}"#
         let appearance = PhoneAppearance(cache: cache)
         try await load(appearance) { appearance.config.rev == "abc" }
 
@@ -59,12 +59,12 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testAnUnreadableBackgroundKeepsTheLastGoodLook() async throws {
-        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Self.png
         let appearance = PhoneAppearance(cache: cache)
         try await load(appearance) { appearance.config.rev == "one" && appearance.active }
 
-        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/broken.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/broken.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Data("not an image".utf8)
         try await load(appearance) { appearance.problem != nil }
 
@@ -77,20 +77,20 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testAChangedConfigKeepsTheCachedBackgroundForTheNextLaunch() async throws {
-        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: backgrounds/sea.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Self.png
         let appearance = PhoneAppearance(cache: cache)
         try await load(appearance) { appearance.config.rev == "one" && appearance.active }
 
-        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/sea.png","glass.opacity":0.4},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: backgrounds/sea.png","glass.opacity":0.4},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Data()
         try await load(appearance) { appearance.config.rev == "two" }
 
-        UIConfigURLProtocol.state.body = #"{"rev":"three","values":{"background":"none"},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"three","values":{"background":"none"},"chosen":{},"overrides":{},"problems":[]}"#
         try await load(appearance) { appearance.config.rev == "three" }
         XCTAssertNil(appearance.wallpaper)
 
-        UIConfigURLProtocol.state.body = #"{"rev":"four","values":{"background":"image: backgrounds/sea.png"},"problems":[]}"#
+        UIConfigURLProtocol.state.body = #"{"rev":"four","values":{"background":"image: backgrounds/sea.png"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.image = Self.png
         try await load(appearance) { appearance.config.rev == "four" && appearance.active }
 
@@ -132,7 +132,7 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     func testIncreasedContrastAndReducedTransparencyReachTheRenderer() throws {
-        let appearance = PhoneAppearance(cache: nil)
+        let appearance = PhoneAppearance(cache: cache)
         let values = try config(["background": "gradient: 90deg, #000000 0%, #ffffff 100%", "contrast.target": 5])
         appearance.preview(values)
         XCTAssertEqual(PhoneAppearance.contrastTarget(values, increased: false), 5)
@@ -141,6 +141,11 @@ final class PhoneAppearanceTests: XCTestCase {
         var solid = key(.pane)
         solid.solid = true
         XCTAssertTrue(appearance.spec(solid).solidPanes)
+        var plain = key(.cards)
+        plain.readable = false
+        XCTAssertFalse(appearance.spec(plain).readability, "glass.readability off reaches the renderer")
+        XCTAssertNotNil(appearance.file(plain))
+        XCTAssertNotEqual(appearance.file(plain), appearance.file(key(.cards)))
     }
 
     func testNoBackdropWithoutABackgroundTheGlassOrAPhoneDesktop() throws {
