@@ -40,7 +40,7 @@ final class WindowBackdrop: ObservableObject {
 
     init() {
         accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.schedule() }
+            MainActor.assumeIsolated { self?.refresh() }
         }
     }
 
@@ -49,6 +49,15 @@ final class WindowBackdrop: ObservableObject {
     }
 
     var paneRadius: CGFloat { gutter > 0 ? DesktopRadius.sheet : 0 }
+
+    /// Floating glass lifts what is under it, and only the window colour laid
+    /// over it brings text back. Measured on every built-in background, 0.2
+    /// keeps secondary text above 4.5:1; a higher target needs more.
+    static func floatingOpacity(_ config: UIConfig, increaseContrast: Bool) -> Double {
+        guard config.readability || increaseContrast else { return config.composerOpacity }
+        let target = increaseContrast ? 7 : config.contrastTarget
+        return max(config.composerOpacity, min(1, 0.2 + (target - 4.5) * 0.32))
+    }
 
     func configure(_ config: UIConfig, wallpapers: [String: WallpaperImage]) {
         self.config = config
@@ -65,7 +74,8 @@ final class WindowBackdrop: ObservableObject {
         let gutter = wanted ? CGFloat(config.gutter) : 0
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
-        if composerOpacity != config.composerOpacity { composerOpacity = config.composerOpacity }
+        let floating = Self.floatingOpacity(config, increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        if composerOpacity != floating { composerOpacity = floating }
         if !wanted { image = nil; rendered = nil }
         schedule()
     }
@@ -415,7 +425,9 @@ private struct FloatingGlassBody<Content: View, S: InsettableShape>: View {
         if !backdrop.active || reduceTransparency {
             content.background(fallback, in: shape)
         } else if #available(macOS 26, *) {
-            content.glassEffect(.regular.tint(DesktopPalette.window.opacity(backdrop.composerOpacity)), in: shape)
+            content
+                .background(DesktopPalette.window.opacity(backdrop.composerOpacity), in: shape)
+                .glassEffect(.regular, in: shape)
         } else {
             content
                 .background(DesktopPalette.window.opacity(backdrop.composerOpacity), in: shape)

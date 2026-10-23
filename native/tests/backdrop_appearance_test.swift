@@ -61,6 +61,16 @@ struct BackdropAppearanceTest {
         backdrop.windowChanged(window)
         check(!backdrop.active, "a dark window whose picture has not loaded shows no backdrop rather than the light one")
 
+        var glass = UIConfig()
+        glass.values["glass.composer.opacity"] = .number(0)
+        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0.2, "readable floating glass never drops below the measured floor")
+        glass.values["glass.composer.opacity"] = .number(0.6)
+        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0.6, "a stronger setting is kept")
+        glass.values["glass.composer.opacity"] = .number(0)
+        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: true) > 0.9, "Increase Contrast raises floating glass for its higher target")
+        glass.values["glass.readability"] = .text("off")
+        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0, "readability off uses the setting exactly")
+
         if failures > 0 { exit(1) }
         print("backdrop appearance: dark and light windows draw their own background")
     }
