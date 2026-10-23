@@ -582,3 +582,46 @@ func (r *Registry) MarkSessionJournalDerivation(sessionID string, derivation int
 	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,derived_version) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET derived_version=excluded.derived_version`, sessionID, derivation)
 	return err
 }
+
+// TranscriptCheckpoint is where a transcript-backed journal stands in its
+// transcript: the journal holds every item recorded before Offset in the file
+// with Identity.
+type TranscriptCheckpoint struct {
+	Offset   int64  `json:"offset"`
+	Identity string `json:"identity"`
+}
+
+func (r *Registry) SessionTranscriptCheckpoint(sessionID string) (TranscriptCheckpoint, bool, error) {
+	var stored string
+	err := r.read.QueryRow(`SELECT transcript_checkpoint FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&stored)
+	if err == sql.ErrNoRows || (err == nil && stored == "") {
+		return TranscriptCheckpoint{}, false, nil
+	}
+	if err != nil {
+		return TranscriptCheckpoint{}, false, err
+	}
+	var checkpoint TranscriptCheckpoint
+	if err := json.Unmarshal([]byte(stored), &checkpoint); err != nil {
+		return TranscriptCheckpoint{}, false, fmt.Errorf("parse session transcript checkpoint: %w", err)
+	}
+	return checkpoint, true, nil
+}
+
+// SetSessionTranscriptCheckpoint records a checkpoint; a writer records it only
+// after the items before its offset are in the journal.
+func (r *Registry) SetSessionTranscriptCheckpoint(sessionID string, checkpoint TranscriptCheckpoint) error {
+	if strings.TrimSpace(sessionID) == "" || checkpoint.Offset < 0 || checkpoint.Identity == "" {
+		return fmt.Errorf("invalid session transcript checkpoint")
+	}
+	encoded, err := json.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,transcript_checkpoint) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET transcript_checkpoint=excluded.transcript_checkpoint`, sessionID, string(encoded))
+	return err
+}
+
+func (r *Registry) ClearSessionTranscriptCheckpoint(sessionID string) error {
+	_, err := r.db.Exec(`UPDATE session_journal_state SET transcript_checkpoint='' WHERE session_id=?`, sessionID)
+	return err
+}

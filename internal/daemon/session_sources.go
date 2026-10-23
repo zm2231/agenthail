@@ -92,6 +92,10 @@ type sessionSource struct {
 	streamCursorErr error
 	anonymous       uint64
 	sourceVersion   uint64
+	// appendFailed records that a journal append of this source failed. The
+	// source then never records a checkpoint, since a later one would claim
+	// the items it lost.
+	appendFailed bool
 }
 
 // sessionSourceSubscription follows a session's journal. Wake receives a
@@ -317,6 +321,9 @@ func (s *sessionSource) run() {
 			s.session.CodexCurrentTurnID = current.CodexCurrentTurnID
 			s.session.ClaudeClosingTurn = current.ClaudeClosingTurn
 			s.session.TranscriptFromStart = false
+			if err := s.recordTranscriptCheckpoint(s.session.TranscriptOffset, s.session.TranscriptIdentity); err != nil {
+				s.appendSourceError(fmt.Errorf("record the transcript checkpoint: %w", err))
+			}
 		}
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -460,7 +467,10 @@ func (s *sessionSource) loadSeed() error {
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
 	if seeded && transcriptBacked {
-		err := s.catchUpLocalTranscript(ctx, trustedIdentity)
+		caughtUp, err := s.catchUpFromCheckpoint(ctx, trustedIdentity)
+		if err == nil && !caughtUp {
+			err = s.catchUpLocalTranscript(ctx, trustedIdentity)
+		}
 		if err == nil {
 			err = s.rederiveJournal(ctx)
 		}
@@ -505,9 +515,68 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	if _, ok := s.adapter.(surface.TranscriptItemReader); ok {
+		if err := s.recordTranscriptCheckpoint(read.TranscriptOffset, read.TranscriptIdentity); err != nil {
+			return err
+		}
 		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, transcriptJournalDerivation)
 	}
 	return nil
+}
+
+// forwardCatchUpLimit bounds how much transcript a source reads forward from
+// its checkpoint. A longer backlog is caught up by paging back from the
+// transcript's end, which stops at the journal.
+var forwardCatchUpLimit int64 = 32 << 20
+
+// catchUpFromCheckpoint appends the items the transcript recorded after the
+// journal's checkpoint, reading each record once. It reports false, having
+// changed nothing, when there is no checkpoint, the transcript was replaced,
+// or the backlog is past forwardCatchUpLimit.
+func (s *sessionSource) catchUpFromCheckpoint(ctx context.Context, trustedIdentity string) (bool, error) {
+	reader, ok := s.adapter.(surface.TranscriptItemReader)
+	if !ok {
+		return false, nil
+	}
+	checkpoint, found, err := s.manager.registry.SessionTranscriptCheckpoint(s.session.ID)
+	if err != nil || !found || (trustedIdentity != "" && checkpoint.Identity != trustedIdentity) {
+		return false, err
+	}
+	s.providerMu.Lock()
+	read, err := reader.TranscriptItems(ctx, &s.session, surface.TranscriptItemsRequest{From: checkpoint.Offset, Identity: checkpoint.Identity, MaxBytes: forwardCatchUpLimit})
+	s.providerMu.Unlock()
+	if errors.Is(err, surface.ErrTranscriptChanged) || errors.Is(err, surface.ErrTranscriptBacklog) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !s.session.TranscriptOffsetSet {
+		s.session.TranscriptOffset = read.End
+		s.session.TranscriptOffsetSet = true
+		s.session.TranscriptIdentity = read.Identity
+		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
+	}
+	s.appendSeedItems(read.Items)
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.Identity); err != nil {
+		return false, err
+	}
+	return true, s.recordTranscriptCheckpoint(read.End, read.Identity)
+}
+
+// recordTranscriptCheckpoint records that the journal holds the transcript's
+// items before offset. Once an append of this source failed it clears the
+// checkpoint instead, so the next source pages back to the journal.
+func (s *sessionSource) recordTranscriptCheckpoint(offset int64, identity string) error {
+	if _, ok := s.adapter.(surface.TranscriptItemReader); !ok || identity == "" {
+		return nil
+	}
+	s.mu.Lock()
+	failed := s.appendFailed
+	s.mu.Unlock()
+	if failed {
+		return s.manager.registry.ClearSessionTranscriptCheckpoint(s.session.ID)
+	}
+	return s.manager.registry.SetSessionTranscriptCheckpoint(s.session.ID, registry.TranscriptCheckpoint{Offset: offset, Identity: identity})
 }
 
 func (s *sessionSource) setSeedErr(err error) {
@@ -539,6 +608,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	pages := make([][]surface.TimelineItem, 0, 2)
 	before := int64(0)
 	transcriptIdentity := trustedIdentity
+	var end int64
 	for {
 		s.providerMu.Lock()
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
@@ -582,6 +652,9 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 			s.session.TranscriptIdentity = read.TranscriptIdentity
 		}
+		if len(pages) == 0 {
+			end = read.TranscriptOffset
+		}
 		pages = append(pages, read.Items)
 		if timelineItemsOverlapJournal(read.Items, known) || read.NextBefore == 0 {
 			break
@@ -594,7 +667,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, transcriptIdentity); err != nil {
 		return err
 	}
-	return nil
+	return s.recordTranscriptCheckpoint(end, transcriptIdentity)
 }
 
 // transcriptJournalDerivation versions how a transcript-backed journal's
@@ -642,11 +715,12 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, transcriptJournalDerivation)
 	}
 	s.providerMu.Lock()
-	items, err := reader.TranscriptItems(ctx, &s.session, from)
+	read, err := reader.TranscriptItems(ctx, &s.session, surface.TranscriptItemsRequest{From: from})
 	s.providerMu.Unlock()
 	if err != nil {
 		return err
 	}
+	items := read.Items
 	derived := make(map[string]bool, len(items))
 	for _, item := range items {
 		derived[item.ID] = true
@@ -909,7 +983,12 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 		return true
 	}
 	_, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: merged.Kind, ProviderKey: journalKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: entry.FullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
-	if err == nil && changed {
+	if err != nil {
+		s.mu.Lock()
+		s.appendFailed = true
+		s.mu.Unlock()
+		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
+	} else if changed {
 		s.wakeFollowers()
 	}
 	return true
@@ -947,6 +1026,9 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	accumulated := payload.Body
 	_, changed, err := s.persist(payload)
 	if err != nil {
+		s.mu.Lock()
+		s.appendFailed = true
+		s.mu.Unlock()
 		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
 		return
 	}

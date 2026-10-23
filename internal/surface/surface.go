@@ -316,7 +316,26 @@ type LocalTranscriptProvider interface {
 // TranscriptItemReader is implemented by an adapter that can derive again,
 // from its transcript, every timeline item recorded at or after an offset.
 type TranscriptItemReader interface {
-	TranscriptItems(ctx context.Context, session *Session, from int64) ([]TimelineItem, error)
+	TranscriptItems(ctx context.Context, session *Session, request TranscriptItemsRequest) (*TranscriptItemsResult, error)
+}
+
+// TranscriptItemsRequest asks for the items recorded at or after From. A
+// non-empty Identity must still name the transcript file, or the read fails
+// with ErrTranscriptChanged; a positive MaxBytes refuses, with
+// ErrTranscriptBacklog, a transcript that holds more than that past From.
+type TranscriptItemsRequest struct {
+	From     int64
+	Identity string
+	MaxBytes int64
+}
+
+// TranscriptItemsResult is the items read and where the transcript stood
+// after them, which is where a source resumes following it.
+type TranscriptItemsResult struct {
+	Items             []TimelineItem
+	End               int64
+	Identity          string
+	ClaudeClosingTurn ClaudeClosingTurn
 }
 
 func IsReadOnlySession(session *Session) bool {

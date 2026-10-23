@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 31
+	schemaVersion   = 32
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -317,6 +317,9 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal_state", "transcript_checkpoint", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -847,7 +850,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	seed_seq INTEGER NOT NULL DEFAULT 0,
 	seed_identity TEXT NOT NULL DEFAULT '',
 	history_before INTEGER NOT NULL DEFAULT -1,
-	derived_version INTEGER NOT NULL DEFAULT 0
+	derived_version INTEGER NOT NULL DEFAULT 0,
+	transcript_checkpoint TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

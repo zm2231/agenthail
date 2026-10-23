@@ -53,6 +53,16 @@ most two seconds for its first pass. A cold journal is seeded by that pass. A
 seeded journal backed by a transcript (Claude, and Codex with a local
 transcript) catches up by reading the transcript newest-first until it meets
 the journal, so turns written while no source ran appear on the next read.
+A Claude journal also keeps a transcript checkpoint in
+`session_journal_state.transcript_checkpoint`: the byte offset and file
+identity up to which it holds the transcript's items. The seed, each catch-up,
+and each live stream window record it after the items they appended. Once a
+journal write of a source has failed, that source clears the checkpoint at
+each of these points instead, so the next source pages back to the journal and
+appends what was lost. A source that starts
+with a checkpoint reads forward from that offset once, deriving items the same
+way a page does. It pages newest-first instead when there is no checkpoint, the
+file identity changed, or more than 32 MiB was written since the checkpoint.
 A Claude journal written by an earlier version of the item derivation is
 rebuilt from the transcript once, at a source start: in one transaction, its
 retained rows are replaced by the items the transcript records from the

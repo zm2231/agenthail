@@ -97,10 +97,13 @@ func (s *rederiveSurface) ReadSession(context.Context, *surface.Session, surface
 	return &surface.SessionReadResult{Items: s.items[len(s.items)-2:], TranscriptOffsetSet: true, TranscriptOffset: 900, TranscriptIdentity: "transcript"}, nil
 }
 
-func (s *rederiveSurface) TranscriptItems(_ context.Context, _ *surface.Session, from int64) ([]surface.TimelineItem, error) {
+func (s *rederiveSurface) TranscriptItems(_ context.Context, _ *surface.Session, request surface.TranscriptItemsRequest) (*surface.TranscriptItemsResult, error) {
+	if request.Identity != "" {
+		return &surface.TranscriptItemsResult{End: 900, Identity: "transcript"}, nil
+	}
 	s.calls++
-	s.from = from
-	return s.items, nil
+	s.from = request.From
+	return &surface.TranscriptItemsResult{Items: s.items, End: 900, Identity: "transcript"}, nil
 }
 
 // earlierDerivationJournal holds what an earlier derivation wrote: rows
