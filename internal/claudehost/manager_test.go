@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -527,6 +528,13 @@ func TestALaterProtocolKeepsARetiringProtocol2HostServingItsSessions(t *testing.
 			}
 			// The host retires the idle session as it drains, and its Claude
 			// lingers after closing its output; a stop must still end it.
+			claudehosttest.WaitFor(t, "the retired session's Claude to close its output and linger", func() bool {
+				_, err := os.Stat(lingering + "." + strconv.Itoa(exiting.PID))
+				return err == nil
+			})
+			if !claudehosttest.Alive(exiting.PID) {
+				t.Fatalf("Claude %d exited before its retired session was stopped", exiting.PID)
+			}
 			if err := client.Close(ctx, retired); err != nil && !claudehost.IsCode(err, "not_open") {
 				t.Fatalf("stopping a session the protocol 2 host retired = %v", err)
 			}

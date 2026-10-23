@@ -411,8 +411,9 @@ lines.on('line', (line) => {
 // still open, finishes its turns and exits. With FAKE_CLAUDE_OUTLIVES_INPUT
 // it keeps running and serving its messaging socket instead, as a Claude
 // whose input an earlier host closed was seen doing. With FAKE_CLAUDE_LINGER_MS
-// it closes its output and exits that much later, and with
-// FAKE_CLAUDE_LINGER_RELEASE once the file it names exists.
+// it closes its output and exits that much later. With
+// FAKE_CLAUDE_LINGER_RELEASE it closes its output, writes <release>.<pid> to
+// say it lingers, and exits once the release file exists.
 lines.on('close', async () => {
   inputClosed = true;
   for (const [id, resolve] of [...pending]) {
@@ -424,9 +425,11 @@ lines.on('close', async () => {
   const release = process.env.FAKE_CLAUDE_LINGER_RELEASE;
   if (release) {
     process.stdout.end();
-    return setInterval(() => {
+    const waiting = setInterval(() => {
       if (fs.existsSync(release)) process.exit(0);
     }, 20);
+    fs.writeFileSync(`${release}.${process.pid}`, '');
+    return waiting;
   }
   const linger = Number(process.env.FAKE_CLAUDE_LINGER_MS);
   if (linger) {
