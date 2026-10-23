@@ -25,7 +25,7 @@ struct ToolContentView: View {
                 rawInput
             case .raw:
                 if diffs.isEmpty {
-                    code(item.text.isEmpty ? "No additional details were recorded." : item.text)
+                    code(item.text.isEmpty ? "No additional details were recorded." : presentation.readableInput)
                 } else {
                     changes(diffs)
                 }

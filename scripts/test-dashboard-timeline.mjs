@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
@@ -47,6 +48,7 @@ const elements = {
   },
 };
 const context = {
+  tools,
   app: { slashCommands: [], pendingEntryScroll: false, transcriptSignature: null },
   labels: { claude: "Claude Code", codex: "Codex" },
   $: (selector) => elements[selector],
@@ -338,6 +340,17 @@ assert(run.includes('<span>App.swift</span><span class="added">+4</span><span cl
 assert(run.includes("Finished 3:13 · "), "the reply that ends a turn shows how long it took and when");
 assert(!run.includes("timeline-annotation"), "the duration joins the reply rather than standing alone");
 assert(/<footer class="turn-footer"><span class="turn-status">Finished 3:13[^<]*<\/span><span class="turn-actions"><button class="turn-action" type="button" data-copy-text="Fixed.">Copy<\/button>/.test(run), "Copy sits on the footer line beside the time");
+const pending = (sessionState, ...after) => context.renderTimeline([
+  { id: "p1", kind: "toolCall", title: "Bash", text: JSON.stringify({ command: "sleep 600", timeout: 600 }), callId: "p1", turnId: "t9" },
+  ...after,
+], { ...session, ...sessionState });
+assert(pending({ status: "busy" }).includes('<p class="timeline-empty">Running</p>'), "a call in a working session's open turn is running");
+assert(pending({ status: "idle", waitingOn: { kind: "approval", id: "w" } }).includes('<p class="timeline-empty">Running</p>'), "a call waiting on approval is running");
+assert(pending({ status: "busy" }, { id: "x", kind: "done", turnId: "t9", status: "cancelled" }).includes("Interrupted before a result"), "a call whose turn was cancelled says so");
+assert(pending({ status: "busy" }, { id: "x", kind: "done", turnId: "t8", status: "cancelled" }).includes('<p class="timeline-empty">Running</p>'), "another turn's end does not interrupt a running call");
+assert(pending({ status: "idle" }).includes("No result recorded"), "a quiet session's call with no end recorded claims nothing more");
+assert(!pending({ status: "busy" }).includes("No result yet"), "no surface guesses that a result is coming");
+assert(pending({ status: "busy" }).includes("$ sleep 600\ntimeout: 600"), "input reads as a command and its fields, not JSON");
 const written = context.renderTimeline(call("w1", "Write", { file_path: "/work/One.swift", content: "one\n" }), session);
 assert(written.includes('<span>One.swift</span><span class="added">+1</span>'), `a final newline does not count as another line: ${written.match(/file-chips.*?<\/div>/)?.[0]}`);
 const long = context.renderTimeline(Array.from({ length: 7 }, (_, index) => call(`b${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);

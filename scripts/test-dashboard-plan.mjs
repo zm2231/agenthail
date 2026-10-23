@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
@@ -27,8 +28,6 @@ assert.equal(context.livePlan(session({ plan: { done: 5, total: 5 } })), null, "
 assert.equal(context.livePlan(session({ plan: { done: 0, total: 0 } })), null, "an empty list shows no badge");
 assert.equal(context.livePlan(session({ plan: undefined })), null, "a row from a daemon that sends no plan shows no badge");
 
-const tools = { toolChanges: () => [], baseName: (value) => value.split("/").pop(), firstLine: (value) => String(value).split("\n")[0], toolInput: (text) => { try { return JSON.parse(text); } catch { return null; } } };
-vm.runInNewContext(`${slice("function toolLine", "function isFailedTool")}\nglobalThis.toolLine = toolLine;`, tools);
 assert.deepEqual({ ...tools.toolLine({ title: "TaskCreate", text: JSON.stringify({ subject: "Parse the list", description: "A long description" }) }) }, { verb: "Add task", object: "Parse the list", code: false });
 assert.deepEqual({ ...tools.toolLine({ title: "TaskUpdate", text: JSON.stringify({ taskId: "2", status: "in_progress" }) }) }, { verb: "Update task", object: "Task 2 · in progress", code: false });
 assert.equal(tools.toolLine({ title: "send_email", text: JSON.stringify({ subject: "Hi", description: "Weekly note" }) }).object, "Weekly note", "other tools keep their description");

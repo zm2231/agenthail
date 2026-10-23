@@ -9,6 +9,7 @@ struct ToolPresentation {
     }
     let content: Content
     let name: String
+    let text: String
     var intent: String? = nil
     var summary: String {
         switch content {
@@ -16,18 +17,24 @@ struct ToolPresentation {
         case .edit(let path, _, _): return path
         case .plan(let steps): return steps.map { $0.0 }.joined(separator: " · ")
         case .raw(let text):
-            if let data = text.data(using: .utf8), let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if name == "TaskUpdate", let id = input["taskId"] as? String {
-                    return (["Task \(id)"] + [(input["status"] as? String)?.replacingOccurrences(of: "_", with: " ")].compactMap { $0 }).joined(separator: " · ")
-                }
-                if name == "TaskCreate", let subject = input["subject"] as? String, !subject.isEmpty { return subject }
-                for key in ["description", "file_path", "path", "pattern", "query", "url", "prompt"] {
-                    if let value = input[key] as? String, !value.isEmpty { return value }
-                }
+            guard let input = Self.input(text) else { return text.isEmpty ? "No input parameters" : text }
+            if name == "TaskUpdate", let id = input["taskId"] as? String {
+                return (["Task \(id)"] + [(input["status"] as? String)?.replacingOccurrences(of: "_", with: " ")].compactMap { $0 }).joined(separator: " · ")
             }
-            return text.isEmpty ? "No input parameters" : text
+            if name == "TaskCreate", let subject = input["subject"] as? String, !subject.isEmpty { return subject }
+            for key in Self.summaryKeys + input.keys.sorted() {
+                if let value = input[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
+            }
+            switch input.count {
+            case 0: return "No input parameters"
+            case 1: return "1 field"
+            default: return "\(input.count) fields"
+            }
         }
     }
+
+    /// Fields that name what a call acted on, most telling first; any other text field comes after them.
+    private static let summaryKeys = ["description", "file_path", "path", "pattern", "query", "url", "prompt", "subject", "message", "title", "name"]
 
     var title: String {
         switch content {
@@ -73,6 +80,7 @@ struct ToolPresentation {
 
     init(name: String, text: String) {
         self.name = name
+        self.text = text
         guard let data = text.data(using: .utf8),
               let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             content = .raw(text)
@@ -185,8 +193,63 @@ extension ToolPresentation {
     }
 
     private var rawText: String {
-        if case .raw(let text) = content { return text }
+        if case .raw = content { return text }
         return ""
+    }
+
+    /// The recorded input as a person reads it: a command first, then every other field as `key: value`,
+    /// with nested values as indented JSON. Input that is not a JSON object reads as recorded.
+    var readableInput: String {
+        guard let input = Self.input(text), !input.isEmpty else { return text }
+        let commandKey = ["command", "cmd"].first { input[$0] is String }
+        var lines = commandKey.map { ["$ " + (input[$0] as! String)] } ?? []
+        for key in input.keys.sorted() where key != commandKey {
+            lines.append(key + ": " + Self.readable(input[key]!))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func readable(_ value: Any) -> String {
+        if let string = value as? String { return string }
+        return json(value, indent: "")
+    }
+
+    /// JSON with sorted keys and two-space indents, written out here so the dashboard can match it exactly.
+    private static func json(_ value: Any, indent: String) -> String {
+        let inner = indent + "  "
+        switch value {
+        case let string as String:
+            return quoted(string)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
+            return number.stringValue
+        case let array as [Any]:
+            if array.isEmpty { return "[]" }
+            return "[\n" + array.map { inner + json($0, indent: inner) }.joined(separator: ",\n") + "\n" + indent + "]"
+        case let object as [String: Any]:
+            if object.isEmpty { return "{}" }
+            return "{\n" + object.keys.sorted().map { inner + quoted($0) + ": " + json(object[$0]!, indent: inner) }.joined(separator: ",\n") + "\n" + indent + "}"
+        default:
+            return "null"
+        }
+    }
+
+    private static func quoted(_ string: String) -> String {
+        var out = "\""
+        for scalar in string.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
+            case _ where scalar.value < 0x20: out += String(format: "\\u%04x", scalar.value)
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out + "\""
     }
 
     private static func input(_ text: String) -> [String: Any]? {
@@ -195,6 +258,59 @@ extension ToolPresentation {
     }
 
     private static func firstLine(_ text: String) -> String {
-        text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        text.split(omittingEmptySubsequences: true) { $0 == "\n" || $0 == "\r\n" }.first.map(String.init) ?? ""
+    }
+}
+
+/// What became of a call with no recorded result, read from the timeline after it: the turn that made it
+/// ended, was interrupted or failed, or it is still going. Never a guess: a call whose turn has no recorded
+/// end reads as running only while its session is active.
+enum ToolCallState: String {
+    case running, interrupted, failed, unrecorded
+
+    var label: String {
+        switch self {
+        case .running: return "Running"
+        case .interrupted: return "Interrupted before a result"
+        case .failed: return "The turn failed before a result"
+        case .unrecorded: return "No result recorded"
+        }
+    }
+}
+
+/// The state of every call in a timeline, by item id.
+struct ToolCallStates: Equatable {
+    private var states: [String: ToolCallState] = [:]
+
+    init() {}
+
+    /// `active` is whether the session is working or waiting on someone now.
+    init(items: [TimelineItem], active: Bool) {
+        var open: [TimelineItem] = []
+        func end(_ state: ToolCallState, where ends: (TimelineItem) -> Bool) {
+            for call in open where ends(call) { states[call.id] = state }
+            open.removeAll(where: ends)
+        }
+        for item in items {
+            if ToolRunSummary.isCall(item) {
+                open.append(item)
+            } else if item.kind == "done" || (item.kind == "event" && item.title == "Turn interrupted") {
+                let state = item.kind == "event" ? .interrupted : Self.state(ending: item.status ?? "")
+                end(state) { $0.turnId == nil || item.turnId == nil || $0.turnId == item.turnId }
+            } else if let turn = item.turnId {
+                end(.unrecorded) { $0.turnId != nil && $0.turnId != turn }
+            }
+        }
+        for call in open { states[call.id] = active ? .running : .unrecorded }
+    }
+
+    subscript(call: String) -> ToolCallState { states[call] ?? .unrecorded }
+
+    private static func state(ending status: String) -> ToolCallState {
+        switch status {
+        case "cancelled", "canceled", "interrupted", "task_cancelled", "task_canceled", "task_aborted", "turn_aborted": return .interrupted
+        case "failed", "error", "systemerror": return .failed
+        default: return .unrecorded
+        }
     }
 }

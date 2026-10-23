@@ -1,4 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
+let tools;
+const toolsReady = import("/js/tool-activity.js").then((module) => { tools = module; });
 const app = {
   state: {
     sessions: [],
@@ -1396,6 +1398,7 @@ function renderAll() {
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 async function load(fresh = false) {
+  await toolsReady;
   if (app.loading) return;
   app.loading = true;
   const slowTimer = setTimeout(() => {
@@ -1611,87 +1614,6 @@ function turnFooter(duration, timestamp) {
 }
 const toolKinds = ["toolCall", "toolResult", "reasoning", "tool", "command"];
 const foldToolsAfter = 6;
-function toolInput(text) {
-  try {
-    const value = JSON.parse(text || "");
-    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-function baseName(path) {
-  return String(path || "").split("/").filter(Boolean).pop() || String(path || "");
-}
-function firstLine(text) {
-  return String(text || "").split("\n").find(line => line.trim()) || "";
-}
-// A final newline ends the last line rather than starting another.
-function textLines(text) {
-  const lines = String(text ?? "").split("\n");
-  if (lines[lines.length - 1] === "") lines.pop();
-  return lines;
-}
-// Lines added and removed between two texts, from their longest common
-// subsequence; texts too large to compare count every line as changed.
-function lineCounts(before, after) {
-  const a = textLines(before);
-  const b = textLines(after);
-  if (a.length * b.length > 250000) return { added: b.length, removed: a.length };
-  let previous = new Array(b.length + 1).fill(0);
-  for (let i = 1; i <= a.length; i += 1) {
-    const current = new Array(b.length + 1).fill(0);
-    for (let j = 1; j <= b.length; j += 1) {
-      current[j] = a[i - 1] === b[j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], current[j - 1]);
-    }
-    previous = current;
-  }
-  const common = previous[b.length];
-  return { added: b.length - common, removed: a.length - common };
-}
-function patchChanges(patch) {
-  const changes = [];
-  for (const line of String(patch || "").split("\n")) {
-    const file = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
-    if (file) changes.push({ path: file[1].trim(), added: 0, removed: 0 });
-    else if (line.startsWith("*** ") || !changes.length) continue;
-    else if (line.startsWith("+")) changes[changes.length - 1].added += 1;
-    else if (line.startsWith("-")) changes[changes.length - 1].removed += 1;
-  }
-  return changes;
-}
-function toolChanges(call) {
-  const input = toolInput(call.text);
-  const name = call.title || "";
-  const path = input?.file_path || input?.path;
-  if (name === "apply_patch") return patchChanges(input?.input || input?.patch || call.text);
-  if (!input || !path) return [];
-  if (typeof input.old_string === "string" && typeof input.new_string === "string") return [{ path, ...lineCounts(input.old_string, input.new_string) }];
-  if (["Write", "write_file"].includes(name) && typeof input.content === "string") return [{ path, added: textLines(input.content).length, removed: 0 }];
-  if (name === "MultiEdit" && Array.isArray(input.edits)) {
-    return [input.edits.reduce((total, edit) => {
-      const counts = lineCounts(edit.old_string || "", edit.new_string || "");
-      return { path, added: total.added + counts.added, removed: total.removed + counts.removed };
-    }, { path, added: 0, removed: 0 })];
-  }
-  return [];
-}
-// What a call did, as a verb and the thing it acted on, for a one-line entry.
-function toolLine(call) {
-  const name = call.title || call.kind || "Tool";
-  const input = toolInput(call.text);
-  const command = input?.command ?? input?.cmd;
-  if (typeof command === "string") return { verb: "Run", object: input.description || firstLine(command), code: !input.description };
-  if (name === "apply_patch") return { verb: "Edit", object: toolChanges(call).map(change => baseName(change.path)).join(", "), code: true };
-  const verbs = { Read: "Read", read_file: "Read", NotebookRead: "Read", view_image: "Read", Write: "Write", write_file: "Write", Edit: "Edit", MultiEdit: "Edit", NotebookEdit: "Edit", Grep: "Search", Glob: "Search", LS: "Search", ToolSearch: "Search", WebSearch: "Search the web", web_search: "Search the web", WebFetch: "Open", Agent: "Delegate", Task: "Delegate", spawn_agent: "Delegate", TodoWrite: "Update plan", update_plan: "Update plan", TaskCreate: "Add task", TaskUpdate: "Update task" };
-  const verb = verbs[name] || name.replace(/^functions\./, "").replace(/^mcp__/, "").replace(/__/g, " · ").replace(/_/g, " ");
-  if (name === "TaskCreate" && typeof input?.subject === "string") return { verb, object: input.subject, code: false };
-  if (name === "TaskUpdate" && input?.taskId) return { verb, object: [`Task ${input.taskId}`, input.status?.replace(/_/g, " ")].filter(Boolean).join(" · "), code: false };
-  if (typeof input?.pattern === "string") return { verb, object: input.pattern, code: true };
-  const path = input?.file_path || input?.path || input?.notebook_path;
-  if (typeof path === "string") return { verb, object: baseName(path), code: true };
-  const detail = input ? ["description", "query", "url", "prompt"].map(key => input[key]).find(value => typeof value === "string" && value) : firstLine(call.text);
-  return { verb, object: firstLine(detail || ""), code: false };
-}
 function isFailedTool(item) {
   return item.status === "failed" || item.status === "error";
 }
@@ -1706,7 +1628,7 @@ function renderToolOutput(result) {
   const copy = result.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(result.text)}">Copy output</button>` : "";
   return `<div class="tool-result" ${timelineItemAttributes(result)}><div class="tool-result-label">${failed ? "Error output" : "Output"}</div>${body}${copy}${metadata}</div>`;
 }
-function renderToolRun(items) {
+function renderToolRun(items, states = new Map()) {
   const entries = [];
   const calls = new Map();
   for (const item of items) {
@@ -1724,20 +1646,20 @@ function renderToolRun(items) {
     const attributes = timelineItemAttributes(item);
     if (item.kind === "reasoning") {
       const body = item.text ? `<div class="turn-content">${markdown(item.text)}</div>` : '<p class="timeline-empty">No recorded content.</p>';
-      return renderToolLine({ verb: "Thought", object: firstLine(item.text), code: false }, false, attributes, body + renderTimelineMetadata(item), false);
+      return renderToolLine({ verb: "Thought", object: tools.firstLine(item.text), code: false }, false, attributes, body + renderTimelineMetadata(item), false);
     }
     if (item.kind === "toolResult") {
-      return renderToolLine({ verb: "Output", object: firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item), isFailedTool(item));
+      return renderToolLine({ verb: "Output", object: tools.firstLine(item.text), code: true }, isFailedTool(item), attributes, renderToolOutput(item), isFailedTool(item));
     }
     const failed = isFailedTool(item) || results.some(isFailedTool);
-    const input = item.text ? `<pre class="tool-input">${escape(item.text)}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
-    const outputs = results.length ? results.map(renderToolOutput).join("") : '<p class="timeline-empty">No result yet</p>';
-    return renderToolLine(toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, failed);
+    const input = item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
+    const outputs = results.length ? results.map(renderToolOutput).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
+    return renderToolLine(tools.toolLine(item), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, failed);
   });
   const changes = [];
   for (const { item, results } of entries) {
     if (item.kind === "reasoning" || item.kind === "toolResult" || isFailedTool(item) || results.some(isFailedTool)) continue;
-    for (const change of toolChanges(item)) {
+    for (const change of tools.toolChanges(item)) {
       const existing = changes.find(other => other.path === change.path);
       if (existing) {
         existing.added += change.added;
@@ -1747,7 +1669,7 @@ function renderToolRun(items) {
       }
     }
   }
-  const chips = changes.length ? `<div class="file-chips">${changes.map(change => `<span class="file-chip" title="${escape(change.path)}" aria-label="${escape(`${baseName(change.path)}, ${change.added} added, ${change.removed} removed`)}"><span>${escape(baseName(change.path))}</span>${change.added ? `<span class="added">+${change.added}</span>` : ""}${change.removed ? `<span class="removed">−${change.removed}</span>` : ""}</span>`).join("")}</div>` : "";
+  const chips = changes.length ? `<div class="file-chips">${changes.map(change => `<span class="file-chip" title="${escape(change.path)}" aria-label="${escape(`${tools.baseName(change.path)}, ${change.added} added, ${change.removed} removed`)}"><span>${escape(tools.baseName(change.path))}</span>${change.added ? `<span class="added">+${change.added}</span>` : ""}${change.removed ? `<span class="removed">−${change.removed}</span>` : ""}</span>`).join("")}</div>` : "";
   const callCount = entries.filter(entry => entry.item.kind !== "reasoning" && entry.item.kind !== "toolResult").length;
   if (callCount <= foldToolsAfter) return `<section class="tool-run">${lines.join("")}${chips}</section>`;
   const failures = entries.filter(({ item, results }) => isFailedTool(item) || results.some(isFailedTool)).length;
@@ -1758,7 +1680,7 @@ function toolRunLabel(entries) {
   const counts = new Map();
   for (const { item } of entries) {
     if (item.kind === "reasoning" || item.kind === "toolResult") continue;
-    const verb = toolLine(item).verb;
+    const verb = tools.toolLine(item).verb;
     counts.set(verb, (counts.get(verb) || 0) + 1);
   }
   const phrases = { Run: ["ran 1 command", "ran %d commands"], Read: ["read 1 file", "read %d files"], Edit: ["edited 1 file", "edited %d files"], Write: ["wrote 1 file", "wrote %d files"], Search: ["searched once", "searched %d times"] };
@@ -1772,8 +1694,9 @@ function toolRunLabel(entries) {
 function renderTimeline(items, session) {
   const out = [];
   let run = [];
+  const states = tools.toolCallStates(items, session.status === "busy" || Boolean(session.waitingOn));
   const flush = () => {
-    if (run.length) out.push(renderToolRun(run));
+    if (run.length) out.push(renderToolRun(run, states));
     run = [];
   };
   for (let index = 0; index < items.length; index += 1) {
@@ -1798,6 +1721,7 @@ function renderTimeline(items, session) {
 function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents) {
   return JSON.stringify([
     session.id,
+    session.status === "busy" || Boolean(session.waitingOn),
     exchanges,
     JSON.stringify(goal || null),
     Boolean(capabilities.goal),

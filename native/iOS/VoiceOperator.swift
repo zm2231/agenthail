@@ -98,6 +98,7 @@ struct AgenthailVoiceOperatorSheet: View {
                             Button("Open full timeline") { openSession(detail.session.id) }
                         }.padding(.top, 12)
                         .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: detail.session.id))
+                        .environment(\.toolCallStates, ToolCallStates(items: detail.timeline?.items ?? [], active: detail.session.status == "busy" || detail.session.waitingOn != nil))
                     } label: {
                         Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                             .font(.subheadline.weight(.medium)).frame(minHeight: 44)

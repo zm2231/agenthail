@@ -1928,6 +1928,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var sender: String? = nil
     var files: [AttachedFile]? = nil
     var resetsAt: String? = nil
+    var turnId: String? = nil
 
     var isPeerMessage: Bool { kind == "message" && role == "peer" }
     /// Model input a provider injected, such as project instructions or hook
