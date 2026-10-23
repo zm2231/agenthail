@@ -33,7 +33,7 @@ enum SessionLaunchDecision: Equatable {
     case failed(String)
 
     init(_ receipt: SessionCreationReceipt, launcher: String?, agent: String) {
-        if receipt.unknown == true {
+        if receipt.outcomeUnknown {
             self = .unconfirmed(receipt.id)
             return
         }
