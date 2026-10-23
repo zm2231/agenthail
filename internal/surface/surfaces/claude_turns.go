@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -366,15 +368,19 @@ func scanTranscriptRecords(ctx context.Context, file *os.File, from, to int64, v
 }
 
 // TranscriptItems returns, oldest first and with their full text, the timeline
-// items the transcript records from the offset to its last complete record,
-// as a transcript page derives them. A prompt recorded twice, queued and then
-// delivered, appears once, at its delivery.
-func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, from int64) ([]surface.TimelineItem, error) {
+// items the transcript records from the requested offset to its last complete
+// record, as a transcript page derives them, and where the transcript stood
+// after them. A prompt recorded twice, queued and then delivered, appears
+// once, at its delivery.
+func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, request surface.TranscriptItemsRequest) (*surface.TranscriptItemsResult, error) {
 	path, err := c.sessionTranscript(session)
 	if err != nil {
 		return nil, err
 	}
 	file, err := os.Open(path)
+	if request.Identity != "" && errors.Is(err, fs.ErrNotExist) {
+		return nil, surface.ErrTranscriptChanged
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -383,11 +389,18 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return nil, err
 	}
+	identity := transcriptFileIdentity(info)
+	if request.Identity != "" && (identity != request.Identity || request.From > info.Size()) {
+		return nil, surface.ErrTranscriptChanged
+	}
 	end, err := completeJSONLEnd(ctx, file, info.Size())
 	if err != nil {
 		return nil, err
 	}
-	from = min(max(0, from), end)
+	from := min(max(0, request.From), end)
+	if request.MaxBytes > 0 && end-from > request.MaxBytes {
+		return nil, surface.ErrTranscriptBacklog
+	}
 	turns, err := claudeTurnStateAt(ctx, file, from)
 	if err != nil {
 		return nil, err
@@ -430,5 +443,13 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 		}
 	}
 	slices.Reverse(kept)
-	return kept, nil
+	result := &surface.TranscriptItemsResult{Items: kept, End: end, Identity: identity}
+	if turns.closing.TurnID != "" {
+		closing := turns.closing
+		if closing.Anchor, err = completionAnchor(path, end); err != nil {
+			return nil, err
+		}
+		result.ClaudeClosingTurn = closing
+	}
+	return result, nil
 }

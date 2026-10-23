@@ -25,7 +25,7 @@ the same turns. `timelineBefore` requests turns strictly before the returned
 their identity, role, title, status and retained body reference. If retention
 has pruned history needed by `timelineBefore`, or the journal has no older-history
 boundary, the endpoint returns `409` with
-`error.code` set to `history_gap` and the retained `earliestSeq`/`latestSeq`.
+`error.code` set to `history_gap` and the retained `earliestPosition`/`latestPosition`.
 
 `timeline.nextBefore` is opaque; clients pass it back unchanged and treat `0`
 as the end of history. A seed into an empty journal records the provider's
@@ -48,11 +48,26 @@ transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journa
 to receive subsequent changes rather than replaying the entire retained journal.
 An older-page request does not change the active stream cursor.
 
-Every newest-page read goes through the shared session source and waits at
-most two seconds for its first pass. A cold journal is seeded by that pass. A
-seeded journal backed by a transcript (Claude, and Codex with a local
-transcript) catches up by reading the transcript newest-first until it meets
-the journal, so turns written while no source ran appear on the next read.
+Every newest-page read starts the shared session source. A streamable session
+whose journal was seeded before is served from the journal at once; what the
+source then catches up gets later seqs and reaches the client on the session
+stream it opens after the page's `journalSeq`. A journal written by an earlier
+item derivation is not: the source's first pass rebuilds it, dropping rows the
+stream has no removal for, so its page waits for that pass. Any other newest-page read waits
+at most two seconds for the source's first pass, and a cold journal is seeded
+by that pass. A seeded journal backed by a transcript (Claude, and Codex with a
+local transcript) catches up by reading the transcript newest-first until it
+meets the journal, so turns written while no source ran appear after it.
+A Claude journal also keeps a transcript checkpoint in
+`session_journal_state.transcript_checkpoint`: the byte offset and file
+identity up to which it holds the transcript's items. The seed, each catch-up,
+and each live stream window record it after the items they appended. Once a
+journal write of a source has failed, that source clears the checkpoint at
+each of these points instead, so the next source pages back to the journal and
+appends what was lost. A source that starts
+with a checkpoint reads forward from that offset once, deriving items the same
+way a page does. It pages newest-first instead when there is no checkpoint, the
+file identity changed, or more than 32 MiB was written since the checkpoint.
 A Claude journal written by an earlier version of the item derivation is
 rebuilt from the transcript once, at a source start: in one transaction, its
 retained rows are replaced by the items the transcript records from the
@@ -104,3 +119,28 @@ Optional `limit` (1–200) returns `nextCursor`; pass it as `cursor` with the sa
 filters. A changed catalog or snapshot returns `409 catalog_changed` rather
 than silently skipping or repeating rows. Cache entries are invalidated by
 catalog changes and state-relevant events, not transcript output.
+
+## Sent prompts
+
+`GET /api/v1/prompts` (scope `read`) lists what a person typed into this host's
+sessions, newest first, for composer history and prompt search. It takes
+`sessionId` (omit it for every session), `q` (a literal substring, at most 200
+characters), `limit` (1 to 200, default 50) and `before` (the `nextBefore` of
+the previous page). The response is `{"prompts":[{sessionId, itemId, turnId,
+ts, text}], "nextBefore"}`; an empty `nextBefore` is the end. `?host=` and
+`host::id` session ids are routed like other per-session reads, and each daemon
+answers only for its own sessions, so a client searching every computer asks
+each host and merges by `ts`.
+
+A prompt is a user message the journal recorded from a person: messages from
+peers, task notifications, injected context and continuation summaries are
+left out, and so are subagents, delegated sessions, sessions an agent started
+and sessions mirrored from another host. A request scans at most 2000 journal
+rows; when it stops short of `limit` it returns the cursor it reached, so a
+rare `q` match may take several pages.
+
+The prompts come only from the journal, and the journal records a session
+only once something reads it: a session page read, a session stream, a
+voice call, or a watch or relay that holds it. A session nothing has read
+since the journal was added, such as a closed terminal Claude session or an
+older Codex thread, has no sent prompts until then.

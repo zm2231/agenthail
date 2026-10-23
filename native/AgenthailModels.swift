@@ -1791,6 +1791,14 @@ struct SessionRequests: Decodable, Hashable {
     /// the settings' default, which a session can start in but not be set to.
     static let permissionModes = ["acceptEdits", "auto", "plan", "manual", "dontAsk", "bypassPermissions"]
 
+    // Bypass permissions and Don't ask stay menu-only, so a key press never lands a session there.
+    static let cyclingModes = ["manual", "acceptEdits", "plan", "auto"]
+
+    static func cycled(from mode: String) -> String {
+        guard let index = cyclingModes.firstIndex(of: mode) else { return mode == "" || mode == "default" ? "acceptEdits" : "manual" }
+        return cyclingModes[(index + 1) % cyclingModes.count]
+    }
+
     static func permissionModeLabel(_ mode: String) -> String {
         switch mode {
         case "": return "Default (Claude settings)"
@@ -1853,5 +1861,79 @@ enum MetadataLabels {
         guard let next, next != current else { return current ?? "Choose" }
         guard let current else { return "\(next) from next turn" }
         return "\(current) · \(next) from next turn"
+    }
+}
+
+enum QueueTakeBack {
+    /// Queued messages go back ahead of the draft, oldest first, as they would have been sent.
+    static func text(queued: [String], draft: String) -> String {
+        let parts = queued.filter { !$0.isEmpty } + (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [draft])
+        return parts.joined(separator: "\n\n")
+    }
+}
+
+struct ComposerStash: Equatable {
+    var text: String
+    var attachments: [ComposerAttachment]
+}
+
+struct PromptItem: Decodable, Equatable, Identifiable {
+    var id: String { sessionId + "/" + itemId }
+    var sessionId: String
+    let itemId: String
+    let turnId: String?
+    let ts: String
+    let text: String
+
+    var sentAt: Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: ts) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: ts)
+    }
+}
+
+struct PromptsPage: Decodable {
+    let prompts: [PromptItem]
+    let nextBefore: String?
+}
+
+/// Steps through what a session's composer has sent, newest first, with the
+/// draft in progress kept aside until the person steps back past the newest.
+struct PromptHistory: Equatable {
+    private(set) var entries: [String] = []
+    private(set) var position: Int?
+    private var draft = ""
+
+    var isBrowsing: Bool { position != nil }
+
+    mutating func replace(_ texts: [String]) {
+        var seen = Set<String>()
+        entries = texts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && seen.insert($0).inserted }
+        if let position, position >= entries.count { self.position = entries.isEmpty ? nil : entries.count - 1 }
+    }
+
+    mutating func older(from current: String) -> String? {
+        let next = (position ?? -1) + 1
+        guard next < entries.count else { return nil }
+        if position == nil { draft = current }
+        position = next
+        return entries[next]
+    }
+
+    mutating func newer() -> String? {
+        guard let position else { return nil }
+        if position == 0 {
+            self.position = nil
+            return draft
+        }
+        self.position = position - 1
+        return entries[position - 1]
+    }
+
+    mutating func stopBrowsing() {
+        position = nil
+        draft = ""
     }
 }

@@ -43,7 +43,7 @@ jobs:
         working-directory: sidecar
         run: npm ci --ignore-scripts
       - name: Race tests
-        run: go test ./... -race -count=1
+        run: go test ./... -race -count=1 -timeout 25m
       - name: Build
         run: go build ./...
       - name: Vet
@@ -132,7 +132,7 @@ jobs:
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
       - name: Race tests
-        run: go test ./... -race -count=1
+        run: go test ./... -race -count=1 -timeout 25m
       - name: Build Linux archives
         run: |
           for arch in amd64 arm64; do

@@ -9,6 +9,7 @@ enum AgenthailAPIError: LocalizedError {
     case requestStale(String)
     case outcomeUnknown(String)
     case historyGap(String)
+    case olderHost
     case streamGap
     case streamUnsupported
     case streamClosed
@@ -23,6 +24,7 @@ enum AgenthailAPIError: LocalizedError {
         case .requestStale(let message): return message
         case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
+        case .olderHost: return "This computer runs an older Agenthail. Update it to use this."
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
         case .streamClosed: return "The Agenthail event stream disconnected."
@@ -35,6 +37,11 @@ enum AgenthailAPIError: LocalizedError {
     static func sharedConversationHolders(_ message: String) -> Int? {
         guard let match = message.firstMatch(of: #/is open in (\d+) terminals: .*; send to one with claude:\d+/#) else { return nil }
         return Int(match.1)
+    }
+
+    static func isUnknownRoute(_ data: Data?) -> Bool {
+        guard let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return (object["error"] as? [String: Any])?["code"] as? String == "unknown_route"
     }
 
     static let disconnectedGuidance = "Agenthail is not connected. Restart it from the menu bar, then refresh."
@@ -55,6 +62,8 @@ final class AgenthailAPI: @unchecked Sendable {
     private let baseURL: URL
     private let token: String
     var holderPins = HolderPins.shared
+    private let snapshotLock = NSLock()
+    private var heldSnapshot: (tag: String, snapshot: DashboardSnapshot)?
 
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
@@ -104,8 +113,20 @@ final class AgenthailAPI: @unchecked Sendable {
         return version
     }
 
+    /// A plain snapshot request names the snapshot it last received, and the
+    /// daemon answers 304 while that snapshot is still current.
     func snapshot(fresh: Bool = false) async throws -> DashboardSnapshot {
-        try await get("/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
+        var request = authorizedRequest(path: "/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
+        let held = fresh ? nil : snapshotLock.withLock { heldSnapshot }
+        if let held { request.setValue(held.tag, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await session.data(for: request)
+        let http = response as? HTTPURLResponse
+        if let held, http?.statusCode == 304 { return held.snapshot }
+        try validate(response: response, data: data)
+        let loaded = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+        let tag = http?.value(forHTTPHeaderField: "ETag")
+        snapshotLock.withLock { heldSnapshot = tag.map { (tag: $0, snapshot: loaded) } }
+        return loaded
     }
 
     /// Every direct subagent of a session, including the ones the session list
@@ -165,6 +186,7 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard response.statusCode == 200 else {
             if response.statusCode == 413 { throw AgenthailAPIError.request(413, "This image is too large to display on the device.") }
+            if AgenthailAPIError.isUnknownRoute(await Self.errorBody(bytes)) { throw AgenthailAPIError.olderHost }
             throw AgenthailAPIError.request(response.statusCode, HTTPURLResponse.localizedString(forStatusCode: response.statusCode))
         }
         if let length = response.value(forHTTPHeaderField: "Content-Length"), let length = Int(length), length > 10 * 1024 * 1024 {
@@ -322,6 +344,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func prompts(sessionID: String? = nil, query: String = "", before: String? = nil, limit: Int = 50, host: String? = nil) async throws -> PromptsPage {
+        var components = URLComponents()
+        components.path = "/api/v1/prompts"
+        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+            + (sessionID.map { [URLQueryItem(name: "sessionId", value: $0)] } ?? [])
+            + (query.isEmpty ? [] : [URLQueryItem(name: "q", value: query)])
+            + (before.map { [URLQueryItem(name: "before", value: $0)] } ?? [])
+            + (host.map { [URLQueryItem(name: "host", value: $0)] } ?? [])
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func devices() async throws -> [DeviceState] {
         let response: DeviceListResponse = try await get("/api/v1/devices")
         return response.devices
@@ -364,6 +398,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
+            if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
                 .flatMap { $0["error"] as? [String: String] }?["message"] ?? "Pairing failed."
             throw AgenthailAPIError.request(response.statusCode, message)
@@ -474,7 +509,7 @@ final class AgenthailAPI: @unchecked Sendable {
         var request = authorizedRequest(path: "/api/v1/events")
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
-        try validate(response: response, data: nil)
+        try await validateStream(response: response, bytes: bytes)
         await onConnected()
         try await Self.readEvents(bytes, as: AgenthailEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
@@ -488,10 +523,7 @@ final class AgenthailAPI: @unchecked Sendable {
         var request = authorizedRequest(path: path)
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
-        if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw await Self.streamConflict(bytes)
-        }
-        try validate(response: response, data: nil)
+        try await validateStream(response: response, bytes: bytes)
         await onConnected()
         try await Self.readEvents(bytes, as: SessionStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
@@ -515,10 +547,7 @@ final class AgenthailAPI: @unchecked Sendable {
         var request = authorizedRequest(path: path)
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
-        if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw await Self.streamConflict(bytes)
-        }
-        try validate(response: response, data: nil)
+        try await validateStream(response: response, bytes: bytes)
         await onConnected()
         try await Self.readEvents(bytes, as: CatalogStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
@@ -596,7 +625,14 @@ final class AgenthailAPI: @unchecked Sendable {
         }
     }
 
-    private static func streamConflict(_ bytes: URLSession.AsyncBytes) async -> AgenthailAPIError {
+    private func validateStream(response: URLResponse, bytes: URLSession.AsyncBytes) async throws {
+        guard let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) else { return }
+        let body = await Self.errorBody(bytes)
+        if http.statusCode == 409 { throw Self.streamConflict(body) }
+        try validate(response: response, data: body)
+    }
+
+    private static func errorBody(_ bytes: URLSession.AsyncBytes) async -> Data {
         let task = bytes.task
         let deadline = Task {
             try? await Task.sleep(for: .seconds(2))
@@ -610,7 +646,7 @@ final class AgenthailAPI: @unchecked Sendable {
                 if data.count >= 16 * 1024 { break }
             }
         } catch {}
-        return streamConflict(data)
+        return data
     }
 
     static func streamConflict(_ data: Data) -> AgenthailAPIError {
@@ -630,6 +666,7 @@ final class AgenthailAPI: @unchecked Sendable {
                !text.isEmpty, text.count <= 500, !text.hasPrefix("{"), !text.hasPrefix("<") {
                 message = text
             }
+            if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail

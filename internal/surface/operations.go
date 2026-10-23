@@ -42,9 +42,13 @@ func (o TurnOptions) Validate(kind SurfaceKind) error {
 	return nil
 }
 
+// ForkOptions name where a fork's history ends. BeforeTurnID asks for the
+// history before a turn; the daemon turns it into LastTurnID from the
+// session's journal, so a surface only sees LastTurnID.
 type ForkOptions struct {
-	Model      string `json:"model,omitempty"`
-	LastTurnID string `json:"lastTurnId,omitempty"`
+	Model        string `json:"model,omitempty"`
+	LastTurnID   string `json:"lastTurnId,omitempty"`
+	BeforeTurnID string `json:"beforeTurnId,omitempty"`
 }
 type SessionForker interface {
 	ForkSession(context.Context, *Session, ForkOptions) (*Session, error)

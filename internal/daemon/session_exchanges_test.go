@@ -97,10 +97,13 @@ func (s *rederiveSurface) ReadSession(context.Context, *surface.Session, surface
 	return &surface.SessionReadResult{Items: s.items[len(s.items)-2:], TranscriptOffsetSet: true, TranscriptOffset: 900, TranscriptIdentity: "transcript"}, nil
 }
 
-func (s *rederiveSurface) TranscriptItems(_ context.Context, _ *surface.Session, from int64) ([]surface.TimelineItem, error) {
+func (s *rederiveSurface) TranscriptItems(_ context.Context, _ *surface.Session, request surface.TranscriptItemsRequest) (*surface.TranscriptItemsResult, error) {
+	if request.Identity != "" {
+		return &surface.TranscriptItemsResult{End: 900, Identity: "transcript"}, nil
+	}
 	s.calls++
-	s.from = from
-	return s.items, nil
+	s.from = request.From
+	return &surface.TranscriptItemsResult{Items: s.items, End: 900, Identity: "transcript"}, nil
 }
 
 // earlierDerivationJournal holds what an earlier derivation wrote: rows
@@ -161,7 +164,7 @@ func TestSourceStartRederivesAnEarlierJournalOnce(t *testing.T) {
 	earlierDerivationJournal(t, r, from.ID)
 	adapter := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
 	start := func() {
-		source := &sessionSource{manager: newSessionSourceManager(r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+		source := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 		if err := source.loadSeed(); err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +213,7 @@ func TestSessionStreamCursorRecoversAcrossARederivedJournal(t *testing.T) {
 	}
 	earlierDerivationJournal(t, r, from.ID)
 	adapter := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
-	source := &sessionSource{manager: newSessionSourceManager(r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: adapter, epoch: "rederive", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	if err := source.catchUpLocalTranscript(context.Background(), "transcript"); err != nil {
 		t.Fatal(err)
 	}

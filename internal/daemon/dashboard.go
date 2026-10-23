@@ -512,8 +512,16 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
 	if cacheable && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
-		state := dashboard.state
+		state, tag := dashboard.state, dashboardSnapshotTag(dashboard.state, dashboard.cachedVersion, dashboard.stateAt)
 		dashboard.stateMu.Unlock()
+		if r.URL.RawQuery == "" {
+			w.Header().Set("ETag", tag)
+			if r.Header.Get("If-None-Match") == tag {
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
 		d.writeDashboardSnapshot(w, r, state)
 		return
 	}
@@ -545,9 +553,20 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		dashboard.state = state
 		dashboard.stateAt = time.Now()
 		dashboard.cachedVersion = version
+		tag := dashboardSnapshotTag(state, version, dashboard.stateAt)
 		dashboard.stateMu.Unlock()
+		if r.URL.RawQuery == "" {
+			w.Header().Set("ETag", tag)
+		}
 	}
 	d.writeDashboardSnapshot(w, r, state)
+}
+
+// dashboardSnapshotTag names one cached snapshot: the cached state is never
+// changed once stored, so its catalog position, state version and build time
+// identify the body a plain snapshot request receives.
+func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Time) string {
+	return fmt.Sprintf(`"%s-%d-%d-%d"`, state.HostEpoch, state.CatalogSeq, version, builtAt.UnixNano())
 }
 
 func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
@@ -689,6 +708,14 @@ func (dashboard *dashboardServer) asset(contentType string, body []byte) http.Ha
 }
 
 func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeAPIError(w, http.StatusNotFound, "unknown_route", "This Agenthail has no "+r.URL.Path+"; it runs an older version.")
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -2100,6 +2127,13 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		cancel()
 	} else if timelineBefore > 0 {
 		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	} else if atOnce, err := d.sources.servesPageAtOnce(session, adapter); err == nil && atOnce {
+		// What the source catches up arrives on the session stream after the
+		// page's seq.
+		if err := d.sources.start(session, adapter); err != nil {
+			d.log.Printf("start session source %s: %s", d.resolveDisplay(session.ID), err)
+		}
+		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
 	} else {
 		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
 		seedErr := d.sources.seed(seedCtx, session, adapter)
@@ -2116,8 +2150,8 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 				"code":    "history_gap",
 				"message": "The requested older session history is no longer retained.",
 			},
-			"earliestSeq": historyGap.EarliestSeq,
-			"latestSeq":   historyGap.LatestSeq,
+			"earliestPosition": historyGap.Earliest,
+			"latestPosition":   historyGap.Latest,
 		})
 		return
 	}

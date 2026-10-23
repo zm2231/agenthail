@@ -95,10 +95,14 @@ func TestClaudeTranscriptItemsMatchThePageFromAnOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := transcriptItemOffsetForTest(t, page.Items[3].ID)
-	got, err := NewClaude(nil, t.TempDir()).TranscriptItems(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, from)
+	read, err := NewClaude(nil, t.TempDir()).TranscriptItems(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.TranscriptItemsRequest{From: from})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if read.End != page.TranscriptOffset || read.Identity != page.TranscriptIdentity || read.ClaudeClosingTurn != page.ClaudeClosingTurn {
+		t.Fatalf("read ends at %d %q closing %+v; the page at %d %q closing %+v", read.End, read.Identity, read.ClaudeClosingTurn, page.TranscriptOffset, page.TranscriptIdentity, page.ClaudeClosingTurn)
+	}
+	got := read.Items
 	// The record at from also carries the done of the turn closing before it.
 	want := page.Items[2:]
 	if len(got) != len(want) {
@@ -178,5 +182,41 @@ func TestClaudeSourceStartedWhileATurnClosesFinishesItOnceWhenIdle(t *testing.T)
 	}
 	if len(done) != 1 || len(pageDone) != 1 || done[0].ID != pageDone[0].ID || done[0].TurnID != "u1" || pageDone[0].TurnID != "u1" {
 		t.Fatalf("stream done %+v, page done %+v", done, pageDone)
+	}
+}
+
+func TestClaudeTranscriptItemsRefuseAReplacedTranscriptAndABacklogPastTheLimit(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"first"}}`+"\n"+claudeCatchUpTurns)
+	claude := NewClaude(nil, t.TempDir())
+	session := &surface.Session{Transcript: path, Status: surface.StatusIdle}
+	whole, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{Identity: whole.Identity, MaxBytes: whole.End - 1}); !errors.Is(err, surface.ErrTranscriptBacklog) {
+		t.Fatalf("a backlog past the limit: err=%v", err)
+	}
+	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{From: 1, Identity: whole.Identity, MaxBytes: whole.End - 1}); err != nil {
+		t.Fatalf("a backlog within the limit: %v", err)
+	}
+	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{From: whole.End + 1, Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
+		t.Fatalf("an offset past a shrunk transcript: err=%v", err)
+	}
+	if _, err := claude.TranscriptItems(context.Background(), &surface.Session{Transcript: path + ".gone", Status: surface.StatusIdle}, surface.TranscriptItemsRequest{Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
+		t.Fatalf("a removed transcript: err=%v", err)
+	}
+	replacement := path + ".new"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(replacement, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claude.TranscriptItems(context.Background(), session, surface.TranscriptItemsRequest{Identity: whole.Identity}); !errors.Is(err, surface.ErrTranscriptChanged) {
+		t.Fatalf("a replaced transcript: err=%v", err)
 	}
 }

@@ -231,6 +231,79 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testTakingBackAQueuedMessageFollowsItsSessionAcrossARekey() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(#"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"claude","name":"task","status":"working","queueCount":1,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#.utf8)))
+        model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
+        func queued(_ id: Int, _ message: String) throws -> QueueState {
+            var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"old","target":"old","message":"\#(message)","status":"pending","evidence":"","attempts":0,"queuedAt":"now"}"#.utf8))
+            item.hostID = "computer"
+            return item
+        }
+        try await model.takeBack(queued(9, "first"))
+        await model.loadSession("computer::old")
+        XCTAssertEqual(model.selectedSessionID, "computer::new")
+        XCTAssertEqual(model.composer, "first")
+        try await model.takeBack(queued(10, "second"))
+        XCTAssertEqual(model.composer, "second\n\nfirst")
+        XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["action"] as? String }, ["queue-cancel", "queue-cancel"])
+        XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["queueId"] as? Int }, [9, 10])
+    }
+
+    @MainActor
+    func testAStashedDraftComesBackAfterSendingAndFollowsARekey() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(Self.codexSessionSnapshot.utf8)))
+        await model.loadSession("computer::old")
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::old"
+        model.selectedDetail = detail
+        model.composer = "half written"
+        model.toggleStash()
+        XCTAssertEqual(model.composer, "")
+        XCTAssertEqual(model.stashes["computer::old"]?.text, "half written")
+        model.composer = "a quick question"
+        model.toggleStash()
+        XCTAssertEqual(model.composer, "half written")
+        XCTAssertEqual(model.stashes["computer::old"]?.text, "a quick question")
+        model.send(to: try XCTUnwrap(model.snapshot?.sessions.first))
+        XCTAssertEqual(model.composer, "a quick question")
+        XCTAssertNil(model.stashes["computer::old"])
+        for _ in 0 ..< 200 where !ParityProtocol.state.actions.contains(where: { $0["action"] as? String == "send" }) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(ParityProtocol.state.actions.last?["message"] as? String, "half written")
+        model.toggleStash()
+        model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
+        XCTAssertNil(model.stashes["computer::old"])
+        XCTAssertEqual(model.stashes["computer::new"]?.text, "a quick question")
+    }
+
+    @MainActor
+    func testRecentPromptsAndForkingFromAPrompt() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(Self.codexSessionSnapshot.utf8)))
+        let found = await model.recentPrompts(sessionID: "computer::old", query: "sec")
+        XCTAssertEqual(found.prompts.map(\.text), ["second", "first"])
+        XCTAssertEqual(found.prompts.map(\.sessionId), ["computer::old", "computer::old"])
+        XCTAssertTrue(ParityProtocol.state.promptQueries.first?.contains("sessionId=old") == true)
+        XCTAssertTrue(ParityProtocol.state.promptQueries.first?.contains("q=sec") == true)
+        let session = try XCTUnwrap(model.snapshot?.sessions.first)
+        XCTAssertTrue(model.canFork(session))
+        try await model.fork(session, before: found.prompts[0])
+        let fork = try XCTUnwrap(ParityProtocol.state.actions.last)
+        XCTAssertEqual(fork["action"] as? String, "session-fork")
+        XCTAssertEqual(fork["sessionId"] as? String, "old")
+        XCTAssertEqual((fork["fork"] as? [String: Any])?["beforeTurnId"] as? String, "t2")
+        XCTAssertEqual(model.requestedSessionID, "computer::forked")
+        await model.loadSession("computer::forked")
+        XCTAssertEqual(model.composer, "second")
+    }
+
+    private static let codexSessionSnapshot = #"{"updatedAt":"now","daemon":{"running":true},"surfaces":[],"sessions":[{"id":"old","surface":"codex","name":"task","status":"idle","queueCount":0,"open":true,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}],"totalSessions":1,"queue":[],"channels":[],"relays":[],"history":[],"attention":[],"codexRecentHours":24}"#
+
+    @MainActor
     func testCreatingOnAMirroredComputerKeysTheSessionByItsOwner() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -256,14 +329,20 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var accepted = false
         private var failReceipt = false
         private var actionKeys: [String?] = []
+        private var queries: [String] = []
+        var promptQueries: [String] { lock.withLock { queries } }
+        func recordQuery(_ query: String) { lock.withLock { queries.append(query) } }
         var actions: [[String:Any]] { lock.withLock { records } }
         var actionIdempotencyKeys: [String?] { lock.withLock { actionKeys } }
-        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false, failReceipt: Bool = false) { lock.withLock { records = []; actionKeys = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted; self.failReceipt = failReceipt } }
+        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false, failReceipt: Bool = false) { lock.withLock { records = []; actionKeys = []; queries = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted; self.failReceipt = failReceipt } }
         func respond(_ body: [String:Any], idempotencyKey: String?) -> (Int,String) { lock.withLock {
             records.append(body)
             actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if failReceipt { return (409,#"{"ok":false,"accepted":true,"retryable":false,"launcher":"tmux","error":"launcher busy"}"#) }
+            if body["action"] as? String == "session-fork" {
+                return (200, #"{"ok":true,"result":{"session":{"id":"forked"}}}"#)
+            }
             if (body["action"] as? String)?.contains("create") == true {
                 if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
                 if body["surface"] as? String == "claude" {
@@ -285,6 +364,9 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating:0,count:4096); while stream.hasBytesAvailable { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(contentsOf:buffer.prefix(n)) } }
             let body = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
             (status,text) = Self.state.respond(body, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+        } else if request.url?.path == "/api/v1/prompts" {
+            Self.state.recordQuery(request.url?.query ?? "")
+            text = #"{"prompts":[{"sessionId":"old","itemId":"i2","turnId":"t2","ts":"2026-10-20T10:00:02Z","text":"second"},{"sessionId":"old","itemId":"i1","turnId":"t1","ts":"2026-10-20T10:00:01Z","text":"first"}],"nextBefore":""}"#
         } else if request.url?.path != "/api/v1/session-options" { status = 503; text = #"{"error":{"message":"fixture refresh unavailable"}}"# }
         client?.urlProtocol(self,didReceive:HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:nil,headerFields:["Content-Type":"application/json"])!,cacheStoragePolicy:.notAllowed)
         client?.urlProtocol(self,didLoad:Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)

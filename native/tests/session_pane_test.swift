@@ -303,6 +303,28 @@ struct SessionPaneTest {
         check(archivePane.archivedTab?.id == "NA" && archivePane.archivedTabError != nil, "a failure after dismissal brings the notice back with the reason")
         archiveModel.closePane(archivePane)
         archive.stop()
+        var cancels: [String] = []
+        let queueServer = try! StubServer { request, _ in
+            guard request.contains("queue-cancel") else { return StubServer.reply("200 OK", "{}") }
+            cancels.append(request)
+            return request.contains("\"queueId\":3") ? StubServer.reply("409 Conflict", #"{"error":{"message":"already delivering"}}"#) : StubServer.reply("200 OK", "{}")
+        }
+        let queuePort = await queueServer.ready()
+        let queueModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(queuePort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        func queued(_ id: Int64, _ message: String) -> QueueState {
+            try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"Q","target":"q","message":"\#(message)","status":"pending","attempts":0,"queuedAt":"2026-10-22 12:00:00","evidence":""}"#.utf8))
+        }
+        queueModel.draft(for: "Q").text = "draft"
+        queueModel.takeBackQueued([queued(2, "second"), queued(1, "first")], sessionID: "Q")
+        for _ in 0..<60 where queueModel.draft(for: "Q").text == "draft" { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.draft(for: "Q").text == "first\n\nsecond\n\ndraft" && cancels.count == 2 && cancels[0].contains("\"queueId\":1"), "queued messages come back ahead of the draft, oldest first: \(queueModel.draft(for: "Q").text.debugDescription)")
+        queueModel.draft(for: "Q").text = ""
+        queueModel.takeBackQueued([queued(4, "after"), queued(3, "on its way")], sessionID: "Q")
+        for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        try? await Task.sleep(for: .milliseconds(200))
+        check(queueModel.draft(for: "Q").text == "" && cancels.count == 3 && queueModel.operationError?.contains("already delivering") == true, "a message that can't be cancelled stays queued, and later ones stay behind it: \(queueModel.draft(for: "Q").text.debugDescription) \(cancels.count)")
+        queueServer.stop()
+
         let unreachable = model.openPane()
         unreachable.archivedTab = noticeA
         await unreachable.unarchiveTab(noticeA)

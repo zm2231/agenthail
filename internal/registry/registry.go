@@ -54,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 31
+	schemaVersion   = 33
 	readConnections = 4
 	// deadReviewWindow is how long a failed or uncertain delivery stays a
 	// current decision before it moves to history. Pending work never ages out.
@@ -259,6 +259,9 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if err := ensureJournalPromptIndexes(tx); err != nil {
+		return err
+	}
 	// The catalog lists sessions most recent first; reading them in index order
 	// spares sorting every row's projection on each snapshot.
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
@@ -319,6 +322,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_state", "transcript_checkpoint", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -326,6 +332,26 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE catalog_state SET projection_clock=(SELECT MAX(projection_generation) FROM catalog_sessions) WHERE projection_clock<(SELECT COALESCE(MAX(projection_generation),0) FROM catalog_sessions)`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal", "position", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal_state", "pruned_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if version < 33 {
+		if _, err := tx.Exec(`UPDATE session_journal SET position=seq WHERE position=0`); err != nil {
+			return err
+		}
+		// Trims ran in seq order until now, so every seq below a journal's
+		// earliest row was pruned or rewritten; streams keep reporting a gap
+		// for cursors there.
+		if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_seq=MAX(pruned_before,COALESCE((SELECT MIN(seq)-1 FROM session_journal WHERE session_journal.session_id=session_journal_state.session_id),0))`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_journal_position ON session_journal(session_id, position)`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -552,16 +578,16 @@ func upgradeReleasedProjectsTable(tx *sql.Tx) error {
 }
 
 func columnExists(tx *sql.Tx, table, name string) (bool, error) {
-	rows, err := tx.Query(`PRAGMA table_info(` + table + `)`)
+	rows, err := tx.Query(`PRAGMA table_xinfo(` + table + `)`)
 	if err != nil {
 		return false, err
 	}
 	found := false
 	for rows.Next() {
-		var cid, notNull, pk int
+		var cid, notNull, pk, hidden int
 		var columnName, columnType string
 		var defaultValue any
-		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk); err != nil {
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk, &hidden); err != nil {
 			rows.Close()
 			return false, err
 		}
@@ -827,6 +853,7 @@ CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DES
 CREATE TABLE IF NOT EXISTS session_journal (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	seq INTEGER NOT NULL,
+	position INTEGER NOT NULL DEFAULT 0,
 	kind TEXT NOT NULL,
 	provider_key TEXT NOT NULL DEFAULT '',
 	payload BLOB NOT NULL,
@@ -843,11 +870,13 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
+	pruned_seq INTEGER NOT NULL DEFAULT 0,
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
 	seed_seq INTEGER NOT NULL DEFAULT 0,
 	seed_identity TEXT NOT NULL DEFAULT '',
 	history_before INTEGER NOT NULL DEFAULT -1,
-	derived_version INTEGER NOT NULL DEFAULT 0
+	derived_version INTEGER NOT NULL DEFAULT 0,
+	transcript_checkpoint TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

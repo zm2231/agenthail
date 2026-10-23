@@ -19,6 +19,10 @@ func TestCodexInjectedContextIsOnlyCodexFragments(t *testing.T) {
 		{environment + "\nRun the tests.", false},
 		{"What does <environment_context> mean?", false},
 		{"<environment_context>never closed", false},
+		{"<codex_internal_context source=\"goal\">\nContinue working toward the active thread goal.\n</codex_internal_context>", true},
+		{"<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>", true},
+		{"<recommended_plugins>\n- Box\n</recommended_plugins>\n" + environment, true},
+		{"<codex_internal_context source=\"goal\">\nContinue.\n</codex_internal_context>\nAlso fix the tests.", false},
 		{"", false},
 	} {
 		if got := IsCodexInjectedContext(test.text); got != test.want {

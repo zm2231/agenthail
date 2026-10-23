@@ -39,6 +39,15 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case nextTab
     case previousTab
     case keepTab
+    case composerNewline
+    case composerDeleteToLineStart
+    case composerDeleteWordBackward
+    case composerPaste
+    case composerSendNow
+    case composerCycleMode
+    case composerInterrupt
+    case composerStash
+    case composerSearchHistory
 
     var id: String { rawValue }
 
@@ -66,6 +75,15 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .nextTab: "Next tab"
         case .previousTab: "Previous tab"
         case .keepTab: "Keep tab open"
+        case .composerNewline: "New line"
+        case .composerDeleteToLineStart: "Delete to start of line"
+        case .composerDeleteWordBackward: "Delete previous word"
+        case .composerPaste: "Paste (also ⌘V)"
+        case .composerSendNow: "Send now, steering a running turn"
+        case .composerCycleMode: "Change mode"
+        case .composerInterrupt: "Stop the running turn (twice clears the draft)"
+        case .composerStash: "Stash the draft, or bring it back"
+        case .composerSearchHistory: "Search what you sent"
         }
     }
 
@@ -90,6 +108,15 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .closeTab: StoredShortcut(kVK_ANSI_W, cmdKey)
         case .nextTab: StoredShortcut(kVK_ANSI_RightBracket, cmdKey | shiftKey)
         case .previousTab: StoredShortcut(kVK_ANSI_LeftBracket, cmdKey | shiftKey)
+        case .composerNewline: StoredShortcut(kVK_ANSI_J, controlKey)
+        case .composerDeleteToLineStart: StoredShortcut(kVK_ANSI_U, controlKey)
+        case .composerDeleteWordBackward: StoredShortcut(kVK_ANSI_W, controlKey)
+        case .composerPaste: StoredShortcut(kVK_ANSI_V, controlKey)
+        case .composerSendNow: StoredShortcut(kVK_Return, controlKey)
+        case .composerCycleMode: StoredShortcut(kVK_Tab, shiftKey)
+        case .composerInterrupt: StoredShortcut(kVK_Escape, 0)
+        case .composerStash: StoredShortcut(kVK_ANSI_S, controlKey)
+        case .composerSearchHistory: StoredShortcut(kVK_ANSI_R, controlKey)
         case .rename, .openInNewWindow, .keepTab: nil
         }
     }

@@ -20,6 +20,12 @@ Each row retains the existing session summary fields and adds
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
 `forkedFrom`, the session it was branched from.
 
+A request with no query parameters is answered from the daemon's cached
+snapshot while that snapshot is current, and carries an `ETag` naming it. A
+client that sends the tag back in `If-None-Match` gets `304 Not Modified`
+with no body while the cache still holds that snapshot. Filtered, paged and
+`fresh=1` requests carry no tag.
+
 The owning host resolves `project` from the session's working directory: the
 deepest added project holding the folder, read in a worktree as the same
 folder of the main checkout, else the repository's implicit project at its
@@ -89,7 +95,9 @@ without `@`) is accepted, matching CLI target resolution; the response always ca
 same journal. `Last-Event-ID` is accepted as the same per-session cursor.
 Replay emits entries strictly after the cursor. When retention cannot satisfy a
 cursor, the endpoint returns the typed `stream_gap` response so a client can
-reload a bounded page. Session sequence numbers are never catalog sequence
+reload a bounded page. The journal records the highest sequence a trim or
+rebuild removed; a cursor below it gets the gap, since a trim removes the
+oldest places and an upserted row keeps its place under a newer sequence. Session sequence numbers are never catalog sequence
 numbers. A mutation of an existing provider key receives a new session
 sequence, so a reconnect after its prior version replays the latest value.
 

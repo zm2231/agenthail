@@ -180,7 +180,7 @@ test('open, send and stream a turn bound to the message uuid', async () => {
 for (const [setting, retained] of [['4', 4], ['5000', 4096], ['Infinity', 4096]]) {
   test(`AGENTHAIL_CLAUDE_HOST_MAX_EVENTS=${setting} retains the last ${retained} events`, async () => {
     const f = fixture();
-    await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_MAX_EVENTS: setting } });
+    await startHost(f, { env: { AGENTHAIL_CLAUDE_HOST_MAX_EVENTS: setting, FAKE_CLAUDE_IDLE_AFTER_MS: '300' } });
     const c = new Client(f.socket);
     await c.call('subscribe');
     const id = randomUUID();
@@ -192,10 +192,11 @@ for (const [setting, retained] of [['4', 4], ['5000', 4096], ['Infinity', 4096]]
     const late = new Client(f.socket);
     const start = await late.call('subscribe', { after: 0 });
     assert.equal(start.gap, true);
-    for (let i = 0; i < 200 && late.events.length < retained; i++) await sleep(25);
-    await sleep(100);
-    assert.equal(late.events.length, retained);
-    assert.equal(late.events.at(-1).seq, start.seq);
+    await late.event((e) => e.sessionId === id && e.kind === 'state' && e.state === 'idle');
+    const replayed = late.events.filter((e) => e.seq <= start.seq);
+    assert.equal(replayed.length, retained);
+    assert.equal(replayed.at(-1).seq, start.seq);
+    assert.deepEqual(late.events.slice(0, retained), replayed);
     late.close();
   });
 }

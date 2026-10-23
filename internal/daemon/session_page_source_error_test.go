@@ -19,7 +19,7 @@ func TestReadJournalPagePreservesLiveSourceErrorAfterSuccessfulSeed(t *testing.T
 	if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "old", Payload: normal, ObservedAt: time.Now()}, retention); err != nil {
 		t.Fatal(err)
 	}
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}}
 	source.appendSourceError(errors.New("initial provider failure"))
 	if err := reg.MarkSessionJournalSeed(from.ID, true); err != nil {
 		t.Fatal(err)

@@ -46,7 +46,7 @@ func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 
 func TestReadJournalPageClearsSourceErrorAfterNewerHealthyActivity(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "recovery", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "recovery", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.appendSourceError(errors.New("older failure"))
 	source.appendSourceError(errors.New("temporary"))
 	page, err := d.readJournalPage(from.ID, 0, 20)
@@ -62,7 +62,7 @@ func TestReadJournalPageClearsSourceErrorAfterNewerHealthyActivity(t *testing.T)
 
 func TestSeedPreviewDoesNotReplaceRetainedAuthoritativeBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "seed", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "seed", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	full := strings.Repeat("authoritative reply ", 2000)
 	source.append(surface.StreamEvent{ID: "reply", ProviderKey: "timeline:reply", Version: uint64(len(full)), Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: full})
 	before := journalPayloads(t, reg, from.ID)
@@ -84,7 +84,7 @@ func TestSeedPreviewDoesNotReplaceRetainedAuthoritativeBody(t *testing.T) {
 
 func TestSeedDoneAndLivePhaseShareOneCompletionRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "done", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "done", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	const id = "codex:turn-1:done:turn-1"
 	source.appendSeedItems([]surface.TimelineItem{{ID: id, Kind: "done", Status: "turn_completed", TurnID: "turn-1"}})
 	source.append(surface.StreamEvent{ID: id, ProviderKey: id, Operation: "phase", Kind: "done", TurnID: "turn-1"})
@@ -140,7 +140,7 @@ func TestHeldSourceRecoversFromTransientSeedFailure(t *testing.T) {
 	adapter := &flakySeedSurface{daemonSurface: fake}
 	adapter.caps.Stream = true
 	adapter.set(true)
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	t.Cleanup(manager.shutdown)
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestNonStreamableSourceRefreshesThroughOneSharedProducer(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &flakySeedSurface{daemonSurface: fake}
 	adapter.set(false, surface.TimelineItem{ID: "first", Kind: "message", Role: "assistant", Text: "first"})
-	manager := newSessionSourceManager(reg)
+	manager := newTestSourceManager(t, reg)
 	t.Cleanup(manager.shutdown)
 	releases := make([]func(), 0, 3)
 	for range 3 {
@@ -313,7 +313,7 @@ func TestManagedStreamRestartsKeepOneAuthoritativeReplyBody(t *testing.T) {
 			_, reg, fake, from, _ := daemonFixture(t)
 			adapter := &managedRestartSurface{flakySeedSurface: &flakySeedSurface{daemonSurface: fake}, mode: mode}
 			adapter.caps.Stream = true
-			manager := newSessionSourceManager(reg)
+			manager := newTestSourceManager(t, reg)
 			subscription, err := manager.subscribe(&from, adapter)
 			if err != nil {
 				t.Fatal(err)
@@ -338,7 +338,7 @@ func TestManagedStreamRestartsKeepOneAuthoritativeReplyBody(t *testing.T) {
 
 func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "merge", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "merge", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "done", ProviderKey: "timeline:done", Operation: "phase", Kind: "done", Status: "completed", TurnID: "turn-1"})
 	source.appendSeedItems([]surface.TimelineItem{{ID: "done", Kind: "done", Status: "cancelled", TurnID: "turn-1"}})
 	full := strings.Repeat("authoritative reply ", 2000)
@@ -364,9 +364,9 @@ func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
 
 func TestSkippedSeedKeepsAuthoritativeAppendPrefix(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	writer := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "first", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	writer := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "first", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	writer.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Version: 11, Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: "hello world"})
-	restarted := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "second", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	restarted := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "second", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
 	restarted.appendSeedItems([]surface.TimelineItem{{ID: "item", Kind: "message", Role: "assistant", Text: "hello", Truncated: true}})
 	restarted.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Operation: "append", Kind: "message", Role: "assistant", Text: "!"})
 	rows := journalPayloads(t, reg, from.ID)

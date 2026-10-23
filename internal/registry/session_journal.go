@@ -14,9 +14,11 @@ import (
 
 var ErrSessionJournalEntryTooLarge = errors.New("session journal entry exceeds byte retention")
 
+// SessionJournalHistoryGapError reports a page cursor before the retained
+// history, with the earliest and latest retained positions.
 type SessionJournalHistoryGapError struct {
-	EarliestSeq uint64
-	LatestSeq   uint64
+	Earliest uint64
+	Latest   uint64
 }
 
 func (e *SessionJournalHistoryGapError) Error() string {
@@ -24,8 +26,11 @@ func (e *SessionJournalHistoryGapError) Error() string {
 }
 
 type SessionJournalEntry struct {
-	SessionID   string
-	Seq         uint64
+	SessionID string
+	Seq       uint64
+	// Position orders the entry in the session's history. It is the seq the
+	// entry was first written with and stays when an upsert gives it a new seq.
+	Position    uint64
 	Kind        string
 	ProviderKey string
 	Payload     []byte
@@ -137,8 +142,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 		return SessionJournalPage{}, err
 	}
 	defer tx.Rollback()
-	var earliest, latest sql.NullInt64
-	if err := tx.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+	var earliest, latest, latestSeq sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(position),MAX(position),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest, &latestSeq); err != nil {
 		return SessionJournalPage{}, err
 	}
 	var prunedBefore, historyBefore sql.NullInt64
@@ -148,21 +153,21 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if before > 0 {
 		historyUnknown := !historyBefore.Valid || historyBefore.Int64 < 0
 		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) || (historyUnknown && before <= uint64(earliest.Int64)) {
-			var earliestSeq, latestSeq uint64
+			var earliestPosition, latestPosition uint64
 			if earliest.Valid {
-				earliestSeq = uint64(earliest.Int64)
+				earliestPosition = uint64(earliest.Int64)
 			}
 			if latest.Valid {
-				latestSeq = uint64(latest.Int64)
+				latestPosition = uint64(latest.Int64)
 			}
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
 		}
-		earliestSeq, latestSeq := uint64(earliest.Int64), uint64(latest.Int64)
-		if before < earliestSeq-1 {
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		earliestPosition, latestPosition := uint64(earliest.Int64), uint64(latest.Int64)
+		if before < earliestPosition-1 {
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
 		}
 	}
-	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
+	rows, err := tx.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT ?`, sessionID, before, before, limit+1)
 	if err != nil {
 		return SessionJournalPage{}, err
 	}
@@ -181,9 +186,9 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	var next uint64
 	if len(entries) > limit {
 		entries = entries[:limit]
-		next = entries[len(entries)-1].Seq
-	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
-		next = entries[len(entries)-1].Seq
+		next = entries[len(entries)-1].Position
+	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Position == uint64(earliest.Int64) {
+		next = entries[len(entries)-1].Position
 	}
 	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
 		entries[left], entries[right] = entries[right], entries[left]
@@ -194,7 +199,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if err := tx.Commit(); err != nil {
 		return SessionJournalPage{}, err
 	}
-	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}
+	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latestSeq.Int64)}
 	if next == 0 && (!prunedBefore.Valid || prunedBefore.Int64 == 0) && historyBefore.Valid && historyBefore.Int64 > 0 {
 		page.HistoryBefore = historyBefore.Int64
 	}
@@ -261,6 +266,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 					return SessionJournalEntry{}, false, err
 				}
 			}
+			input.Position = existing.Position
 			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
@@ -276,7 +282,8 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			return input, true, tx.Commit()
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
+	input.Position = input.Seq
+	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	if err := storeSessionJournalBody(tx, input); err != nil {
@@ -338,21 +345,26 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if limit < 1 {
 		return SessionJournalWindow{Entries: []SessionJournalEntry{}}, nil
 	}
+	// A trim drops the oldest places, whose seqs need not be the lowest: an
+	// upserted row keeps its place under a newer seq. pruned_seq is the
+	// highest seq any trim dropped, so a cursor below it missed a row.
 	var earliest, latest sql.NullInt64
-	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+	var prunedSeq, nextSeq uint64
+	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0),COALESCE((SELECT next_seq FROM session_journal_state WHERE session_id=?),0) FROM session_journal WHERE session_id=?`, sessionID, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq, &nextSeq); err != nil {
 		return SessionJournalWindow{}, err
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
 	if !earliest.Valid || !latest.Valid {
+		window.Gap = after > 0 && (after < prunedSeq || after > nextSeq)
 		return window, nil
 	}
 	window.EarliestSeq = uint64(earliest.Int64)
 	window.LatestSeq = uint64(latest.Int64)
-	window.Gap = after > 0 && (after < window.EarliestSeq-1 || after > window.LatestSeq)
+	window.Gap = after > 0 && (after < prunedSeq || after > window.LatestSeq)
 	if window.Gap {
 		return window, nil
 	}
-	rows, err := r.read.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
+	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}
@@ -383,7 +395,7 @@ func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey strin
 }
 
 func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID, providerKey string) (SessionJournalEntry, bool, error) {
-	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
+	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return SessionJournalEntry{}, false, nil
 	}
@@ -392,19 +404,19 @@ func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row 
 
 func scanSessionJournalEntry(row sessionJournalRow) (SessionJournalEntry, error) {
 	var entry SessionJournalEntry
-	var seq int64
+	var seq, position int64
 	var observedAt string
-	if err := row.Scan(&entry.SessionID, &seq, &entry.Kind, &entry.ProviderKey, &entry.Payload, &observedAt, &entry.Bytes, &entry.BodyRef); err != nil {
+	if err := row.Scan(&entry.SessionID, &seq, &position, &entry.Kind, &entry.ProviderKey, &entry.Payload, &observedAt, &entry.Bytes, &entry.BodyRef); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if seq < 1 {
-		return SessionJournalEntry{}, fmt.Errorf("invalid session journal sequence %d", seq)
+	if seq < 1 || position < 1 {
+		return SessionJournalEntry{}, fmt.Errorf("invalid session journal sequence %d at %d", seq, position)
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, observedAt)
 	if err != nil {
 		return SessionJournalEntry{}, fmt.Errorf("parse session journal observation time: %w", err)
 	}
-	entry.Seq = uint64(seq)
+	entry.Seq, entry.Position = uint64(seq), uint64(position)
 	entry.ObservedAt = parsed
 	entry.Payload = append([]byte(nil), entry.Payload...)
 	return entry, nil
@@ -422,16 +434,16 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if count <= retention.Count && bytes <= retention.Bytes {
 		return nil
 	}
-	rows, err := tx.Query(`SELECT seq,bytes,body_ref FROM session_journal WHERE session_id=? ORDER BY seq`, sessionID)
+	rows, err := tx.Query(`SELECT position,bytes,body_ref FROM session_journal WHERE session_id=? ORDER BY position`, sessionID)
 	if err != nil {
 		return err
 	}
-	var prunedSeq int64
+	var prunedPosition int64
 	prunedBody := false
 	for (count > retention.Count || bytes > retention.Bytes) && rows.Next() {
 		var rowBytes int
 		var bodyRef string
-		if err := rows.Scan(&prunedSeq, &rowBytes, &bodyRef); err != nil {
+		if err := rows.Scan(&prunedPosition, &rowBytes, &bodyRef); err != nil {
 			rows.Close()
 			return err
 		}
@@ -446,10 +458,14 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq<=?`, sessionID, prunedSeq); err != nil {
+	var prunedSeq int64
+	if err := tx.QueryRow(`SELECT MAX(seq) FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition).Scan(&prunedSeq); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),retained_bytes=? WHERE session_id=?`, prunedSeq, bytes, sessionID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),pruned_seq=MAX(pruned_seq,?),retained_bytes=? WHERE session_id=?`, prunedPosition, prunedSeq, bytes, sessionID); err != nil {
 		return err
 	}
 	if !prunedBody {
@@ -529,13 +545,14 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	if err := tx.QueryRow(`SELECT next_seq FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&next); err != nil {
 		return nil, err
 	}
+	previous := next
 	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
-	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`)
+	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -544,33 +561,35 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 	for index := range entries {
 		entry := &entries[index]
 		next++
-		entry.SessionID, entry.Seq = sessionID, next
+		entry.SessionID, entry.Seq, entry.Position = sessionID, next, next
 		entry.Bytes = len(entry.Payload) + len(entry.FullBody)
 		retained += entry.Bytes
 		if entry.ObservedAt.IsZero() {
 			entry.ObservedAt = time.Now().UTC()
 		}
-		if _, err := insert.Exec(sessionID, entry.Seq, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
+		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
 			return nil, err
 		}
 		if err := storeSessionJournalBody(tx, *entry); err != nil {
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=? WHERE session_id=?`, next, derivation, retained, sessionID); err != nil {
+	// Every row up to the previous newest is gone: a stream cursor at that
+	// newest receives the rebuilt rows, and an older one reports a gap.
+	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=?,pruned_seq=MAX(pruned_seq,?) WHERE session_id=?`, next, derivation, retained, previous, sessionID); err != nil {
 		return nil, err
 	}
 	if err := trimSessionJournal(tx, sessionID, retention); err != nil {
 		return nil, err
 	}
 	var earliest sql.NullInt64
-	if err := tx.QueryRow(`SELECT MIN(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest); err != nil {
+	if err := tx.QueryRow(`SELECT MIN(position) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	for len(entries) > 0 && earliest.Valid && entries[0].Seq < uint64(earliest.Int64) {
+	for len(entries) > 0 && earliest.Valid && entries[0].Position < uint64(earliest.Int64) {
 		entries = entries[1:]
 	}
 	return entries, nil
@@ -580,5 +599,48 @@ func (r *Registry) ReplaceSessionJournal(sessionID string, entries []SessionJour
 // nothing to rebuild for derivation.
 func (r *Registry) MarkSessionJournalDerivation(sessionID string, derivation int) error {
 	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,derived_version) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET derived_version=excluded.derived_version`, sessionID, derivation)
+	return err
+}
+
+// TranscriptCheckpoint is where a transcript-backed journal stands in its
+// transcript: the journal holds every item recorded before Offset in the file
+// with Identity.
+type TranscriptCheckpoint struct {
+	Offset   int64  `json:"offset"`
+	Identity string `json:"identity"`
+}
+
+func (r *Registry) SessionTranscriptCheckpoint(sessionID string) (TranscriptCheckpoint, bool, error) {
+	var stored string
+	err := r.read.QueryRow(`SELECT transcript_checkpoint FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&stored)
+	if err == sql.ErrNoRows || (err == nil && stored == "") {
+		return TranscriptCheckpoint{}, false, nil
+	}
+	if err != nil {
+		return TranscriptCheckpoint{}, false, err
+	}
+	var checkpoint TranscriptCheckpoint
+	if err := json.Unmarshal([]byte(stored), &checkpoint); err != nil {
+		return TranscriptCheckpoint{}, false, fmt.Errorf("parse session transcript checkpoint: %w", err)
+	}
+	return checkpoint, true, nil
+}
+
+// SetSessionTranscriptCheckpoint records a checkpoint; a writer records it only
+// after the items before its offset are in the journal.
+func (r *Registry) SetSessionTranscriptCheckpoint(sessionID string, checkpoint TranscriptCheckpoint) error {
+	if strings.TrimSpace(sessionID) == "" || checkpoint.Offset < 0 || checkpoint.Identity == "" {
+		return fmt.Errorf("invalid session transcript checkpoint")
+	}
+	encoded, err := json.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,transcript_checkpoint) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET transcript_checkpoint=excluded.transcript_checkpoint`, sessionID, string(encoded))
+	return err
+}
+
+func (r *Registry) ClearSessionTranscriptCheckpoint(sessionID string) error {
+	_, err := r.db.Exec(`UPDATE session_journal_state SET transcript_checkpoint='' WHERE session_id=?`, sessionID)
 	return err
 }
