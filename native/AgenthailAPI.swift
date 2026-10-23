@@ -177,6 +177,22 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func sessionCommands(id: String) async throws -> RuntimeCommands {
+        var components = URLComponents()
+        components.path = "/api/v1/session-commands"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    func sessionFiles(id: String, query: String, limit: Int = 50) async throws -> SessionFiles {
+        var components = URLComponents()
+        components.path = "/api/v1/session-files"
+        components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: String(limit))]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func sessionAttachment(sessionID: String, id: String) async throws -> Data {
         var components = URLComponents()
         components.path = "/api/v1/session-attachment"

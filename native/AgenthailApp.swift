@@ -499,8 +499,8 @@ private struct SessionMenuSection: Identifiable {
     @MainActor
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
         let attention = model.sessionAttention
-        let needsYou = SessionTree.needsYou(model.knownSessions, attention: attention)
-        let others = SessionTree.newestFirst(SessionFamilies.build(model.knownSessions).filter { attention[$0.root.id] == nil }, by: SessionTree.activity)
+        let needsYou = model.sessionTree.needsYou
+        let others = SessionTree.newestFirst(model.sessionFamilies.filter { attention[$0.root.id] == nil }, by: SessionTree.activity)
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(needsYou.prefix(limit)), reasons: attention.mapValues(\.reason)),
             SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).map(\.root).prefix(limit))),

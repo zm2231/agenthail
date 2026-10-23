@@ -11,6 +11,9 @@ struct ComposerTextView: NSViewRepresentable {
     var onCommand: ((ComposerCommand) -> Bool)? = nil
     var onUpFromFirstLine: (() -> Bool)? = nil
     var onDownFromLastLine: (() -> Bool)? = nil
+    var editor: ComposerEditor? = nil
+    var onCaret: ((Int) -> Void)? = nil
+    var completionKey: ((CompletionKey) -> Bool)? = nil
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -23,11 +26,14 @@ struct ComposerTextView: NSViewRepresentable {
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
         textView.string = text
         context.coordinator.sync = ComposerTextSync(text)
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         textView.command = { ComposerCommand.matching($0, in: .shared) }
         textView.onCommand = { [weak coordinator = context.coordinator] in coordinator?.parent.onCommand?($0) ?? false }
         textView.onUpFromFirstLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onUpFromFirstLine?() ?? false }
         textView.onDownFromLastLine = { [weak coordinator = context.coordinator] in coordinator?.parent.onDownFromLastLine?() ?? false }
         textView.onSubmit = { [weak coordinator = context.coordinator] in coordinator?.parent.onSubmit() }
+        textView.completionKey = { [weak coordinator = context.coordinator] in coordinator?.parent.completionKey?($0) ?? false }
+        editor?.textView = textView
         textView.focusChanged = { [weak coordinator = context.coordinator] isFocused in
             coordinator?.focusChanged(isFocused)
         }
@@ -46,6 +52,7 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = scroll.documentView as? ComposerNSTextView else { return }
         textView.isEditable = context.environment.isEnabled
         textView.pasteAttachments = onPaste
+        editor?.textView = textView
         if textView.placeholder != placeholder {
             textView.placeholder = placeholder
             textView.setAccessibilityPlaceholderValue(placeholder)
@@ -76,6 +83,19 @@ struct ComposerTextView: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             textView.needsDisplay = true
             sync.viewChanged(to: textView.string) { if parent.text != $0 { parent.text = $0 } }
+            caretMoved(textView)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            caretMoved(textView)
+        }
+
+        // The text view also moves the caret while SwiftUI updates the view,
+        // when it replaces the text, and state can't change during an update.
+        private func caretMoved(_ textView: NSTextView) {
+            let caret = textView.selectedRange().location
+            DispatchQueue.main.async { [self] in parent.onCaret?(caret) }
         }
 
         func focusChanged(_ isFocused: Bool) {
@@ -83,5 +103,18 @@ struct ComposerTextView: NSViewRepresentable {
                 if parent.focused != isFocused { parent.focused = isFocused }
             }
         }
+    }
+}
+
+/// Replaces part of the composer's text through the text view, so the edit
+/// joins its undo and the caret lands after it.
+@MainActor
+final class ComposerEditor {
+    weak var textView: NSTextView?
+
+    func replace(_ range: NSRange, with text: String, caret: Int) {
+        guard let textView, NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        textView.insertText(text, replacementRange: range)
+        textView.setSelectedRange(NSRange(location: min(caret, (textView.string as NSString).length), length: 0))
     }
 }

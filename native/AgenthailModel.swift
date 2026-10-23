@@ -5,8 +5,9 @@ import Foundation
 final class AgenthailModel: ObservableObject {
     @Published var snapshot: DashboardSnapshot? {
         didSet {
+            rederive()
             trackFinishedSessions(from: oldValue)
-            pruneDetailCache()
+            pruneStore()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -26,7 +27,9 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
     @Published private(set) var searchError: String?
-    @Published private(set) var pinnedSessions: [SessionState] = []
+    @Published private(set) var pinnedSessions: [SessionState] = [] {
+        didSet { rederive() }
+    }
     private var searchTask: Task<Void, Never>?
     @Published var devices: [DeviceState] = []
     @Published var signin: SigninState?
@@ -52,8 +55,12 @@ final class AgenthailModel: ObservableObject {
     @Published var pendingForks: Set<String> = []
     @Published var loading = false
     @Published var operationsVisible = false
-    @Published var sessionFilter: SessionFilter = .recent
-    @Published var sessionRefinement = SessionRefinement()
+    @Published var sessionFilter: SessionFilter = .recent {
+        didSet { rederive() }
+    }
+    @Published var sessionRefinement = SessionRefinement() {
+        didSet { rederive() }
+    }
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
@@ -74,8 +81,7 @@ final class AgenthailModel: ObservableObject {
     private var lastEventID: UInt64 = 0
     private var catalogStreamTask: Task<Void, Never>?
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-    private var detailCache: [String: SessionDetail] = [:]
-    private var detailCacheOrder: [String] = []
+    let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
     private var pendingSessionReference: String?
@@ -88,23 +94,31 @@ final class AgenthailModel: ObservableObject {
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-    var knownSessions: [SessionState] {
+    private(set) var knownSessions: [SessionState] = []
+    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    private(set) var sessionFamilies: [SessionFamily] = []
+    private(set) var sessionAttention: [String: SessionAttention] = [:]
+    private(set) var sessionTree = SessionTree.build([], filter: .recent, attention: [:])
+
+    /// Rebuilds the sidebar's sessions, attention and tree when one of their
+    /// inputs changes, so views read them instead of rebuilding them.
+    private func rederive() {
         let listed = snapshot?.sessions ?? []
         let listedIDs = Set(listed.map(\.id))
-        return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
-    }
-    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var sessionAttention: [String: SessionAttention] {
-        SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
-    }
-    var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
+        knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
+        sessionFamilies = SessionFamilies.build(knownSessions)
+        sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
+        sessionTree = SessionTree.build(knownSessions, families: sessionFamilies, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {
         self.api = api
         mainPane = SessionPane(model: self, restoresSelection: true)
         panes = [mainPane]
+        store.pinned = { [unowned self] id in
+            panes.contains { $0.selectedSessionID == id } || drafts[id]?.isEmpty == false
+        }
+        store.working = { [unowned self] id in knownSessions.first { $0.id == id }?.isWorking == true }
         if connecting { connect() }
     }
 
@@ -237,22 +251,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func cachedDetail(_ id: String) -> SessionDetail? {
-        guard let cached = detailCache[id] else { return nil }
-        touchCachedDetail(id)
-        return cached
-    }
-
-    func detailLoaded(_ loaded: SessionDetail, for id: String) {
-        cacheDetail(loaded, for: id)
-        if let items = loaded.timeline?.items, let sends = localSends[id] {
+    func detailLoaded(_ loaded: WarmSession, for id: String) {
+        store.keep(loaded, for: id)
+        if let items = loaded.detail.timeline?.items, let sends = localSends[id] {
             localSends[id] = LocalSend.reconcile(sends, with: items)
         }
-    }
-
-    func refreshCachedDetail(_ detail: SessionDetail, for id: String) {
-        guard detailCache[id] != nil else { return }
-        detailCache[id] = detail
     }
 
     func openNewSession(message: String? = nil) {
@@ -279,24 +282,10 @@ final class AgenthailModel: ObservableObject {
         finishedUnseen.remove(id)
     }
 
-    private func cacheDetail(_ loaded: SessionDetail, for id: String) {
-        detailCache[id] = loaded
-        touchCachedDetail(id)
-        while detailCacheOrder.count > 16 {
-            detailCache.removeValue(forKey: detailCacheOrder.removeFirst())
-        }
-    }
-
-    private func touchCachedDetail(_ id: String) {
-        detailCacheOrder.removeAll { $0 == id }
-        detailCacheOrder.append(id)
-    }
-
-    private func pruneDetailCache() {
+    private func pruneStore() {
         guard snapshot != nil else { return }
-        let known = Set(knownSessions.map(\.id))
-        detailCacheOrder.removeAll { !known.contains($0) }
-        detailCache = detailCache.filter { known.contains($0.key) }
+        store.carry(rekeys)
+        store.prune(keeping: Set(knownSessions.map(\.id)))
     }
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {

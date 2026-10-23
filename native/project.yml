@@ -36,11 +36,13 @@ targets:
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
       - path: ComposerTextSync.swift
+      - path: ComposerCompletion.swift
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: SessionTree.swift
       - path: MetadataOverlay.swift
       - path: ClaudeSubagentList.swift
+      - path: SessionStore.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
       - path: TextDiff.swift

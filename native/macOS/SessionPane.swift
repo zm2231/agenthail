@@ -91,6 +91,9 @@ final class SessionPane: ObservableObject, Identifiable {
     private var selectionGeneration: UInt64 = 0
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
+    /// The last journal row the shown detail reflects, kept with it in the
+    /// store; nil once a row could not be applied, until a page read.
+    private var appliedCursor: UInt64?
 
     /// Whether the inspector is on screen, docked or over the conversation.
     var inspectorShown: Bool { inspectorDocks ? inspectorVisible : inspectorOverlay }
@@ -304,7 +307,8 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     /// Marks a session open in Instruments, from the switch until the
-    /// daemon's first page for it is shown (`loaded`), the selection moves
+    /// daemon's first page for it is shown (`loaded`), its stream resumes from
+    /// the cached position (`resumed`), the selection moves
     /// off it (`left`), it is removed (`removed`), the pane closes
     /// (`closed`), or it is shown again (`superseded`).
     private func beginOpenInterval(cached: Bool) {
@@ -342,8 +346,9 @@ final class SessionPane: ObservableObject, Identifiable {
         composerDraft = model.draft(for: id)
         selectedSessionID = id
         model.markSeen(id)
-        olderItems = []
-        olderCursor = nil
+        let warm = model.store.open(id)
+        olderItems = warm?.older ?? []
+        olderCursor = warm?.olderCursor
         olderError = nil
         requestError = nil
         streamedRows = []
@@ -351,7 +356,8 @@ final class SessionPane: ObservableObject, Identifiable {
         detailAppliedGeneration = detailRequestGeneration
         if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
         dropUnpublishedDetail()
-        detail = model.cachedDetail(id)
+        detail = warm.map { SessionStore.live($0.detail, selectedSnapshot) }
+        appliedCursor = warm?.cursor
         detailStale = detail != nil
         beginOpenInterval(cached: detail != nil)
         detailRefreshFailed = false
@@ -359,10 +365,18 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadPending = false
         detailReloadTask?.cancel()
         detailReloadTask = nil
-        metadata = MetadataOverlay(seed: detail)
-        awaitStreamCursor()
-        startDetailLoad(id)
+        metadata = MetadataOverlay(seed: detail, allClaudeSubagents: warm?.allClaudeSubagents ?? false)
+        if let cursor = appliedCursor, selectedSnapshot?.capabilities.stream == true {
+            detailLoadTask?.cancel()
+            streamAwaitsCursor = false
+            streamUnsupported = false
+            startSessionStream(id, after: cursor)
+        } else {
+            awaitStreamCursor()
+            startDetailLoad(id)
+        }
         startMetadataLoad(id)
+        loadCommands(id)
     }
 
     func close() {
@@ -413,14 +427,18 @@ final class SessionPane: ObservableObject, Identifiable {
             var merged = metadata.apply(to: loaded)
             let pageSeq = loaded.journalSeq ?? 0
             var older = olderItems
-            for row in streamedRows where row.seq > pageSeq { merged = Self.applying(row, to: merged, older: &older) ?? merged }
+            appliedCursor = loaded.journalSeq
+            for row in streamedRows where row.seq > pageSeq {
+                merged = Self.applying(row, to: merged, older: &older) ?? merged
+                if appliedCursor != nil { appliedCursor = max(appliedCursor ?? 0, row.seq) }
+            }
             if older != olderItems { olderItems = older }
             dropUnpublishedDetail()
             detail = merged
             endOpenInterval("loaded")
             detailStale = false
             detailRefreshFailed = false
-            model.detailLoaded(merged, for: id)
+            model.detailLoaded(warm(merged), for: id)
             detailLoadError = nil
             if streamAwaitsCursor {
                 streamAwaitsCursor = false
@@ -467,6 +485,10 @@ final class SessionPane: ObservableObject, Identifiable {
                 olderItems = fresh + olderItems
                 next = timeline.nextBefore
                 olderCursor = next
+                model.store.update(id) {
+                    $0.older = olderItems
+                    $0.olderCursor = next
+                }
                 if !fresh.isEmpty { break }
             }
             olderError = nil
@@ -718,7 +740,24 @@ final class SessionPane: ObservableObject, Identifiable {
     func showAllClaudeSubagents() {
         guard let id = selectedSessionID else { return }
         metadata.showAllClaudeSubagents()
+        model.store.update(id) { $0.allClaudeSubagents = true }
         startMetadataLoad(id)
+    }
+
+    private func loadCommands(_ id: String) {
+        guard let api = model.api, let read = model.store.beginCommandsRead(id) else { return }
+        Task { [store = model.store] in
+            do {
+                store.commandsRead(try await api.sessionCommands(id: id), for: id, read: read)
+            } catch {
+                store.commandsRead(nil, for: id, read: read, retry: !(error is CancellationError) && !Self.isOlderHost(error))
+            }
+        }
+    }
+
+    private static func isOlderHost(_ error: Error) -> Bool {
+        if case AgenthailAPIError.olderHost = error { return true }
+        return false
     }
 
     private func applyMetadata(to id: String) {
@@ -726,7 +765,7 @@ final class SessionPane: ObservableObject, Identifiable {
         let merged = metadata.apply(to: current)
         dropUnpublishedDetail()
         detail = merged
-        model.refreshCachedDetail(merged, for: id)
+        model.store.update(id) { $0.detail = merged }
     }
 
     /// Changes whenever syncRequests could reach a different result, so the
@@ -843,7 +882,7 @@ final class SessionPane: ObservableObject, Identifiable {
             while !Task.isCancelled, selectedSessionID == id {
                 guard let api = model.api else { return }
                 do {
-                    try await api.streamSession(id: id, after: sessionCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await api.streamSession(id: id, after: sessionCursor, onConnected: { [weak self] in await self?.streamConnected(id) }, onEvent: { [weak self] event in
                         backoff.reset()
                         await self?.receiveSessionEvent(event)
                     })
@@ -855,6 +894,7 @@ final class SessionPane: ObservableObject, Identifiable {
                         return
                     }
                     if case AgenthailAPIError.streamGap = error {
+                        appliedCursor = nil
                         streamAwaitsCursor = true
                         startDetailLoad(id)
                         return
@@ -868,17 +908,25 @@ final class SessionPane: ObservableObject, Identifiable {
     private func receiveSessionEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID else { return }
         sessionCursor = max(sessionCursor, event.seq)
+        if event.data.kind == "commands" {
+            model.store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: event.sessionId)
+            advanceAppliedCursor(event.seq)
+            return
+        }
         if event.data.kind == "context" || event.data.kind == "goal" {
             guard removedSession == nil else { return }
             if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }
             applyMetadata(to: event.sessionId)
             applyStreamedRow(event)
+            advanceAppliedCursor(event.seq)
             return
         }
         guard applyStreamedRow(event) else {
+            appliedCursor = nil
             scheduleDetailReload(event.sessionId)
             return
         }
+        advanceAppliedCursor(event.seq)
         // A finished turn reloads once, so exchanges and paging come from the daemon.
         if event.data.kind == "done" { scheduleDetailReload(event.sessionId) }
     }
@@ -904,9 +952,25 @@ final class SessionPane: ObservableObject, Identifiable {
             guard let pending = unpublishedDetail else { return }
             unpublishedDetail = nil
             detail = pending
-            model.detailLoaded(pending, for: pending.session.id)
+            model.detailLoaded(warm(pending), for: pending.session.id)
         }
         return true
+    }
+
+    private func advanceAppliedCursor(_ seq: UInt64) {
+        if let applied = appliedCursor { appliedCursor = max(applied, seq) }
+    }
+
+    private func warm(_ detail: SessionDetail) -> WarmSession {
+        WarmSession(detail: detail, older: olderItems, olderCursor: olderCursor, cursor: appliedCursor, allClaudeSubagents: metadata.allClaudeSubagents)
+    }
+
+    /// A stream resumed from a cached position brings the shown rows current
+    /// without a page read.
+    private func streamConnected(_ id: String) {
+        guard selectedSessionID == id, detailStale, !streamAwaitsCursor, pageReadsInFlight == 0 else { return }
+        detailStale = false
+        endOpenInterval("resumed")
     }
 
     private func dropUnpublishedDetail() {
@@ -915,10 +979,8 @@ final class SessionPane: ObservableObject, Identifiable {
         unpublishedDetail = nil
     }
 
-    /// Applies a streamed journal row as a session page reads it: an updated
-    /// row keeps its place, as its journal entry does, and a new row goes at
-    /// the end, so a later reload shows the same rows in the same order.
-    /// Returns nil for a row it cannot apply.
+    /// Applies a streamed journal row as a session page reads it. Returns nil
+    /// for a row it cannot apply.
     static func applying(_ event: SessionStreamEvent, to detail: SessionDetail, older: inout [TimelineItem]) -> SessionDetail? {
         guard var timeline = detail.timeline else { return nil }
         let id = event.data.itemId
@@ -928,13 +990,7 @@ final class SessionPane: ObservableObject, Identifiable {
             timeline.items.removeAll { $0.id == id }
             older.removeAll { $0.id == id }
         } else if let item = event.item {
-            if let index = timeline.items.firstIndex(where: { $0.id == item.id }) {
-                timeline.items[index] = item
-            } else if let index = older.firstIndex(where: { $0.id == item.id }) {
-                older[index] = item
-            } else {
-                timeline.items.append(item)
-            }
+            SessionStore.place(item, in: &timeline, older: &older)
             timeline.unavailableReason = nil
         } else {
             return nil

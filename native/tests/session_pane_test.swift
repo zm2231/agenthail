@@ -526,6 +526,89 @@ struct SessionPaneTest {
         streamingModel.closePane(streamingPane)
         streamingServer.stop()
 
+        var warmRequests: [String] = []
+        var gapOnResume = false
+        let warmServer = try! StubServer { line, _ in
+            let request = line.components(separatedBy: "\r\n").first ?? line
+            warmRequests.append(request)
+            if request.contains("/api/v1/session-stream?") {
+                if gapOnResume, request.contains("after=100") {
+                    gapOnResume = false
+                    return StubServer.reply("409 Conflict", #"{"error":{"code":"stream_gap","message":"gone"}}"#)
+                }
+                return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n: connected\n\n"
+            }
+            if request.contains("/api/v1/session?") {
+                let id = request.contains("id=W2") ? "W2" : "W1"
+                return StubServer.reply("200 OK", pageJSON.replacingOccurrences(of: #""id":"D","surface""#, with: #""id":"\#(id)","surface""#))
+            }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let warmPort = await warmServer.ready()
+        let warmModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(warmPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        func streamed(_ id: String) -> SessionState {
+            var capabilities = Capabilities()
+            capabilities.stream = true
+            return SessionState(id: id, surface: "claude", name: id, alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: false, readOnlyReason: nil)
+        }
+        warmModel.snapshot = listing([streamed("W1"), streamed("W2")])
+        let warmPane = warmModel.openPane()
+        func waitForStream(_ id: String, from start: Int) async {
+            let deadline = Date().addingTimeInterval(5)
+            while !warmRequests[start...].contains(where: { $0.contains("/api/v1/session-stream?") && $0.contains("id=\(id)") }), Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        warmPane.select("W1")
+        await waitForStream("W1", from: 0)
+        warmPane.select("W2")
+        await waitForStream("W2", from: 0)
+        let beforeReturn = warmRequests.count
+        warmPane.select("W1")
+        await waitForStream("W1", from: beforeReturn)
+        let returned = Array(warmRequests[beforeReturn...])
+        check(!returned.contains { $0.contains("/api/v1/session?") }, "switching back to a cached session reads no page: \(returned)")
+        check(returned.filter { $0.contains("/api/v1/session-stream?") }.count == 1 && returned.contains { $0.contains("/api/v1/session-stream?") && $0.contains("after=100") }, "it resumes its stream once, from the cached journal position: \(returned)")
+        check(warmPane.timelineItems.map(\.id) == ["a", "b"], "the cached rows show at once: \(warmPane.timelineItems.map(\.id))")
+        let staleDeadline = Date().addingTimeInterval(5)
+        while warmPane.detailStale, Date() < staleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(!warmPane.detailStale, "a resumed stream marks the cached rows current")
+        let commandsFrame = "id: 101\nevent: item\ndata: " + #"{"stream":"session","sessionId":"W1","seq":101,"type":"item","data":{"itemId":"","version":1,"op":"upsert","kind":"commands","ts":"2026-10-23T00:00:00Z","truncated":false,"commands":[{"name":"review","description":"Review a PR","argumentHint":"[pr]","insert":"/review"}],"unavailable":""}}"# + "\n\n"
+        warmServer.push(commandsFrame, to: "id=W1")
+        let commandsDeadline = Date().addingTimeInterval(5)
+        while warmModel.store.commands["W1"] == nil, Date() < commandsDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(warmModel.store.commands["W1"]?.commands.map(\.insert) == ["/review"] && warmModel.store.commands["W1"]?.unavailable == "", "a streamed command list replaces the session's commands: \(String(describing: warmModel.store.commands["W1"]))")
+        check(warmPane.timelineItems.map(\.id) == ["a", "b"], "a command list adds no transcript row: \(warmPane.timelineItems.map(\.id))")
+
+        warmPane.showAllClaudeSubagents()
+        warmPane.select("W2")
+        await waitForStream("W2", from: beforeReturn)
+        let beforeAll = warmRequests.count
+        warmPane.select("W1")
+        await waitForStream("W1", from: beforeAll)
+        let allDeadline = Date().addingTimeInterval(5)
+        while !warmRequests[beforeAll...].contains(where: { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") }), Date() < allDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let reopenedMetadata = warmRequests[beforeAll...].filter { $0.contains("/api/v1/session-metadata?") && $0.contains("id=W1") }
+        check(warmPane.showsAllClaudeSubagents && !reopenedMetadata.isEmpty && reopenedMetadata.allSatisfy { $0.contains("subagents=all") }, "a cached session reopens listing every subagent it showed: \(reopenedMetadata)")
+
+        warmPane.select("W2")
+        await waitForStream("W2", from: beforeReturn)
+        gapOnResume = true
+        let beforeGap = warmRequests.count
+        warmPane.select("W1")
+        let gapDeadline = Date().addingTimeInterval(5)
+        while warmRequests[beforeGap...].filter({ $0.contains("/api/v1/session-stream?") && $0.contains("id=W1") }).count < 2, Date() < gapDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let gapped = Array(warmRequests[beforeGap...])
+        check(gapped.filter { $0.contains("/api/v1/session?") && $0.contains("id=W1") }.count == 1, "a cursor the journal no longer holds falls back to exactly one page read: \(gapped)")
+        check(gapped.last { $0.contains("/api/v1/session-stream?") }?.contains("after=100") == true, "the stream restarts from the page's journal position: \(gapped)")
+        warmModel.closePane(warmPane)
+        warmServer.stop()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
