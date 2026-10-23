@@ -196,6 +196,7 @@ struct ToolActivityRow: View {
     @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.revealRow) private var revealRow
+    @Environment(\.toolCallStates) private var states
 
     private var presentation: ToolPresentation { ToolPresentation(name: call.title, text: call.text) }
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
@@ -227,7 +228,7 @@ struct ToolActivityRow: View {
                         if call.truncated { ShortenedNote() }
                     }
                     if results.isEmpty && !standaloneRecord {
-                        Text("No result yet").font(.footnote).foregroundStyle(.secondary)
+                        Text(states[call.id].label).font(.footnote).foregroundStyle(.secondary)
                     }
                     ForEach(results) { result in
                         if result.kind == "attachment" {

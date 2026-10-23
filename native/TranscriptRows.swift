@@ -57,4 +57,6 @@ struct RowChoice<Value> {
 
 extension EnvironmentValues {
     @Entry var transcriptRows = TranscriptRows()
+    /// What became of each call on screen that has no result.
+    @Entry var toolCallStates = ToolCallStates()
 }

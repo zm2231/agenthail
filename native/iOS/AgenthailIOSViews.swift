@@ -527,6 +527,7 @@ struct SessionScreen: View {
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
                 .environment(\.revealRow) { position.scrollTo(y: $0) }
                 .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
+                .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)

@@ -105,26 +105,9 @@ struct ToolLine: View {
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
     @Environment(\.holdTranscriptPlace) private var holdPlace
+    @Environment(\.toolCallStates) private var states
 
     private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
-
-    static func fullInput(_ text: String) -> String {
-        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], !object.isEmpty else { return text }
-        let command = (object["command"] ?? object["cmd"]) as? String
-        let rest = object.filter { $0.key != "command" && $0.key != "cmd" }
-        var lines: [String] = command.map { ["$ " + $0] } ?? []
-        for key in rest.keys.sorted() {
-            let value = rest[key].map { value -> String in
-                if let string = value as? String { return string }
-                if JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) {
-                    return String(decoding: data, as: UTF8.self)
-                }
-                return "\(value)"
-            } ?? ""
-            lines.append("\(key): \(value)")
-        }
-        return lines.joined(separator: "\n")
-    }
 
     var body: some View {
         let presentation = ToolPresentation(name: call.title, text: call.text)
@@ -146,7 +129,7 @@ struct ToolLine: View {
                     if !failed {
                         let diffs = presentation.diffs
                         if diffs.isEmpty {
-                            CodeBlock(text: Self.fullInput(call.text), lineLimit: 40)
+                            CodeBlock(text: presentation.readableInput, lineLimit: 40)
                         } else {
                             ForEach(diffs, id: \.path) { file in
                                 if diffs.count > 1 {
@@ -160,7 +143,7 @@ struct ToolLine: View {
                         ShortenedNote(item: call)
                     }
                     if results.isEmpty {
-                        Text("No result yet")
+                        Text(states[call.id].label)
                             .font(.system(size: DesktopType.meta))
                             .foregroundStyle(DesktopPalette.muted)
                     }

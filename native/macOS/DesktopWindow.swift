@@ -986,6 +986,7 @@ struct TranscriptView: View {
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
+            .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
         }
         .background {
             Color.clear
