@@ -1,4 +1,4 @@
--- schemaVersion 37
+-- schemaVersion 38
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -215,7 +215,8 @@ CREATE TABLE delivery_history (
 	completion_id TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL DEFAULT '',
 	result TEXT NOT NULL DEFAULT '',
-	error TEXT NOT NULL DEFAULT ''
+	error TEXT NOT NULL DEFAULT '',
+	operation TEXT NOT NULL DEFAULT ''
 );
 
 -- table delivery_intents
