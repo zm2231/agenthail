@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -43,7 +44,7 @@ func TestABriefKeepsTheNewestExchangesWithinItsCapAndNamesWhatItLeftOut(t *testi
 	if strings.Contains(text, "request 0 ") {
 		t.Fatalf("an old exchange survived the cap:\n%s", text)
 	}
-	for _, want := range []string{"Status: working on a turn now.", "Goal (active): Make the reconnect build reliable", "Context compactions so far: 2.", "say you don't know", fmt.Sprintf("%d earlier exchange(s) left out for length", 40-info.Exchanges), "was shortened", "goal budget: xxx"} {
+	for _, want := range []string{"Status: working on a turn now.", "Goal (active): Make the reconnect build reliable", "Context compactions so far: 2.", "say you don't know", fmt.Sprintf("%d earlier exchange(s) left out for length", 40-info.Exchanges), "of the exchanges shown were shortened", "goal budget: xxx"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("brief lacks %q:\n%s", want, text)
 		}
@@ -53,6 +54,35 @@ func TestABriefKeepsTheNewestExchangesWithinItsCapAndNamesWhatItLeftOut(t *testi
 	}
 	if !strings.ContainsRune(text, '…') || strings.ContainsRune(text, '\uFFFD') {
 		t.Fatalf("clipping broke a character:\n%s", text)
+	}
+}
+
+func TestEveryPartOfABriefIsBoundedAndEveryShortenedPartIsNamed(t *testing.T) {
+	var exchanges []surface.Exchange
+	for i := range 40 {
+		exchanges = append(exchanges, surface.Exchange{User: strings.Repeat("é", 2000), Assistant: strings.Repeat("ü", 4000), Timestamp: briefTime(i)})
+	}
+	var missing []string
+	for i := range 60 {
+		missing = append(missing, fmt.Sprintf("part %d: %s", i, strings.Repeat("why ", 200)))
+	}
+	text, info := RenderBrief(BriefSource{
+		Session:   surface.Session{ID: strings.Repeat("i", 9000), Name: strings.Repeat("\x01名", 4000), Surface: surface.SurfaceKind(strings.Repeat("s", 900)), Status: surface.SessionStatus(strings.Repeat("z", 900))},
+		Goal:      &surface.GoalState{Objective: strings.Repeat("goal ", 2000), Status: strings.Repeat("g", 900)},
+		Exchanges: exchanges,
+		Missing:   missing,
+		AsOf:      briefTime(59),
+	})
+	if len(text) > briefBytes || info.Bytes != len(text) || !utf8.ValidString(text) {
+		t.Fatalf("brief is %d bytes (info %d, valid %v), cap %d", len(text), info.Bytes, utf8.ValidString(text), briefBytes)
+	}
+	for _, want := range []string{"the session name was shortened", "the session id was shortened", "the session's provider was shortened", "the status was shortened", "the goal status was shortened", "the goal was shortened", "earlier exchange(s) left out for length", "more."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("brief lacks %q:\n%s", want, text)
+		}
+	}
+	if len(info.Omitted) != 6+2+60 || info.Exchanges == 0 {
+		t.Fatalf("info=%d omitted, %d exchanges", len(info.Omitted), info.Exchanges)
 	}
 }
 

@@ -80,12 +80,14 @@ A session-bound call also gets a brief of its session as its first item, and a
 transfer appends the same brief to its developer message. The host builds it
 without a model call, from the session's own records: its status, goal,
 compaction count and newest exchanges from the session journal, newest first,
-within 6 KB. Each part it shortens, leaves out or could not read is named in
-the brief, and the brief tells the model that anything not in it is unknown.
-The call state's `brief` records what the call was given: the session, when it
-was read, the journal position, the size, the number of exchanges and the
-omitted parts. The reads behind a brief are bounded to three seconds, and a
-brief that could not be read still lets the call start.
+within 6 KB. Every field has its own limit, and each part it shortens, leaves
+out or could not read is named in the brief, and the brief tells the model that
+anything not in it is unknown. When the names of those parts outgrow their 1 KB
+line, the rest are counted. The call state's `brief` records what the call was
+given: the session, when it was read, the journal position, the size, the
+number of exchanges and every omitted part. A call waits at most three seconds
+for the reads behind its brief; a part not read by then is named as missing,
+and a brief that could not be read still lets the call start.
 
 ## Conversation and work flow
 

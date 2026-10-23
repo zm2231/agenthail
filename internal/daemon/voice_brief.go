@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -26,7 +27,10 @@ func (b voiceBriefs) BriefSource(ctx context.Context, session *surface.Session) 
 	defer cancel()
 	src := voice.BriefSource{Session: *session, AsOf: time.Now()}
 	missing := func(part string, err error) { src.Missing = append(src.Missing, part+": "+err.Error()) }
-	if page, err := b.d.readJournalPage(session.ID, 0, voiceBriefExchanges); err != nil {
+	sessionID := session.ID
+	if page, err := within(ctx, func() (*surface.SessionReadResult, error) {
+		return b.d.readJournalPage(sessionID, 0, voiceBriefExchanges)
+	}); err != nil {
 		missing("recent exchanges", err)
 	} else {
 		src.Exchanges, src.JournalSeq = page.Exchanges, page.JournalSeq
@@ -61,4 +65,26 @@ func (b voiceBriefs) BriefSource(ctx context.Context, session *surface.Session) 
 		src.Missing = append(src.Missing, "compactions: this session does not report them")
 	}
 	return src
+}
+
+// within returns read's result, or ctx's error once ctx ends first. The
+// registry's reads take no context, so a read past the deadline finishes in
+// the background and its result is dropped.
+func within[T any](ctx context.Context, read func() (T, error)) (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := read()
+		done <- result{value, err}
+	}()
+	select {
+	case r := <-done:
+		return r.value, r.err
+	case <-ctx.Done():
+		var zero T
+		return zero, fmt.Errorf("not read in time: %w", ctx.Err())
+	}
 }

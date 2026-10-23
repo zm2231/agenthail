@@ -16,9 +16,16 @@ import (
 const briefBytes = 6 << 10
 
 const (
+	briefNameBytes      = 200
+	briefIDBytes        = 128
+	briefStatusBytes    = 64
+	briefGoalBytes      = 600
 	briefUserBytes      = 600
 	briefAssistantBytes = 1200
 	briefMissingBytes   = 200
+	// briefOmittedBytes is the room kept for the line naming what the brief
+	// left out. Labels past it are counted rather than listed.
+	briefOmittedBytes = 1024
 )
 
 // BriefSource is what the host read from a session's own records for a voice
@@ -56,11 +63,15 @@ type BriefInfo struct {
 func RenderBrief(src BriefSource) (string, BriefInfo) {
 	info := BriefInfo{SessionID: src.Session.ID, AsOf: src.AsOf, JournalSeq: src.JournalSeq}
 	var omitted []string
-	for _, missing := range src.Missing {
-		omitted = append(omitted, clip(missing, briefMissingBytes))
+	field := func(text string, limit int, label string) string {
+		text, short := clipped(text, limit)
+		if short {
+			omitted = append(omitted, label+" was shortened")
+		}
+		return text
 	}
 	var head strings.Builder
-	fmt.Fprintf(&head, "Context for the session %q (%s, id %s), read from its own records at %s. ", src.Session.Name, src.Session.Surface, src.Session.ID, src.AsOf.UTC().Format(time.RFC3339))
+	fmt.Fprintf(&head, "Context for the session %q (%s, id %s), read from its own records at %s. ", field(src.Session.Name, briefNameBytes, "the session name"), field(string(src.Session.Surface), briefStatusBytes, "the session's provider"), field(src.Session.ID, briefIDBytes, "the session id"), src.AsOf.UTC().Format(time.RFC3339))
 	head.WriteString("It is everything you know about the session. For anything not in it, say you don't know, and offer to ask the session.\n")
 	switch src.Session.Status {
 	case surface.StatusBusy:
@@ -68,32 +79,37 @@ func RenderBrief(src BriefSource) (string, BriefInfo) {
 	case surface.StatusIdle:
 		head.WriteString("Status: idle.\n")
 	default:
-		fmt.Fprintf(&head, "Status: %s.\n", src.Session.Status)
+		fmt.Fprintf(&head, "Status: %s.\n", field(string(src.Session.Status), briefStatusBytes, "the status"))
 	}
 	if src.Goal != nil && strings.TrimSpace(src.Goal.Objective) != "" {
-		fmt.Fprintf(&head, "Goal (%s): %s\n", src.Goal.Status, clip(src.Goal.Objective, briefUserBytes))
+		fmt.Fprintf(&head, "Goal (%s): %s\n", field(src.Goal.Status, briefStatusBytes, "the goal status"), field(src.Goal.Objective, briefGoalBytes, "the goal"))
 	}
 	if src.Compactions != nil {
 		fmt.Fprintf(&head, "Context compactions so far: %d. Details from before the latest one may no longer be in the session's memory.\n", *src.Compactions)
 	}
 
 	var shown []string
-	budget := briefBytes - head.Len() - 512
-	kept := 0
+	budget := briefBytes - head.Len() - len("Recent exchanges, newest first:\n") - briefOmittedBytes
+	shortened := 0
 	for i := len(src.Exchanges) - 1; i >= 0; i-- {
-		block, shortened := exchangeBlock(src.Exchanges[i])
+		block, short := exchangeBlock(src.Exchanges[i])
 		if len(block) > budget {
 			break
 		}
 		budget -= len(block)
 		shown = append(shown, block)
-		kept++
-		if shortened {
-			omitted = append(omitted, "an exchange at "+src.Exchanges[i].Timestamp.UTC().Format(time.RFC3339)+" was shortened")
+		if short {
+			shortened++
 		}
 	}
-	if dropped := len(src.Exchanges) - kept; dropped > 0 {
+	if dropped := len(src.Exchanges) - len(shown); dropped > 0 {
 		omitted = append(omitted, fmt.Sprintf("%d earlier exchange(s) left out for length", dropped))
+	}
+	if shortened > 0 {
+		omitted = append(omitted, fmt.Sprintf("%d of the exchanges shown were shortened", shortened))
+	}
+	for _, missing := range src.Missing {
+		omitted = append(omitted, clip(missing, briefMissingBytes))
 	}
 	var b strings.Builder
 	b.WriteString(head.String())
@@ -105,11 +121,36 @@ func RenderBrief(src BriefSource) (string, BriefInfo) {
 			b.WriteString(block)
 		}
 	}
-	if len(omitted) > 0 {
-		b.WriteString("Not included: " + strings.Join(omitted, "; ") + ".\n")
-	}
-	info.Bytes, info.Exchanges, info.Omitted = b.Len(), kept, omitted
+	b.WriteString(omittedLine(omitted))
+	info.Bytes, info.Exchanges, info.Omitted = b.Len(), len(shown), omitted
 	return b.String(), info
+}
+
+// omittedLine names what the brief left out within briefOmittedBytes, and
+// counts the labels that do not fit.
+func omittedLine(omitted []string) string {
+	if len(omitted) == 0 {
+		return ""
+	}
+	const prefix, suffix = "Not included: ", ".\n"
+	room := briefOmittedBytes - len(prefix) - len(suffix) - len(fmt.Sprintf("; and %d more", len(omitted)))
+	listed := make([]string, 0, len(omitted))
+	used := 0
+	for _, label := range omitted {
+		if used+len(label)+2 > room {
+			break
+		}
+		used += len(label) + 2
+		listed = append(listed, label)
+	}
+	line := strings.Join(listed, "; ")
+	switch rest := len(omitted) - len(listed); {
+	case rest > 0 && line == "":
+		line = fmt.Sprintf("%d part(s)", rest)
+	case rest > 0:
+		line += fmt.Sprintf("; and %d more", rest)
+	}
+	return prefix + line + suffix
 }
 
 func exchangeBlock(e surface.Exchange) (string, bool) {

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -36,5 +37,23 @@ func TestAVoiceBriefIsReadFromTheSessionsJournalAndNamesWhatItCouldNotRead(t *te
 		if !strings.Contains(text, missing) {
 			t.Fatalf("brief does not name %q:\n%s", missing, text)
 		}
+	}
+}
+
+func TestAVoiceBriefReadThatOutlastsItsDeadlineIsReportedMissingWithoutWaiting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	release := make(chan struct{})
+	defer close(release)
+	started := time.Now()
+	_, err := within(ctx, func() (int, error) {
+		<-release
+		return 1, nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "not read in time") {
+		t.Fatalf("err=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("waited %s for a blocked read", elapsed)
 	}
 }
