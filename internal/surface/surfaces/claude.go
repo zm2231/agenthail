@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -1571,7 +1572,30 @@ const claudeHostTranscriptTick = 250 * time.Millisecond
 var claudeHostTranscriptLookupTicks = 8
 
 // sameTranscriptState reports whether two stats of a transcript show the same
-// file at the same size and modification time.
+// file at the same size, modification time and change time. Every write moves
+// the change time, which no one can set back as they can the modification
+// time.
 func sameTranscriptState(a, b os.FileInfo) bool {
-	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && transcriptFileIdentity(a) == transcriptFileIdentity(b)
+	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
+}
+
+// transcriptChangeTime is a stat's inode change time, or "" where the platform
+// does not report one.
+func transcriptChangeTime(info os.FileInfo) string {
+	if info.Sys() == nil {
+		return ""
+	}
+	value := reflect.ValueOf(info.Sys())
+	if value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range []string{"Ctimespec", "Ctim"} {
+		if field := value.FieldByName(name); field.IsValid() && field.CanInterface() {
+			return fmt.Sprintf("%v", field.Interface())
+		}
+	}
+	return ""
 }
