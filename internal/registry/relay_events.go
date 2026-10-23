@@ -192,20 +192,15 @@ func (r *Registry) PendingRelayEvents(route RouteRow) ([]RelayEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var events []RelayEvent
-	for rows.Next() {
+	return appendRows(nil, rows, func(row rowScanner) (RelayEvent, error) {
 		var event RelayEvent
 		var completedAt int64
-		if err := rows.Scan(&event.ID, &event.SourceKey, &event.CompletionID, &event.InputID, &event.Message, &event.RelayHops, &completedAt); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&event.ID, &event.SourceKey, &event.CompletionID, &event.InputID, &event.Message, &event.RelayHops, &completedAt)
 		if completedAt != 0 {
 			event.CompletedAt = time.UnixMilli(completedAt)
 		}
-		events = append(events, event)
-	}
-	return events, rows.Err()
+		return event, err
+	})
 }
 
 func (r *Registry) SetRelayError(routeID int64, message string) error {

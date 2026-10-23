@@ -142,38 +142,29 @@ func transitionLimitResume(db interface {
 
 // LimitResumes returns every recorded stop, oldest refusal first.
 func (r *Registry) LimitResumes() ([]LimitResume, error) {
-	rows, err := r.read.Query(`SELECT session_id,turn_id,account_key,refused_at_ms,resets_at_ms,state,attempts,updated_at_ms FROM limit_resumes ORDER BY refused_at_ms,session_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var resumes []LimitResume
-	for rows.Next() {
-		var resume LimitResume
-		var refused, resets, updated int64
-		if err := rows.Scan(&resume.SessionID, &resume.TurnID, &resume.AccountKey, &refused, &resets, &resume.State, &resume.Attempts, &updated); err != nil {
-			return nil, err
-		}
-		resume.RefusedAt, resume.ResetsAt, resume.UpdatedAt = fromUnixMilli(refused), fromUnixMilli(resets), fromUnixMilli(updated)
-		resumes = append(resumes, resume)
-	}
-	return resumes, rows.Err()
+	return queryRows(r.read, nil, scanLimitResume, `SELECT `+limitResumeColumns+` FROM limit_resumes ORDER BY refused_at_ms,session_id`)
 }
 
 // LimitResumeFor returns the session's recorded stop.
 func (r *Registry) LimitResumeFor(sessionID string) (LimitResume, bool, error) {
-	var resume LimitResume
-	var refused, resets, updated int64
-	err := r.read.QueryRow(`SELECT session_id,turn_id,account_key,refused_at_ms,resets_at_ms,state,attempts,updated_at_ms FROM limit_resumes WHERE session_id=?`, sessionID).
-		Scan(&resume.SessionID, &resume.TurnID, &resume.AccountKey, &refused, &resets, &resume.State, &resume.Attempts, &updated)
+	resume, err := scanLimitResume(r.read.QueryRow(`SELECT `+limitResumeColumns+` FROM limit_resumes WHERE session_id=?`, sessionID))
 	if err == sql.ErrNoRows {
 		return LimitResume{}, false, nil
 	}
 	if err != nil {
 		return LimitResume{}, false, err
 	}
-	resume.RefusedAt, resume.ResetsAt, resume.UpdatedAt = fromUnixMilli(refused), fromUnixMilli(resets), fromUnixMilli(updated)
 	return resume, true, nil
+}
+
+const limitResumeColumns = `session_id,turn_id,account_key,refused_at_ms,resets_at_ms,state,attempts,updated_at_ms`
+
+func scanLimitResume(row rowScanner) (LimitResume, error) {
+	var resume LimitResume
+	var refused, resets, updated int64
+	err := row.Scan(&resume.SessionID, &resume.TurnID, &resume.AccountKey, &refused, &resets, &resume.State, &resume.Attempts, &updated)
+	resume.RefusedAt, resume.ResetsAt, resume.UpdatedAt = fromUnixMilli(refused), fromUnixMilli(resets), fromUnixMilli(updated)
+	return resume, err
 }
 
 func unixMilli(at time.Time) int64 {

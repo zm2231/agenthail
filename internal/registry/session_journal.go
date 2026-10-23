@@ -171,16 +171,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if err != nil {
 		return SessionJournalPage{}, err
 	}
-	defer rows.Close()
-	entries := make([]SessionJournalEntry, 0, limit+1)
-	for rows.Next() {
-		entry, err := scanSessionJournalEntry(rows)
-		if err != nil {
-			return SessionJournalPage{}, err
-		}
-		entries = append(entries, entry)
-	}
-	if err := rows.Err(); err != nil {
+	entries, err := appendRows(make([]SessionJournalEntry, 0, limit+1), rows, scanSessionJournalEntry)
+	if err != nil {
 		return SessionJournalPage{}, err
 	}
 	var next uint64
@@ -378,19 +370,12 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		entry, err := scanSessionJournalEntry(rows)
-		if err != nil {
-			return SessionJournalWindow{}, err
-		}
-		window.Entries = append(window.Entries, entry)
+	entries, err := appendRows(window.Entries, rows, scanSessionJournalEntry)
+	if err != nil {
+		return SessionJournalWindow{}, err
 	}
-	return window, rows.Err()
-}
-
-type sessionJournalRow interface {
-	Scan(...any) error
+	window.Entries = entries
+	return window, nil
 }
 
 func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey string) (SessionJournalEntry, bool, error) {
@@ -412,7 +397,7 @@ func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row 
 	return entry, err == nil, err
 }
 
-func scanSessionJournalEntry(row sessionJournalRow) (SessionJournalEntry, error) {
+func scanSessionJournalEntry(row rowScanner) (SessionJournalEntry, error) {
 	var entry SessionJournalEntry
 	var seq, position int64
 	var observedAt string

@@ -362,20 +362,15 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	devices := []Device{}
-	for rows.Next() {
+	return appendRows([]Device{}, rows, func(row rowScanner) (Device, error) {
 		var device Device
 		var scopes string
 		var pushEnabled int
-		if err := rows.Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser, &pushEnabled); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&device.ID, &device.Name, &scopes, &device.HostID, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt, &device.Browser, &pushEnabled)
 		device.Scopes = splitDeviceScopes(scopes)
 		device.PushEnabled = pushEnabled != 0
-		devices = append(devices, device)
-	}
-	return devices, rows.Err()
+		return device, err
+	})
 }
 
 func (r *Registry) RevokeDevice(id string) error {
@@ -423,18 +418,13 @@ func (r *Registry) DevicePushTargets() ([]DevicePushTarget, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	targets := []DevicePushTarget{}
-	for rows.Next() {
+	return appendRows([]DevicePushTarget{}, rows, func(row rowScanner) (DevicePushTarget, error) {
 		var target DevicePushTarget
 		var enabled int
-		if err := rows.Scan(&target.DeviceID, &target.InstallationID, &target.Credential, &enabled, &target.UpdatedAt); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&target.DeviceID, &target.InstallationID, &target.Credential, &enabled, &target.UpdatedAt)
 		target.Enabled = enabled != 0
-		targets = append(targets, target)
-	}
-	return targets, rows.Err()
+		return target, err
+	})
 }
 
 func randomDeviceSecret(size int) (string, error) {

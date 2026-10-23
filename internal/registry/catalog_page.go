@@ -87,26 +87,15 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	if err != nil {
 		return CatalogPage{}, err
 	}
-	sessions := make([]CatalogSessionState, 0, request.Limit)
-	for rows.Next() {
-		state, err := scanCatalogSession(rows)
-		if err != nil {
-			rows.Close()
-			return CatalogPage{}, err
-		}
-		sessions = append(sessions, state)
-	}
-	if err := rows.Close(); err != nil {
-		return CatalogPage{}, err
-	}
-	if err := rows.Err(); err != nil {
+	sessions, err := appendRows(make([]CatalogSessionState, 0, request.Limit), rows, scanCatalogSession)
+	if err != nil {
 		return CatalogPage{}, err
 	}
 	hasMore := len(sessions) > request.Limit
 	if hasMore {
 		sessions = sessions[:request.Limit]
 	}
-	surfaces, err := catalogSurfaceSnapshotTx(tx)
+	surfaces, err := catalogSurfaces(tx)
 	if err != nil {
 		return CatalogPage{}, err
 	}
@@ -153,7 +142,7 @@ func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string,
 	return from, strings.Join(conditions, " AND "), args
 }
 
-func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSessionState, error) {
+func scanCatalogSession(scanner rowScanner) (CatalogSessionState, error) {
 	var state CatalogSessionState
 	var kind, status, observedAt string
 	var hasLocal, focusable, generation, misses, discoveryFailures int
@@ -194,27 +183,4 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	}
 	state.Session.Runtime = runtime
 	return state, nil
-}
-
-func catalogSurfaceSnapshotTx(tx *sql.Tx) ([]CatalogSurfaceState, error) {
-	rows, err := tx.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := []CatalogSurfaceState{}
-	for rows.Next() {
-		var state CatalogSurfaceState
-		var observedAt string
-		if err := rows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
-			return nil, err
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
-		if err != nil {
-			return nil, fmt.Errorf("parse catalog surface observation: %w", err)
-		}
-		state.ObservedAt = parsed
-		result = append(result, state)
-	}
-	return result, rows.Err()
 }

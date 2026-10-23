@@ -76,18 +76,9 @@ func dropOperatorSession(tx *sql.Tx) error {
 type sessionReference struct{ table, column string }
 
 func sessionReferences(tx *sql.Tx) ([]sessionReference, error) {
-	rows, err := tx.Query(`SELECT m.name, f."from" FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"='sessions'`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var references []sessionReference
-	for rows.Next() {
+	return queryRows(tx, nil, func(row rowScanner) (sessionReference, error) {
 		var ref sessionReference
-		if err := rows.Scan(&ref.table, &ref.column); err != nil {
-			return nil, err
-		}
-		references = append(references, ref)
-	}
-	return references, rows.Err()
+		err := row.Scan(&ref.table, &ref.column)
+		return ref, err
+	}, `SELECT m.name, f."from" FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"='sessions'`)
 }

@@ -393,16 +393,12 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		name, cwd       string
 		status          string
 	}
-	var failed []failedRow
-	for rows.Next() {
+	failed, err := appendRows(nil, rows, func(scanner rowScanner) (failedRow, error) {
 		var row failedRow
-		if err := rows.Scan(&row.id, &row.fingerprint, &row.generation, &row.observedAt, &row.surface, &row.name, &row.cwd, &row.status); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		failed = append(failed, row)
-	}
-	if err := rows.Close(); err != nil {
+		err := scanner.Scan(&row.id, &row.fingerprint, &row.generation, &row.observedAt, &row.surface, &row.name, &row.cwd, &row.status)
+		return row, err
+	})
+	if err != nil {
 		return nil, err
 	}
 	events := make([]CatalogEvent, 0, len(failed))
@@ -680,35 +676,17 @@ func (r *Registry) CatalogLocalProjects(projectID string) ([]json.RawMessage, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var projects []json.RawMessage
-	for rows.Next() {
+	return appendRows(nil, rows, func(row rowScanner) (json.RawMessage, error) {
 		var project []byte
-		if err := rows.Scan(&project); err != nil {
-			return nil, err
-		}
-		projects = append(projects, project)
-	}
-	return projects, rows.Err()
+		err := row.Scan(&project)
+		return project, err
+	})
 }
 
 // CatalogProjectHosts lists the paired hosts whose mirrored sessions belong
 // to the project.
 func (r *Registry) CatalogProjectHosts(projectID string) ([]string, error) {
-	rows, err := r.read.Query(`SELECT DISTINCT s.host_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id<>'' AND json_extract(cs.host_project,'$.id')=? ORDER BY s.host_id`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var hostIDs []string
-	for rows.Next() {
-		var hostID string
-		if err := rows.Scan(&hostID); err != nil {
-			return nil, err
-		}
-		hostIDs = append(hostIDs, hostID)
-	}
-	return hostIDs, rows.Err()
+	return queryRows(r.read, nil, scanString, `SELECT DISTINCT s.host_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id<>'' AND json_extract(cs.host_project,'$.id')=? ORDER BY s.host_id`, projectID)
 }
 
 func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {
@@ -749,21 +727,14 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	defer rows.Close()
-	snapshot := CatalogSnapshot{HostEpoch: epoch, Sessions: []CatalogSessionState{}, Surfaces: []CatalogSurfaceState{}}
+	snapshot := CatalogSnapshot{HostEpoch: epoch, Surfaces: []CatalogSurfaceState{}}
 	if latest.Valid {
 		if latest.Int64 < 0 {
 			return CatalogSnapshot{}, fmt.Errorf("invalid catalog sequence")
 		}
 		snapshot.CatalogSeq = uint64(latest.Int64)
 	}
-	for rows.Next() {
-		state, err := scanCatalogSession(rows)
-		if err != nil {
-			return CatalogSnapshot{}, err
-		}
-		snapshot.Sessions = append(snapshot.Sessions, state)
-	}
-	if err := rows.Err(); err != nil {
+	if snapshot.Sessions, err = appendRows([]CatalogSessionState{}, rows, scanCatalogSession); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	surfaces, err := catalogSurfaces(tx)
@@ -796,16 +767,7 @@ func (r *Registry) CatalogActiveSessions(since time.Time) ([]CatalogSessionState
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var sessions []CatalogSessionState
-	for rows.Next() {
-		state, err := scanCatalogSession(rows)
-		if err != nil {
-			return nil, err
-		}
-		sessions = append(sessions, state)
-	}
-	return sessions, rows.Err()
+	return appendRows(nil, rows, scanCatalogSession)
 }
 
 // CatalogSurfaces returns the last health each surface's discovery recorded.
@@ -813,29 +775,20 @@ func (r *Registry) CatalogSurfaces() ([]CatalogSurfaceState, error) {
 	return catalogSurfaces(r.read)
 }
 
-func catalogSurfaces(q interface {
-	Query(string, ...any) (*sql.Rows, error)
-}) ([]CatalogSurfaceState, error) {
-	rows, err := q.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	surfaces := []CatalogSurfaceState{}
-	for rows.Next() {
+func catalogSurfaces(q rowQuerier) ([]CatalogSurfaceState, error) {
+	return queryRows(q, []CatalogSurfaceState{}, func(row rowScanner) (CatalogSurfaceState, error) {
 		var state CatalogSurfaceState
 		var observedAt string
-		if err := rows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
-			return nil, err
+		if err := row.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
+			return state, err
 		}
 		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
 		if err != nil {
-			return nil, fmt.Errorf("parse catalog surface observation: %w", err)
+			return state, fmt.Errorf("parse catalog surface observation: %w", err)
 		}
 		state.ObservedAt = parsed
-		surfaces = append(surfaces, state)
-	}
-	return surfaces, rows.Err()
+		return state, nil
+	}, `SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
 }
 
 // deleteUnheldClaudeSessionTx removes a Claude row whose process moved to

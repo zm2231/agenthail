@@ -1633,33 +1633,15 @@ func (r *Registry) SessionsNamed(kind surface.SurfaceKind, name string) ([]Named
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []NamedSession
-	for rows.Next() {
+	return appendRows(nil, rows, func(row rowScanner) (NamedSession, error) {
 		var session NamedSession
-		if err := rows.Scan(&session.ID, &session.Alias); err != nil {
-			return nil, err
-		}
-		out = append(out, session)
-	}
-	return out, rows.Err()
+		err := row.Scan(&session.ID, &session.Alias)
+		return session, err
+	})
 }
 
 func (r *Registry) matchingIDs(query string, args ...any) ([]string, error) {
-	rows, err := r.read.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return queryRows(r.read, nil, scanString, query, args...)
 }
 
 func (r *Registry) CreateChannel(name string) (string, error) {
@@ -1998,17 +1980,14 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	entries := make([]HistoryEntry, 0)
-	for rows.Next() {
-		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation); err != nil {
-			return nil, err
-		}
-		entry.Evidence = historyEvidence(entry)
-		entries = append(entries, entry)
-	}
-	return entries, rows.Err()
+	return appendRows(make([]HistoryEntry, 0), rows, scanHistoryEntry)
+}
+
+func scanHistoryEntry(row rowScanner) (HistoryEntry, error) {
+	var entry HistoryEntry
+	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation)
+	entry.Evidence = historyEvidence(entry)
+	return entry, err
 }
 
 func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText string) ([]HistoryEntry, bool, error) {
@@ -2045,17 +2024,8 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
-	entries := make([]HistoryEntry, 0, limit+1)
-	for rows.Next() {
-		var entry HistoryEntry
-		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation); err != nil {
-			return nil, false, err
-		}
-		entry.Evidence = historyEvidence(entry)
-		entries = append(entries, entry)
-	}
-	if err := rows.Err(); err != nil {
+	entries, err := appendRows(make([]HistoryEntry, 0, limit+1), rows, scanHistoryEntry)
+	if err != nil {
 		return nil, false, err
 	}
 	hasMore := len(entries) > limit
@@ -2101,20 +2071,7 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 }
 
 func (r *Registry) ListHistoryKinds() ([]string, error) {
-	rows, err := r.read.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	kinds := []string{}
-	for rows.Next() {
-		var kind string
-		if err := rows.Scan(&kind); err != nil {
-			return nil, err
-		}
-		kinds = append(kinds, kind)
-	}
-	return kinds, rows.Err()
+	return queryRows(r.read, []string{}, scanString, `SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
 }
 
 type QueueRow struct {
@@ -2239,12 +2196,10 @@ func queueRowSelect(mode deliverypolicy.Mode) string {
 	FROM message_queue q LEFT JOIN sessions s ON s.id=q.session_id LEFT JOIN session_runtime sr ON sr.session_id=q.session_id`
 }
 
-type queueRowScanner interface{ Scan(...any) error }
-
 // scanQueueRow picks the hold for a target that can steer when the adapter
 // that carries the target's runtime can steer into it; a target no adapter
 // carries cannot.
-func scanQueueRow(scanner queueRowScanner, adapters surface.Adapters, now time.Time) (QueueRow, error) {
+func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) (QueueRow, error) {
 	var row QueueRow
 	var evidence, targetSurface, transport, bridge, runtimeKind string
 	var steerHold, otherHold QueueHold
@@ -2278,16 +2233,9 @@ func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := make([]QueueRow, 0)
-	for rows.Next() {
-		row, err := scanQueueRow(rows, adapters, now)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, row)
-	}
-	return result, rows.Err()
+	return appendRows(make([]QueueRow, 0), rows, func(row rowScanner) (QueueRow, error) {
+		return scanQueueRow(row, adapters, now)
+	})
 }
 
 func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, error) {
@@ -2346,16 +2294,11 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	items := make([]AttentionItem, 0)
-	for rows.Next() {
+	return appendRows(make([]AttentionItem, 0), rows, func(row rowScanner) (AttentionItem, error) {
 		var item AttentionItem
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+		err := row.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution)
+		return item, err
+	})
 }
 
 // queueRefusedRow matches an open message whose last attempt the target
@@ -2487,17 +2430,13 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	var pending []HistoryEntry
-	for rows.Next() {
+	pending, err := appendRows(nil, rows, func(row rowScanner) (HistoryEntry, error) {
 		var id int64
 		var message string
-		if err := rows.Scan(&id, &message); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		pending = append(pending, HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from pending queue"})
-	}
-	if err := rows.Close(); err != nil {
+		err := row.Scan(&id, &message)
+		return HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from pending queue"}, err
+	})
+	if err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
@@ -3042,18 +2981,13 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var sessions []WatchedSession
-	for rows.Next() {
+	return appendRows(nil, rows, func(row rowScanner) (WatchedSession, error) {
 		var session WatchedSession
 		var kind string
-		if err := rows.Scan(&session.ID, &kind); err != nil {
-			return nil, err
-		}
+		err := row.Scan(&session.ID, &kind)
 		session.Surface = surface.SurfaceKind(kind)
-		sessions = append(sessions, session)
-	}
-	return sessions, rows.Err()
+		return session, err
+	})
 }
 
 func (r *Registry) RemoveRoute(id int64) error {
@@ -3109,20 +3043,14 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []RouteRow
-	for rows.Next() {
-		var r RouteRow
+	return appendRows(nil, rows, func(row rowScanner) (RouteRow, error) {
+		var route RouteRow
 		var once, active int
-		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &once, &active, &r.FireCount, &r.LastFiredAt, &r.Handoff, &r.EventCursor, &r.LastGoalKey, &r.LastError, &r.PendingCount); err != nil {
-			return nil, err
-		} else {
-			r.Once = once != 0
-			r.Active = active != 0
-			out = append(out, r)
-		}
-	}
-	return out, rows.Err()
+		err := row.Scan(&route.ID, &route.FromSession, &route.ToSession, &route.Pattern, &once, &active, &route.FireCount, &route.LastFiredAt, &route.Handoff, &route.EventCursor, &route.LastGoalKey, &route.LastError, &route.PendingCount)
+		route.Once = once != 0
+		route.Active = active != 0
+		return route, err
+	})
 }
 
 func (r *Registry) DeactivateRoute(id int64) error {
@@ -3228,7 +3156,7 @@ func sessionSelect(status string) string {
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
 
-func scanSession(scanner interface{ Scan(...any) error }) (surface.Session, error) {
+func scanSession(scanner rowScanner) (surface.Session, error) {
 	var session surface.Session
 	var kind, status string
 	var hasLocal int
@@ -3318,25 +3246,6 @@ func encodeCatalogUsageLimit(limit *surface.UsageLimit) ([]byte, error) {
 	return json.Marshal(limit)
 }
 
-func scanSessions(rows *sql.Rows) ([]surface.Session, error) {
-	defer rows.Close()
-	results := make([]surface.Session, 0)
-	for rows.Next() {
-		session, err := scanSession(rows)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
 func (r *Registry) Session(id string) (*surface.Session, error) {
 	session, err := scanSession(r.read.QueryRow(sessionSelect(`s.status`)+` FROM sessions s`+sessionJoins+` WHERE s.id = ?`, id))
 	if err != nil {
@@ -3361,7 +3270,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 	if err != nil {
 		return nil, err
 	}
-	return scanSessions(rows)
+	return appendRows(make([]surface.Session, 0), rows, scanSession)
 }
 
 // ListSessions reports a session the catalog no longer holds as offline: its
@@ -3377,7 +3286,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scanSessions(rows)
+	return appendRows(make([]surface.Session, 0), rows, scanSession)
 }
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -120,14 +119,9 @@ func (u Uploads) Value() (driver.Value, error) {
 }
 
 func (u *Uploads) Scan(value any) error {
-	var data []byte
-	switch v := value.(type) {
-	case string:
-		data = []byte(v)
-	case []byte:
-		data = v
-	default:
-		return fmt.Errorf("invalid stored uploads: %T", value)
+	data, err := storedJSON(value, "uploads")
+	if err != nil {
+		return err
 	}
 	*u = nil
 	if len(bytes.TrimSpace(data)) == 0 {
