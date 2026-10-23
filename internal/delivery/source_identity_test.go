@@ -91,6 +91,11 @@ func TestTheSurfaceIsToldHowTheTargetAddressesTheSender(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for alias, id := range map[string]string{"local-builder": "remote-aliased", "local-only": "remote-titled"} {
+		if err := r.SetAlias(alias, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for source, want := range map[string]string{"aliased": "@reviewer", "remote-aliased": "vps::@builder", "titled": "", "remote-titled": ""} {
 		adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "peer-" + source, Accepted: true}}}
 		if _, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, target, "hello", "", surface.SendOptions{SourceSessionID: source}); err != nil {

@@ -60,10 +60,17 @@ func PeerName(kind surface.SurfaceKind, name string) string {
 	return "agenthail/" + string(kind) + ": " + name
 }
 
-// senderName is how a session is named to the sessions it writes to: the
-// target that reaches it with agenthail send from this host, else its title.
-func senderName(reg *registry.Registry, session surface.Session) string {
-	if target, err := reg.ReplyTarget(session.ID); err == nil && target != "" {
+// replyTarget is how agenthail send on this host reaches the session, empty
+// when it has no alias.
+func replyTarget(reg *registry.Registry, id string) string {
+	target, _ := reg.ReplyTarget(id)
+	return target
+}
+
+// listedName is the name Claude lists for the session: its reply target,
+// else its title.
+func listedName(reg *registry.Registry, session surface.Session) string {
+	if target := replyTarget(reg, session.ID); target != "" {
 		return target
 	}
 	return session.Name
@@ -238,7 +245,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	started := time.Now().UnixMilli()
 	record := sessionRecord{PID: pid, SessionID: claudeID, Cwd: c.Session.Cwd, StartedAt: started, ProcStart: procStart,
 		Version: "agenthail", PeerProtocol: peerProtocol, Kind: "interactive", Entrypoint: "cli", MessagingSocketPath: socketPath,
-		Name: PeerName(c.Session.Surface, senderName(reg, c.Session)), NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
+		Name: PeerName(c.Session.Surface, listedName(reg, c.Session)), NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
 	controlDevice, controlInode, err := socketIdentity(controlPath)
 	if err != nil {
 		ln.Close()
@@ -367,7 +374,7 @@ func SendNative(ctx context.Context, home string, sender surface.Session, sender
 		return nil, err
 	}
 	id := messageID(surface.MessageUUID(ctx))
-	content := peerContent(sender, senderSocket, fromMode, message)
+	content := peerContent(sender, surface.ReplyTarget(ctx), senderSocket, fromMode, message)
 	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 	if len(payload) >= maxLineBytes {
 		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
@@ -591,7 +598,7 @@ func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *reg
 		case now := <-t.C:
 			next := record
 			if session, err := reg.Session(id); err == nil {
-				next.Name = PeerName(session.Surface, senderName(reg, *session))
+				next.Name = PeerName(session.Surface, listedName(reg, *session))
 				next.Cwd = session.Cwd
 				next.Status = status(*session)
 			}
@@ -1150,9 +1157,7 @@ func rejectFrame(reg *registry.Registry, c Config, f frame, ownSocket string, er
 		return
 	}
 	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
-	self := c.Session
-	self.Name = senderName(reg, self)
-	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(self, ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.Session, replyTarget(reg, c.Session.ID), ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
 	_ = sendAuthenticatedFrame(c.Home, target, payload)
 }
 
@@ -1244,7 +1249,6 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			_ = json.NewEncoder(conn).Encode(resp)
 			return
 		}
-		session.Name = senderName(reg, *session)
 		id := messageID(req.MsgID)
 		senderSocket := ownSocket
 		if req.ReplySocket != "" {
@@ -1265,7 +1269,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 				}
 			}
 		}
-		content := peerContent(sender, senderSocket, "", req.Message)
+		content := peerContent(sender, replyTarget(reg, sender.ID), senderSocket, "", req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
@@ -1462,17 +1466,23 @@ func messageID(id string) string {
 	return uuid.New().String()
 }
 
-func peerContent(session surface.Session, socket, fromMode, message string) string {
-	name := strings.Map(func(r rune) rune {
+// peerContent wraps a message from session. The sender is named by target,
+// how a reply reaches it, which is never shortened; without one, by its
+// title, shortened to 64 runes.
+func peerContent(session surface.Session, target, socket, fromMode, message string) string {
+	name := target
+	if name == "" {
+		name = strings.TrimSpace(session.Name)
+		if runes := []rune(name); len(runes) > 64 {
+			name = string(runes[:64]) + "…"
+		}
+	}
+	name = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if r == '"' || r == '<' || r == '>' || unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Cs, unicode.Zl, unicode.Zp) {
 			return -1
 		}
 		return r
-	}, PeerName(session.Surface, session.Name))
-	name = strings.TrimSpace(name)
-	if runes := []rune(name); len(runes) > 64 {
-		name = string(runes[:64]) + "…"
-	}
+	}, PeerName(session.Surface, name)))
 	switch session.ID {
 	case surface.PersonSessionID:
 		message = session.Name + " wrote this in Agenthail. They read your reply here in this session; answer in your reply, not with SendMessage.\n\n" + message

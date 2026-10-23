@@ -1314,7 +1314,8 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := reg.RegisterSession(s); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.SetAlias("reviewer", s.ID); err != nil {
+	alias := "reviewer-" + strings.Repeat("x", 80)
+	if err := reg.SetAlias(alias, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	_ = reg.Close()
@@ -1324,7 +1325,7 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var record sessionRecord
-	if err := json.Unmarshal(data, &record); err != nil || record.Name != "agenthail/claude: @reviewer" {
+	if err := json.Unmarshal(data, &record); err != nil || record.Name != "agenthail/claude: @"+alias {
 		t.Fatalf("peer name=%q err=%v", record.Name, err)
 	}
 	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
@@ -1355,7 +1356,7 @@ func TestAWorkerNamesItsSenderByTheAliasARepliesTo(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
 		t.Fatalf("invalid frame=%s: %v", line, err)
 	}
-	if !strings.Contains(body.Content, `from-name="agenthail/claude: @reviewer"`) {
+	if !strings.Contains(body.Content, `from-name="agenthail/claude: @`+alias+`"`) {
 		t.Fatalf("content=%q", body.Content)
 	}
 }

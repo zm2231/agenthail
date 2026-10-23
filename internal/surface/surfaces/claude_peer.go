@@ -80,9 +80,6 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if sender, senderSocket, found, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx)); err != nil {
 		return nil, err
 	} else if found {
-		if target := surface.ReplyTarget(ctx); target != "" {
-			sender.Name = target
-		}
 		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, c.permissionClass(ctx, sender), message)
 	}
 	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
