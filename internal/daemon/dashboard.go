@@ -2382,16 +2382,16 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 // no session.
 func (d *Daemon) writeUnstartedSession(w http.ResponseWriter, message string, startErr error) {
 	unknown := surface.IsDeliveryOutcomeUnknown(startErr)
-	kind := "failed"
+	status, code := "failed", "create_failed"
 	if unknown {
-		kind = "unknown"
+		status, code = "unknown", "create_unknown"
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: message, Error: startErr.Error()})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: status, Message: message, Error: startErr.Error()})
 	detail := startErr.Error()
 	if unknown {
 		detail = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 	}
-	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": detail})
+	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": status, "code": code, "retryable": false, "unknown": unknown, "error": detail})
 }
 
 func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, creator, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
@@ -2464,7 +2464,7 @@ func submittedSessionDetail(session *surface.Session, alias string) string {
 }
 
 func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string, extra map[string]any) {
-	body := map[string]any{"ok": false, "status": "failed", "retryable": false, "session": session, "error": message}
+	body := map[string]any{"ok": false, "status": "failed", "code": "initial_turn_failed", "retryable": false, "session": session, "error": message}
 	if deliveryID > 0 {
 		body["deliveryId"] = deliveryID
 	}
@@ -2475,6 +2475,7 @@ func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, 
 	writeSessionCreateJSON(w, http.StatusInternalServerError, map[string]any{
 		"ok":        false,
 		"status":    "storage_failed",
+		"code":      "create_storage_failed",
 		"retryable": false,
 		"session":   session,
 		"error":     warning,
