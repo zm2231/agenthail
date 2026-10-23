@@ -55,6 +55,8 @@ const FIT = {
 };
 const POSITION = { center: "center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
+const GLASS_PROPERTIES = ["--glass-tint", "--glass-edge", "--glass-blur", "--glass-border", "--glass-gutter", "--glass-content", "--glass-sidebar", "--glass-chrome", "--glass-float"];
+
 function channels(colour) {
   return colour.map((v) => Math.round(v * 255)).join(" ");
 }
@@ -294,6 +296,7 @@ export function createBackdrop({ document, measure }) {
     const glass = style && look.glass?.on ? look.glass : null;
     html.toggleAttribute("data-panes", Boolean(glass));
     html.toggleAttribute("data-glass-gap", Boolean(glass && glass.gutter > 0));
+    if (!glass) for (const name of GLASS_PROPERTIES) html.style.removeProperty(name);
     if (glass) {
       html.style.setProperty("--glass-tint", channels(glass.tint));
       html.style.setProperty("--glass-edge", channels(glass.edge));
