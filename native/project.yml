@@ -32,6 +32,7 @@ targets:
       - path: UIConfig.swift
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
+      - path: ComposerTextSync.swift
       - path: SessionSelection.swift
       - path: SessionTree.swift
       - path: MetadataOverlay.swift

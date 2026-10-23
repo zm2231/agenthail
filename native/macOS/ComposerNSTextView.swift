@@ -175,7 +175,12 @@ final class ComposerNSTextView: NSTextView {
         return resigned
     }
 
+    func show(bound text: String, sync: ComposerTextSync) {
+        if let shown = sync.textToShow(bound: text), string != shown { replaceAll(with: shown) }
+    }
+
     func replaceAll(with text: String) {
+        if hasMarkedText() { unmarkText() }
         let range = NSRange(location: 0, length: (string as NSString).length)
         breakUndoCoalescing()
         if shouldChangeText(in: range, replacementString: text) {
