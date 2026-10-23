@@ -1,11 +1,18 @@
 import SwiftUI
 
 extension EnvironmentValues {
-    /// Scrolls the transcript so the row with this id sits at the top. Set by the view that owns the
-    /// scroll view, because a proxy only reaches scroll views inside its own reader. The owner scrolls on
-    /// the next turn, once a collapse that asked for it has been laid out; scrolling in the same
-    /// transaction measures the expanded rows and leaves a large collapse past the end.
-    @Entry var revealRow: (String) -> Void = { _ in }
+    /// Scrolls the transcript so this point of its content, measured in `TimelineGroup.contentSpace`, sits
+    /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
+    /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
+    /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
+    @Entry var revealRow: (CGFloat) -> Void = { _ in }
+}
+
+extension View {
+    /// Keeps `top` at this view's top in the transcript's content, for `revealRow`.
+    func contentTop(_ top: Binding<CGFloat>) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TimelineGroup.contentSpace)).minY } action: { top.wrappedValue = $0 }
+    }
 }
 
 extension TimelineItem {
@@ -14,6 +21,9 @@ extension TimelineItem {
 }
 
 struct TimelineGroup: Identifiable {
+    /// The coordinate space of a transcript's scroll content.
+    static let contentSpace = "timeline-content"
+
     let id: String
     var items: [TimelineItem]
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
@@ -77,6 +87,7 @@ struct CompactActivityGroup: View {
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var onInspect: () -> Void = {}
     @State private var opened: RowChoice<Bool>?
+    @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.revealRow) private var revealRow
 
@@ -93,6 +104,7 @@ struct CompactActivityGroup: View {
                     .accessibilityIdentifier("activity-" + group.id)
                     .accessibilityValue(open ? "Expanded" : "Collapsed")
                     .accessibilityHint("Show each tool in this run")
+                    .contentTop($top)
                 }
                 if open {
                     ForEach(group.invocations) { invocation in
@@ -106,7 +118,7 @@ struct CompactActivityGroup: View {
                         Button("Collapse activity", systemImage: "chevron.up") {
                             // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
                             set(false)
-                            revealRow(group.id)
+                            revealRow(top)
                         }
                         .font(.footnote.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -185,6 +197,7 @@ struct ToolActivityRow: View {
     var standaloneRecord = false
     var onInspect: () -> Void = {}
     @State private var opened: RowChoice<Bool>?
+    @State private var top: CGFloat = 0
     @Environment(\.transcriptRows) private var rows
     @Environment(\.revealRow) private var revealRow
 
@@ -210,7 +223,7 @@ struct ToolActivityRow: View {
                 }
                 CopyCallID(item: call)
             }
-            .id(headerID)
+            .contentTop($top)
             if open {
                 VStack(alignment: .leading, spacing: 12) {
                     if !failed {
@@ -229,7 +242,7 @@ struct ToolActivityRow: View {
                     }
                     Button {
                         set(false)
-                        revealRow(headerID)
+                        revealRow(top)
                     } label: {
                         Label("Collapse tool", systemImage: "chevron.up")
                             .font(.footnote.weight(.medium))
@@ -243,8 +256,6 @@ struct ToolActivityRow: View {
             }
         }
     }
-
-    private var headerID: String { "tool-header-" + call.id }
 
     private func set(_ open: Bool) {
         opened = rows.choice(open)

@@ -39,16 +39,20 @@ final class ActivityCollapseTests: XCTestCase {
         XCTAssertTrue(activity.waitForExistence(timeout: 10))
         for _ in 0..<6 where !activity.isHittable { timeline.swipeDown() }
         activity.tapWhenReady()
-        let command = app.staticTexts["swift build --target Reconnect2"]
-        command.tapWhenReady()
+        let tool = app.buttons["tool-run-2"]
+        XCTAssertTrue(tool.waitForExistence(timeout: 5))
+        // The failed tool above opens on its own and can push this line under the composer, where a tap
+        // reaches the composer even though the line reports itself hittable.
+        for _ in 0..<6 where tool.frame.maxY > timeline.frame.maxY - 200 { timeline.swipeUp() }
+        tool.tapWhenStill()
         let collapse = app.buttons["collapse-tool-run-2"]
         for _ in 0..<6 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
-        XCTAssertFalse(command.isHittable, "the command row should have scrolled above the screen before collapsing")
+        XCTAssertFalse(tool.isHittable, "the tool's line should have scrolled above the screen before collapsing")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
-        XCTAssertTrue(command.isHittable, "the collapsed command should be on screen, at \(command.frame) in \(timeline.frame)")
+        XCTAssertTrue(tool.isHittable && tool.frame.maxY < timeline.frame.maxY - 140, "the collapsed tool's line should be on screen above the composer, at \(tool.frame) in \(timeline.frame)")
     }
 }
