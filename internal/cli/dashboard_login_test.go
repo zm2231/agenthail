@@ -26,6 +26,7 @@ const dashboardTestSecret = "0123456789abcdef0123456789abcdef0123456789abcdef012
 type dashboardLoginFixture struct {
 	app       *App
 	tailscale string
+	opened    string
 	links     atomic.Int32
 }
 
@@ -78,9 +79,9 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 	if err := os.WriteFile(daemon.PidFilePath(), []byte(strconv.Itoa(process.Process.Pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"open", "pbcopy"} {
-		writeExecutable(t, filepath.Join(bin, name), "#!/bin/sh\ncat >/dev/null\n")
-	}
+	fixture.opened = filepath.Join(bin, "opened")
+	writeExecutable(t, filepath.Join(bin, "open"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \""+fixture.opened+"\"\n")
+	writeExecutable(t, filepath.Join(bin, "pbcopy"), "#!/bin/sh\ncat >/dev/null\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	_, port, _ := net.SplitHostPort(listen)
@@ -110,15 +111,18 @@ func TestNoDashboardCommandPrintsTheDashboardToken(t *testing.T) {
 		{"dashboard", "remote", "status", "--json", "--tailscale", fixture.tailscale},
 	}
 	for _, command := range commands {
+		_ = os.Remove(fixture.opened)
 		output, err := captureStdout(t, func() error { return fixture.app.Run(command) })
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", command, err, output)
 		}
-		if strings.Contains(output, dashboardTestSecret) {
-			t.Fatalf("%v printed the dashboard token:\n%s", command, output)
+		opened, _ := os.ReadFile(fixture.opened)
+		shown := output + string(opened)
+		if strings.Contains(shown, dashboardTestSecret) {
+			t.Fatalf("%v showed the dashboard token:\n%s", command, shown)
 		}
-		if command[len(command)-1] != "status" && !strings.Contains(output, "http") {
-			t.Fatalf("%v printed no address:\n%s", command, output)
+		if command[len(command)-1] != "status" && !strings.Contains(shown, "http") {
+			t.Fatalf("%v neither printed nor opened an address:\n%s", command, shown)
 		}
 	}
 	if fixture.links.Load() == 0 {
