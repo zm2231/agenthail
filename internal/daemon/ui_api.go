@@ -44,13 +44,17 @@ func (u *uiState) open() (*uiconf.Store, error) {
 	return u.store, u.err
 }
 
-// uiView is ui.conf as one device should render it.
+// uiView is ui.conf as one device should render it. Values are what to draw;
+// Chosen is what ui.conf says for the device, and Overrides names the device
+// line each overridden key comes from, for settings screens.
 type uiView struct {
-	Rev      string           `json:"rev"`
-	Text     string           `json:"text"`
-	Values   map[string]any   `json:"values"`
-	Problems []uiconf.Problem `json:"problems"`
-	Change   *uiconf.Entry    `json:"change,omitempty"`
+	Rev       string            `json:"rev"`
+	Text      string            `json:"text"`
+	Values    map[string]any    `json:"values"`
+	Chosen    map[string]string `json:"chosen"`
+	Overrides map[string]string `json:"overrides"`
+	Problems  []uiconf.Problem  `json:"problems"`
+	Change    *uiconf.Entry     `json:"change,omitempty"`
 }
 
 func viewFor(state uiconf.State, device uiconf.Device) uiView {
@@ -58,7 +62,8 @@ func viewFor(state uiconf.State, device uiconf.Device) uiView {
 	if problems == nil {
 		problems = []uiconf.Problem{}
 	}
-	return uiView{Rev: state.Rev, Text: state.Text, Values: state.Parsed.Resolve(device), Problems: problems}
+	chosen, overrides := state.Parsed.Chosen(device)
+	return uiView{Rev: state.Rev, Text: state.Text, Values: state.Parsed.Resolve(device), Chosen: chosen, Overrides: overrides, Problems: problems}
 }
 
 func requestDevice(r *http.Request) uiconf.Device {
@@ -78,7 +83,20 @@ func (d *Daemon) registerUIAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 		d.apiV1Guard(dashboard, scope, d.apiUIHandler)(w, r)
 	})
 	mux.HandleFunc("/api/v1/ui/log", d.apiV1Guard(dashboard, "read", d.apiUILogHandler))
-	mux.HandleFunc("/api/v1/ui/background", d.apiV1Guard(dashboard, "read", d.apiUIBackgroundHandler))
+	mux.HandleFunc("/api/v1/ui/presets", d.apiV1Guard(dashboard, "read", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"presets": uiconf.Choices()})
+	}))
+	mux.HandleFunc("/api/v1/ui/background", func(w http.ResponseWriter, r *http.Request) {
+		scope := "read"
+		if r.Method == http.MethodPost {
+			scope = "settings"
+		}
+		d.apiV1Guard(dashboard, scope, d.apiUIBackgroundHandler)(w, r)
+	})
 }
 
 type uiChangeRequest struct {
@@ -239,8 +257,8 @@ func (d *Daemon) apiUILogHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) apiUIBackgroundHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET or POST for this endpoint.")
 		return
 	}
 	store, err := d.ui.open()
@@ -248,24 +266,37 @@ func (d *Daemon) apiUIBackgroundHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusServiceUnavailable, "ui_unavailable", err.Error())
 		return
 	}
-	path, err := store.Asset(r.URL.Query().Get("path"))
-	if err != nil {
+	if r.Method == http.MethodPost {
+		name := r.URL.Query().Get("name")
+		if err := uiconf.CheckBackgroundUpload(name, r.ContentLength); err != nil {
+			writeAPIError(w, http.StatusUnprocessableEntity, "background_refused", err.Error())
+			return
+		}
+		rel, err := store.ImportBackgroundData(name, r.Body)
+		if err != nil {
+			writeAPIError(w, http.StatusUnprocessableEntity, "background_refused", err.Error())
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]string{"path": rel})
+		return
+	}
+	asset, err := store.OpenAsset(r.URL.Query().Get("path"))
+	if uiconf.IsAssetPath(err) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_path", err.Error())
 		return
 	}
-	file, err := os.Open(path)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "That background is not in ui.conf's folder.")
 		return
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "ui_read_failed", err.Error())
-		return
+	defer asset.Close()
+	if asset.Tag != "" {
+		w.Header().Set("Cache-Control", "private, no-cache")
+		w.Header().Set("ETag", `"`+asset.Tag+`"`)
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	}
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
+	http.ServeContent(w, r, asset.Name, asset.Modified, asset)
 }
 
 // noteUIRevision tells clients when ui.conf reaches a revision they have

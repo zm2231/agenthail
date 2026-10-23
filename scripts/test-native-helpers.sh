@@ -37,6 +37,7 @@ SOURCES=(
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
+  macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift
   macOS/AuditFacts.swift

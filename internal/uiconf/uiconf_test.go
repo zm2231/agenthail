@@ -1,6 +1,7 @@
 package uiconf
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,6 +41,17 @@ func TestParseReportsBadLinesAndKeepsTheRest(t *testing.T) {
 	}
 }
 
+func TestChosenNamesTheDeviceAValueComesFrom(t *testing.T) {
+	parsed := Parse("glass.blur = 20\nglass.blur@device:studio = 40\ntexture@mac = grain\nbackground = art: dawn\n")
+	values, overrides := parsed.Chosen(Device{Class: "mac", Name: "studio"})
+	if values["glass.blur"] != "40" || values["texture"] != "grain" || values["background"] != "art: dawn" || values["theme"] != "system" {
+		t.Fatalf("chosen = %v", values)
+	}
+	if !reflect.DeepEqual(overrides, map[string]string{"glass.blur": "device:studio", "texture": "mac"}) {
+		t.Fatalf("overrides = %v", overrides)
+	}
+}
+
 func TestResolvePrefersTheMostSpecificDevice(t *testing.T) {
 	parsed := Parse("texture = scanlines\ntexture@device:studio = grain\ntexture@phone = none\n")
 	cases := []struct {
@@ -65,8 +77,16 @@ func TestResolveFillsDefaultsAndExpandsPresets(t *testing.T) {
 			t.Fatalf("missing default for %s", key.Name)
 		}
 	}
-	if values["background"] != Presets["aurora"] {
-		t.Fatalf("background = %v", values["background"])
+	if values["background"] != "image: art/tide-dark.jpg" || values["background.light"] != "image: art/tide-light.jpg" {
+		t.Fatalf("default background = %v, light %v", values["background"], values["background.light"])
+	}
+	slate := Parse("background = gradient: slate").Resolve(Device{Class: "mac"})
+	if slate["background"] != Presets["slate"].Dark || slate["background.light"] != Presets["slate"].Light || Presets["slate"].Dark == Presets["slate"].Light {
+		t.Fatalf("slate = %v, light %v", slate["background"], slate["background.light"])
+	}
+	custom := Parse("background = mesh: 2x2, #000000, #111111, #222222, #333333").Resolve(Device{Class: "mac"})
+	if custom["background"] != custom["background.light"] {
+		t.Fatalf("a custom background is drawn the same in both appearances: %v, %v", custom["background"], custom["background.light"])
 	}
 	if got := values["statusbar"]; !reflect.DeepEqual(got, []string{"usage", "working", "needs-you", "hosts", "terminal"}) {
 		t.Fatalf("statusbar = %v", got)
@@ -78,7 +98,7 @@ func TestResolveFillsDefaultsAndExpandsPresets(t *testing.T) {
 
 func TestBackgroundValues(t *testing.T) {
 	good := []string{
-		"none", "desktop", "image: backgrounds/a1.png", "gradient: dusk",
+		"none", "desktop", "image: backgrounds/a1.png", "gradient: dusk", "art: tide", "art: field",
 		"gradient: 160deg, #1b1035 0%, #e0763a 100%",
 		"mesh: 2x2, #000000, #111111, #222222, #333333",
 	}
@@ -87,16 +107,21 @@ func TestBackgroundValues(t *testing.T) {
 			t.Errorf("%q: %s", value, problem)
 		}
 	}
-	bad := []string{"image:", "image: a.gif", "gradient: sunset", "gradient: 160deg, red 0%, blue 100%", "mesh: 2x2, #000000", "mesh: 9x9, #000000", "wallpaper"}
+	bad := []string{"image:", "image: a.gif", "gradient: sunset", "gradient: aurora", "art: sunset", "art:", "gradient: 160deg, red 0%, blue 100%", "mesh: 2x2, #000000", "mesh: 9x9, #000000", "wallpaper"}
 	for _, value := range bad {
 		if _, problem := checkBackground(value); problem == "" {
 			t.Errorf("%q accepted", value)
 		}
 	}
-	for name, mesh := range Presets {
-		if problem := checkMesh(strings.TrimPrefix(mesh, "mesh: ")); problem != "" {
-			t.Errorf("preset %s: %s", name, problem)
+	for name, preset := range Presets {
+		for _, mesh := range []string{preset.Dark, preset.Light} {
+			if problem := checkMesh(strings.TrimPrefix(mesh, "mesh: ")); problem != "" {
+				t.Errorf("preset %s: %s", name, problem)
+			}
 		}
+	}
+	if len(Presets) != len(PresetNames) {
+		t.Fatalf("%d presets, %d names", len(Presets), len(PresetNames))
 	}
 }
 
@@ -237,13 +262,44 @@ func TestBackgroundsAreImportedAndOnlyThoseServed(t *testing.T) {
 	if err != nil || !strings.Contains(files, rel) {
 		t.Fatalf("committed files = %q, %v", files, err)
 	}
-	if path, err := s.Asset(rel); err != nil || path != filepath.Join(s.Dir(), rel) {
-		t.Fatalf("asset = %q, %v", path, err)
+	asset, err := s.OpenAsset(rel)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, bad := range []string{"ui.conf", "../secret.png", "/etc/x.png", "backgrounds/../../x.png", "backgrounds/a.txt"} {
-		if _, err := s.Asset(bad); err == nil {
+	served, _ := io.ReadAll(asset)
+	asset.Close()
+	if string(served) != "png bytes" || asset.Tag != "" {
+		t.Fatalf("asset = %q tag %q", served, asset.Tag)
+	}
+	for _, name := range ArtNames {
+		for _, variant := range []string{"dark", "light"} {
+			art, err := s.OpenAsset("art/" + name + "-" + variant + ".jpg")
+			if err != nil {
+				t.Fatalf("built-in %s %s: %v", name, variant, err)
+			}
+			head := make([]byte, 3)
+			_, _ = io.ReadFull(art, head)
+			art.Close()
+			if string(head) != "\xff\xd8\xff" || art.Tag == "" {
+				t.Fatalf("built-in %s %s is not a JPEG: %x", name, variant, head)
+			}
+		}
+	}
+	for _, bad := range []string{"ui.conf", "../secret.png", "/etc/x.png", "backgrounds/../../x.png", "backgrounds/a.txt", "art/../ui.conf", "art/missing.jpg"} {
+		if asset, err := s.OpenAsset(bad); err == nil {
+			asset.Close()
 			t.Errorf("served %q", bad)
 		}
+	}
+	uploaded, err := s.ImportBackgroundData("photo.JPG", strings.NewReader("jpeg bytes"))
+	if err != nil || !strings.HasPrefix(uploaded, "backgrounds/") || !strings.HasSuffix(uploaded, ".jpg") {
+		t.Fatalf("upload = %q, %v", uploaded, err)
+	}
+	if _, err := s.ImportBackgroundData("photo.gif", strings.NewReader("gif")); err == nil {
+		t.Fatal("uploaded a gif")
+	}
+	if _, err := s.ImportBackgroundData("photo.png", strings.NewReader("")); err == nil {
+		t.Fatal("uploaded an empty image")
 	}
 	if _, err := s.ImportBackground(filepath.Join(t.TempDir(), "notes.txt")); err == nil {
 		t.Fatal("imported a non-image")

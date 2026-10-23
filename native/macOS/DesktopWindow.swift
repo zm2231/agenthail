@@ -62,6 +62,7 @@ struct DesktopWindow: View {
         } detail: {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
+                .hidesSplitDividers()
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)

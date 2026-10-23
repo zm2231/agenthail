@@ -168,7 +168,7 @@ struct NewSessionView: View {
     }
 
     @ViewBuilder private var status: some View {
-        let lines = model.isConnected ? [draft.hosts.loadError, draft.modelError].compactMap { $0 } : []
+        let lines = model.isConnected ? [draft.hosts.loadError.map { NewSessionNotice(summary: $0) }, draft.modelError].compactMap { $0 } : []
         if !model.isConnected || !lines.isEmpty || draft.error != nil || draft.submitted != nil {
             VStack(alignment: .leading, spacing: DesktopSpace.xs) {
                 if !model.isConnected {
@@ -179,7 +179,20 @@ struct NewSessionView: View {
                         if !model.daemonSlow { Button("Start Agenthail") { model.restartDaemon() } }
                     }
                 }
-                ForEach(lines, id: \.self) { Text($0).foregroundStyle(DesktopPalette.text2) }
+                ForEach(lines, id: \.self) { notice in
+                    if let detail = notice.detail {
+                        DisclosureGroup {
+                            Text(detail)
+                                .foregroundStyle(DesktopPalette.text2)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } label: {
+                            Text(notice.summary).foregroundStyle(DesktopPalette.text2)
+                        }
+                    } else {
+                        Text(notice.summary).foregroundStyle(DesktopPalette.text2)
+                    }
+                }
                 if let error = draft.error { Text(error).foregroundStyle(DesktopPalette.failed) }
                 if let submitted = draft.submitted {
                     HStack(spacing: DesktopSpace.s) {
