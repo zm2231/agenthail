@@ -24,6 +24,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
     let openSession: (String) -> Void
 
     init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
@@ -33,7 +34,6 @@ struct AgenthailVoiceOperatorSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                     if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
@@ -103,6 +103,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
+                .scrollPosition($scrollPosition)
                 .onScrollPhaseChange { _, phase in
                     if phase == .interacting {
                         userScrolling = true
@@ -118,7 +119,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     atLatest = value
                 }
                 .onChange(of: latestContentMarker) { _, _ in
-                    if followingLatest, !showActivity { proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                    if followingLatest, !showActivity { scrollPosition.scrollTo(edge: .bottom) }
                 }
                 .onChange(of: showActivity) { _, expanded in
                     if expanded { followingLatest = false }
@@ -126,14 +127,17 @@ struct AgenthailVoiceOperatorSheet: View {
                 .onChange(of: model.state?.session?.id) { _, _ in
                     followingLatest = true
                     atLatest = true
-                    proxy.scrollTo("voice-bottom", anchor: .bottom)
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
                 .safeAreaInset(edge: .bottom) {
-                    VStack(spacing: 0) {
+                    // The button floats above the controls so showing it never
+                    // changes the inset, which would move the transcript and
+                    // flip whether it is at the latest activity.
+                    controls.overlay(alignment: .top) {
                         if !atLatest {
                             Button {
                                 followingLatest = true
-                                proxy.scrollTo("voice-bottom", anchor: .bottom)
+                                scrollPosition.scrollTo(edge: .bottom)
                             } label: {
                                 Image(systemName: "arrow.down")
                                     .font(.body.weight(.semibold))
@@ -142,11 +146,10 @@ struct AgenthailVoiceOperatorSheet: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Jump to latest voice activity")
+                            .alignmentGuide(.top) { $0[.bottom] + 8 }
                         }
-                        controls
                     }
                 }
-            }
             .navigationTitle(model.state?.target == nil ? "Talk to orchestrator" : "Session voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
