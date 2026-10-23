@@ -1287,18 +1287,30 @@ struct SessionInspector: View {
                     }
                 }
                 if let links = detail.claudeSubagents, !links.isEmpty {
-                    Section("Claude subagents") {
-                        ForEach(links) { link in
+                    let list = ClaudeSubagentList(links, total: detail.claudeSubagentsTotal, expanded: model.showsAllClaudeSubagents)
+                    Section {
+                        ForEach(list.shown) { link in
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(link.agentType.flatMap { $0.isEmpty ? nil : $0 } ?? link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(link.title).font(.body.weight(.medium)).lineLimit(2)
                                     Spacer(minLength: 0)
-                                    if link.working == true { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                    if link.working == true {
+                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                                    } else if let value = link.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+                                        Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
-                                if let description = link.description, !description.isEmpty { Text(description).font(.subheadline).foregroundStyle(.secondary) }
-                                if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                                if let kind = link.kindLabel { Text(kind).font(.caption).foregroundStyle(.secondary) }
                             }
+                            .accessibilityElement(children: .combine)
                         }
+                        if list.earlier > 0 {
+                            Button(list.earlierLabel) { model.showAllClaudeSubagents() }
+                        }
+                    } header: {
+                        Text("Claude subagents")
+                    } footer: {
+                        Text(list.summary)
                     }
                 }
                 if let errors = detail.metadataErrors, !errors.isEmpty {
@@ -1489,12 +1501,12 @@ struct IOSSessionRow: View {
                     }
                 }
             }
-            if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 || !session.sharedHolders.isEmpty {
+            if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
-                    if let family, family.subagentCount > 0 {
+                    if let family, family.workingSubagents > 0 {
                         Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
                             .font(.caption)
-                            .foregroundStyle(family.workingSubagents > 0 ? SessionStyle.accent : .secondary)
+                            .foregroundStyle(SessionStyle.accent)
                     }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }

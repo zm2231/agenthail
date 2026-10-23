@@ -20,6 +20,7 @@
 		2F390DCA359AD2E249947755 /* VoiceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */; };
 		2F869372B2CD32797E8B80B3 /* SessionPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4297F79B0E285D005AC6D64C /* SessionPreview.swift */; };
 		2FB92290069468D2BB16CC79 /* ComposerPasteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C3F5CCDDCD59B0A248E7CA /* ComposerPasteTests.swift */; };
+		3088041E658DFAE92C94F2EB /* ClaudeSubagentList.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */; };
 		35D62B0FAA562423252C2DE2 /* AgenthailIOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352FB70958533EE6B1BD305F /* AgenthailIOSViews.swift */; };
 		393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */; };
 		3BB751A32C3C20091981CA4A /* SessionTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBFE61CC399105A1DE63886 /* SessionTree.swift */; };
@@ -216,6 +217,7 @@
 		DD6DB02C48C8DEC1677170BC /* SessionCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCapture.swift; sourceTree = "<group>"; };
 		DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPasteUITests.swift; sourceTree = "<group>"; };
 		E11D12B1DC6197256B5C3DBC /* ActivityPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPresentationTests.swift; sourceTree = "<group>"; };
+		E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeSubagentList.swift; sourceTree = "<group>"; };
 		E4A1E18EEE0A6F1BE8B9D3EB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRelayClient.swift; sourceTree = "<group>"; };
 		E8D9DEC8D7641FCE4A82824B /* TurnSettingsFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnSettingsFlowTests.swift; sourceTree = "<group>"; };
@@ -317,6 +319,7 @@
 				5EB73667A631B4855B108997 /* AgenthailAPI.swift */,
 				C701FBB1DE5E6A7E3827B1BA /* AgenthailModels.swift */,
 				FE02D88989FB5526F2B617EC /* Backdrop.swift */,
+				E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */,
 				33AFDDC2552D1DC17F94ABC1 /* ComposerAttachment.swift */,
 				C40DC2DE9D610F9A650F9EA3 /* ComposerTextSync.swift */,
 				1C5287EF2BD6F1B5CC9EE0E8 /* EventRetryBackoff.swift */,
@@ -521,6 +524,7 @@
 				35D62B0FAA562423252C2DE2 /* AgenthailIOSViews.swift in Sources */,
 				9CF8E68FE23A7B101908BB6C /* AgenthailModels.swift in Sources */,
 				FD1DB4A68A71F97EE5F08FC8 /* Backdrop.swift in Sources */,
+				3088041E658DFAE92C94F2EB /* ClaudeSubagentList.swift in Sources */,
 				1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */,
 				7F351AE442DA4780791BA41D /* ComposerAttachment.swift in Sources */,
 				57604F04AAC9A479B06C5A83 /* ComposerAttachmentViews.swift in Sources */,

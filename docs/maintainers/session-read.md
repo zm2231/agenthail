@@ -121,7 +121,9 @@ selection. Codex model reads use read-only thread metadata, never resume.
 
 For Claude sessions, metadata also contains optional `claudeRuns` and
 `claudeSubagents` arrays. The daemon filters background-job records and
-validated local subagent links to the requested session. Browser conversation
+validated local subagent links to the requested session, and pages the
+subagents as [Subagents](subagents.md) describes (`claudeSubagentsTotal`,
+`subagents=all`). Browser conversation
 details and native session details display these observations without
 inferring wake times or adding cancellation controls. They are metadata
 observations, not session-stream lifecycle events.

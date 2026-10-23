@@ -8,6 +8,8 @@ struct MetadataOverlay {
     private(set) var models: [ModelOption]?
     private(set) var claudeRuns: [ClaudeRunObservation]?
     private(set) var claudeSubagents: [ClaudeSubagentLink]?
+    private(set) var claudeSubagentsTotal: Int?
+    private(set) var allClaudeSubagents = false
     private(set) var metadataErrors: [String: String]?
     private(set) var settled = false
     private var streamed: Set<String> = []
@@ -20,6 +22,7 @@ struct MetadataOverlay {
         models = detail?.models
         claudeRuns = detail?.claudeRuns
         claudeSubagents = detail?.claudeSubagents
+        claudeSubagentsTotal = detail?.claudeSubagentsTotal
         metadataErrors = detail?.metadataErrors
     }
 
@@ -28,8 +31,13 @@ struct MetadataOverlay {
         pendingModel = metadata.pendingModel
         claudeRuns = metadata.claudeRuns
         claudeSubagents = metadata.claudeSubagents
+        claudeSubagentsTotal = metadata.claudeSubagentsTotal
         metadataErrors = metadata.errors
         settled = true
+    }
+
+    mutating func showAllClaudeSubagents() {
+        allClaudeSubagents = true
     }
 
     mutating func metadataRequested() {
@@ -41,6 +49,7 @@ struct MetadataOverlay {
     mutating func metadataFailed() {
         claudeRuns = nil
         claudeSubagents = nil
+        claudeSubagentsTotal = nil
         metadataErrors = nil
         settled = true
     }
@@ -71,6 +80,7 @@ struct MetadataOverlay {
         merged.models = models
         merged.claudeRuns = claudeRuns
         merged.claudeSubagents = claudeSubagents
+        merged.claudeSubagentsTotal = claudeSubagentsTotal
         merged.metadataErrors = metadataErrors
         return merged
     }

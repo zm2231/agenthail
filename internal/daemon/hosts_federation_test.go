@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -31,11 +32,12 @@ import (
 
 type federatedSurface struct {
 	*daemonSurface
-	mu       sync.Mutex
-	messages []string
-	sources  []string
-	persons  []string
-	usage    *surface.Usage
+	mu        sync.Mutex
+	messages  []string
+	sources   []string
+	persons   []string
+	usage     *surface.Usage
+	subagents []surface.ClaudeSubagentLink
 }
 
 func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {
@@ -45,6 +47,28 @@ func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {
 		return nil, surfaces.ErrNoCodexUsage
 	}
 	return s.usage, nil
+}
+
+func (f *federatedSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
+	return nil, nil
+}
+
+func (f *federatedSurface) ObserveClaudeSubagents(_ context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var links []surface.ClaudeSubagentLink
+	for _, link := range f.subagents {
+		if link.ParentSessionID == session.ID {
+			links = append(links, link)
+		}
+	}
+	return links, nil
+}
+
+func (f *federatedSurface) ObserveAllClaudeSubagents(context.Context) ([]surface.ClaudeSubagentLink, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]surface.ClaudeSubagentLink(nil), f.subagents...), nil
 }
 
 func (f *federatedSurface) record(message string) {
@@ -131,10 +155,13 @@ type actionGate struct {
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
 	older     atomic.Bool
-	snapshots atomic.Pointer[snapshotHold]
-	versions  atomic.Pointer[snapshotHold]
-	actions   atomic.Pointer[snapshotHold]
-	transfers atomic.Pointer[snapshotHold]
+	// legacyMetadata, when set, is the session metadata body a host from
+	// before subagent paging returns.
+	legacyMetadata atomic.Pointer[string]
+	snapshots      atomic.Pointer[snapshotHold]
+	versions       atomic.Pointer[snapshotHold]
+	actions        atomic.Pointer[snapshotHold]
+	transfers      atomic.Pointer[snapshotHold]
 	// beyondVersion counts requests for anything other than /api/v1/version.
 	beyondVersion atomic.Int32
 }
@@ -216,6 +243,13 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			w.Header().Set(hosts.ResponseHeader, identity.ID)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"protocol": 1, "minimumProtocol": 1, "maximumProtocol": 1, "hostId": identity.ID, "hostName": identity.Name})
+			return
+		}
+		if body := n.gate.legacyMetadata.Load(); body != nil && r.URL.Path == "/api/v1/session-metadata" {
+			identity, _ := n.reg.HostIdentity()
+			w.Header().Set(hosts.ResponseHeader, identity.ID)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, *body)
 			return
 		}
 		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
@@ -1168,4 +1202,49 @@ func TestAPairedHostReportsTheBuildItRuns(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestFederationPagesARemoteSessionsSubagentsAndPassesAnOlderHostsListThrough(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	now := time.Now()
+	remote.fake.mu.Lock()
+	for index := range 12 {
+		remote.fake.subagents = append(remote.fake.subagents, surface.ClaudeSubagentLink{ParentSessionID: "remote-a", AgentID: fmt.Sprintf("agent-%02d", index), Working: index >= 10, LastActive: now.Add(-time.Duration(index) * time.Minute), TranscriptPath: fmt.Sprintf("/tmp/agent-%02d.jsonl", index)})
+	}
+	remote.fake.mu.Unlock()
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	read := func(query string) (ids []string, total *int) {
+		t.Helper()
+		response := local.request(t, http.MethodGet, "/api/v1/session-metadata?id="+url.QueryEscape(qualified)+query, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("metadata%s status=%d body=%s", query, response.Code, response.Body.String())
+		}
+		var body struct {
+			Links []surface.ClaudeSubagentLink `json:"claudeSubagents"`
+			Total *int                         `json:"claudeSubagentsTotal"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		for _, link := range body.Links {
+			ids = append(ids, link.AgentID)
+		}
+		return ids, body.Total
+	}
+	ids, total := read("")
+	want := []string{"agent-10", "agent-11", "agent-00", "agent-01", "agent-02", "agent-03", "agent-04", "agent-05", "agent-06", "agent-07"}
+	if !reflect.DeepEqual(ids, want) || total == nil || *total != 12 {
+		t.Fatalf("paged ids=%v total=%v, want %v of 12", ids, total, want)
+	}
+	if ids, total := read("&subagents=all"); len(ids) != 12 || ids[11] != "agent-09" || total == nil || *total != 12 {
+		t.Fatalf("all ids=%v total=%v", ids, total)
+	}
+
+	legacy := `{"sessionId":"remote-a","claudeSubagents":[{"parentSessionId":"remote-a","agentId":"old-1","depth":0,"working":false,"transcriptPath":"/tmp/old-1.jsonl"},{"parentSessionId":"remote-a","agentId":"old-2","depth":0,"working":true,"transcriptPath":"/tmp/old-2.jsonl"}]}`
+	remote.gate.legacyMetadata.Store(&legacy)
+	for _, query := range []string{"", "&subagents=all"} {
+		if ids, total := read(query); !reflect.DeepEqual(ids, []string{"old-1", "old-2"}) || total != nil {
+			t.Fatalf("older host%s ids=%v total=%v, want its list unchanged and no total", query, ids, total)
+		}
+	}
 }
