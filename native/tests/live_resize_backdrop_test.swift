@@ -1,5 +1,6 @@
 @testable import AgenthailHelpers
 import AppKit
+import Combine
 
 final class ResizingWindow: NSWindow {
     var resizing = false
@@ -24,7 +25,7 @@ struct LiveResizeBackdropTest {
         }
 
         var config = UIConfig()
-        config.values["background"] = .text("mesh: 2x2, #1B2A6B, #6B2A8C, #0E4D64, #C2557A")
+        config.values["background"] = .text("mesh: 2x2, #0000FF, #0000FF, #0000FF, #0000FF")
         let backdrop = WindowBackdrop()
         backdrop.configure(config, wallpaper: nil)
         let window = ResizingWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -50,6 +51,30 @@ struct LiveResizeBackdropTest {
         backdrop.windowChanged(window)
         wait { backdrop.image.map { CGFloat($0.image.width) } == dragged.width * scale }
         check(backdrop.image.map { CGFloat($0.image.width) } == dragged.width * scale || scale == 1, "after the resize the backdrop renders at full resolution, got \(String(describing: backdrop.image?.image.width))")
+
+        func hue(_ image: BackdropImage) -> String {
+            var pixel = [UInt8](repeating: 0, count: 4)
+            let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image.image, in: CGRect(x: -CGFloat(image.image.width) / 2, y: -CGFloat(image.image.height) / 2, width: CGFloat(image.image.width), height: CGFloat(image.image.height)))
+            return pixel[0] > pixel[2] ? "red" : "blue"
+        }
+        func background(_ value: String) -> UIConfig {
+            var config = UIConfig()
+            config.values["background"] = .text(value)
+            return config
+        }
+        var published: [String] = []
+        let watch = backdrop.$image.dropFirst().sink { published.append($0.map(hue) ?? "none") }
+        window.setContentSize(NSSize(width: 200, height: 160))
+        backdrop.windowChanged(window)
+        wait { backdrop.rendering }
+        check(backdrop.rendering, "the resize starts a render")
+        backdrop.configure(background("none"), wallpaper: nil)
+        backdrop.configure(background("mesh: 2x2, #FF0000, #FF0000, #FF0000, #FF0000"), wallpaper: nil)
+        wait { published.last == "red" }
+        watch.cancel()
+        let afterSwitch = published.drop { $0 != "none" }
+        check(afterSwitch.first == "none" && afterSwitch.last == "red" && !afterSwitch.contains("blue"), "a render started before the background changed is never shown, got \(published)")
 
         if failures > 0 { exit(1) }
         print("live resize backdrop: the image follows the window during a resize and sharpens after it")

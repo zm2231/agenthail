@@ -31,8 +31,9 @@ final class WindowBackdrop: ObservableObject {
     private var config = UIConfig.defaults
     private var wallpaper: WallpaperImage?
     private var renderTask: Task<Void, Never>?
-    private var rendering = false
+    private(set) var rendering = false
     private var pending = false
+    private var generation = 0
     private var rendered: BackdropSpec?
     private weak var window: NSWindow?
     nonisolated(unsafe) private var accessibilityObserver: NSObjectProtocol?
@@ -52,6 +53,7 @@ final class WindowBackdrop: ObservableObject {
     func configure(_ config: UIConfig, wallpaper: WallpaperImage?) {
         self.config = config
         self.wallpaper = wallpaper
+        generation += 1
         let wanted = Self.wallpaper(config, image: wallpaper) != nil
         if active != wanted { active = wanted }
         if desktop != (config.background == .desktop) { desktop = config.background == .desktop }
@@ -128,9 +130,10 @@ final class WindowBackdrop: ObservableObject {
         if live { spec.scale = min(spec.scale, 1) }
         guard spec != rendered else { return }
         rendering = true
+        let started = generation
         let image = await Task.detached(priority: .userInitiated) { BackdropRenderer.render(spec) }.value
         rendering = false
-        if let image {
+        if let image, started == generation, active {
             rendered = spec
             self.image = image
         }
