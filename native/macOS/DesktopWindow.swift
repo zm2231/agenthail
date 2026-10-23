@@ -1550,10 +1550,6 @@ struct ComposerView: View {
                             QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
                         }
-                        if !draft.attachments.isEmpty {
-                            AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
-                                .padding(.horizontal, 10)
-                        }
                     }
                 }
                 .scrimText("dock-notices")
@@ -1561,13 +1557,13 @@ struct ComposerView: View {
                     CompletionMenu(suggestions: completion.items, notice: completion.notice, highlighted: scopedCompletion.highlighted, roundedTop: queued.isEmpty, choose: accept)
                         .padding(.horizontal, 10)
                 }
-                VStack(spacing: 0) {
-                    ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
-                        .id(session.id)
-                        .padding(.horizontal, 15)
-                        .padding(.top, 13)
-                        .padding(.bottom, DesktopSpace.xs)
-                    HStack(spacing: DesktopSpace.xs) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !draft.attachments.isEmpty {
+                        AttachmentChips(attachments: $draft.attachments)
+                            .padding(.horizontal, DesktopSpace.s)
+                            .padding(.top, DesktopSpace.s)
+                    }
+                    HStack(alignment: .bottom, spacing: DesktopSpace.xs) {
                         if session.capabilities.attach {
                             Button(action: chooseAttachments) {
                                 Image(systemName: "paperclip")
@@ -1578,63 +1574,63 @@ struct ComposerView: View {
                             .foregroundStyle(DesktopPalette.text2)
                             .help("Attach files or images")
                             .accessibilityLabel("Attach files or images")
-                            .padding(.leading, 5)
                         }
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
+                                .frame(height: 28)
                         }
-                        if let mode = permissionMode {
-                            Button(action: cycleMode) {
-                                Text(SessionRequests.permissionModeLabel(mode))
-                                    .font(.system(size: DesktopType.meta, weight: .medium))
-                                    .foregroundStyle(mode == "" || mode == "manual" ? DesktopPalette.text2 : DesktopPalette.accentText)
-                                    .padding(.horizontal, 8)
-                                    .frame(height: 22)
-                                    .background(modeChanged ? DesktopPalette.accent.opacity(0.18) : .clear, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                        ComposerTextView(text: $draft.text, focused: $focused, placeholder: "Message \(session.title)", lines: ComposerNSTextView.composerLines, onPaste: pasteAttachments, onCommand: perform, onUpFromFirstLine: { takeBackQueued() || olderPrompt() }, onDownFromLastLine: newerPrompt, editor: editor, onCaret: { caret in updateCompletion { $0.caret = caret } }, completionKey: completionKey) { submit(alternate: false) }
+                            .id(session.id)
+                            .frame(minHeight: 28)
+                            .padding(.horizontal, DesktopSpace.xs)
+                        HStack(spacing: DesktopSpace.xs) {
+                            if let mode = permissionMode {
+                                Button(action: cycleMode) {
+                                    Text(SessionRequests.permissionModeLabel(mode))
+                                        .font(.system(size: DesktopType.meta, weight: .medium))
+                                        .foregroundStyle(mode == "" || mode == "manual" ? DesktopPalette.text2 : DesktopPalette.accentText)
+                                        .padding(.horizontal, 8)
+                                        .frame(height: 22)
+                                        .background(modeChanged ? DesktopPalette.accent.opacity(0.18) : .clear, in: Capsule())
+                                        .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                                }
+                                .buttonStyle(.plain)
+                                .help(shortcuts.help("Change mode", .composerCycleMode))
+                                .accessibilityLabel("Mode, \(SessionRequests.permissionModeLabel(mode))")
                             }
-                            .buttonStyle(.plain)
-                            .help(shortcuts.help("Change mode", .composerCycleMode))
-                            .accessibilityLabel("Mode, \(SessionRequests.permissionModeLabel(mode))")
-                        }
-                        if !session.sharedHolders.isEmpty {
-                            HolderPicker(model: model, session: session)
-                        }
-                        if draft.stash != nil {
-                            Button {
-                                if draft.isEmpty { draft.toggleStash() }
-                                focused = true
-                            } label: {
-                                Label("Stashed", systemImage: "tray.and.arrow.down")
-                                    .font(.system(size: DesktopType.meta, weight: .medium))
-                                    .foregroundStyle(DesktopPalette.text2)
-                                    .padding(.horizontal, 8)
-                                    .frame(height: 22)
-                                    .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                            if !session.sharedHolders.isEmpty {
+                                HolderPicker(model: model, session: session)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!draft.isEmpty)
-                            .help(draft.isEmpty ? shortcuts.help("Bring back the stashed draft", .composerStash) : "The stashed draft comes back after you send")
-                            .accessibilityLabel(draft.isEmpty ? "Bring back the stashed draft" : "A draft is stashed; it comes back after you send")
+                            if draft.stash != nil {
+                                Button {
+                                    if draft.isEmpty { draft.toggleStash() }
+                                    focused = true
+                                } label: {
+                                    Label("Stashed", systemImage: "tray.and.arrow.down")
+                                        .font(.system(size: DesktopType.meta, weight: .medium))
+                                        .foregroundStyle(DesktopPalette.text2)
+                                        .padding(.horizontal, 8)
+                                        .frame(height: 22)
+                                        .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!draft.isEmpty)
+                                .help(draft.isEmpty ? shortcuts.help("Bring back the stashed draft", .composerStash) : "The stashed draft comes back after you send")
+                                .accessibilityLabel(draft.isEmpty ? "Bring back the stashed draft" : "A draft is stashed; it comes back after you send")
+                            }
+                            ComposerContextRing(pane: pane, session: session)
+                            if showsSteerNow {
+                                Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
+                                    .controlSize(.small)
+                                    .help(shortcuts.help("Change the turn in progress", .sendAlternate))
+                            }
                         }
-                        Spacer()
-                        if session.isWorking && hasText && !draftIsCommand {
-                            Text(hint)
-                                .font(.system(size: DesktopType.caption))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .padding(.trailing, DesktopSpace.xs)
-                        }
-                        ComposerContextRing(pane: pane, session: session)
-                        if showsSteerNow {
-                            Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
-                                .controlSize(.small)
-                                .help(shortcuts.help("Change the turn in progress", .sendAlternate))
-                        }
+                        .frame(height: 28)
                         Button(action: primaryAction) {
                             Image(systemName: primarySymbol)
                                 .font(.system(size: primaryIsStop ? 10 : 14, weight: .semibold))
                                 .foregroundStyle(DesktopPalette.onAccent)
-                                .frame(width: 32, height: 32)
+                                .frame(width: 28, height: 28)
                                 .background(primaryIsStop ? DesktopPalette.stop : DesktopPalette.accent, in: Circle())
                         }
                         .buttonStyle(.plain)
@@ -1648,9 +1644,14 @@ struct ComposerView: View {
                             .hidden()
                             .frame(width: 0, height: 0)
                     }
-                    .padding(.horizontal, DesktopSpace.s)
-                    .padding(.top, 6)
-                    .padding(.bottom, DesktopSpace.s)
+                    .padding(DesktopSpace.xs)
+                    if session.isWorking && hasText && !draftIsCommand {
+                        Text(hint)
+                            .font(.system(size: DesktopType.caption))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .padding(.horizontal, DesktopSpace.m)
+                            .padding(.bottom, DesktopSpace.xs)
+                    }
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .scrimText("composer")
@@ -1686,8 +1687,7 @@ struct ComposerView: View {
         }
         .frame(maxWidth: DesktopColumns.reading)
         .padding(.horizontal, DesktopColumns.gutter)
-        .padding(.top, 40)
-        .padding(.bottom, DesktopSpace.xl)
+        .padding(.vertical, DesktopSpace.m)
         .frame(maxWidth: .infinity)
         .backdropFade(DesktopPalette.window, paneID: "content", solidFrom: 0.38)
         .popover(isPresented: $showingSent, arrowEdge: .top) {
@@ -2062,60 +2062,61 @@ struct QueueDock: View {
     }
 }
 
-struct AttachmentDock: View {
+struct AttachmentChips: View {
     @Binding var attachments: [ComposerAttachment]
-    let roundedTop: Bool
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(topLeadingRadius: roundedTop ? 14 : 0, topTrailingRadius: roundedTop ? 14 : 0)
-        VStack(spacing: 0) {
+        ChipFlow(spacing: DesktopSpace.xs) {
             ForEach(attachments) { attachment in
-                HStack(spacing: 10) {
-                    AttachmentThumbnail(attachment: attachment)
-                    HStack(spacing: 6) {
-                        Text(attachment.name)
-                            .foregroundStyle(DesktopPalette.text)
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))
-                            .foregroundStyle(DesktopPalette.text2)
-                    }
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: DesktopSpace.xs) {
+                    AttachmentThumbnail(attachment: attachment, side: 18)
+                    Text(attachment.name)
+                        .foregroundStyle(DesktopPalette.text)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 220, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
                     Button {
                         attachments.removeAll { $0.id == attachment.id }
                     } label: {
                         Image(systemName: "xmark")
+                            .font(.system(size: DesktopType.caption, weight: .semibold))
+                            .frame(width: 14, height: 14)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DesktopPalette.text2)
                     .accessibilityLabel("Remove \(attachment.name)")
                 }
-                .font(.system(size: DesktopType.body))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
+                .font(.system(size: DesktopType.meta))
+                .padding(.leading, 3)
+                .padding(.trailing, 6)
+                .frame(height: 24)
+                .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).strokeBorder(DesktopPalette.line))
+                .help("\(attachment.name), \(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))")
             }
         }
-        .padding(.vertical, DesktopSpace.xs)
-        .background(DesktopPalette.dock, in: shape)
-        .overlay(shape.strokeBorder(DesktopPalette.line))
     }
 }
 
 struct AttachmentThumbnail: View {
     let attachment: ComposerAttachment
+    var side: CGFloat = 28
 
     var body: some View {
         if attachment.isImage, let image = NSImage(data: attachment.data) {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 28, height: 28)
+                .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .accessibilityHidden(true)
         } else {
             Image(systemName: "doc")
                 .font(.system(size: DesktopType.caption))
                 .foregroundStyle(DesktopPalette.text2)
-                .frame(width: 28, height: 28)
+                .frame(width: side, height: side)
         }
     }
 }

@@ -237,7 +237,7 @@ struct NewSessionView: View {
 
 /// Lays chips out in rows that wrap at the proposed width, so the row never
 /// asks the window for more width than one chip.
-private struct ChipFlow: Layout {
+struct ChipFlow: Layout {
     var spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
