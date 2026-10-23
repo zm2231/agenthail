@@ -40,6 +40,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var inspectorOverlay = false
     @Published private(set) var sidebarDocks = true
     @Published private(set) var sidebarOverlay = false
+    private var fitted = false
     @Published var renamingSession: SessionState?
     @Published var adoptingSession: SessionState?
     @Published var projectSheet: ProjectSheet?
@@ -115,6 +116,10 @@ final class SessionPane: ObservableObject, Identifiable {
     /// conversation on request instead, and forgets that request once it
     /// can dock again. The inspector collapses first, then the sidebar.
     func fitWindow(width: CGFloat) {
+        if !fitted {
+            fitted = true
+            inspectorVisible = width >= ColumnFit.inspectorOpens
+        }
         let inspector = width >= ColumnFit.inspectorDocks
         if inspector != inspectorDocks {
             inspectorDocks = inspector

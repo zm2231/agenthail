@@ -2258,17 +2258,19 @@ struct DetailsTab: View {
                     .foregroundStyle(DesktopPalette.text2)
                 }
             }
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
-                GridRow {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
                     Text("Agent").foregroundStyle(DesktopPalette.text2)
-                    HStack(spacing: 6) {
-                        Text(session.alias.map { "@\($0)" } ?? session.name)
-                            .textSelection(.enabled)
-                        Button("Rename") { pane.renamingSession = session }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(DesktopPalette.accentText)
-                    }
+                    Spacer(minLength: DesktopSpace.s)
+                    Button("Rename") { pane.renamingSession = session }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
                 }
+                Text(session.alias.map { "@\($0)" } ?? session.name)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
                 detailRow("Surface", session.surface.capitalized)
                 if let configRoot = session.claudeConfigRoot {
                     GridRow {
@@ -2331,7 +2333,17 @@ struct DetailsTab: View {
                 }
                 if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
-                if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
+                if let path = session.checkout?.path ?? session.cwd {
+                    GridRow {
+                        Text("Checkout").foregroundStyle(DesktopPalette.text2)
+                        Text((path as NSString).abbreviatingWithTildeInPath)
+                            .font(.system(size: DesktopType.meta, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .help(path)
+                    }
+                }
             }
             if canControl && session.capabilities.compact {
                 Button("Compact context") { pane.compactContext() }

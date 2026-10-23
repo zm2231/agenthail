@@ -41,9 +41,18 @@ struct WindowColumnsTest {
             }
         }
 
+        let laptop = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
+        laptop.fitWindow(width: 1400)
+        check(laptop.inspectorDocks && !laptop.inspectorShown, "a window narrower than \(ColumnFit.inspectorOpens) pt opens with the docked inspector closed")
+        laptop.toggleInspector()
+        laptop.fitWindow(width: 1500)
+        check(laptop.inspectorShown, "once the person opens it, resizing keeps it open")
+
         let pane = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
-        pane.fitWindow(width: 1400)
+        pane.fitWindow(width: 1700)
         check(pane.inspectorShown, "a wide window shows the inspector by default")
+        pane.fitWindow(width: 1400)
+        check(pane.inspectorShown, "narrowing an open window doesn't close the inspector the person has")
         pane.toggleInspector()
         check(!pane.inspectorVisible && !pane.inspectorShown, "toggling in a wide window hides the docked inspector")
         pane.toggleInspector()
