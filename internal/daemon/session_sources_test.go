@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -29,7 +30,7 @@ type sourceCountingSurface struct {
 	streamErr error
 }
 
-func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *testing.T) {
+func TestCodexTranscriptReplacedBeforeCatchUpReloadsFromTheNewFileAfterRegistryReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")
 	initial := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-old"}}
@@ -84,39 +85,50 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 	t.Cleanup(func() { reg.Close() })
 	manager = newTestSourceManager(t, reg)
 	second, err := manager.prepareStream(context.Background(), &from, adapter)
-	if err == nil {
-		second.Cancel()
-		t.Fatal("replacement before first catch-up page was accepted")
+	if err != nil {
+		t.Fatalf("replaced transcript was not reloaded: %v", err)
 	}
-	if !errors.Is(err, surface.ErrTranscriptUnavailable) || !strings.Contains(err.Error(), "replaced before catch-up") {
-		t.Fatalf("err=%v, want typed replacement failure", err)
-	}
-	status, _, trustedAfterFailure, err := reg.SessionJournalSeedCheckpoint(from.ID)
-	if err != nil || status != registry.SessionJournalSeedFailed || trustedAfterFailure != identity {
-		t.Fatalf("failed checkpoint status=%q identity=%q err=%v, want preserved %q", status, trustedAfterFailure, err, identity)
-	}
-	page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
+	second.Cancel()
+	waitForSessionSourceGone(t, manager)
+	info, err := os.Stat(transcript)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range page.Entries {
-		var payload sessionJournalPayload
-		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+	for attempt := range 2 {
+		bodies, notices, sourceErrors := []string{}, 0, 0
+		page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if payload.Body == "new generation" {
-			t.Fatalf("replacement item was published: %+v", payload)
+		for _, entry := range page.Entries {
+			var payload sessionJournalPayload
+			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case payload.Kind == "source-error":
+				sourceErrors++
+			case payload.Kind == "notice" && payload.Title == "Conversation reloaded":
+				notices++
+			case payload.Op != "remove" && payload.Body != "":
+				bodies = append(bodies, payload.Body)
+			}
 		}
-	}
-
-	third, err := manager.prepareStream(context.Background(), &from, adapter)
-	if err == nil {
-		third.Cancel()
-		t.Fatal("failed retry trusted replacement identity was bypassed")
-	}
-	status, _, retryIdentity, checkpointErr := reg.SessionJournalSeedCheckpoint(from.ID)
-	if checkpointErr != nil || status != registry.SessionJournalSeedFailed || retryIdentity != identity {
-		t.Fatalf("retry checkpoint status=%q identity=%q err=%v", status, retryIdentity, checkpointErr)
+		if !slices.Equal(bodies, []string{"new generation"}) || notices != 1 || sourceErrors != 0 {
+			t.Fatalf("attempt %d: bodies=%q notices=%d source errors=%d, want only the new generation and one reload notice", attempt, bodies, notices, sourceErrors)
+		}
+		status, _, reloaded, err := reg.SessionJournalSeedCheckpoint(from.ID)
+		if err != nil || status != registry.SessionJournalSeeded || reloaded == identity || reloaded != fileIdentityForTest(info) {
+			t.Fatalf("attempt %d: checkpoint status=%q identity=%q err=%v, want the replacement's", attempt, status, reloaded, err)
+		}
+		if attempt == 0 {
+			third, err := manager.prepareStream(context.Background(), &from, adapter)
+			if err != nil {
+				t.Fatalf("reloaded journal was not trusted on the next start: %v", err)
+			}
+			third.Cancel()
+			waitForSessionSourceGone(t, manager)
+		}
 	}
 }
 
