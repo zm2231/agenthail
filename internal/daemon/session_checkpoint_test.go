@@ -308,6 +308,9 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	// A stopped source leaves the map before its stream returns and records
+	// where it stopped.
+	d.sources.running.Wait()
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
