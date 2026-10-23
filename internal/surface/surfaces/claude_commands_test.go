@@ -62,7 +62,7 @@ func TestClaudeGoalCommandRendersAsEventsNotUserMessages(t *testing.T) {
 	}
 }
 
-func TestClaudeGoalCommandIsNotAnExchange(t *testing.T) {
+func TestClaudeGoalCommandIsAnExchangeOfItsOutputWithoutItsMarkup(t *testing.T) {
 	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: timelineFixture(t, claudeGoalSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -72,8 +72,39 @@ func TestClaudeGoalCommandIsNotAnExchange(t *testing.T) {
 			t.Fatalf("exchanges=%+v", read.Exchanges)
 		}
 	}
-	if len(read.Exchanges) == 0 || read.Exchanges[0].User != "Reply with exactly: ready" {
+	type want struct{ user, assistant string }
+	wants := []want{{"Reply with exactly: ready", "ready"}, {"/goal you have replied with exactly the word READY", "Goal set: you have replied with exactly the word READY"}, {"", "READY"}}
+	if len(read.Exchanges) != len(wants) {
 		t.Fatalf("exchanges=%+v", read.Exchanges)
+	}
+	for index, expected := range wants {
+		if got := (want{read.Exchanges[index].User, read.Exchanges[index].Assistant}); got != expected {
+			t.Fatalf("exchange %d = %+v want %+v", index, read.Exchanges[index], expected)
+		}
+	}
+}
+
+// claudeContextSequence is what Claude Code writes when a person runs /context
+// between turns from Agenthail or the terminal: the command record carries no
+// origin, unlike a prompt the person typed.
+const claudeContextSequence = `{"type":"user","uuid":"u-human","origin":{"kind":"human"},"message":{"role":"user","content":"Reply with the single word READY."},"timestamp":"2026-10-23T01:47:41Z"}
+{"type":"assistant","uuid":"a-1","message":{"id":"m-1","role":"assistant","content":[{"type":"text","text":"READY"}],"stop_reason":"end_turn"},"timestamp":"2026-10-23T01:47:50Z"}
+{"type":"system","subtype":"turn_duration","durationMs":9000,"timestamp":"2026-10-23T01:47:50Z"}
+{"type":"user","uuid":"u-caveat","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>"},"timestamp":"2026-10-23T01:55:45Z"}
+{"type":"user","uuid":"u-command","parentUuid":"u-caveat","message":{"role":"user","content":"<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>"},"timestamp":"2026-10-23T01:55:44Z"}
+{"type":"system","subtype":"local_command","uuid":"s-output","parentUuid":"u-command","isMeta":false,"content":"<local-command-stdout>## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)</local-command-stdout>","timestamp":"2026-10-23T01:55:45Z"}
+`
+
+func TestAClaudeBuiltInRunBetweenTurnsReadsAsTheLatestExchange(t *testing.T) {
+	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: timelineFixture(t, claudeContextSequence), Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Exchanges) != 2 || read.Exchanges[0].Assistant != "READY" {
+		t.Fatalf("exchanges=%+v", read.Exchanges)
+	}
+	if last := read.Exchanges[1]; last.User != "/context" || last.Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || last.Timestamp.IsZero() {
+		t.Fatalf("the built-in and its output are not the latest exchange: %+v", last)
 	}
 }
 

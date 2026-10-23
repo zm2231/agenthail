@@ -134,3 +134,43 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 		t.Fatalf("exchange timestamps=%v,%v want %v,%v", got[0].Timestamp, got[1].Timestamp, first, second)
 	}
 }
+
+func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testing.T) {
+	previousGrace := sessionPageHandoffGrace
+	sessionPageHandoffGrace = 10 * time.Millisecond
+	t.Cleanup(func() { sessionPageHandoffGrace = previousGrace })
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	d, r, _, _, _ := daemonFixture(t)
+	fixture := claudetest.New(t)
+	conversation := "conversation-built-in"
+	path := filepath.Join(fixture.Home, ".claude", "projects", "fixture-project", conversation+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	asked := time.Date(2026, 10, 23, 1, 47, 41, 0, time.UTC)
+	appendClaudeTranscript(t, path,
+		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "turn-one", "sessionId": conversation, "origin": map[string]any{"kind": "human"}, "timestamp": asked.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "Reply with the single word READY."}}),
+		claudeTranscriptLine(t, map[string]any{"type": "assistant", "uuid": "reply-one", "sessionId": conversation, "timestamp": asked.Add(9 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"id": "message-one", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "READY"}}}}),
+		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "turn_duration", "durationMs": 9000, "sessionId": conversation, "timestamp": asked.Add(9 * time.Second).Format(time.RFC3339Nano)}),
+	)
+	session := surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 || got[0].Assistant != "READY" {
+		t.Fatalf("first page exchanges=%+v", got)
+	}
+
+	ran := asked.Add(8 * time.Minute)
+	appendClaudeTranscript(t, path,
+		claudeTranscriptLine(t, map[string]any{"type": "user", "isMeta": true, "uuid": "caveat", "sessionId": conversation, "timestamp": ran.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user.</local-command-caveat>"}}),
+		claudeTranscriptLine(t, map[string]any{"type": "user", "uuid": "command", "parentUuid": "caveat", "sessionId": conversation, "timestamp": ran.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>"}}),
+		claudeTranscriptLine(t, map[string]any{"type": "system", "subtype": "local_command", "uuid": "output", "parentUuid": "command", "isMeta": false, "sessionId": conversation, "timestamp": ran.Add(time.Second).Format(time.RFC3339Nano), "content": "<local-command-stdout>## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)</local-command-stdout>"}),
+	)
+	got := readDashboardExchangesWhen(t, handler, conversation, func(got []pageExchange) bool { return len(got) == 2 })
+	if len(got) != 2 || got[1].User != "/context" || got[1].Assistant != "## Context Usage\n\n**Tokens:** 40.9k / 500k (8%)" || !got[1].Timestamp.Equal(ran) {
+		t.Fatalf("the built-in is not the latest exchange: %+v", got)
+	}
+}

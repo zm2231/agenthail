@@ -62,6 +62,13 @@ toward the goal. None of them are shown as something the user said. A slash
 command typed in Claude itself, which Claude records with a human origin,
 stays the person's message and shows as typed, such as `/goal tests pass`.
 
+Claude records a built-in such as `/goal` or `/context` with no origin and
+runs it without a model turn.
+Between turns, such a command and its output make an exchange of their own,
+so the latest exchange (what `agenthail last` shows) is the command and what
+it printed. A command that prints nothing, or one inside a running turn,
+makes no exchange.
+
 Claude has no settable pause or token budget for a goal. The command takes only
 `[<condition> | clear]`; Claude pauses a goal itself, and any message
 continues it.

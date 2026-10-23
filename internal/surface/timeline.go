@@ -217,8 +217,29 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 	exchanges := []Exchange{}
 	starts := []int{}
 	turn, open := "", false
+	// command is a command run outside a turn, which with its output makes an
+	// exchange of its own. A command that prints nothing makes none.
+	command := -1
 	for index, item := range items {
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		if item.Kind == "event" && (item.Title == TimelineCommand || item.Title == TimelineLocalCommand) && !open && item.Text != "" {
+			if item.Title == TimelineCommand {
+				command = index
+				continue
+			}
+			exchange, start := Exchange{Assistant: item.Text, Timestamp: at, Source: source}, index
+			if command >= 0 {
+				exchange.User, start = items[command].Text, command
+				if asked, err := time.Parse(time.RFC3339Nano, items[command].Timestamp); err == nil {
+					exchange.Timestamp = asked
+				}
+			}
+			exchanges = append(exchanges, exchange)
+			starts = append(starts, start)
+			command = -1
+			continue
+		}
+		command = -1
 		if item.Kind == "done" {
 			if open && (item.TurnID == "" || item.TurnID == turn) {
 				open = false
@@ -261,6 +282,14 @@ func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
 	}
 	return exchanges, starts
 }
+
+// TimelineCommand and TimelineLocalCommand title the events for a slash
+// command Claude Code ran itself rather than sending it to the model, and
+// for what it printed.
+const (
+	TimelineCommand      = "Command"
+	TimelineLocalCommand = "Local command"
+)
 
 // TimelineUsageLimit is the status of a notice that Claude refused a turn
 // because a usage limit was reached.

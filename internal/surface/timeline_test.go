@@ -92,3 +92,31 @@ func TestExchangeStartsNeverCrossAnEndedTurn(t *testing.T) {
 		t.Fatalf("starts=%v, want [0 4]", got)
 	}
 }
+
+func TestABuiltInCommandRunBetweenTurnsIsAnExchangeOfItsOwn(t *testing.T) {
+	items := []TimelineItem{
+		{Kind: "message", Role: "user", Text: "first", TurnID: "t1", Timestamp: "2026-10-23T01:54:40Z"},
+		{Kind: "message", Role: "assistant", Text: "one", TurnID: "t1"},
+		{Kind: "done", TurnID: "t1"},
+		{Kind: "event", Title: "Turn duration", Text: "4s", TurnID: "t1"},
+		{Kind: "event", Title: TimelineCommand, Text: "/context", TurnID: "t1", Timestamp: "2026-10-23T01:55:44Z"},
+		{Kind: "event", Title: TimelineLocalCommand, Text: "## Context Usage", TurnID: "t1", Timestamp: "2026-10-23T01:55:45Z"},
+		{Kind: "message", Role: "user", Text: "second", TurnID: "t2", Timestamp: "2026-10-23T01:56:00Z"},
+		{Kind: "event", Title: TimelineCommand, Text: "/compact", TurnID: "t2"},
+		{Kind: "message", Role: "assistant", Text: "two", TurnID: "t2"},
+	}
+	exchanges := ExchangesFromItems(items, "journal")
+	type want struct{ user, assistant string }
+	wants := []want{{"first", "one"}, {"/context", "## Context Usage"}, {"second", "two"}}
+	if len(exchanges) != len(wants) {
+		t.Fatalf("exchanges=%+v", exchanges)
+	}
+	for index, expected := range wants {
+		if got := (want{exchanges[index].User, exchanges[index].Assistant}); got != expected || exchanges[index].Timestamp.IsZero() {
+			t.Fatalf("exchange %d = %+v want %+v", index, exchanges[index], expected)
+		}
+	}
+	if got := ExchangeStarts(items); !reflect.DeepEqual(got, []int{0, 3, 6}) {
+		t.Fatalf("starts=%v, want [0 3 6]", got)
+	}
+}
