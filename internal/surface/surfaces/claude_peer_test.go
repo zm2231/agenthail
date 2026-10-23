@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -324,7 +324,7 @@ func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
 	defer listener.Close()
 	record := map[string]any{"pid": os.Getpid(), "sessionId": "linux-id", "status": "idle", "version": "2.1.302", "messagingSocketPath": socket}
 	if runtime.GOOS == "linux" {
-		start, err := claudepeer.ProcStartTicks(os.Getpid())
+		start, err := procstart.Ticks(os.Getpid())
 		if err != nil {
 			t.Fatal(err)
 		}

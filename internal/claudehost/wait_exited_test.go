@@ -5,10 +5,12 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/procstart"
 )
 
 func TestWaitExitedTellsAClaudeFromALaterProcessWithItsPID(t *testing.T) {
-	started, err := processStart(os.Getpid())
+	started, err := procstart.Lstart(context.Background(), os.Getpid())
 	if err != nil || started == "" {
 		t.Fatalf("start of this process = %q, %v", started, err)
 	}

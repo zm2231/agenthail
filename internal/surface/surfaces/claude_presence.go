@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
+	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -68,7 +69,7 @@ func claudeRecordLive(record map[string]any) bool {
 		return claudeRecordPredatesProcess(record, int(pid))
 	}
 	if claudepeer.IsClockTicks(started) {
-		actual, err := claudepeer.ProcStartTicks(int(pid))
+		actual, err := procstart.Ticks(int(pid))
 		return err == nil && actual == started
 	}
 	actual, err := processStartTime(int(pid))
