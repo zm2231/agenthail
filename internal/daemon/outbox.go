@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -68,6 +69,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
+	if named, err := delivery.WithPersonName(operationCtx, d.Registry, item.SourceSessionID, item.PersonName); err != nil {
+		d.log.Printf("queue item %d: %s", item.ID, err)
+	} else {
+		operationCtx = named
+	}
 	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
 		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
 	} else if messageUUID != "" {
@@ -78,7 +84,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	addressed := *session
 	var steered *surface.ControlResult
 	route := surface.RouteFor(adapter, session, item.Author)
-	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads}
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads, PersonName: item.PersonName}
 	steers, policyErr := d.Registry.Steers(item.BusyDelivery)
 	if policyErr != nil {
 		d.log.Printf("read busy delivery policy for queue item %d: %s", item.ID, policyErr)

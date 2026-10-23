@@ -87,6 +87,7 @@ type managerRequest struct {
 	Message         string `json:"message,omitempty"`
 	ReplySocket     string `json:"replySocket,omitempty"`
 	MsgID           string `json:"msgId,omitempty"`
+	PersonName      string `json:"personName,omitempty"`
 }
 
 type managerError struct {
@@ -254,7 +255,7 @@ func (m *Manager) serve() {
 			response := managerResponse{}
 			switch request.Operation {
 			case "send":
-				response.Result, err = m.Send(surface.WithMessageUUID(ctx, request.MsgID), request.SourceSessionID, request.TargetSocket, request.Message)
+				response.Result, err = m.Send(surface.WithPersonName(surface.WithMessageUUID(ctx, request.MsgID), request.PersonName), request.SourceSessionID, request.TargetSocket, request.Message)
 			case "ensure":
 				err = m.Ensure(ctx, request.SourceSessionID)
 			default:
@@ -381,6 +382,11 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	session, err := m.registry.Session(id)
 	if err != nil {
 		return fmt.Errorf("load sender %q: %w", id, err)
+	}
+	if id == surface.PersonSessionID {
+		if session.Name, err = m.registry.PersonName(); err != nil {
+			return err
+		}
 	}
 	if !own {
 		if session.Status == surface.StatusOffline {
@@ -893,7 +899,7 @@ func Send(ctx context.Context, home, sourceID, socket, message string) (*surface
 	if err := claudepeer.ValidateSend(sourceID, socket, message); err != nil {
 		return nil, err
 	}
-	response, err := requestManager(ctx, home, managerRequest{Operation: "send", SourceSessionID: sourceID, TargetSocket: socket, Message: message, MsgID: surface.MessageUUID(ctx)})
+	response, err := requestManager(ctx, home, managerRequest{Operation: "send", SourceSessionID: sourceID, TargetSocket: socket, Message: message, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)})
 	if err != nil {
 		return nil, err
 	}

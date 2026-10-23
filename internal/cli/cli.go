@@ -236,6 +236,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdHooks(rest)
 	case "permissions":
 		return a.cmdPermissions(rest)
+	case "person":
+		return a.cmdPerson(rest)
 	case "ui":
 		return a.cmdUI(rest)
 	case "dashboard":
@@ -412,6 +414,7 @@ Other:
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
   permissions [--json]          The daemon's macOS privacy grants and where to change them
   permissions request           Have macOS ask for the grants the daemon lacks
+  person name [<name>|--reset]  The name sessions see on your messages
   update [--check] [--json]     Install the latest Agenthail release
   upgrade [--check] [--json]    Alias for update
   version [--json]              Build and revision information
@@ -706,6 +709,7 @@ func validateCommandFlags(command string, args []string) error {
 		"move":    {values: map[string]bool{"--to": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
 		"devices": {values: map[string]bool{"--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"person":  {bools: map[string]bool{"--reset": true, "--json": true}},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "permissions": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
@@ -3131,8 +3135,14 @@ func (a *App) cmdDoctor(args []string) error {
 		cancel()
 		grants = &report
 	}
+	personName, personSet := "", false
+	if r := a.registry(); r != nil {
+		personName, _ = r.PersonName()
+		setting, _ := r.PersonNameSetting()
+		personSet = setting != ""
+	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -3145,6 +3155,9 @@ func (a *App) cmdDoctor(args []string) error {
 			return err
 		}
 	} else {
+		if personName != "" {
+			fmt.Println(describePersonName(personName, personSet))
+		}
 		if claudeRootsErr != nil {
 			fmt.Printf("claude config: %s\n", claudeRootsErr)
 		}

@@ -32,6 +32,7 @@ type federatedSurface struct {
 	mu       sync.Mutex
 	messages []string
 	sources  []string
+	persons  []string
 }
 
 func (f *federatedSurface) record(message string) {
@@ -55,6 +56,7 @@ func (f *federatedSurface) delivered() []string {
 func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.mu.Lock()
 	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.persons = append(f.persons, surface.PersonName(ctx))
 	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
@@ -386,6 +388,34 @@ func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 2
 	})
 	return local, remote, record
+}
+
+func TestAPersonsMessageToAnotherHostKeepsTheNameTheirOwnHostHasForThem(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	for node, name := range map[*federationNode]string{local: "Ada at her Mac", remote: "root"} {
+		if err := node.reg.SetPersonName(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	for _, request := range []map[string]string{
+		{"action": "send", "sessionId": qualified, "message": "from the app", "author": "person"},
+		{"action": "send", "sessionId": "remote-a", "message": "typed on the server", "author": "person", "personName": "Someone Else"},
+	} {
+		node := local
+		if request["sessionId"] == "remote-a" {
+			node = remote
+		}
+		if response := node.request(t, http.MethodPost, "/api/v1/actions", request); response.Code != http.StatusOK {
+			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	remote.fake.mu.Lock()
+	sources, persons := append([]string(nil), remote.fake.sources...), append([]string(nil), remote.fake.persons...)
+	remote.fake.mu.Unlock()
+	if len(sources) != 2 || sources[0] != surface.PersonSessionID || sources[1] != surface.PersonSessionID || persons[0] != "Ada at her Mac" || persons[1] != "root" {
+		t.Fatalf("sources=%v persons=%v", sources, persons)
+	}
 }
 
 func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {

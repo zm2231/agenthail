@@ -528,6 +528,9 @@ type SendOptions struct {
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
 	Author          Author `json:"-"`
+	// PersonName names the person on a message they sent from a paired
+	// host, which knows them by the name that host has for them.
+	PersonName string `json:"-"`
 	// Uploads are the person's attached files. Route.Send turns them into
 	// Images for a route that takes image input and into stored paths in the
 	// message text for everything else.
@@ -572,6 +575,22 @@ func SourceSessionID(ctx context.Context) string {
 	}
 	id, _ := ctx.Value(sourceSessionIDContextKey{}).(string)
 	return id
+}
+
+type personNameContextKey struct{}
+
+// WithPersonName names the person a message is from, for the route that
+// says who wrote it.
+func WithPersonName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, personNameContextKey{}, name)
+}
+
+func PersonName(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	name, _ := ctx.Value(personNameContextKey{}).(string)
+	return name
 }
 
 type SessionStartOptions struct {

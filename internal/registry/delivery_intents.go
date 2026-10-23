@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/user"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ func readsNotices(senderSessionID string) bool {
 // EnsureSender records the person or the Agenthail CLI the first time either
 // sends, and does nothing for any other sender.
 func (r *Registry) EnsureSender(id string) error {
-	sender, ok := surface.AgenthailSender(id, PersonName())
+	sender, ok := surface.AgenthailSender(id, "")
 	if !ok {
 		return nil
 	}
@@ -44,15 +45,47 @@ func (r *Registry) EnsureSender(id string) error {
 	return r.RegisterSession(sender)
 }
 
-// PersonName is the person's name as the account they run Agenthail under
-// gives it.
-func PersonName() string {
-	if account, err := user.Current(); err == nil {
-		if name, _, _ := strings.Cut(account.Name, ","); strings.TrimSpace(name) != "" {
-			return strings.TrimSpace(name)
-		}
+// PersonName is what sessions call the person: the name set with agenthail
+// person name, else the full name of the account Agenthail runs under, else
+// its login.
+func (r *Registry) PersonName() (string, error) {
+	name, err := r.PersonNameSetting()
+	if err != nil || name != "" {
+		return name, err
 	}
-	return "The person"
+	return accountName(), nil
+}
+
+// PersonNameSetting is the name set with agenthail person name, empty when
+// none is.
+func (r *Registry) PersonNameSetting() (string, error) {
+	var name string
+	err := r.db.QueryRow(`SELECT name FROM sessions WHERE id=?`, surface.PersonSessionID).Scan(&name)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// SetPersonName sets the name sessions call the person; an empty name goes
+// back to the account's.
+func (r *Registry) SetPersonName(name string) error {
+	if err := r.EnsureSender(surface.PersonSessionID); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(`UPDATE sessions SET name=?, updated_at=datetime('now') WHERE id=?`, strings.TrimSpace(name), surface.PersonSessionID)
+	return err
+}
+
+func accountName() string {
+	account, err := user.Current()
+	if err != nil {
+		return os.Getenv("USER")
+	}
+	if name, _, _ := strings.Cut(account.Name, ","); strings.TrimSpace(name) != "" {
+		return strings.TrimSpace(name)
+	}
+	return account.Username
 }
 
 // EnsureUnrepliableSender records a session on a host this daemon has not

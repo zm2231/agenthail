@@ -20,7 +20,7 @@ func splitOperator(tx *sql.Tx) error {
 	}
 	if present > 0 {
 		for _, id := range []string{surface.PersonSessionID, surface.CLISessionID} {
-			sender, _ := surface.AgenthailSender(id, PersonName())
+			sender, _ := surface.AgenthailSender(id, "")
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO sessions(id,surface,name,status,runtime_kind) VALUES(?,?,?,?,?)`, sender.ID, string(sender.Surface), sender.Name, string(sender.Status), string(sender.RuntimeKind)); err != nil {
 				return err
 			}

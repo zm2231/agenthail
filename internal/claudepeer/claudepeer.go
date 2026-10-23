@@ -132,6 +132,7 @@ type controlRequest struct {
 	Message      string `json:"message"`
 	ReplySocket  string `json:"replySocket,omitempty"`
 	MsgID        string `json:"msgId,omitempty"`
+	PersonName   string `json:"personName,omitempty"`
 }
 
 type controlResponse struct {
@@ -334,7 +335,7 @@ func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocke
 	if err := conn.SetDeadline(time.Now().Add(readDeadline)); err != nil {
 		return nil, err
 	}
-	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx)})
+	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket, MsgID: surface.MessageUUID(ctx), PersonName: surface.PersonName(ctx)})
 	if _, err := conn.Write(append(req, '\n')); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -1261,7 +1262,17 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			}
 			senderSocket = req.ReplySocket
 		}
-		content := peerContent(c.HostName, *session, senderSocket, "", req.Message)
+		sender := *session
+		if sender.ID == surface.PersonSessionID {
+			if sender.Name = req.PersonName; sender.Name == "" {
+				if sender.Name, err = reg.PersonName(); err != nil {
+					resp.Error = classifyControlError(err)
+					_ = json.NewEncoder(conn).Encode(resp)
+					return
+				}
+			}
+		}
+		content := peerContent(c.HostName, sender, senderSocket, "", req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {

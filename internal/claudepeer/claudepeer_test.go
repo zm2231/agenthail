@@ -1245,3 +1245,60 @@ func TestAMessageClaudeReportsExpiredIsADeliveryFailure(t *testing.T) {
 		t.Fatalf("problems = %+v, want the expired message as a failure", problems)
 	}
 }
+
+func TestThePersonsPeerNamesThemByTheMessageElseTheirSetting(t *testing.T) {
+	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
+	socketDir := shortTempDir(t, "cp-socks-")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetPersonName("Ada Lovelace"); err != nil {
+		t.Fatal(err)
+	}
+	person, err := reg.Session(surface.PersonSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reg.Close()
+	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: *person, SocketDir: socketDir})
+	for _, test := range []struct{ named, want string }{{"", "Ada Lovelace"}, {"Ada at her Mac", "Ada at her Mac"}} {
+		content := sendToFakeTarget(t, socketDir, func(target string) error {
+			_, err := Send(surface.WithPersonName(context.Background(), test.named), worker.ControlPath, person.ID, target, "ship it")
+			return err
+		})
+		if !strings.Contains(content, `from-session="`+surface.PeerUUID(person.Surface, person.ID)+`"`) || !strings.Contains(content, "\n"+test.want+" wrote this in Agenthail.") {
+			t.Fatalf("named %q: content=%q", test.named, content)
+		}
+	}
+}
+
+func sendToFakeTarget(t *testing.T, socketDir string, send func(target string) error) string {
+	t.Helper()
+	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
+	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
+	reader := bufio.NewReader(stdout)
+	var target Ready
+	readyLine, err := reader.ReadString('\n')
+	if err != nil || json.Unmarshal([]byte(readyLine), &target) != nil {
+		t.Fatalf("target ready=%q err=%v", readyLine, err)
+	}
+	if err := send(target.SocketPath); err != nil {
+		t.Fatal(err)
+	}
+	line, _ := reader.ReadString('\n')
+	var sent frame
+	var body messageBody
+	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
+		t.Fatalf("invalid frame=%s: %v", line, err)
+	}
+	return body.Content
+}

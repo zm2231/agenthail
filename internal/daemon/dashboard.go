@@ -1148,6 +1148,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 		Author          surface.Author             `json:"author"`
+		PersonName      string                     `json:"personName"`
 		PID             int                        `json:"pid"`
 		PIDStartedAt    int64                      `json:"pidStartedAt"`
 		ProjectID       string                     `json:"projectId"`
@@ -1500,7 +1501,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		case source != "":
 			label = d.resolveDisplay(service.Canonical(source))
 		case request.Author == surface.AuthorPerson:
-			source, label = surface.PersonSessionID, registry.PersonName()
+			source = surface.PersonSessionID
+			if label, err = d.Registry.PersonName(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
 		result, err := broadcaster.Send(operationCtx, target, request.Message, label, source)
@@ -1832,7 +1837,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 			return
 		}
-		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, Uploads: attached}
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
 		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
@@ -1858,6 +1863,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
+		}
+		if request.PersonName != "" {
+			ctx = surface.WithPersonName(ctx, request.PersonName)
 		}
 		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message, request.Author)
 	case "interrupt":
