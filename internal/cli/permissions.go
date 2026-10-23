@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/permissions"
@@ -17,6 +18,9 @@ import (
 // process responsible for the one asking, which from a terminal is the
 // terminal.
 func (a *App) cmdPermissions(args []string) error {
+	if !privacyGrantsExist {
+		return permissionsOffMacOS(args)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	switch positional := stripFlags(args); {
@@ -40,6 +44,24 @@ func (a *App) cmdPermissions(args []string) error {
 		}
 		fmt.Println("macOS is asking on this Mac for each grant Agenthail Daemon lacks; run 'agenthail permissions' after answering")
 		return nil
+	}
+	return fmt.Errorf("usage: agenthail permissions [request] [--json]")
+}
+
+var privacyGrantsExist = runtime.GOOS == "darwin"
+
+// permissionsOffMacOS answers without the daemon: privacy grants exist only on
+// macOS, so elsewhere there are none to read or request.
+func permissionsOffMacOS(args []string) error {
+	switch positional := stripFlags(args); {
+	case len(positional) == 0:
+		if hasFlag(args, "--json") {
+			return json.NewEncoder(os.Stdout).Encode(permissions.Report{Grants: []permissions.Grant{}})
+		}
+		fmt.Println("[permissions] privacy grants are a macOS setting; this system has none")
+		return nil
+	case len(positional) == 1 && positional[0] == "request":
+		return errors.New("privacy grants are a macOS setting; this system has none to request")
 	}
 	return fmt.Errorf("usage: agenthail permissions [request] [--json]")
 }

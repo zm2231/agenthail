@@ -54,7 +54,7 @@ final class NativeVoiceAudio: VoiceAudioClient {
     }
 
     func start() async throws {
-        guard permittedOrigin else { throw AgenthailAPIError.unavailable("Voice requires a secure paired Mac.") }
+        guard permittedOrigin else { throw AgenthailAPIError.unavailable("Voice requires a secure paired computer.") }
         generation += 1
         let current = generation
         let id = callID ?? UUID()

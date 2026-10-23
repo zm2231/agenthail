@@ -1,6 +1,6 @@
 # Appearance with ui.conf
 
-The Mac app's look comes from one text file, `ui.conf`, kept on the computer that runs Agenthail at `~/.agenthail/ui/ui.conf`. You can edit it by hand, change it with `agenthail ui`, or ask an agent to change it. The app picks up a change within a few seconds of it being saved.
+The look of the Mac and iPhone apps comes from one text file, `ui.conf`, kept on the computer that runs Agenthail, macOS or Linux, at `~/.agenthail/ui/ui.conf`. You can edit it by hand, change it with `agenthail ui`, or ask an agent to change it. The Mac app picks up a change within a few seconds of it being saved.
 
 `~/.agenthail/ui` is a git repository. Every change is a commit that records who made it (you, or the agent that ran `agenthail ui`) and why, so any change can be listed, compared and undone.
 
