@@ -132,7 +132,7 @@ enum DesktopColumns {
     static let sidebar = (min: CGFloat(248), ideal: CGFloat(300), max: CGFloat(340))
     static let detail = (min: CGFloat(340), ideal: CGFloat(892))
     static let inspector = (min: CGFloat(270), ideal: CGFloat(284), max: CGFloat(300))
-    static let reading: CGFloat = 880
+    static let reading: CGFloat = 1040
     static let wide: CGFloat = 1120
     static let gutter: CGFloat = 32
 

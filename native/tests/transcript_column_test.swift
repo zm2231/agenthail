@@ -11,7 +11,7 @@ struct TranscriptColumnTest {
             check(DesktopColumns.gutter + layout.column + layout.overhang <= pane - DesktopColumns.gutter + 0.5, "a tool run stops at the right gutter, at \(pane)")
         }
         check(DesktopColumns.transcript(pane: 600).overhang == 0, "a pane that fits only the column gives tool runs nothing extra")
-        check(DesktopColumns.transcript(pane: 1440) == (880, 240), "a wide pane gives the full reading column and the full overhang")
+        check(DesktopColumns.transcript(pane: 1440) == (1040, 80), "a wide pane gives the full reading column and the full overhang")
         check(DesktopColumns.transcript(pane: 40).column == 0, "a pane narrower than its gutters has no column, not a negative one")
         print("ok")
     }
