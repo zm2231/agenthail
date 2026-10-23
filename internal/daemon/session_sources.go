@@ -35,7 +35,11 @@ var (
 	sessionPageHandoffGrace        = 5 * time.Second
 	ErrSessionSourceManagerClosed  = errors.New("session source manager is closed")
 	sessionTranscriptMoveCheck     = 2 * time.Second
-	errTranscriptReplaced          = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
+	// sessionStreamRestartPause is how long a source waits before it streams
+	// again when it does not restart at once: after a failure, or after a
+	// short stream that read nothing or followed another quick restart.
+	sessionStreamRestartPause = time.Second
+	errTranscriptReplaced     = fmt.Errorf("transcript identity changed: %w", surface.ErrTranscriptUnavailable)
 )
 
 type sessionJournalPayload struct {
@@ -300,6 +304,7 @@ func (s *sessionSource) run() {
 		return
 	}
 	followDelay := sessionSeedRetryDelay
+	var restartedAt time.Time
 	for {
 		current := s.session
 		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
@@ -340,7 +345,12 @@ func (s *sessionSource) run() {
 		} else {
 			close(watched)
 		}
-		streamErr := s.adapter.Stream(streamContext, &current, "", s.append, 30*time.Minute)
+		started := time.Now()
+		var streamed atomic.Bool
+		streamErr := s.adapter.Stream(streamContext, &current, "", func(event surface.StreamEvent) {
+			streamed.Store(true)
+			s.append(event)
+		}, 30*time.Minute)
 		stopStream()
 		<-watched
 		if moved.Load() {
@@ -372,9 +382,22 @@ func (s *sessionSource) run() {
 		if s.ctx.Err() != nil || !hasHolders {
 			break
 		}
+		// A stream that ended cleanly after reading something, as a managed
+		// Codex stream does when its turn completes, is followed again at once
+		// so the next turn is not read late, at most once per pause so streams
+		// that keep ending at once cannot spin. A stream that ran for the pause
+		// is followed again at once as well.
+		clean := streamErr == nil || errors.Is(streamErr, surface.ErrStreamWindow)
+		if clean && time.Since(started) >= sessionStreamRestartPause {
+			continue
+		}
+		if clean && streamed.Load() && time.Since(restartedAt) >= sessionStreamRestartPause {
+			restartedAt = time.Now()
+			continue
+		}
 		select {
 		case <-s.ctx.Done():
-		case <-time.After(time.Second):
+		case <-time.After(sessionStreamRestartPause):
 		}
 	}
 }
