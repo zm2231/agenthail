@@ -129,7 +129,12 @@ concatenate successive ranges without splitting a code point.
 
 Catalog event envelopes are `{stream:"catalog",seq,type,data}` and session event
 envelopes are `{stream:"session",sessionId,seq,type,data}`. Their cursors are
-separate. The following shapes are canonical:
+separate. A catalog stream, a paired host's included, follows the catalog
+journal from its own cursor: catalog writers wake it once their transaction
+commits, and it reads the committed events after its cursor in pages, so a
+reader slow to take a burst catches up instead of being disconnected. It ends
+only when the journal no longer retains the events after its cursor; the
+reconnect then receives `stream_gap`. The following shapes are canonical:
 
 ```json
 {"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","project":{"id":"project-1","displayName":"agenthail","rootPath":"/repo","kind":"git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}

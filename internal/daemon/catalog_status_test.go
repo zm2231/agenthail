@@ -239,10 +239,12 @@ func TestRunCatalogPublishesStatusWithinTwoSeconds(t *testing.T) {
 	}
 	// Let the first status tick record the post-discovery stamps.
 	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
-	window, events, unsubscribe, err := d.catalog.subscribe(latestCatalogSeq(t, store))
+	window, eventsFollower, err := d.catalog.subscribe(latestCatalogSeq(t, store))
 	if err != nil || window.Gap {
 		t.Fatalf("subscribe gap=%v err=%v", window.Gap, err)
 	}
+	events := followCatalog(t, eventsFollower)
+	unsubscribe := eventsFollower.Cancel
 	defer unsubscribe()
 	started := time.Now()
 	source.writeStatus(t, "from", surface.StatusBusy)

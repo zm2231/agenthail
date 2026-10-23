@@ -692,10 +692,12 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.startErr = errors.New("initial message rejected")
-	_, liveEvents, cancel, err := d.catalog.subscribe(0)
+	_, liveEventsFollower, err := d.catalog.subscribe(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	liveEvents := followCatalog(t, liveEventsFollower)
+	cancel := liveEventsFollower.Cancel
 	defer cancel()
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
