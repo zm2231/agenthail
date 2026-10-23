@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -81,7 +80,7 @@ func (d *Daemon) apiUISnapshotHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request uiSnapshotRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, apiRequestBodyLimit)).Decode(&request); err != nil {
+	if err := decodeAPIV1JSON(w, r, &request, true); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", "The request body must be JSON.")
 		return
 	}
@@ -127,7 +126,7 @@ func (d *Daemon) apiUISnapshotUploadHandler(w http.ResponseWriter, r *http.Reque
 		var failed struct {
 			Error string `json:"error"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, apiRequestBodyLimit)).Decode(&failed); err != nil || strings.TrimSpace(failed.Error) == "" {
+		if err := decodeAPIV1JSON(w, r, &failed, false); err != nil || strings.TrimSpace(failed.Error) == "" {
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "A failed snapshot is reported as {\"error\": \"<reason>\"}.")
 			return
 		}

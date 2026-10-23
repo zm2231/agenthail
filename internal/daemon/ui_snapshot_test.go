@@ -97,7 +97,7 @@ func TestUISnapshotExplainsWhenNoAppAnswers(t *testing.T) {
 func TestUISnapshotRefusesBadSizesAndOversizedImages(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	for _, body := range []string{`{"width":900}`, `{"width":-1,"height":600}`, `{"width":9000,"height":600}`, `not json`} {
+	for _, body := range []string{`{"width":900}`, `{"width":-1,"height":600}`, `{"width":9000,"height":600}`, `not json`, `{} trailing`} {
 		if call := snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(body)); call.code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d", body, call.code)
 		}
@@ -125,8 +125,10 @@ func TestUISnapshotPassesTheAppsFailureToTheCaller(t *testing.T) {
 	done := make(chan snapshotCall, 1)
 	go func() { done <- snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{}`)) }()
 	request := nextSnapshotRequest(t, stream)
-	if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(`{"error":" "}`)); call.code != http.StatusBadRequest {
-		t.Fatalf("an empty failure was accepted: %d %s", call.code, call.body)
+	for _, body := range []string{`{"error":" "}`, `{"error":"missing"} trailing`, `{"error":"a"}{"error":"b"}`} {
+		if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(body)); call.code != http.StatusBadRequest {
+			t.Fatalf("a malformed failure %s was accepted: %d %s", body, call.code, call.body)
+		}
 	}
 	if call := snapshotPost(handler, "/api/v1/ui/snapshot/"+request.ID, "application/json", []byte(`{"error":"This macOS no longer provides CGWindowListCreateImage."}`)); call.code != http.StatusNoContent {
 		t.Fatalf("failure report: %d %s", call.code, call.body)
