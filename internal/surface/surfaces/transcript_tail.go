@@ -94,6 +94,9 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 	if info.Size() < offset {
 		offset = 0
 	}
+	if info.Size() == offset {
+		return offset, nil
+	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
