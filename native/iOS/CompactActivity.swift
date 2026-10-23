@@ -1,5 +1,13 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Scrolls the transcript so the row with this id sits at the top. Set by the view that owns the
+    /// scroll view, because a proxy only reaches scroll views inside its own reader. The owner scrolls on
+    /// the next turn, once a collapse that asked for it has been laid out; scrolling in the same
+    /// transaction measures the expanded rows and leaves a large collapse past the end.
+    @Entry var revealRow: (String) -> Void = { _ in }
+}
+
 struct TimelineGroup: Identifiable {
     let id: String
     var items: [TimelineItem]
@@ -69,6 +77,7 @@ struct CompactActivityGroup: View {
     var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var onInspect: () -> Void = {}
     @State private var expanded = false
+    @Environment(\.revealRow) private var revealRow
 
     var body: some View {
         if group.isActivity {
@@ -90,7 +99,11 @@ struct CompactActivityGroup: View {
                             ToolActivityRow(call: call, results: Array(invocation.items.dropFirst()), attachmentLoader: attachmentLoader)
                         } else { ForEach(invocation.items) { IOSTimelineRow(item: $0, attachmentLoader: attachmentLoader) } }
                     }
-                    Button("Collapse activity", systemImage: "chevron.up") { expanded = false }
+                    Button("Collapse activity", systemImage: "chevron.up") {
+                        // Collapsing from the end removes the rows on screen; bring the group back rather than leave the offset past the content.
+                        expanded = false
+                        revealRow(group.id)
+                    }
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .accessibilityIdentifier("collapse-activity-" + group.id)
@@ -109,6 +122,7 @@ struct ToolActivityRow: View {
     var standaloneRecord = false
     @State private var expanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.revealRow) private var revealRow
 
     private var presentation: ToolPresentation { ToolPresentation(name: call.title, text: call.text) }
     private var failed: Bool { results.contains { $0.status == "error" } }
@@ -139,6 +153,7 @@ struct ToolActivityRow: View {
             }.buttonStyle(.plain)
             .accessibilityHint("Show recorded input and output")
             .contextMenu { CopyCallID(item: call) }
+            .id(headerID)
             if expanded {
                 VStack(alignment: .leading, spacing: 12) {
                     ToolContentView(item: call)
@@ -157,7 +172,10 @@ struct ToolActivityRow: View {
                         if result.truncated { shortened }
                     }
                     if call.truncated { shortened }
-                    Button { expanded = false } label: {
+                    Button {
+                        expanded = false
+                        revealRow(headerID)
+                    } label: {
                         Label("Collapse tool", systemImage: "chevron.up")
                             .font(.footnote.weight(.medium))
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -170,6 +188,8 @@ struct ToolActivityRow: View {
         }
         .background(SessionStyle.surface, in: RoundedRectangle(cornerRadius: 12))
     }
+
+    private var headerID: String { "tool-header-" + call.id }
 
     private var shortened: some View {
         Label("Output shortened by the host", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary)
