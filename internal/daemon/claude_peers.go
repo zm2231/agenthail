@@ -36,7 +36,7 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 
 // claudePeerChangeSettle is how long registration waits after a session
 // change, so a burst of discovery commits is advertised in one pass.
-var claudePeerChangeSettle = time.Second
+const claudePeerChangeSettle = time.Second
 
 // runClaudePeerRegistration advertises peers at startup, shortly after
 // discovery commits a session change, and every 30 seconds so idle peers age
@@ -46,18 +46,27 @@ func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(c
 	defer func() { <-watching }()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	for {
+	settleChanges(ctx, changed, ticker.C, func() <-chan time.Time { return time.After(claudePeerChangeSettle) }, func() {
 		d.registerRecentClaudePeers(ctx, advertise)
 		retire(time.Now())
+	})
+}
+
+// settleChanges runs pass at once and on every tick. A change runs it once
+// settle fires, and every change that arrives while it settles joins that
+// pass.
+func settleChanges(ctx context.Context, changed <-chan struct{}, tick <-chan time.Time, settle func() <-chan time.Time, pass func()) {
+	for {
+		pass()
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
 		case <-changed:
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(claudePeerChangeSettle):
+			case <-settle():
 			}
 			select {
 			case <-changed:
