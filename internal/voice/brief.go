@@ -55,13 +55,16 @@ type BriefInfo struct {
 	Bytes      int       `json:"bytes"`
 	Exchanges  int       `json:"exchanges"`
 	Omitted    []string  `json:"omitted,omitempty"`
+	// Compactions is the session's compaction count when the brief was read,
+	// so a later compaction is noticed.
+	Compactions *int `json:"compactions,omitempty"`
 }
 
 // RenderBrief writes the brief voice is given about its session, newest
 // exchanges first, within briefBytes. Every part it leaves out or shortens is
 // named in the brief and in the returned info.
 func RenderBrief(src BriefSource) (string, BriefInfo) {
-	info := BriefInfo{SessionID: src.Session.ID, AsOf: src.AsOf, JournalSeq: src.JournalSeq}
+	info := BriefInfo{SessionID: src.Session.ID, AsOf: src.AsOf, JournalSeq: src.JournalSeq, Compactions: src.Compactions}
 	var omitted []string
 	field := func(text string, limit int, label string) string {
 		text, short := clipped(text, limit)

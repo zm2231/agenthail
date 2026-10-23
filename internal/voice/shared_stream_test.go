@@ -36,7 +36,7 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 	select {
 	case <-stream.prepared:
 	case <-time.After(time.Second):
-		t.Fatal("journal subscription was not prepared before dispatch")
+		t.Fatal("journal subscription was not prepared for the call")
 	}
 	stream.events <- sessionstream.Event{ItemID: "other", Version: 1, Kind: "text", Role: "assistant", TurnID: "other-turn", Body: "unrelated"}
 	stream.events <- sessionstream.Event{ItemID: "reasoning", Version: 1, Kind: "reasoning", Role: "assistant", TurnID: "turn-a", Body: "internal reasoning"}
@@ -52,8 +52,14 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 	}
 	select {
 	case <-stream.cancelled:
+		t.Fatal("the call's journal subscription ended with the turn")
+	default:
+	}
+	apply(t, f, Action{Action: "stop", AttemptID: "call-a"})
+	select {
+	case <-stream.cancelled:
 	case <-time.After(time.Second):
-		t.Fatal("journal subscription was not released")
+		t.Fatal("journal subscription was not released at hangup")
 	}
 }
 
@@ -68,7 +74,7 @@ func TestAJournalTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.
 	select {
 	case <-stream.prepared:
 	case <-time.After(time.Second):
-		t.Fatal("journal subscription was not prepared before dispatch")
+		t.Fatal("journal subscription was not prepared for the call")
 	}
 	refusal := "Claude is out of usage (You've hit your session limit)"
 	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a", Status: "failed", Body: refusal}

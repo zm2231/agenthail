@@ -110,8 +110,34 @@ iPhone conversation ◄─ live voice events + normal recorded session timeline
 The host resolves the entered target through Agenthail's live discovery and
 ambiguity checks; no local parser turns a guessed name into a command. On each
 completed user transcript, it delivers the exact text to that selected target.
-It only forwards text that arrives from the receipt's exact target turn, so a
-newer unrelated reply cannot become audible voice output.
+It speaks a reply to that request only when it arrives from the receipt's exact
+target turn, so a newer unrelated reply cannot pass for it.
+
+A call follows its selected session's journal from when voice moves to the
+session until it moves away, the call ends or the host closes, with one
+subscription per call. Each turn in the journal is placed before anything
+about it is spoken:
+
+- A turn a request from the call started streams its reply to voice as it
+  comes, as above.
+- A turn the person typed in the session itself, from any device, gives voice
+  a note with the first 300 bytes of what they typed, then, once the turn ends,
+  the opening sentences of its reply, within 300 bytes, and "The full reply is
+  in the session". That reply waits for a pause: the person is not mid-utterance
+  and voice has not spoken for two seconds. A transcript delta whose done never
+  arrives holds it at most four seconds. Up to eight replies wait; past that the
+  oldest is dropped and recorded.
+- A request sent on a route that gives no turn stays silent, as voice said:
+  its turn is known by its prompt.
+- While a request's turn is not yet known, a turn the host cannot place waits
+  for that request to settle, at most 30 seconds. Past that it is taken as typed,
+  recorded in the call as `voice/target/turn-unattributed` and written to the
+  daemon log.
+
+After each turn the host reads the session's brief again. When the session's
+compaction count rose since the brief voice holds, voice is told the session
+compacted its context and given the fresh brief, which replaces the call state's
+`brief`.
 
 The persistent audio operator retains the packaged Operations skill for ordinary
 voice lifecycle support, but it is not the coding provider for a selected target.
@@ -131,7 +157,7 @@ existing transport; the voice layer does not emulate them.
 | Agent operations | The complete packaged `agenthail-operations` skill is embedded in the host binary and passed as literal developer instructions when creating the operator. Availability still depends on configured runtimes and their capabilities. |
 | Identity | One saved operator per Agenthail registry at a time. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. The explicit **New conversation** action deliberately creates a distinct new operator thread and makes it the saved operator; the previous operator stays discoverable in the normal Sessions timeline. It is refused while a call is active or while a creation outcome is still unknown. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
-| Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. |
+| Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. Typing in the session itself during a call is noted to voice, and its reply is spoken at the next pause. |
 | Mute | Stops sending microphone content without stopping the call or agent work. The phone reports mute and system hold to the host in order. While input is muted, the host refuses `voice_transfer`, `voice_return_to_orchestrator` and `voice_send_to_lead` and does not deliver spoken requests; read-only tools still answer. Each of those actions checks the mute again just before it sends anything, so a mute that arrives while one is being prepared stops it; one already sending is not recalled. If the host cannot record a mute, the phone ends the call. |
 | Hang up / leave app | Hang up, in the app or with the system call controls, stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Closing the Voice screen, switching apps or locking the phone does not hang up; **Return to call** reopens it. Force-quitting the app or OS termination ends the call. |
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |

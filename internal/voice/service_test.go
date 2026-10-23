@@ -73,6 +73,7 @@ type targetFixture struct {
 	capabilities    surface.Capabilities
 	watchDone       chan struct{}
 	streaming       chan struct{}
+	journal         *targetJournal
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
@@ -124,6 +125,7 @@ func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message st
 		}
 		f.replies[turnID] = make(chan string, 1)
 		f.mu.Unlock()
+		f.journalReply(turnID, message)
 		return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 	}
 	f.mu.Unlock()
@@ -131,7 +133,16 @@ func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message st
 	if turnID == "" {
 		turnID = "target-turn"
 	}
+	f.journalReply(turnID, message)
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+}
+
+// journalReply journals the scripted reply to turnID when the fixture is its
+// own session journal.
+func (f *targetFixture) journalReply(turnID, prompt string) {
+	if f.journal != nil {
+		go f.journal.replay(f.session, turnID, prompt)
+	}
 }
 
 // reply finishes a per-turn send's turn with text.
@@ -475,6 +486,10 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	}
 	if target := options.target; target != nil {
 		target.gate = g
+		if options.stream == nil {
+			target.journal = &targetJournal{target: target}
+			options.stream = target.journal
+		}
 		resolver = func(ctx context.Context, id string) (*Target, error) {
 			resolved, err := target.Resolve(ctx, id)
 			if err != nil {
@@ -811,6 +826,7 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 		t.Fatalf("wrong target dispatch: %v", target.sent)
 	}
 	want := []string{"The correlated answer.", "The partial answer.", "The authoritative answer."}
+	testkit.Eventually(t, "the correlated reply to be spoken", 5*time.Second, func() bool { return len(f.provider.spoken()) >= len(want) })
 	if got := f.provider.spoken(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("spoken=%q want=%q", got, want)
 	}

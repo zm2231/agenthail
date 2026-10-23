@@ -208,6 +208,19 @@ type Service struct {
 	speechTimeout           time.Duration
 	logf                    func(format string, args ...any)
 	briefer                 Briefer
+	// follow follows the selected session for the current call.
+	follow *follower
+	// replies are replies to typed input waiting for a pause; replying is
+	// set while one is spoken.
+	replies  []queuedReply
+	replying bool
+	// rewait is set when the poll in flight is ended so its wait is computed
+	// again for a queued reply, not because it failed.
+	rewait bool
+	// lastSpeech is when the call last carried speech, and listening is set
+	// while the person is mid-utterance.
+	lastSpeech time.Time
+	listening  bool
 }
 
 // snapshot is the state as of the last release of s.mu, so View never waits
@@ -489,6 +502,8 @@ func (s *Service) endCall() {
 	if s.cancelCall != nil {
 		s.cancelCall()
 	}
+	s.stopFollowing()
+	s.listening, s.lastSpeech = false, time.Time{}
 }
 
 // Apply runs one phone action. s.mu guards only state and is never held
@@ -723,6 +738,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	}
 	if v.Phase != "ended" {
 		s.observe()
+		s.followTarget(v.Target)
 	}
 	if saveErr := s.commit(); saveErr != nil {
 		return saveErr
@@ -936,11 +952,13 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 	if target == nil {
 		v.Target, v.CodingProvider, v.Brief = nil, "", nil
 		v.Message = "Voice is with the Agenthail orchestrator."
+		s.stopFollowing()
 		return "", s.commit()
 	}
 	v.Target = target.Session
 	if transfer {
 		v.Brief = briefInfo
+		s.followTarget(target.Session)
 	}
 	v.CodingProvider = string(target.Adapter.Name())
 	if transfer {
@@ -975,24 +993,25 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	if !target.Adapter.Capabilities().Stream {
 		return errors.New("selected target cannot return correlated voice updates")
 	}
-	var streamSubscription sessionstream.Subscription
-	if s.stream != nil {
-		streamSubscription, err = s.stream.PrepareSessionStream(callCtx, target.Session)
-		if err != nil {
-			return fmt.Errorf("prepare target session stream: %w", err)
-		}
+	s.mu.Lock()
+	f := s.follow
+	s.unlock()
+	if f == nil || f.target.ID != targetID {
+		return errors.New("voice is not following the selected session's replies")
 	}
-	cancelStream := func() {
-		if streamSubscription.Cancel != nil {
-			streamSubscription.Cancel()
-		}
+	select {
+	case <-f.ready:
+	case <-callCtx.Done():
+		return callCtx.Err()
+	}
+	if f.err != nil {
+		return fmt.Errorf("voice cannot follow the selected session: %w", f.err)
 	}
 	waker, ok := target.Adapter.(surface.Waker)
 	woke := ok && waker.NeedsWake(callCtx, target.Session)
 	s.mu.Lock()
-	if err := s.delegationAllowed(a, spoken); err != nil || v.Target.ID != targetID {
+	if err := s.delegationAllowed(a, spoken); err != nil || v.Target.ID != targetID || s.follow != f {
 		s.unlock()
-		cancelStream()
 		if err == nil {
 			err = errors.New("the voice target changed before the request was sent")
 		}
@@ -1003,36 +1022,24 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	if woke {
 		v.Message = "Waking up " + target.Session.Name + "."
 	}
+	f.pending++
 	s.stage()
 	s.unlock()
 	if err := s.flush(); err != nil {
-		cancelStream()
+		s.mu.Lock()
+		s.settleDelegation(f, a.MessageID, "", "")
+		s.unlock()
 		return err
 	}
 	addressed := *target.Session
 	receipt, err := s.dispatcher.DeliverWithoutQueue(callCtx, target.Adapter, target.Session, a.Text, "voice:"+attemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: sourceID, Author: surface.AuthorPerson})
 	s.mu.Lock()
-	if !s.sameCall(attemptID, sourceID, targetID) {
-		s.unlock()
-		cancelStream()
-		if err == nil {
-			err = errors.New("the call ended or moved before the request's reply could be followed")
-		}
-		return err
-	}
-	if target.Session.ID != addressed.ID {
-		v.Target = target.Session
-	}
-	if err != nil {
-		s.unlock()
-		cancelStream()
-		return err
-	}
 	// A delegation is the person speaking, so it is sent as their turn. The
-	// stream was prepared for the session as addressed, so voice follows a reply
-	// only when the send kept that identity and the route it took carries turns.
+	// follower follows the session as addressed, so voice speaks a reply only
+	// when the send kept that identity and the route it took carries turns.
 	held := ""
 	switch {
+	case err != nil:
 	case (receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted) &&
 		(target.Session.ID != addressed.ID || surface.RouteFor(target.Adapter, target.Session, surface.AuthorPerson).TransportOnly()):
 		held = "Sent to " + addressed.Name + ". Voice cannot follow this session's reply; read it in the session transcript."
@@ -1041,24 +1048,39 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	case receipt.TurnID == "" || receipt.TurnID == target.Session.ID:
 		held = "Target did not provide an authoritative turn ID; no uncorrelated reply will be spoken."
 	}
+	switch {
+	case err != nil:
+		s.settleDelegation(f, a.MessageID, "", "")
+	case held != "":
+		s.settleDelegation(f, a.MessageID, "", a.Text)
+	default:
+		s.settleDelegation(f, a.MessageID, receipt.TurnID, "")
+	}
+	if !s.sameCall(attemptID, sourceID, targetID) {
+		s.unlock()
+		if err == nil {
+			err = errors.New("the call ended or moved before the request's reply could be followed")
+		}
+		return err
+	}
+	if target.Session.ID != addressed.ID {
+		v.Target = target.Session
+		s.followTarget(target.Session)
+	}
+	if err != nil {
+		s.unlock()
+		return err
+	}
 	if held != "" {
 		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
 		v.Message = held
-		err := s.commit()
-		cancelStream()
-		return err
+		return s.commit()
 	}
 	if woke {
 		v.Message = "Woke " + addressed.Name + " and sent the request."
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
-	turnID, deliveredID := receipt.TurnID, target.Session.ID
-	watching := s.spawn(func() { s.watchDelegation(attemptID, a.MessageID, deliveredID, turnID, streamSubscription) })
-	err = s.commit()
-	if !watching {
-		cancelStream()
-	}
-	return err
+	return s.commit()
 }
 
 // sameCall reports whether the connected call is still the one an action did
@@ -1186,158 +1208,6 @@ func (s *Service) spawn(task func()) bool {
 	return true
 }
 
-func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
-	s.mu.Lock()
-	if s.target == nil || s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
-		s.unlock()
-		if subscription.Cancel != nil {
-			subscription.Cancel()
-		}
-		return
-	}
-	callCtx, endWatch := s.callContext(s.background)
-	s.unlock()
-	defer endWatch()
-	ctx, cancel := context.WithTimeout(callCtx, 5*time.Minute)
-	defer cancel()
-	target, err := s.target(ctx, targetID)
-	if err != nil || target == nil || target.Session == nil || target.Adapter == nil {
-		if subscription.Cancel != nil {
-			subscription.Cancel()
-		}
-		if err == nil {
-			err = errors.New("selected target is unavailable")
-		}
-		s.recordDelegationFailure(attemptID, messageID, targetID, err)
-		return
-	}
-	if subscription.Events != nil {
-		defer subscription.Cancel()
-		s.watchJournalDelegation(ctx, attemptID, messageID, target.Session, turnID, subscription)
-		return
-	}
-	finalSpoken := false
-	terminalDone := false
-	streamCtx, cancelStream := context.WithCancel(ctx)
-	defer cancelStream()
-	lastBody := map[string]string{}
-	seenVersion := map[string]uint64{}
-	finalItems := map[string]bool{}
-	var streamFailure error
-	err = target.Adapter.Stream(streamCtx, target.Session, turnID, func(event surface.StreamEvent) {
-		switch event.Class() {
-		case surface.StreamEventTerminal:
-			if event.Failed() {
-				streamFailure = errors.New(event.FailureReason())
-				cancelStream()
-				return
-			}
-			terminalDone = true
-		case surface.StreamEventMessage:
-			if event.Role != "" && event.Role != "assistant" {
-				return
-			}
-			if event.Final {
-				finalSpoken = true
-			}
-			key := event.ID
-			if key == "" {
-				key = event.ProviderKey
-			}
-			if key != "" {
-				if prior, found := seenVersion[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
-					return
-				}
-				seenVersion[key] = event.Version
-			}
-			if event.Final && key != "" {
-				if finalItems[key] {
-					return
-				}
-				finalItems[key] = true
-			}
-			text := event.Text
-			if key != "" {
-				previous := lastBody[key]
-				text = surface.StreamEventDelta(event, previous)
-				if event.Operation == "append" {
-					lastBody[key] = previous + event.Text
-				} else {
-					lastBody[key] = event.Text
-				}
-			}
-			if strings.TrimSpace(text) != "" {
-				stage := "interim"
-				if event.Final {
-					stage = "final"
-				}
-				s.speakDelegation(attemptID, messageID, target.Session, turnID, text, stage)
-			}
-		}
-	}, 5*time.Minute)
-	if streamFailure != nil {
-		s.recordDelegationFailure(attemptID, messageID, targetID, streamFailure)
-		return
-	}
-	if err != nil {
-		s.recordDelegationFailure(attemptID, messageID, targetID, err)
-		return
-	}
-	if !finalSpoken && !terminalDone {
-		s.recordDelegationFailure(attemptID, messageID, targetID, errors.New("selected worker stream ended without an authoritative final"))
-	}
-}
-
-func (s *Service) watchJournalDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID string, subscription sessionstream.Subscription) {
-	lastBody := map[string]string{}
-	seenVersion := map[string]uint64{}
-	for {
-		select {
-		case <-ctx.Done():
-			s.recordDelegationFailure(attemptID, messageID, target.ID, ctx.Err())
-			return
-		case event, ok := <-subscription.Events:
-			if !ok {
-				s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New("selected worker journal ended before completion"))
-				return
-			}
-			if event.Kind == "source-error" {
-				reason := event.Reason
-				if reason == "" {
-					reason = "selected worker journal source failed"
-				}
-				s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(reason))
-				return
-			}
-			if event.TurnID != turnID {
-				continue
-			}
-			if prior, found := seenVersion[event.ItemID]; found && ((event.Version > 0 && prior > 0 && event.Version <= prior) || (event.Version == 0 && lastBody[event.ItemID] == event.Body)) {
-				continue
-			}
-			seenVersion[event.ItemID] = event.Version
-			if event.SpokenAssistantContent() {
-				previous := lastBody[event.ItemID]
-				body := event.Body
-				lastBody[event.ItemID] = body
-				delta := body
-				if strings.HasPrefix(body, previous) {
-					delta = strings.TrimPrefix(body, previous)
-				}
-				if strings.TrimSpace(delta) != "" {
-					s.speakDelegation(attemptID, messageID, target, turnID, delta, map[bool]string{true: "final", false: "interim"}[event.Final])
-				}
-			}
-			if event.Terminal() {
-				if event.Failed() {
-					s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(event.FailureReason()))
-				}
-				return
-			}
-		}
-	}
-}
-
 // delegatedSpeechTimeout bounds how long a target update waits for the Codex
 // write lock, so a busy Codex delays the update rather than the call.
 const delegatedSpeechTimeout = 15 * time.Second
@@ -1447,7 +1317,7 @@ const sessionBoundPrompt = `You are the voice of an existing Agenthail coding se
 
 Agenthail transcribes what the person says and delivers each finished request to the session. You never do the work, hand it to anyone else, or call a tool to run it. Do not say you will do it; the session does.
 
-Agenthail gives you the session's updates as developer messages. Speak them briefly and plainly: the key result, status or question, without reading out code, diffs, tables or long lists unless asked. Never claim a result, a change or a reply the updates did not give you. When you have no update, say the session is working on it.
+Agenthail gives you the session's updates as developer messages. Speak them briefly and plainly: the key result, status or question, without reading out code, diffs, tables or long lists unless asked. Never claim a result, a change or a reply the updates did not give you. When you have no update, say the session is working on it. A note that the person typed in the session, or that it compacted its context, is for you to know: don't speak it unless asked.
 
 Keep your own turns short. Ask a clarifying question only when a request is too unclear to send. If the person asks to talk to the Agenthail orchestrator instead, use the return-to-orchestrator tool.`
 
@@ -1536,6 +1406,9 @@ func (s *Service) pollWait() time.Duration {
 	if !s.disconnectedAt.IsZero() {
 		due = s.disconnectedAt.Add(hangupGiveUp)
 	}
+	if len(s.replies) > 0 && !s.replying && s.quietAt().Before(due) {
+		due = s.quietAt()
+	}
 	// The checks fire once strictly past the deadline.
 	return max(0, min(pollWait, due.Sub(s.clock.now())+time.Millisecond))
 }
@@ -1563,6 +1436,12 @@ func (s *Service) pollOnce() (more, pause bool) {
 	}
 	s.mu.Lock()
 	s.interruptPoll = nil
+	if s.rewait {
+		s.rewait = false
+		if err != nil && s.background.Err() == nil {
+			b, err = Batch{Cursor: cursor}, nil
+		}
+	}
 	if s.background.Err() != nil {
 		s.stopObserving()
 		s.unlock()
@@ -1580,6 +1459,7 @@ func (s *Service) pollOnce() (more, pause bool) {
 		tools = s.applyBatch(b)
 		changed = len(b.Events) > 0 || b.Lost
 	}
+	s.speakQueued()
 	// After a phone disconnect the poll keeps running until Codex confirms the
 	// hangup, or gives up once it has waited long enough.
 	if s.active() && !s.disconnectedAt.IsZero() && s.clock.now().Sub(s.disconnectedAt) > hangupGiveUp {
@@ -1659,6 +1539,7 @@ func (s *Service) applyBatch(b Batch) []Event {
 			v.Phase = "unknown"
 			v.Message, _ = e.Params["message"].(string)
 		}
+		s.heard(e)
 		if e.Method == "thread/realtime/sdp" || e.Method == "thread/realtime/outputAudio/delta" {
 			continue
 		}
