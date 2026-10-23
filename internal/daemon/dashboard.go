@@ -1294,7 +1294,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			// holding its name, until discovery finds it at its location.
 			pend := func(location *surface.Location, detail string) {
 				if location == nil || *location == (surface.Location{}) {
-					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail, unkeptName(alias))
 					return
 				}
 				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
@@ -1302,12 +1302,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					if detail != "" {
 						failure = detail + "; " + failure
 					}
-					d.writeAcceptedLaunch(w, request.Launcher, location, failure)
+					d.writeAcceptedLaunch(w, request.Launcher, location, failure, unkeptName(alias))
 					return
 				}
 				keepReservation = true
 				if detail != "" {
-					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail, "")
 					return
 				}
 				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
@@ -1335,7 +1335,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if session == nil {
 				if location == nil {
-					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
+					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved", unkeptName(alias))
 					return
 				}
 				pend(location, "")
@@ -1348,15 +1348,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
 			if err := d.Registry.RegisterSession(*session); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err), strings.TrimSpace("Agenthail couldn't record it yet; it appears in the sidebar once found. "+unkeptName(alias)))
 				return
 			}
 			if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err), unkeptName(alias))
 				return
 			}
 			if err := d.Registry.RecordSessionOrigin(registry.OriginOf(session.ID, creator)); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("record who started the session: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("record who started the session: %s", err), "Agenthail couldn't record who started it.")
 				return
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
@@ -2482,20 +2482,33 @@ func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, 
 	}, extra)
 }
 
-func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail string) {
+// writeAcceptedLaunch answers a launch that may be running without a
+// registered session; notice tells the person what Agenthail could not keep.
+func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail, notice string) {
 	d.log.Printf("accepted %s launch: %s", launcher, detail)
+	warning := fmt.Sprintf("Submitted to %s.", launcher)
+	if notice != "" {
+		warning += " " + notice
+	}
 	body := map[string]any{
 		"ok":        true,
 		"status":    "submitted",
 		"accepted":  true,
 		"retryable": false,
 		"launcher":  launcher,
-		"warning":   fmt.Sprintf("Submitted to %s.", launcher),
+		"warning":   warning,
 	}
 	if location != nil {
 		body["location"] = location
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+func unkeptName(alias string) string {
+	if alias == "" {
+		return ""
+	}
+	return fmt.Sprintf("Its name @%s wasn't kept; name it once it appears in the sidebar.", alias)
 }
 
 // reserveStartName holds a new session's name from before it starts until it

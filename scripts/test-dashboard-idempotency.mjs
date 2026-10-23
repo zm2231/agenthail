@@ -24,7 +24,7 @@ const context = {
     return next;
   },
 };
-vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;\nglobalThis.deliveryStatusLabel = deliveryStatusLabel;\nglobalThis.creationFailureMessage = creationFailureMessage;`, context);
+vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;\nglobalThis.deliveryStatusLabel = deliveryStatusLabel;\nglobalThis.creationFailureMessage = creationFailureMessage;\nglobalThis.creationNotice = creationNotice;`, context);
 
 const ok = (body = { ok: true }) => ({ ok: true, json: async () => body });
 const httpFailure = () => ({ ok: false, status: 502, text: async () => "typed failure" });
@@ -90,3 +90,7 @@ const silent = await context.runLogicalAction("session-create", "session-create"
 assert.equal(context.creationFailureMessage(silent), "Agenthail can't tell whether this session started; check the sidebar before trying again.");
 await context.runLogicalAction("session-create", "session-create", { surface: "codex", message: "far", host: "studio" });
 assert.equal(calls[16].key, calls[17].key, "a create a paired host never answered must keep its key");
+
+const lostName = { ok: true, status: "submitted", accepted: true, retryable: false, launcher: "cmux", warning: "Submitted to cmux. Its name @builder wasn't kept; name it once it appears in the sidebar." };
+assert.equal(context.creationNotice(lostName, { surface: "claude", alias: "builder" }), lostName.warning, "an accepted launch shows its warning");
+assert.equal(context.creationNotice({ ok: true, session: { id: "s1", surface: "codex" } }, { surface: "codex", alias: "made" }), "Sent to codex:s1.");
