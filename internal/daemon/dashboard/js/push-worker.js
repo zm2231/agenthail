@@ -29,18 +29,17 @@ async function show(message) {
   });
 }
 
-// withdraw closes what the question showed. Browsers expect every push to
-// show something, so when nothing was open to close, an answered marker is
-// shown silently under the same tag and closed at once.
+// withdraw closes what the question showed. A push that leaves nothing shown
+// counts as silent, and browsers punish those: Chrome posts its own "updated
+// in the background" notice, Safari revokes the subscription. So an answered
+// marker is shown silently under the same tag and closed at once, which the
+// system removes before presenting it.
 async function withdraw(message) {
   if (!message.collapseId) return;
-  const shown = await self.registration.getNotifications({ tag: message.collapseId });
-  if (shown.length) {
-    for (const notification of shown) notification.close();
-    return;
-  }
-  await self.registration.showNotification("Agenthail", { body: "Answered.", icon, badge: icon, tag: message.collapseId, silent: true, renotify: false });
-  for (const notification of await self.registration.getNotifications({ tag: message.collapseId })) notification.close();
+  const tag = message.collapseId;
+  for (const notification of await self.registration.getNotifications({ tag })) notification.close();
+  await self.registration.showNotification("Agenthail", { body: "Answered.", icon, badge: icon, tag, silent: true, renotify: false });
+  for (const notification of await self.registration.getNotifications({ tag })) notification.close();
 }
 
 // A click opens the session in a dashboard window. The worker's scope is
