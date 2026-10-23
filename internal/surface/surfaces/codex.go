@@ -33,6 +33,8 @@ type Codex struct {
 	contextState map[string]*codexContextState
 	sweepMu      sync.Mutex
 	lastSweep    time.Time
+	usageMu      sync.Mutex
+	usageReads   map[string]*codexUsageRead
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;

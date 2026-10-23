@@ -146,6 +146,21 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	}
 }
 
+func TestFederationCodexUsageComesFromTheNamedHost(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	remote.fake.mu.Lock()
+	remote.fake.usage = &surface.Usage{FetchedAt: time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC), Limits: []surface.UsageWindow{{Kind: "weekly", Percent: 19}}}
+	remote.fake.mu.Unlock()
+	response := local.request(t, http.MethodGet, "/api/v1/session-options/codex-usage?host="+record.ID, nil)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kind":"weekly","percent":19`) {
+		t.Fatalf("remote usage status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = local.request(t, http.MethodGet, "/api/v1/session-options/codex-usage", nil)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), `"percent":19`) {
+		t.Fatalf("the local host answered with the remote's usage: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestFederationRefusesActionsThatOnlyMeanSomethingOnOneHost(t *testing.T) {
 	local, _, record := pairedFederation(t)
 	qualified := hosts.Qualify(record.ID, "remote-a")

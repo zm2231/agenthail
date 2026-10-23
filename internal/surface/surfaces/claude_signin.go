@@ -265,7 +265,7 @@ type claudeUsageResponse struct {
 	} `json:"limits"`
 }
 
-func (c *Claude) claudeUsage(ctx context.Context, source CookieSource, organization string) (*surface.ClaudeUsage, error) {
+func (c *Claude) claudeUsage(ctx context.Context, source CookieSource, organization string) (*surface.Usage, error) {
 	if organization == "" {
 		return nil, fmt.Errorf("the config root does not name its organization")
 	}
@@ -277,9 +277,9 @@ func (c *Claude) claudeUsage(ctx context.Context, source CookieSource, organizat
 	if err := json.Unmarshal([]byte(data), &response); err != nil {
 		return nil, fmt.Errorf("parse claude.ai usage: %w", err)
 	}
-	usage := &surface.ClaudeUsage{FetchedAt: time.Now().UTC()}
+	usage := &surface.Usage{FetchedAt: time.Now().UTC()}
 	for _, limit := range response.Limits {
-		out := surface.ClaudeUsageLimit{Kind: limit.Kind, Group: limit.Group, Percent: limit.Percent, Severity: limit.Severity}
+		out := surface.UsageWindow{Kind: limit.Kind, Group: limit.Group, Percent: limit.Percent, Severity: limit.Severity}
 		if limit.Scope != nil && limit.Scope.Model != nil {
 			out.Scope = limit.Scope.Model.DisplayName
 		}

@@ -26,6 +26,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type federatedSurface struct {
@@ -34,6 +35,16 @@ type federatedSurface struct {
 	messages []string
 	sources  []string
 	persons  []string
+	usage    *surface.Usage
+}
+
+func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.usage == nil {
+		return nil, surfaces.ErrNoCodexUsage
+	}
+	return s.usage, nil
 }
 
 func (f *federatedSurface) record(message string) {
