@@ -20,6 +20,12 @@ Each row retains the existing session summary fields and adds
 `freshness` (`generation`, `observedAt`, and `stale`). A Claude branch adds
 `forkedFrom`, the session it was branched from.
 
+A request with no query parameters is answered from the daemon's cached
+snapshot while that snapshot is current, and carries an `ETag` naming it. A
+client that sends the tag back in `If-None-Match` gets `304 Not Modified`
+with no body while the cache still holds that snapshot. Filtered, paged and
+`fresh=1` requests carry no tag.
+
 The owning host resolves `project` from the session's working directory: the
 deepest added project holding the folder, read in a worktree as the same
 folder of the main checkout, else the repository's implicit project at its

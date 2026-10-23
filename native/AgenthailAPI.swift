@@ -62,6 +62,8 @@ final class AgenthailAPI: @unchecked Sendable {
     private let baseURL: URL
     private let token: String
     var holderPins = HolderPins.shared
+    private let snapshotLock = NSLock()
+    private var heldSnapshot: (tag: String, snapshot: DashboardSnapshot)?
 
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
@@ -111,8 +113,20 @@ final class AgenthailAPI: @unchecked Sendable {
         return version
     }
 
+    /// A plain snapshot request names the snapshot it last received, and the
+    /// daemon answers 304 while that snapshot is still current.
     func snapshot(fresh: Bool = false) async throws -> DashboardSnapshot {
-        try await get("/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
+        var request = authorizedRequest(path: "/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
+        let held = fresh ? nil : snapshotLock.withLock { heldSnapshot }
+        if let held { request.setValue(held.tag, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await session.data(for: request)
+        let http = response as? HTTPURLResponse
+        if let held, http?.statusCode == 304 { return held.snapshot }
+        try validate(response: response, data: data)
+        let loaded = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+        let tag = http?.value(forHTTPHeaderField: "ETag")
+        snapshotLock.withLock { heldSnapshot = tag.map { (tag: $0, snapshot: loaded) } }
+        return loaded
     }
 
     /// Every direct subagent of a session, including the ones the session list
