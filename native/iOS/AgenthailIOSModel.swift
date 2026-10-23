@@ -596,7 +596,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 return false
             }
             if receipt.status == "submitted" && receipt.id == nil {
-                creationWarning = "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
+                creationWarning = receipt.warning ?? "Submitted to \(receipt.launcher ?? launcher?.id ?? surface)."
                 return false
             }
             creationWarning = receipt.warning

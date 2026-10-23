@@ -202,6 +202,17 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testAnAcceptedLaunchShowsWhatTheLauncherDidNotKeep() async throws {
+        let warning = "Submitted to cmux. Its name @x wasn't kept; name it once it appears in the sidebar."
+        ParityProtocol.state.reset(create: (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"cmux","warning":"\#(warning)"}"#))
+        let model = makeModel()
+        let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
+        XCTAssertFalse(created)
+        XCTAssertNil(model.creationError)
+        XCTAssertEqual(model.creationWarning, warning)
+    }
+
+    @MainActor
     func testCreationRetryReplaysSameLogicalRequestButEditedFormGetsNewKey() async throws {
         ParityProtocol.state.reset(fail: true)
         let model = makeModel()
@@ -368,7 +379,7 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             }
             if (body["action"] as? String)?.contains("create") == true {
                 if let create { return create }
-                if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
+                if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"Submitted to tmux."}"#) }
                 if body["surface"] as? String == "claude" {
                     return unknown ? (202, #"{"ok":false,"unknown":true,"session":null,"error":"registration delayed"}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
                 }
