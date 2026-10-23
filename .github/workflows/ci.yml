@@ -108,6 +108,8 @@ jobs:
         run: scripts/ci-self-hosted.sh prepare >> "$GITHUB_ENV"
       - name: Native helper tests
         run: scripts/test-native-helpers.sh
+      - name: Simulator run guard tests
+        run: scripts/test-ios-simulator.sh
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
