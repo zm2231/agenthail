@@ -332,6 +332,9 @@ func sameLimitResume(a, b *dashboardLimitResume) bool {
 }
 
 func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
+	if d.limitResumesRead != nil {
+		d.limitResumesRead()
+	}
 	resume, found, err := d.Registry.LimitResumeFor(sessionID)
 	if err != nil || !found || resume.State == registry.LimitResumeReleased {
 		return nil
@@ -339,7 +342,12 @@ func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
 	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt}
 }
 
+// limitResumeRows reads every shown stop at once, so a catalog pass reads
+// them once however many sessions it projects.
 func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
+	if d.limitResumesRead != nil {
+		d.limitResumesRead()
+	}
 	resumes, err := d.Registry.LimitResumes()
 	if err != nil {
 		return nil, err

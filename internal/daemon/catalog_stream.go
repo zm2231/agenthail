@@ -356,6 +356,11 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.log.Printf("catalog queue counts: %s", err)
 		return
 	}
+	limits, err := d.limitResumeRows()
+	if err != nil {
+		d.log.Printf("catalog usage-limit stops: %s", err)
+		return
+	}
 	aliases, err := d.Registry.ListAliases()
 	if err != nil {
 		d.log.Printf("catalog aliases: %s", err)
@@ -452,7 +457,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			// The entry changes with the row, under the session's waiting
 			// lock, so a status publish lands wholly before or after both.
-			d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, view, observedAt, nil, func(committed bool) {
+			d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], limits[session.ID], open, config, view, observedAt, nil, func(committed bool) {
 				d.catalogLiveMu.Lock()
 				defer d.catalogLiveMu.Unlock()
 				if committed && live != nil {
@@ -518,6 +523,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	}()
 	var config *DashboardConfig
 	var counts map[string]int
+	var limits map[string]*dashboardLimitResume
 	var view catalogViewState
 	type followed struct {
 		id      string
@@ -582,6 +588,10 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				d.log.Printf("catalog queue counts: %s", err)
 				return
 			}
+			if limits, err = d.limitResumeRows(); err != nil {
+				d.log.Printf("catalog usage-limit stops: %s", err)
+				return
+			}
 			if view, err = d.loadCatalogViewState(); err != nil {
 				d.log.Printf("catalog view state: %s", err)
 				return
@@ -591,7 +601,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		// discovery's change to the entry, so discovery cannot replace or
 		// drop the entry between them.
 		check := func() bool { return current(entry, func(*catalogLiveSession) {}) }
-		d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
+		d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[entry.id], limits[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
 			current(entry, func(live *catalogLiveSession) {
 				if committed {
 					live.session = refreshed
@@ -609,7 +619,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 // Under the session's waiting lock, check, when set, runs before the row is
 // written and stops the write when it fails, and done, when set, runs last
 // with whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
 	defer d.lockWaiting(session.ID)()
 	if done != nil {
 		defer func() { done(committed) }()
@@ -631,7 +641,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	}
 	stored := d.storedListing(session.ID)
 	for attempt := 0; attempt < 3; attempt++ {
-		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
+		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, config)
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
@@ -989,7 +999,7 @@ func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 	return project
 }
 
-func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
@@ -1000,7 +1010,7 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	if session.Surface == surface.KindClaude {
 		configRoot = surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), session.Transcript)
 	}
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LimitResume: d.limitResumeRow(session.ID), LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, PendingModel: session.PendingModel, ClaudeConfigRoot: configRoot, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, BackgroundTasks: session.BackgroundTasks, UsageLimit: session.UsageLimit, LimitResume: limitResume, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, Project: identity.Project, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Delegated: session.Delegated(), Subagents: session.Subagents, Holders: session.Holders, ObservedSubagents: session.Subagents, Host: &host}
 }
 
 type catalogStoredListing struct {

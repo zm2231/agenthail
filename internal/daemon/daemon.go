@@ -100,6 +100,8 @@ type Daemon struct {
 	// limitResumeEnabled, when set, replaces the host's resume after limit
 	// setting.
 	limitResumeEnabled func() bool
+	// limitResumesRead, when set, runs each time usage-limit stops are read.
+	limitResumesRead func()
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {

@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -383,5 +385,43 @@ func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
 	}
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusConflict {
 		t.Fatalf("canceling a canceled stop: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTheCatalogReadsUsageLimitStopsOncePerPassWhateverItsSize(t *testing.T) {
+	reads := func(count int) int {
+		t.Helper()
+		ids := make([]string, count)
+		for index := range ids {
+			ids[index] = fmt.Sprintf("worker-%02d", index)
+		}
+		f := newLimitFixture(t, ids...)
+		refusedAt := time.Now().Add(-time.Minute).Truncate(time.Second)
+		for _, id := range ids {
+			if err := f.r.RecordLimitStop(f.fake.sessions[id], "/roots/work", surface.LimitStop{TurnID: "u1", RefusedAt: refusedAt, ResetsAt: refusedAt.Add(time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var read atomic.Int32
+		f.d.limitResumesRead = func() { read.Add(1) }
+		f.d.discoverCatalog(context.Background())
+		state, err := f.d.dashboardState(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown := 0
+		for _, row := range state.Sessions {
+			if row.LimitResume != nil && row.LimitResume.State == registry.LimitResumeWaiting {
+				shown++
+			}
+		}
+		if shown != count {
+			t.Fatalf("%d of %d stopped sessions show their stop", shown, count)
+		}
+		return int(read.Load())
+	}
+	small, large := reads(2), reads(40)
+	if small != large || small > 3 {
+		t.Fatalf("stop reads: %d for 2 sessions, %d for 40", small, large)
 	}
 }

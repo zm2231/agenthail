@@ -826,6 +826,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue counts: %w", err)
 	}
+	limits, err := d.limitResumeRows()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read usage-limit stops: %w", err)
+	}
 	aliases, err := d.Registry.ListAliases()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read aliases: %w", err)
@@ -989,7 +993,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if observedAt.IsZero() {
 			observedAt = now.UTC()
 		}
-		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], false, config)
+		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config)
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness = &record.Freshness
 		}
