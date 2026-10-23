@@ -43,6 +43,7 @@ let package = Package(
                 "ClaudeSubagentList.swift",
                 "SessionStore.swift",
                 "EventRetryBackoff.swift",
+                "CatalogBatch.swift",
                 "ToolPresentation.swift",
                 "TextDiff.swift",
                 "DiffPresentation.swift",

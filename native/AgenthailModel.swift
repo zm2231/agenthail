@@ -81,6 +81,8 @@ final class AgenthailModel: ObservableObject {
     private var lastEventID: UInt64 = 0
     private var catalogStreamTask: Task<Void, Never>?
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
+    private var catalogInbox: CatalogInbox?
+    var catalogInboxBound = 2000
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
@@ -217,10 +219,7 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
-            if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
-                startCatalogStream()
-            }
+            adoptRefreshed(loaded)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
             reconcilePanes()
@@ -231,6 +230,13 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    func adoptRefreshed(_ loaded: DashboardSnapshot) {
+        adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
+        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
+            startCatalogStream()
+        }
     }
 
     // Rekeys are recorded before the snapshot is published, because publishing
@@ -1076,18 +1082,21 @@ final class AgenthailModel: ObservableObject {
 
     private func startCatalogStream() {
         catalogStreamTask?.cancel()
+        catalogInbox = nil
         catalogStreamTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled {
                 guard let api else { return }
+                let inbox = openCatalogInbox()
                 do {
-                    try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { event in
                         backoff.reset()
-                        await self?.applyCatalogEvent(event)
+                        inbox.append(event)
                     })
                 } catch {
                     if Task.isCancelled { return }
                     if case AgenthailAPIError.streamGap = error {
+                        catalogInbox = nil
                         catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
                         _ = await refresh(fresh: true)
                     }
@@ -1097,43 +1106,49 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func applyCatalogEvent(_ event: CatalogStreamEvent) {
-        guard event.stream == "catalog", var current = snapshot, catalogPosition.accept(event.seq) else { return }
-        switch event.type {
-        case "session.upserted":
-            guard let changed = event.data.session else { return }
-            if let index = current.sessions.firstIndex(where: { $0.id == changed.id }) {
-                current.sessions[index] = changed
-            } else {
-                current.sessions.append(changed)
+    /// The inbox one stream connection reads into. It replaces any earlier
+    /// one, whose events are read again from the cursor if still needed.
+    func openCatalogInbox() -> CatalogInbox {
+        let inbox = CatalogInbox(bound: catalogInboxBound) { [weak self] in
+            RunLoop.main.perform(inModes: [.common]) {
+                MainActor.assumeIsolated { self?.drainCatalogInbox() }
             }
-        case "session.removed":
-            guard let id = event.data.sessionId else { return }
-            current.sessions.removeAll { $0.id == id }
-            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
-            if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
-        case "delivery.problem":
-            guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
-            var problems = current.deliveryProblems ?? []
-            problems.removeAll { $0.deliveryId == deliveryID }
-            problems.insert(problem, at: 0)
-            current.deliveryProblems = problems
-        case "delivery.dismissed":
-            guard let deliveryID = event.data.deliveryId else { return }
-            current.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
-        case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
-            let previous = current.surfaces[index]
-            // The daemon derives the repair from the runtime problem, and health events carry no repair.
-            let repairs = event.data.runtime?.problem == previous.runtime?.problem
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime, repairAction: repairs ? previous.repairAction : nil, repairLabel: repairs ? previous.repairLabel : nil)
-        default:
-            return
         }
-        current.totalSessions = current.sessions.count
-        snapshot = current
-        reconcilePanes()
+        catalogInbox = inbox
+        return inbox
+    }
+
+    /// A stream that outruns the main actor past the inbox's bound is reloaded
+    /// from a fresh snapshot, and the stream resumes after it.
+    private func drainCatalogInbox() {
+        guard let inbox = catalogInbox else { return }
+        switch inbox.take() {
+        case .overflow:
+            catalogInbox = nil
+            catalogStreamTask?.cancel()
+            catalogStreamTask = nil
+            Task {
+                _ = await refresh(fresh: true)
+                startCatalogStream()
+            }
+        case .events(let events):
+            applyCatalogEvents(events)
+        }
+    }
+
+    func applyCatalogEvents(_ events: [CatalogStreamEvent]) {
+        guard let current = snapshot else { return }
+        let batch = current.applyingCatalog(events, after: catalogPosition.cursor)
+        catalogPosition.cursor = batch.cursor
+        for removal in batch.removals {
+            fetchedSubagents.sessionRemoved(removal.id, unlisted: removal.unlisted)
+            if let next = removal.rekeyedTo { rekeys.record([removal.id: next]) }
+        }
+        if batch.changed {
+            snapshot = batch.snapshot
+            reconcilePanes()
+        }
+        if batch.needsSnapshot { Task { await refresh(fresh: true) } }
     }
 
     private func startEvents() {

@@ -70,7 +70,7 @@ final class AgenthailIOSTests: XCTestCase {
         model.setHostSnapshot(try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8)))
         let computer = try XCTUnwrap(model.connection("computer"))
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":42,"type":"session.upserted","data":{"session":{"id":"demo","surface":"codex","name":"Updated","cwd":"/updated","status":"busy","lastActive":"2026-10-03T12:00:00Z","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
-        await computer.receiveCatalog(event)
+        await computer.receiveCatalog([event])
         let updated = model.snapshot?.sessions.first { $0.id == "computer::demo" }
         XCTAssertEqual(updated?.name, "Updated")
         XCTAssertEqual(updated?.status, "busy")
@@ -86,8 +86,8 @@ final class AgenthailIOSTests: XCTestCase {
             SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
         ] }
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":7,"type":"surface.health","data":{"surface":"codex","health":"unavailable","detail":"discovery failed"}}"#.utf8))
-        await computer.receiveCatalog(event)
-        await computer.receiveCatalog(event)
+        await computer.receiveCatalog([event])
+        await computer.receiveCatalog([event])
         let surface = computer.snapshot?.surfaces.first { $0.name == "codex" }
         XCTAssertEqual(surface?.health, "unavailable")
         XCTAssertFalse(surface?.connected ?? true)
@@ -103,7 +103,7 @@ final class AgenthailIOSTests: XCTestCase {
             SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
         ] }
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"surface.health","data":{"surface":"codex","health":"healthy","detail":"managed terminals unavailable","runtime":{"name":"Codex Desktop bridge","reachable":true,"durable":true,"notes":[{"problem":"standalone-missing","message":"managed terminals unavailable","remediation":"install the standalone Codex runtime: curl -fsSL https://chatgpt.com/codex/install.sh | sh"}]}}}"#.utf8))
-        await computer.receiveCatalog(event)
+        await computer.receiveCatalog([event])
         let surface = try XCTUnwrap(computer.snapshot?.surfaces.first { $0.name == "codex" })
         XCTAssertTrue(surface.needsAttention)
         XCTAssertEqual(surface.runtime?.advice.count, 1)
@@ -119,14 +119,14 @@ final class AgenthailIOSTests: XCTestCase {
             let currentReason = reason.map { #","currentReason":"\#($0)""# } ?? ""
             return try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"session.upserted","data":{"session":{"id":"queued-claude","surface":"claude","name":"Queued","status":"idle","queueCount":\#(queueCount),"open":false,"current":\#(current)\#(currentReason),"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
         }
-        await computer.receiveCatalog(try upserted(50, queueCount: 0, current: false, reason: nil))
+        await computer.receiveCatalog([try upserted(50, queueCount: 0, current: false, reason: nil)])
         let queued = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":51,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":3}}"#.utf8))
-        await computer.receiveCatalog(queued)
+        await computer.receiveCatalog([queued])
         var session = model.snapshot?.sessions.first { $0.id == "computer::queued-claude" }
         XCTAssertEqual(session?.queueCount, 3)
         XCTAssertEqual(session?.current, false)
         XCTAssertNil(session?.currentReason)
-        await computer.receiveCatalog(try upserted(52, queueCount: 3, current: true, reason: "queued"))
+        await computer.receiveCatalog([try upserted(52, queueCount: 3, current: true, reason: "queued")])
         session = model.snapshot?.sessions.first { $0.id == "computer::queued-claude" }
         XCTAssertEqual(session?.current, true)
         XCTAssertEqual(session?.currentReason, "queued")
@@ -139,7 +139,7 @@ final class AgenthailIOSTests: XCTestCase {
         let computer = try XCTUnwrap(model.connection("computer"))
         let before = model.snapshot!.sessions.count
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"session.removed","data":{"sessionId":"demo"}}"#.utf8))
-        await computer.receiveCatalog(event)
+        await computer.receiveCatalog([event])
         XCTAssertNil(model.snapshot?.sessions.first { $0.id == "computer::demo" })
         XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
     }

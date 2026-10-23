@@ -76,7 +76,7 @@ final class SessionRecoveryTests: XCTestCase {
         let before = RecoveryProtocol.state.freshSnapshotReads
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":1,"type":"surface.health","data":{"surface":"new-surface","health":"unavailable","detail":"discovery failed"}}"#.utf8))
 
-        await model.connection("computer")!.receiveCatalog(event)
+        await model.connection("computer")!.receiveCatalog([event])
 
         XCTAssertEqual(RecoveryProtocol.state.freshSnapshotReads, before + 1)
     }
