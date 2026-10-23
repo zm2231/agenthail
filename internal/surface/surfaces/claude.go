@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -1378,16 +1379,13 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 		}
 	}
-	for first := true; first || time.Now().Before(deadline); first = false {
-		if info, statErr := os.Stat(path); statErr == nil {
-			if current := transcriptFileIdentity(info); identity != "" && current != identity {
-				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
-				identity, offset = current, 0
-			}
-		}
+	// readAppended reads what the transcript gained since offset, and its goal.
+	var tail []byte
+	readAppended := func() error {
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
 		// The anchor then rolls forward over the bytes this scan parses, never a later read.
-		tail, tailErr := transcriptTail(path, offset)
+		var tailErr error
+		tail, tailErr = transcriptTail(path, offset)
 		if turns.closing.TurnID != "" && (tailErr != nil || anchorOf(tail) != turns.closing.Anchor) {
 			turns.closing = surface.ClaudeClosingTurn{}
 		}
@@ -1445,6 +1443,25 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				onEvent(surface.StreamEvent{ID: "goal", ProviderKey: "goal", Version: version, Operation: "replace", Kind: "goal", Goal: goal})
 			}
 			commands.Refresh()
+		}
+		return nil
+	}
+	// read is the transcript as the last read found it. A pass that finds it
+	// the same size, time and file has nothing to read and only settles turns.
+	var read os.FileInfo
+	for first := true; first || time.Now().Before(deadline); first = false {
+		info, statErr := os.Stat(path)
+		if statErr == nil {
+			if current := transcriptFileIdentity(info); identity != "" && current != identity {
+				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
+				identity, offset = current, 0
+			}
+		}
+		if statErr != nil || read == nil || !sameTranscriptState(read, info) {
+			if err := readAppended(); err != nil {
+				return err
+			}
+			read = info
 		}
 		finish(turns.settle(func(at time.Time) bool { return c.settledAfter(sess, at) }))
 		if turns.closing.TurnID != "" {
@@ -1615,3 +1632,32 @@ func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session,
 const claudeHostTranscriptTick = 250 * time.Millisecond
 
 var claudeHostTranscriptLookupTicks = 8
+
+// sameTranscriptState reports whether two stats of a transcript show the same
+// file at the same size, modification time and change time. Every write moves
+// the change time, which no one can set back as they can the modification
+// time.
+func sameTranscriptState(a, b os.FileInfo) bool {
+	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
+}
+
+// transcriptChangeTime is a stat's inode change time, or "" where the platform
+// does not report one.
+func transcriptChangeTime(info os.FileInfo) string {
+	if info.Sys() == nil {
+		return ""
+	}
+	value := reflect.ValueOf(info.Sys())
+	if value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return ""
+	}
+	for _, name := range []string{"Ctimespec", "Ctim"} {
+		if field := value.FieldByName(name); field.IsValid() && field.CanInterface() {
+			return fmt.Sprintf("%v", field.Interface())
+		}
+	}
+	return ""
+}
