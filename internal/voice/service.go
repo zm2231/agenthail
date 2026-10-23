@@ -76,7 +76,9 @@ type Deliverer interface {
 type Provider interface {
 	Create(context.Context, string, string) (*surface.Session, error)
 	Cursor(context.Context, *surface.Session) (Cursor, error)
-	Poll(context.Context, Cursor, string) (Batch, error)
+	// Poll returns the call's events after the cursor as soon as there are
+	// any, and an empty batch once wait has passed without one.
+	Poll(ctx context.Context, after Cursor, threadID string, wait time.Duration) (Batch, error)
 	Request(context.Context, *surface.Session, string, map[string]any) error
 	Interrupt(context.Context, *surface.Session) error
 	// Release frees what Cursor opened for one call on the thread, the call
@@ -166,6 +168,9 @@ type Service struct {
 	spokenInFlight string
 	delivering     bool
 	cycled         func()
+	// interruptPoll ends the poll in flight, so a call that changes its
+	// cursor is read at once rather than after the poll's wait.
+	interruptPoll context.CancelFunc
 	// effects is work queued under s.mu that runs, in order, once the lock is
 	// released.
 	effects                 []func()
@@ -216,6 +221,17 @@ func (p *snapshot) view(owner string) State {
 	}
 	return v
 }
+
+const (
+	// pollWait bounds how long one poll waits for the call's next events.
+	pollWait = 5 * time.Second
+	// heartbeatExpiry is how long a call goes without a heartbeat before
+	// the phone counts as disconnected and the audio hangup is requested.
+	heartbeatExpiry = 40 * time.Second
+	// hangupGiveUp is how long after a phone disconnect the call waits for
+	// Codex to confirm the audio hangup.
+	hangupGiveUp = 30 * time.Second
+)
 
 type clock struct {
 	now    func() time.Time
@@ -669,6 +685,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	s.endCall()
 	s.call, s.cancelCall = context.WithCancel(s.background)
 	s.cursor = cursor
+	s.wakePoll()
 	s.boundAttempt, s.eventGap, s.disconnectedAt = "", false, time.Time{}
 	s.state.Owner = owner
 	s.state.Messages = nil
@@ -746,6 +763,7 @@ func (s *Service) hangup(ctx context.Context, attemptID string) error {
 	}
 	if needCursor && s.cursor.Source == "" {
 		*v.Session, s.cursor = session, cursor
+		s.wakePoll()
 	}
 	if v.TerminalReason == "" {
 		v.TerminalReason = "local_hangup"
@@ -1431,32 +1449,38 @@ func (s *Service) observe() {
 		return
 	}
 	s.running = s.spawn(func() {
-		ticks, stop := s.clock.ticker()
-		defer stop()
 		for {
-			select {
-			case <-s.background.Done():
-				s.mu.Lock()
-				s.stopObserving()
-				s.unlock()
-				return
-			case _, open := <-ticks:
-				if !open {
-					s.mu.Lock()
-					s.stopObserving()
-					s.unlock()
-					return
-				}
-			}
-			more := s.pollOnce()
-			if s.cycled != nil {
-				s.cycled()
-			}
-			if !more {
+			more, pause := s.pollOnce()
+			if !more || pause && !s.pause() {
 				return
 			}
 		}
 	})
+}
+
+// pause waits one clock tick after a poll that failed or lost events, so a
+// source that keeps failing or is gone is not asked again at once. It reports false once the service stops.
+func (s *Service) pause() bool {
+	ticks, stop := s.clock.ticker()
+	defer stop()
+	select {
+	case <-s.background.Done():
+	case _, open := <-ticks:
+		if open {
+			return true
+		}
+	}
+	s.mu.Lock()
+	s.stopObserving()
+	s.unlock()
+	return false
+}
+
+// wakePoll ends the poll in flight. The caller holds s.mu.
+func (s *Service) wakePoll() {
+	if s.interruptPoll != nil {
+		s.interruptPoll()
+	}
 }
 
 // stopObserving ends the event poll, the call's work and its event source.
@@ -1469,25 +1493,49 @@ func (s *Service) stopObserving() {
 	}
 }
 
-// pollOnce reads the call's new events outside s.mu and applies them if the
-// call is still the one polled. It reports false once the poll has ended.
-func (s *Service) pollOnce() bool {
+// pollWait is how long the next poll may wait: pollWait, or less when the
+// call's heartbeat expiry or hangup give-up falls due sooner, so that check
+// runs on time. The caller holds s.mu.
+func (s *Service) pollWait() time.Duration {
+	due := time.Unix(0, s.lastSeen.Load()).Add(heartbeatExpiry)
+	if !s.disconnectedAt.IsZero() {
+		due = s.disconnectedAt.Add(hangupGiveUp)
+	}
+	// The checks fire once strictly past the deadline.
+	return max(0, min(pollWait, due.Sub(s.clock.now())+time.Millisecond))
+}
+
+// pollOnce waits outside s.mu for the call's next events and applies them if
+// the call is still the one polled. It reports false once the poll has ended,
+// and whether the next poll should wait a tick because this one failed or
+// lost events.
+func (s *Service) pollOnce() (more, pause bool) {
 	s.mu.Lock()
 	v := &s.state.State
 	if !s.active() {
 		s.stopObserving()
 		s.unlock()
-		return false
+		return false, false
 	}
-	cursor, threadID, attemptID := s.cursor, v.Session.ID, v.AttemptID
+	cursor, threadID, attemptID, wait := s.cursor, v.Session.ID, v.AttemptID, s.pollWait()
+	ctx, cancel := context.WithTimeout(s.background, wait+8*time.Second)
+	s.interruptPoll = cancel
 	s.unlock()
-	ctx, cancel := context.WithTimeout(s.background, 8*time.Second)
-	b, err := s.provider.Poll(ctx, cursor, threadID)
+	b, err := s.provider.Poll(ctx, cursor, threadID, wait)
 	cancel()
+	if s.cycled != nil {
+		defer s.cycled()
+	}
 	s.mu.Lock()
+	s.interruptPoll = nil
+	if s.background.Err() != nil {
+		s.stopObserving()
+		s.unlock()
+		return false, false
+	}
 	if v.AttemptID != attemptID || s.cursor != cursor {
 		s.unlock()
-		return true
+		return true, false
 	}
 	changed := false
 	var tools []Event
@@ -1499,7 +1547,7 @@ func (s *Service) pollOnce() bool {
 	}
 	// After a phone disconnect the poll keeps running until Codex confirms the
 	// hangup, or gives up once it has waited long enough.
-	if s.active() && !s.disconnectedAt.IsZero() && s.clock.now().Sub(s.disconnectedAt) > 30*time.Second {
+	if s.active() && !s.disconnectedAt.IsZero() && s.clock.now().Sub(s.disconnectedAt) > hangupGiveUp {
 		v.Phase = "unknown"
 		v.Message = "Phone disconnected; Codex did not confirm the audio hangup. Agent work remains in the operator thread."
 		s.stopObserving()
@@ -1507,9 +1555,9 @@ func (s *Service) pollOnce() bool {
 		for _, e := range tools {
 			s.runTool(e)
 		}
-		return false
+		return false, err != nil || b.Lost
 	}
-	disconnected := s.active() && s.disconnectedAt.IsZero() && s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second
+	disconnected := s.active() && s.disconnectedAt.IsZero() && s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > heartbeatExpiry
 	if disconnected {
 		s.disconnectedAt = s.clock.now()
 		v.TerminalReason = "phone_disconnected"
@@ -1532,7 +1580,7 @@ func (s *Service) pollOnce() bool {
 		}
 		_ = s.commit()
 	}
-	return true
+	return true, err != nil || b.Lost
 }
 
 // applyBatch applies polled events to the call and returns its tool calls.

@@ -33,7 +33,12 @@ const codexHookSource = `
       if (request && request.id != null) bridge.toolRequests.set(key, {id: request.id, threadId: request.threadId, at: Number.isFinite(request.at) ? request.at : Date.now()});
     }
   }
-  if (current) current.retired = true;
+  if (current) {
+    current.retired = true;
+    if (current.waiters instanceof Set) for (const waiter of [...current.waiters]) waiter(false);
+  }
+  bridge.waiters = new Set();
+  const wake = () => { for (const waiter of [...bridge.waiters]) waiter(false); };
   window.addEventListener('message', event => {
     const data = event.data;
     if (bridge.retired || !data || data.hostId !== 'local') return;
@@ -49,6 +54,7 @@ const codexHookSource = `
     if (data.type === 'mcp-notification' && typeof data.method === 'string') {
       bridge.events.push({sequence: ++bridge.sequence, method: data.method, params: data.params || {}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
+      wake();
       return;
     }
     if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
@@ -63,7 +69,28 @@ const codexHookSource = `
       bridge.toolRequests.set(String(data.request.id), {id: data.request.id, threadId: params.threadId, at: now});
       bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
+      wake();
     }
+  });
+  // voiceBatch is a voice call's events after a cursor; voiceEvents waits up
+  // to waitMs for the first of them.
+  bridge.voiceBatch = (after, threadId) => ({
+    cursor: bridge.sequence,
+    lost: after > bridge.sequence || (bridge.events.length > 0 && bridge.events[0].sequence > after + 1),
+    events: bridge.events.filter(e => e.sequence > after && e.params.threadId === threadId && ((e.method.startsWith('thread/realtime/') && e.method !== 'thread/realtime/outputAudio/delta') || (e.method === 'item/tool/call' && bridge.toolRequests.has(String(e.params.requestId))) || e.method === 'turn/started' || (e.method === 'item/completed' && e.params.item?.type === 'agentMessage' && e.params.item?.phase === 'final_answer'))),
+  });
+  bridge.voiceEvents = (after, threadId, waitMs) => new Promise(resolve => {
+    let timer = null;
+    const check = final => {
+      const batch = bridge.voiceBatch(after, threadId);
+      if (!final && !bridge.retired && !batch.lost && batch.events.length === 0) return;
+      bridge.waiters.delete(check);
+      if (timer !== null) clearTimeout(timer);
+      resolve(batch);
+    };
+    bridge.waiters.add(check);
+    timer = setTimeout(() => check(true), Math.max(0, waitMs));
+    check(waitMs <= 0);
   });
   bridge.respondDynamicToolCall = async (requestId, threadId, success, text) => {
     const key = String(requestId);
