@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -23,7 +25,8 @@ var testRegistryTemplate struct {
 }
 
 // openTestRegistry opens a new registry copied from one migrated once per test
-// process. The copy gets its own host epoch when it is opened.
+// process. The copy gets its own host id before it is opened and its own host
+// epoch on its first catalog write.
 func openTestRegistry(t *testing.T) *Registry {
 	t.Helper()
 	testRegistryTemplate.once.Do(func() { testRegistryTemplate.data, testRegistryTemplate.err = buildTestRegistryTemplate() })
@@ -32,6 +35,9 @@ func openTestRegistry(t *testing.T) *Registry {
 	}
 	path := filepath.Join(t.TempDir(), "registry.db")
 	if err := os.WriteFile(path, testRegistryTemplate.data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := giveTestRegistryItsOwnHostID(path); err != nil {
 		t.Fatal(err)
 	}
 	r, err := Open(path)
@@ -53,12 +59,29 @@ func buildTestRegistryTemplate() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, deleteErr := r.db.Exec(`DELETE FROM catalog_state; DELETE FROM host_identity`)
+	_, deleteErr := r.db.Exec(`DELETE FROM catalog_state`)
 	_, checkpointErr := r.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	if err := errors.Join(deleteErr, checkpointErr, r.Close()); err != nil {
 		return nil, err
 	}
 	return os.ReadFile(path)
+}
+
+// giveTestRegistryItsOwnHostID replaces the host id copied from the template.
+// Open does not touch a registry already at this schema, so the copy must not
+// share the template's id.
+func giveTestRegistryItsOwnHostID(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, 6)
+	_, randErr := rand.Read(raw)
+	var updateErr error
+	if randErr == nil {
+		_, updateErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw))
+	}
+	return errors.Join(randErr, updateErr, db.Close())
 }
 
 func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {

@@ -3,7 +3,10 @@
 package registrytest
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +25,9 @@ var template struct {
 
 // Path writes a new registry at this build's schema into the test's temporary
 // directory and returns its path. The schema is migrated once per test
-// process; each copy is opened with registry.Open as usual, which gives it its
-// own host id and host epoch.
+// process. Each copy gets its own host id here, because registry.Open does not
+// touch a registry already at this schema, and its own host epoch on its first
+// catalog write.
 func Path(t testing.TB) string {
 	t.Helper()
 	template.once.Do(func() { template.data, template.err = build() })
@@ -34,7 +38,24 @@ func Path(t testing.TB) string {
 	if err := os.WriteFile(path, template.data, 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := giveOwnHostID(path); err != nil {
+		t.Fatal(err)
+	}
 	return path
+}
+
+func giveOwnHostID(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, 6)
+	_, randErr := rand.Read(raw)
+	var updateErr error
+	if randErr == nil {
+		_, updateErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw))
+	}
+	return errors.Join(randErr, updateErr, db.Close())
 }
 
 func build() ([]byte, error) {
@@ -55,7 +76,7 @@ func build() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, deleteErr := db.Exec(`DELETE FROM catalog_state; DELETE FROM host_identity`)
+	_, deleteErr := db.Exec(`DELETE FROM catalog_state`)
 	_, checkpointErr := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	if err := db.Close(); err != nil {
 		return nil, err
