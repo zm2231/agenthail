@@ -33,7 +33,7 @@ struct CompletionToken: Equatable {
         return CompletionToken(trigger: trigger, query: query, range: NSRange(location: start, length: caret - start), atStart: atStart)
     }
 
-    private static func isSpace(_ unit: unichar) -> Bool {
+    static func isSpace(_ unit: unichar) -> Bool {
         guard let scalar = Unicode.Scalar(unit) else { return false }
         return CharacterSet.whitespacesAndNewlines.contains(scalar)
     }
@@ -97,9 +97,19 @@ enum ComposerCompletion {
         let next = end < string.length ? string.substring(with: NSRange(location: end, length: 1)) : nil
         let spaced = next?.allSatisfy(\.isWhitespace) == true
         let open = item.insertion.hasSuffix("/") || item.insertion.hasSuffix(" ")
-        let replacement = spaced || (open && next == nil) || item.insertion.hasSuffix(" ") ? item.insertion : item.insertion + " "
+        let trailing = item.insertion.hasSuffix(" ")
+        let replacement = spaced && trailing ? String(item.insertion.dropLast()) : spaced || trailing || (open && next == nil) ? item.insertion : item.insertion + " "
         let caret = token.range.location + (item.insertion as NSString).length + (open ? 0 : 1)
         return (token.range, replacement, caret)
+    }
+
+    /// Whether the whole word under the caret, past it too, is already the
+    /// item, so accepting would change nothing.
+    static func completes(_ item: CompletionItem, in text: String, at token: CompletionToken) -> Bool {
+        let string = text as NSString
+        var end = NSMaxRange(token.range)
+        while end < string.length, !CompletionToken.isSpace(string.character(at: end)) { end += 1 }
+        return string.substring(with: NSRange(location: token.range.location, length: end - token.range.location)) == item.insertion.trimmingCharacters(in: .whitespaces)
     }
 
     static func apply(_ item: CompletionItem, to text: String, at token: CompletionToken) -> (text: String, caret: Int) {

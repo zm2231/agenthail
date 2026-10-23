@@ -1758,7 +1758,7 @@ struct ComposerView: View {
         case .down: updateCompletion { $0.highlighted = (min(highlighted, items.count - 1) + 1) % items.count }
         case .accept:
             let item = items[min(highlighted, items.count - 1)]
-            if let token = completionToken, (draft.text as NSString).substring(with: token.range) == item.insertion.trimmingCharacters(in: .whitespaces) { return false }
+            if let token = completionToken, ComposerCompletion.completes(item, in: draft.text, at: token) { return false }
             accept(item)
         }
         return true

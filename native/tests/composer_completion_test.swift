@@ -75,6 +75,12 @@ struct ComposerCompletionTest {
         check(before.text == "/review Keep the fix" && before.caret == 8, "a command typed in front of a word keeps the word after a space")
         let rest = ComposerCompletion.apply(CompletionItem(id: "f", title: "", detail: "", insertion: "@src/app.go"), to: "@src/main.go", at: CompletionToken.at("@src/main.go", caret: 4)!)
         check(rest.text == "@src/app.go /main.go" && rest.caret == 12, "the rest of the word under the caret stays")
+        let argument = ComposerCompletion.apply(CompletionItem(id: "n", title: "", detail: "", insertion: "/name "), to: "/n x", at: CompletionToken.at("/n x", caret: 2)!)
+        check(argument.text == "/name x" && argument.caret == 6, "a choice that ends in a space uses the space already there")
+        let review = CompletionItem(id: "r", title: "", detail: "", insertion: "/review")
+        check(ComposerCompletion.completes(review, in: "/review", at: CompletionToken.at("/review", caret: 7)!), "a finished word is complete, so Return sends")
+        check(!ComposerCompletion.completes(review, in: "/reviewX", at: CompletionToken.at("/reviewX", caret: 7)!), "a word that runs on past the caret is not complete, so Return accepts")
+        check(ComposerCompletion.completes(CompletionItem(id: "n", title: "", detail: "", insertion: "/name "), in: "/name x", at: CompletionToken.at("/name x", caret: 5)!), "a choice's trailing space is not part of the word")
         let glued = ComposerCompletion.apply(CompletionItem(id: "d", title: "", detail: "", insertion: "@src/"), to: "@sKeep", at: CompletionToken.at("@sKeep", caret: 2)!)
         check(glued.text == "@src/ Keep" && glued.caret == 5, "a folder in front of a word stays open with the word after a space")
     }
