@@ -179,6 +179,37 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 	}
 }
 
+func TestThreadCreateWithoutIdentityReportsItsOutcomeAsUnknownOrFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status string
+		code   string
+	}{
+		{name: "ambiguous", err: surface.DeliveryOutcomeUnknown(errors.New("connection closed")), status: "unknown", code: "create_unknown"},
+		{name: "definite", err: errors.New("model rejected"), status: "failed", code: "create_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cwd := t.TempDir()
+			app := threadFixture(t, &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}, err: tc.err})
+			output, runErr := captureStdout(t, func() error {
+				return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--json"})
+			})
+			if runErr == nil || surface.IsDeliveryOutcomeUnknown(runErr) != (tc.status == "unknown") {
+				t.Fatalf("err=%v", runErr)
+			}
+			var result threadCreateOutput
+			if err := json.Unmarshal([]byte(output), &result); err != nil || result.OK || result.Unknown != (tc.status == "unknown") || result.Status != tc.status || result.Code != tc.code || result.Retryable || result.Session != nil || result.Error == "" {
+				t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
+			}
+			history, err := app.Registry.ListHistory(5, "")
+			if err != nil || len(history) != 1 || history[0].Kind != tc.status {
+				t.Fatalf("history=%+v err=%v", history, err)
+			}
+		})
+	}
+}
+
 func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	cwd := t.TempDir()
 	base := &cliSurface{kind: surface.KindCodex}
@@ -195,7 +226,7 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 		t.Fatal("expected definitive creation failure")
 	}
 	var result threadCreateOutput
-	if err := json.Unmarshal([]byte(output), &result); err != nil || result.OK || result.Unknown || result.Status != "failed" || result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil {
+	if err := json.Unmarshal([]byte(output), &result); err != nil || result.OK || result.Unknown || result.Status != "failed" || result.Code != "initial_turn_failed" || result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil {
 		t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
 	}
 	intent, err := app.Registry.DeliveryIntent(result.DeliveryID)

@@ -1956,7 +1956,7 @@ async function logicalAction(scope, actionName, payload) {
     clearLogicalRequest(scope);
     return result;
   } catch (error) {
-    if (!isNetworkFailure(error)) clearLogicalRequest(scope);
+    if (!isNetworkFailure(error) && !error.unknown) clearLogicalRequest(scope);
     throw error;
   }
 }
@@ -1996,11 +1996,16 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
     }
     const failure = Error(detail);
     try {
-      const typed = JSON.parse(detail).error;
+      const body = JSON.parse(detail);
+      const typed = body.error;
       if (typed?.message) {
         failure.message = typed.message;
         failure.code = typed.code || "";
+      } else if (typeof typed === "string") {
+        failure.message = typed;
+        failure.code = body.code || "";
       }
+      failure.unknown = body.unknown === true || failure.code === "host_outcome_unknown";
     } catch {}
     throw failure;
   }
@@ -2014,6 +2019,15 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
 function deliveryStatusLabel(result) {
   const status = result?.result?.evidence || result?.status;
   return status === "queued" ? "Queued" : status === "submitted" ? "Submitted" : "Sent";
+}
+function creationNotice(response, values) {
+  const target = sessionTarget(response.session || { surface: values.surface, id: response.sessionId, alias: values.alias });
+  return response.detail || response.warning || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`;
+}
+function creationFailureMessage(error) {
+  return error?.unknown
+    ? "Agenthail can't tell whether this session started; check the sidebar before trying again."
+    : friendlyError(error);
 }
 async function voiceRequest(action, extra = {}) {
   const response = await fetch("/api/voice", {
@@ -2881,12 +2895,11 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
     form.reset();
     toggleNewConversationForm(false);
     await load(true);
-    const target = sessionTarget(response.session || { surface: values.surface, id: response.sessionId, alias: values.alias });
-    toast(response.detail || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`);
+    toast(creationNotice(response, values));
     const sessionID = response.sessionId || response.session?.id;
     if (sessionID) await selectSession(sessionID, true);
   } catch (error) {
-    toast(friendlyError(error));
+    toast(creationFailureMessage(error));
   } finally {
     button.disabled = false;
   }

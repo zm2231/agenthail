@@ -1303,7 +1303,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			// holding its name, until discovery finds it at its location.
 			pend := func(location *surface.Location, detail string) {
 				if location == nil || *location == (surface.Location{}) {
-					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail, untracked(alias))
 					return
 				}
 				if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
@@ -1311,12 +1311,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					if detail != "" {
 						failure = detail + "; " + failure
 					}
-					d.writeAcceptedLaunch(w, request.Launcher, location, failure)
+					d.writeAcceptedLaunch(w, request.Launcher, location, failure, untracked(alias))
 					return
 				}
 				keepReservation = true
 				if detail != "" {
-					d.writeAcceptedLaunch(w, request.Launcher, location, detail)
+					d.writeAcceptedLaunch(w, request.Launcher, location, detail, "")
 					return
 				}
 				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
@@ -1344,7 +1344,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			if session == nil {
 				if location == nil {
-					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
+					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved", untracked(alias))
 					return
 				}
 				pend(location, "")
@@ -1357,15 +1357,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
 			if err := d.Registry.RegisterSession(*session); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err), untracked(alias))
 				return
 			}
 			if err := d.Registry.BindReservedAlias(reservation, session.ID); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err), unkeptName(alias))
 				return
 			}
 			if err := d.Registry.RecordSessionOrigin(registry.OriginOf(session.ID, creator)); err != nil {
-				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("record who started the session: %s", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("record who started the session: %s", err), "Agenthail couldn't record who started it.")
 				return
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
@@ -2395,16 +2395,16 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 // no session.
 func (d *Daemon) writeUnstartedSession(w http.ResponseWriter, message string, startErr error) {
 	unknown := surface.IsDeliveryOutcomeUnknown(startErr)
-	kind := "failed"
+	status, code := "failed", "create_failed"
 	if unknown {
-		kind = "unknown"
+		status, code = "unknown", "create_unknown"
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: message, Error: startErr.Error()})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: status, Message: message, Error: startErr.Error()})
 	detail := startErr.Error()
 	if unknown {
 		detail = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 	}
-	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": detail})
+	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": status, "code": code, "retryable": false, "unknown": unknown, "error": detail})
 }
 
 func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, creator, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
@@ -2477,7 +2477,7 @@ func submittedSessionDetail(session *surface.Session, alias string) string {
 }
 
 func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string, extra map[string]any) {
-	body := map[string]any{"ok": false, "status": "failed", "retryable": false, "session": session, "error": message}
+	body := map[string]any{"ok": false, "status": "failed", "code": "initial_turn_failed", "retryable": false, "session": session, "error": message}
 	if deliveryID > 0 {
 		body["deliveryId"] = deliveryID
 	}
@@ -2488,26 +2488,46 @@ func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, 
 	writeSessionCreateJSON(w, http.StatusInternalServerError, map[string]any{
 		"ok":        false,
 		"status":    "storage_failed",
+		"code":      "create_storage_failed",
 		"retryable": false,
 		"session":   session,
 		"error":     warning,
 	}, extra)
 }
 
-func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail string) {
+// writeAcceptedLaunch answers a launch that may be running without a
+// registered session; notice tells the person what Agenthail could not keep.
+func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail, notice string) {
 	d.log.Printf("accepted %s launch: %s", launcher, detail)
+	warning := fmt.Sprintf("Submitted to %s.", launcher)
+	if notice != "" {
+		warning += " " + notice
+	}
 	body := map[string]any{
 		"ok":        true,
 		"status":    "submitted",
 		"accepted":  true,
 		"retryable": false,
 		"launcher":  launcher,
-		"warning":   fmt.Sprintf("Submitted to %s.", launcher),
+		"warning":   warning,
 	}
 	if location != nil {
 		body["location"] = location
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+// untracked is the notice for a launch Agenthail holds no record of; the
+// session is registered only when discovery finds it.
+func untracked(alias string) string {
+	return strings.TrimSpace("It appears in the sidebar once Agenthail finds it. " + unkeptName(alias))
+}
+
+func unkeptName(alias string) string {
+	if alias == "" {
+		return ""
+	}
+	return fmt.Sprintf("Its name @%s wasn't kept; name it once it appears in the sidebar.", alias)
 }
 
 // reserveStartName holds a new session's name from before it starts until it

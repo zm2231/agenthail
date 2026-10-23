@@ -18,6 +18,7 @@ type threadCreateOutput struct {
 	OK         bool                `json:"ok"`
 	Unknown    bool                `json:"unknown,omitempty"`
 	Status     string              `json:"status,omitempty"`
+	Code       string              `json:"code,omitempty"`
 	Accepted   bool                `json:"accepted,omitempty"`
 	Retryable  bool                `json:"retryable"`
 	Detail     string              `json:"detail,omitempty"`
@@ -131,6 +132,7 @@ func (a *App) cmdThread(args []string) error {
 			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator}.Sender(), messageUUID, request.message)
 			if intentErr != nil {
 				output.Status = "storage_failed"
+				output.Code = "create_storage_failed"
 				output.Retryable = false
 				output.Error = fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr)
 				return emitThreadFailure(request, output, fmt.Errorf("%s", output.Error))
@@ -144,20 +146,21 @@ func (a *App) cmdThread(args []string) error {
 			recordThreadCreateHistory(a.registry(), "failed", session, request.message, "", startErr.Error())
 			output.OK = false
 			output.Status = "failed"
+			output.Code = "initial_turn_failed"
 			output.Retryable = false
 			output.Error = startErr.Error()
 			return emitThreadFailure(request, output, startErr)
 		}
-		ambiguous := surface.IsDeliveryOutcomeUnknown(startErr)
 		output.Error = startErr.Error()
-		kind := "failed"
-		if ambiguous {
+		output.Status, output.Code = "failed", "create_failed"
+		if surface.IsDeliveryOutcomeUnknown(startErr) {
+			output.Unknown = true
+			output.Status, output.Code = "unknown", "create_unknown"
 			output.Error = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 		}
-		recordThreadCreateHistory(a.registry(), kind, session, request.message, "", output.Error)
-		output.Status = "failed"
+		recordThreadCreateHistory(a.registry(), output.Status, session, request.message, "", output.Error)
 		output.Retryable = false
-		if ambiguous {
+		if output.Unknown {
 			return emitThreadFailure(request, output, fmt.Errorf("%s: %w", output.Error, startErr))
 		}
 		return emitThreadFailure(request, output, startErr)
@@ -215,7 +218,7 @@ func submittedThreadDetail(session *surface.Session, alias string) string {
 }
 
 func emitCreateStorageFailure(request threadCreateRequest, session *surface.Session, message string) error {
-	return emitThreadFailure(request, threadCreateOutput{OK: false, Status: "storage_failed", Retryable: false, Session: session, Error: message, Warning: message, Alias: request.alias}, fmt.Errorf("%s", message))
+	return emitThreadFailure(request, threadCreateOutput{OK: false, Status: "storage_failed", Code: "create_storage_failed", Retryable: false, Session: session, Error: message, Warning: message, Alias: request.alias}, fmt.Errorf("%s", message))
 }
 
 func emitThreadFailure(request threadCreateRequest, output threadCreateOutput, err error) error {
