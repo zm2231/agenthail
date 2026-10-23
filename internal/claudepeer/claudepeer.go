@@ -1285,7 +1285,6 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 		} else {
 			resp.OK = true
 			resp.Result = &surface.SendResult{UUID: id, Accepted: true}
-			_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_sent", SessionID: c.Session.ID, SourceSessionID: req.SenderID, Message: req.Message, Result: id + ": transport accepted; model completion pending"})
 		}
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
