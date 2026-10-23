@@ -53,18 +53,20 @@ type Config struct {
 	ProcessToken string
 	ReplyRelay   bool
 	BusyDelivery string
-	// HostName names the paired host that owns Session, empty for this
-	// host's own sessions. It prefixes the peer's name so a remote session is
-	// never mistaken for a local one.
-	HostName string
 }
 
 // PeerName is the name Claude lists for an Agenthail peer.
-func PeerName(hostName string, kind surface.SurfaceKind, name string) string {
-	if hostName != "" {
-		name = hostName + "/" + name
-	}
+func PeerName(kind surface.SurfaceKind, name string) string {
 	return "agenthail/" + string(kind) + ": " + name
+}
+
+// senderName is how a session is named to the sessions it writes to: the
+// target that reaches it with agenthail send from this host, else its title.
+func senderName(reg *registry.Registry, session surface.Session) string {
+	if target, err := reg.ReplyTarget(session.ID); err == nil && target != "" {
+		return target
+	}
+	return session.Name
 }
 
 type Ready struct {
@@ -175,6 +177,11 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	if err != nil {
 		return fmt.Errorf("read process start: %w", err)
 	}
+	reg, err := registry.Open(c.RegistryPath)
+	if err != nil {
+		return err
+	}
+	defer reg.Close()
 	claudeID := surface.PeerUUID(c.Session.Surface, c.Session.ID)
 	socketPath := filepath.Join(c.SocketDir, strconv.Itoa(pid)+".sock")
 	controlPath := c.ControlPath
@@ -231,7 +238,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	started := time.Now().UnixMilli()
 	record := sessionRecord{PID: pid, SessionID: claudeID, Cwd: c.Session.Cwd, StartedAt: started, ProcStart: procStart,
 		Version: "agenthail", PeerProtocol: peerProtocol, Kind: "interactive", Entrypoint: "cli", MessagingSocketPath: socketPath,
-		Name: PeerName(c.HostName, c.Session.Surface, c.Session.Name), NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
+		Name: PeerName(c.Session.Surface, senderName(reg, c.Session)), NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
 	controlDevice, controlInode, err := socketIdentity(controlPath)
 	if err != nil {
 		ln.Close()
@@ -269,24 +276,13 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 		cleanupManifest(manifestPath, manifest)
 		return err
 	}
-	reg, err := registry.Open(c.RegistryPath)
-	if err != nil {
-		cleanupManifest(manifestPath, manifest)
-		cleanupOwned(recordPath, record)
-		ln.Close()
-		cl.Close()
-		removeOwnedSocket(socketPath, socketDevice, socketInode)
-		removeOwnedSocket(controlPath, controlDevice, controlInode)
-		return err
-	}
-	defer reg.Close()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var listeners, handlers sync.WaitGroup
 	listeners.Add(3)
 	go func() {
 		defer listeners.Done()
-		heartbeat(ctx.Done(), recordPath, record, reg, c.Session.ID, c.HostName)
+		heartbeat(ctx.Done(), recordPath, record, reg, c.Session.ID)
 	}()
 	go func() { defer listeners.Done(); acceptPeers(&handlers, ln, reg, c, socketPath) }()
 	go func() { defer listeners.Done(); acceptControls(&handlers, cl, reg, c, socketPath) }()
@@ -371,7 +367,7 @@ func SendNative(ctx context.Context, home string, sender surface.Session, sender
 		return nil, err
 	}
 	id := messageID(surface.MessageUUID(ctx))
-	content := peerContent("", sender, senderSocket, fromMode, message)
+	content := peerContent(sender, senderSocket, fromMode, message)
 	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 	if len(payload) >= maxLineBytes {
 		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
@@ -585,7 +581,7 @@ func replaceManifest(path string, current, replacement OwnershipManifest) error 
 	return os.Rename(tmp, path)
 }
 
-func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id, hostName string) {
+func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id string) {
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
 	for {
@@ -595,10 +591,7 @@ func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *reg
 		case now := <-t.C:
 			next := record
 			if session, err := reg.Session(id); err == nil {
-				next.Name = PeerName(hostName, session.Surface, session.Name)
-				if alias, err := reg.ReverseAlias(id); err == nil && alias != "" {
-					next.Name = PeerName(hostName, session.Surface, alias)
-				}
+				next.Name = PeerName(session.Surface, senderName(reg, *session))
 				next.Cwd = session.Cwd
 				next.Status = status(*session)
 			}
@@ -941,7 +934,7 @@ func handleRelay(conn net.Conn, reg *registry.Registry, c Config, ownSocket stri
 		}
 		if err := queueFrame(reg, c, f, ownSocket); err != nil {
 			recordRejection(reg, c, f, s.Bytes(), err)
-			rejectFrame(c, f, ownSocket, err)
+			rejectFrame(reg, c, f, ownSocket, err)
 			continue
 		}
 		_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "received", "transport accepted; logical source queue updated")
@@ -1011,7 +1004,7 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 			_ = sendReceipt(c.SocketDir, item.From, ownSocket, item.MsgID, "received", "transport accepted; logical source queue updated")
 		}
 		for _, item := range rejected {
-			rejectFrame(c, item.frame, ownSocket, item.err)
+			rejectFrame(reg, c, item.frame, ownSocket, item.err)
 		}
 	}()
 	for n := 0; n < maxFrames && s.Scan(); n++ {
@@ -1142,7 +1135,7 @@ func takeNoRouteNotice(from string, now time.Time) bool {
 // model a fixed notice for each receipt status and never the receipt's
 // detail, so a frame refused for having no reply route is followed by a
 // message that gives the reason and where to send instead.
-func rejectFrame(c Config, f frame, ownSocket string, err error) {
+func rejectFrame(reg *registry.Registry, c Config, f frame, ownSocket string, err error) {
 	var noRoute surface.NoReplyRouteError
 	if !errors.As(err, &noRoute) {
 		_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "denied", err.Error())
@@ -1157,7 +1150,9 @@ func rejectFrame(c Config, f frame, ownSocket string, err error) {
 		return
 	}
 	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
-	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.HostName, c.Session, ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
+	self := c.Session
+	self.Name = senderName(reg, self)
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(self, ownSocket, "", notice)}), Priority: "next", From: "uds:" + ownSocket})
 	_ = sendAuthenticatedFrame(c.Home, target, payload)
 }
 
@@ -1249,9 +1244,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			_ = json.NewEncoder(conn).Encode(resp)
 			return
 		}
-		if alias, err := reg.ReverseAlias(session.ID); err == nil && alias != "" {
-			session.Name = alias
-		}
+		session.Name = senderName(reg, *session)
 		id := messageID(req.MsgID)
 		senderSocket := ownSocket
 		if req.ReplySocket != "" {
@@ -1272,7 +1265,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 				}
 			}
 		}
-		content := peerContent(c.HostName, sender, senderSocket, "", req.Message)
+		content := peerContent(sender, senderSocket, "", req.Message)
 		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, UUID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
@@ -1469,13 +1462,13 @@ func messageID(id string) string {
 	return uuid.New().String()
 }
 
-func peerContent(hostName string, session surface.Session, socket, fromMode, message string) string {
+func peerContent(session surface.Session, socket, fromMode, message string) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '"' || r == '<' || r == '>' || unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Cs, unicode.Zl, unicode.Zp) {
 			return -1
 		}
 		return r
-	}, PeerName(hostName, session.Surface, session.Name))
+	}, PeerName(session.Surface, session.Name))
 	name = strings.TrimSpace(name)
 	if runes := []rune(name); len(runes) > 64 {
 		name = string(runes[:64]) + "…"

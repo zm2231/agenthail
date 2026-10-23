@@ -158,7 +158,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			return nil, fmt.Errorf("persist delivery source: %w", err)
 		}
 		var err error
-		if ctx, err = WithPersonName(ctx, d.Registry, sourceID, surface.PersonName(ctx)); err != nil {
+		if ctx, err = WithSender(ctx, d.Registry, sourceID, surface.PersonName(ctx)); err != nil {
 			return nil, err
 		}
 	}
@@ -249,7 +249,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, fmt.Errorf("persist delivery source: %w", err)
 		}
 		var err error
-		if ctx, err = WithPersonName(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
+		if ctx, err = WithSender(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
 			return nil, err
 		}
 	}
@@ -390,11 +390,16 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	return receipt, err
 }
 
-// WithPersonName names the person on a message they sent: given, when a
-// paired host named them, else the name this host has for them.
-func WithPersonName(ctx context.Context, r *registry.Registry, sourceID, given string) (context.Context, error) {
+// WithSender names the sender on a message: the person by given, when a
+// paired host named them, else the name this host has for them; a session by
+// the reply target this host has for it.
+func WithSender(ctx context.Context, r *registry.Registry, sourceID, given string) (context.Context, error) {
 	if sourceID != surface.PersonSessionID {
-		return ctx, nil
+		target, err := r.ReplyTarget(sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("read how the sender is addressed: %w", err)
+		}
+		return surface.WithReplyTarget(ctx, target), nil
 	}
 	if given == "" {
 		name, err := r.PersonName()

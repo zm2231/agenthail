@@ -69,7 +69,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
-	if named, err := delivery.WithPersonName(operationCtx, d.Registry, item.SourceSessionID, item.PersonName); err != nil {
+	if named, err := delivery.WithSender(operationCtx, d.Registry, item.SourceSessionID, item.PersonName); err != nil {
 		d.log.Printf("queue item %d: %s", item.ID, err)
 	} else {
 		operationCtx = named

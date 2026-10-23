@@ -3293,6 +3293,28 @@ func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 	return name, err
 }
 
+// ReplyTarget is how this host addresses a session in agenthail send: @alias
+// for an alias this host holds, host::@alias for the alias its paired host
+// gives it, and empty when it has neither.
+func (r *Registry) ReplyTarget(sessionID string) (string, error) {
+	var alias, hostName, hostAlias string
+	err := r.read.QueryRow(`SELECT COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id ORDER BY a.created_at LIMIT 1),''),
+		COALESCE(h.name,''),
+		COALESCE((SELECT json_extract(cs.projection_fingerprint,'$.alias') FROM catalog_sessions cs WHERE cs.session_id=s.id AND json_valid(cs.projection_fingerprint)),'')
+		FROM sessions s LEFT JOIN hosts h ON h.host_id=s.host_id WHERE s.id=?`, sessionID).Scan(&alias, &hostName, &hostAlias)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", nil
+	case err != nil:
+		return "", err
+	case alias != "":
+		return "@" + alias, nil
+	case hostName != "" && hostAlias != "":
+		return hostName + "::@" + hostAlias, nil
+	}
+	return "", nil
+}
+
 func (r *Registry) RemoveAlias(name string) error {
 	tx, err := r.db.Begin()
 	if err != nil {

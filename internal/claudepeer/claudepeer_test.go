@@ -961,7 +961,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	if err := os.WriteFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(stand.Process.Pid)+".json"), record, 0600); err != nil {
 		t.Fatal(err)
 	}
-	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir, HostName: "vps"})
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: remote, SocketDir: socketDir})
 	defer stop()
 	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(worker.PID)+".json"))
 	if err != nil {

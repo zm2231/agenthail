@@ -2,7 +2,6 @@ package peerbridge
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -388,21 +387,8 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 			return err
 		}
 	}
-	if !own {
-		if session.Status == surface.StatusOffline {
-			return fmt.Errorf("sender %q is offline", id)
-		}
-		if session.Surface != surface.KindClaude {
-			if alias, aliasErr := m.registry.ReverseAlias(session.ID); aliasErr == nil && alias != "" {
-				session.Name = alias
-			} else if aliasErr != nil && !errors.Is(aliasErr, sql.ErrNoRows) {
-				return fmt.Errorf("load sender handle: %w", aliasErr)
-			}
-		}
-	}
-	hostName, err := m.owningHostName(id)
-	if err != nil {
-		return err
+	if !own && session.Status == surface.StatusOffline {
+		return fmt.Errorf("sender %q is offline", id)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -446,7 +432,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	}
 	controlPath := claudepeer.WorkerControlPath(m.home, m.generation, command.Process.Pid)
 	manifestPath := claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid)
-	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken, HostName: hostName}
+	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken}
 	if err := json.NewEncoder(input).Encode(config); err != nil {
 		return startupFailure(err)
 	}
@@ -494,23 +480,6 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 func agenthailSender(id string) bool {
 	_, ok := surface.AgenthailSender(id, "")
 	return ok
-}
-
-// owningHostName names the paired host that owns a session, empty for this
-// host's own sessions.
-func (m *Manager) owningHostName(id string) (string, error) {
-	if agenthailSender(id) {
-		return "", nil
-	}
-	hostID, err := m.registry.SessionHost(id)
-	if err != nil || hostID == "" {
-		return "", err
-	}
-	host, err := m.registry.Host(hostID)
-	if err != nil {
-		return "", fmt.Errorf("load the host that owns %q: %w", id, err)
-	}
-	return host.Name, nil
 }
 
 func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message string) (*surface.SendResult, error) {
