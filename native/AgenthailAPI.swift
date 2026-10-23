@@ -365,6 +365,18 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/settings")
     }
 
+    func setPersonName(_ name: String) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "person-name", "personName": name])
+    }
+
+    func claudeRemoteControl() async throws -> ClaudeRemoteControlState {
+        try await get("/api/v1/claude/remote-control")
+    }
+
+    func setClaudeRemoteControl(root: String, atStartup: Bool) async throws -> ClaudeRemoteControlState {
+        try await post("/api/v1/claude/remote-control", body: ["root": root, "atStartup": atStartup])
+    }
+
     func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
     }
@@ -451,7 +463,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, author: String? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -466,6 +478,7 @@ final class AgenthailAPI: @unchecked Sendable {
         if let once { body["once"] = once }
         if let handoff { body["handoff"] = handoff }
         if let relayID { body["relayId"] = relayID }
+        if let author { body["author"] = author }
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 

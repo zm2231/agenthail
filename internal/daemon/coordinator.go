@@ -74,6 +74,8 @@ type coordinatorRequest struct {
 	ChangedAt       time.Time
 	ChangedBy       string
 	Message         string
+	Author          surface.Author
+	PersonName      string
 }
 
 // coordinatorAction sets or clears a coordinator on the host that owns it.
@@ -161,6 +163,10 @@ func (d *Daemon) sendToCoordinator(r *http.Request, w http.ResponseWriter, reque
 		writeAPIError(w, http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
 		return
 	}
+	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
+		return
+	}
 	if request.SourceSessionID != "" {
 		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
@@ -169,7 +175,7 @@ func (d *Daemon) sendToCoordinator(r *http.Request, w http.ResponseWriter, reque
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
-	outcome, err := d.coordinator().Deliver(ctx, spec, request.Message, surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID})
+	outcome, err := d.coordinator().Deliver(ctx, spec, request.Message, surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName})
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, "delivery_failed", err.Error())
 		return

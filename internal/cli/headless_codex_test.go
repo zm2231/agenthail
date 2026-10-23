@@ -55,7 +55,7 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 		t.Fatalf("reply output=%q err=%v", output, err)
 	}
 	thread, _ := lifecycle.Daemon().Thread(id)
-	if len(thread.Turns) != 2 || !strings.Contains(thread.Turns[0].User, "Mention breaking changes") || thread.Turns[0].Status != "interrupted" || thread.Turns[1].User != "Write it again, shorter" {
+	if len(thread.Turns) != 2 || !strings.Contains(thread.Turns[0].User, "Mention breaking changes") || thread.Turns[0].Status != "interrupted" || thread.Turns[1].User != surface.CLILabel+"Write it again, shorter" {
 		t.Fatalf("thread=%+v", thread)
 	}
 
@@ -63,7 +63,7 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@headless", "After the daemon stopped"}) }); err != nil {
 		t.Fatalf("send after the daemon stopped err=%v", err)
 	}
-	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 3 || thread.Turns[2].User != "After the daemon stopped" {
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 3 || thread.Turns[2].User != surface.CLILabel+"After the daemon stopped" {
 		t.Fatalf("thread=%+v", thread)
 	}
 	if commands := lifecycle.Commands(); len(commands) != 2 {
@@ -74,7 +74,7 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:" + id, "By thread id"}) }); err != nil {
 		t.Fatalf("send by qualified id after the daemon stopped err=%v", err)
 	}
-	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 4 || thread.Turns[3].User != "By thread id" {
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 4 || thread.Turns[3].User != surface.CLILabel+"By thread id" {
 		t.Fatalf("thread=%+v", thread)
 	}
 	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {
@@ -95,7 +95,7 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:" + id[:len(id)-1], "By prefix"}) }); err != nil {
 		t.Fatalf("send by a unique prefix after the daemon stopped err=%v", err)
 	}
-	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 5 || thread.Turns[4].User != "By prefix" {
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 5 || thread.Turns[4].User != surface.CLILabel+"By prefix" {
 		t.Fatalf("thread=%+v", thread)
 	}
 	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {

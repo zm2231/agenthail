@@ -310,14 +310,18 @@ struct Capabilities: Codable, Hashable {
     var commands = false
     var respond = false
     var permissionMode = false
+    /// Why what the person writes reaches the session only as a note from
+    /// Agenthail, and what would make it their own turn; empty when it is.
+    var turnNotice = ""
     var lifecycle = SessionLifecycle()
 
-    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, lifecycle: SessionLifecycle = SessionLifecycle()) {
-        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, lifecycle)
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, goalSet: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false, commands: Bool = false, respond: Bool = false, permissionMode: Bool = false, turnNotice: String = "", lifecycle: SessionLifecycle = SessionLifecycle()) {
+        (self.send, self.stream, self.reply, self.goal, self.goalSet, self.compact, self.model, self.interrupt, self.steer, self.attach, self.commands, self.respond, self.permissionMode, self.turnNotice, self.lifecycle) = (send, stream, reply, goal, goalSet, compact, model, interrupt, steer, attach, commands, respond, permissionMode, turnNotice, lifecycle)
     }
 
     // A paired host on an older release omits goalSet, attach, commands,
-    // respond, permissionMode and lifecycle; it cannot do any of them.
+    // respond, permissionMode, turnNotice and lifecycle; it cannot do any of
+    // them and has no notice to give.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         send = try container.decode(Bool.self, forKey: .send)
@@ -333,6 +337,7 @@ struct Capabilities: Codable, Hashable {
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
         respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false
         permissionMode = try container.decodeIfPresent(Bool.self, forKey: .permissionMode) ?? false
+        turnNotice = try container.decodeIfPresent(String.self, forKey: .turnNotice) ?? ""
         lifecycle = try container.decodeIfPresent(SessionLifecycle.self, forKey: .lifecycle) ?? SessionLifecycle()
     }
 }
@@ -441,6 +446,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     var holders: [SessionHolder]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
+    /// The turn notice, with the app's own remedy when it can adopt the session.
+    var composerTurnNotice: String {
+        let notice = capabilities.turnNotice
+        guard !notice.isEmpty, canAdopt else { return notice }
+        return notice + " Open in Agenthail also makes it your own turn."
+    }
     /// A session its daemon can open in Agenthail's host.
     var canAdopt: Bool { capabilities.lifecycle.adopt && !isReadOnly }
 
@@ -1082,6 +1093,8 @@ struct DashboardSnapshot: Decodable {
     let busyDelivery: String?
     var rekeyed: [String: String]? = nil
     var signin: [SigninConsumerState]? = nil
+    /// What this host's sessions call the person; an older host sends none.
+    var person: PersonState? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1096,7 +1109,8 @@ struct DashboardSnapshot: Decodable {
             deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery &&
-            signin == other.signin
+            signin == other.signin &&
+            person == other.person
     }
 }
 
@@ -1195,11 +1209,11 @@ struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
 struct SessionDetail: Decodable {
     var session: RawSession
     let journalSeq: UInt64?
-    let alias: String?
+    var alias: String?
     let exchanges: [ExchangeState]
-    let capabilities: Capabilities
-    let readOnly: Bool
-    let readOnlyReason: String
+    var capabilities: Capabilities
+    var readOnly: Bool
+    var readOnlyReason: String
     var context: ContextState?
     var goal: GoalState?
     var model: String?
@@ -1219,19 +1233,65 @@ struct SessionDetail: Decodable {
     var waitingPlace: WaitingPlace? {
         session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
     }
+
+    var liveState: SessionLiveState {
+        get {
+            SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
+                             runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit)
+        }
+        set {
+            (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
+            (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit)
+        }
+    }
+}
+
+/// What a session detail shares with the catalog snapshot and can change
+/// while the session is open. The rest of the detail is its history.
+struct SessionLiveState: Equatable {
+    var name: String
+    var alias: String?
+    var status: String
+    var lastActive: String
+    var cwd: String?
+    var transport: String?
+    var runtime: SessionRuntime?
+    var runtimeKind: String?
+    var capabilities: Capabilities
+    var readOnly: Bool
+    var readOnlyReason: String
+    var waitingOn: WaitingState?
+    var backgroundTasks: BackgroundTasks?
+    var usageLimit: UsageLimitState?
+
+    init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
+         capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?) {
+        (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
+        (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit) = (waitingOn, backgroundTasks, usageLimit)
+    }
+
+    /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
+    init(_ live: SessionState, lastActive loaded: String) {
+        self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
+                  runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit)
+    }
 }
 
 struct RawSession: Decodable {
     var id: String
     let surface: String
-    let name: String
+    var name: String
     var status: String
-    let lastActive: String
+    var lastActive: String
     let source: String?
-    let transport: String?
-    let cwd: String?
+    var transport: String?
+    var cwd: String?
     var pendingModel: String? = nil
-    let runtime: SessionRuntime?
+    var runtime: SessionRuntime?
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
@@ -1307,6 +1367,39 @@ struct DashboardConfigState: Decodable {
     let listen: String
     let codexRecentHours: Int
     let busyDelivery: String
+}
+
+/// `set` is false while the name is the host account's own.
+struct PersonState: Decodable, Equatable {
+    let name: String
+    let set: Bool
+}
+
+/// The person-name field: it shows the name the person set, and saves only a
+/// non-empty change, so clearing it never resets the name by accident.
+enum PersonNameDraft {
+    static func field(for person: PersonState) -> String { person.set ? person.name : "" }
+
+    static func submission(_ draft: String, current: PersonState) -> String? {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !(current.set && name == current.name) else { return nil }
+        return name
+    }
+}
+
+/// Whether each Claude config folder starts Remote Control in new sessions.
+/// `atStartup` is nil when the folder leaves it to Claude's default.
+struct ClaudeRemoteControlState: Decodable, Equatable {
+    struct Root: Decodable, Equatable, Identifiable {
+        let root: String
+        let name: String
+        let atStartup: Bool?
+        let problem: String?
+        var id: String { root }
+    }
+
+    let available: Bool
+    let roots: [Root]
 }
 
 struct DashboardSettingsState: Decodable {

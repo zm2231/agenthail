@@ -132,9 +132,14 @@ func journalPageStart(collected []journalPageItem, positions, starts []int, limi
 }
 
 // journalRowIsItem reports whether a page shows a journal row as a timeline
-// item: every row but a source's errors and removals.
+// item: every row but a source's errors, removals, and the goal and context
+// state rows, which describe the session rather than an event in it.
 func journalRowIsItem(payload sessionJournalPayload) bool {
-	return payload.Kind != "source-error" && payload.Op != "remove"
+	switch payload.Kind {
+	case "source-error", "goal", "context":
+		return false
+	}
+	return payload.Op != "remove"
 }
 
 // journalVisibleItems returns the timeline items among entries and each item's entry position.

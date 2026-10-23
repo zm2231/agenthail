@@ -35,6 +35,7 @@ final class AgenthailModel: ObservableObject {
     @Published var signinError: String?
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
+    @Published var claudeRemoteControl: ClaudeRemoteControlState?
     @Published var audit: [HistoryState] = []
     @Published var auditKinds: [String] = []
     @Published var auditHasMore = false
@@ -484,6 +485,21 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    /// Sets the name this host's sessions call the person; empty goes back
+    /// to the account's name.
+    func setPersonName(_ name: String) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.setPersonName(name.trimmingCharacters(in: .whitespacesAndNewlines))
+                operationError = nil
+                _ = await refresh(fresh: true)
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     func loadOperations() async {
         await loadDevices()
         guard let api else { return }
@@ -492,6 +508,19 @@ final class AgenthailModel: ObservableObject {
             await loadAudit(reset: true)
         } catch {
             operationError = AgenthailAPIError.userMessage(error)
+        }
+        claudeRemoteControl = try? await api.claudeRemoteControl()
+    }
+
+    func setClaudeRemoteControl(root: String, atStartup: Bool) {
+        guard let api else { return }
+        Task {
+            do {
+                claudeRemoteControl = try await api.setClaudeRemoteControl(root: root, atStartup: atStartup)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
         }
     }
 
@@ -509,11 +538,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil) {
+    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, author: String? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, handoff: handoff, relayID: relayID)
+                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, handoff: handoff, relayID: relayID, author: author)
                 operationError = nil
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)
@@ -836,7 +865,7 @@ final class AgenthailModel: ObservableObject {
                 return
             }
             do {
-                let receipt = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
+                let receipt = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message, author: "person")
                 localSends[item.sessionId, default: []].append(LocalSend(text: item.message, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, evidence: receipt.result?.evidence)))
                 operationError = nil
             } catch {

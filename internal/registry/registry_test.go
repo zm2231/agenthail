@@ -33,7 +33,7 @@ func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) 
 	if err := os.Mkdir(state, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r, err := Open("")
+	r, err := OpenDefault(true)
 	if err != nil {
 		t.Fatal(err)
 	}

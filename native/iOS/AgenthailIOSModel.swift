@@ -13,6 +13,7 @@ struct PairedHostStatus: Identifiable, Equatable {
     let signin: [SigninConsumerState]
     let peers: [HostHealth]
     let notifications: String
+    var person: PersonState? = nil
 }
 
 @MainActor
@@ -213,7 +214,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
                              surfaces: (connection.snapshot?.surfaces ?? []).filter(\.needsAttention), signin: connection.snapshot?.signin ?? [],
-                             peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled")
+                             peers: connection.snapshot?.daemon.hosts ?? [], notifications: pushStatus[connection.id] ?? "Not enabled",
+                             person: connection.snapshot?.person)
         }
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
@@ -825,11 +827,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 if !fellOff.isEmpty { olderActivity += fellOff }
             }
             var merged = sessionMetadata.apply(to: detail)
-            if seq < selectedSessionStateSeq, let current = selectedDetail?.session, current.id == id {
-                merged.session.status = current.status
-                merged.session.waitingOn = current.waitingOn
-                merged.session.backgroundTasks = current.backgroundTasks
-                merged.session.usageLimit = current.usageLimit
+            if seq < selectedSessionStateSeq, let current = selectedDetail, current.session.id == id {
+                merged.liveState = current.liveState
             } else {
                 selectedSessionStateSeq = seq
             }
@@ -1462,11 +1461,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard seq > selectedSessionStateSeq, var detail = selectedDetail,
               let live = snapshot.sessions.first(where: { $0.id == detail.session.id }) else { return }
         selectedSessionStateSeq = seq
-        guard detail.session.status != live.status || detail.session.waitingOn != live.waitingOn || detail.session.backgroundTasks != live.backgroundTasks || detail.session.usageLimit != live.usageLimit else { return }
-        detail.session.status = live.status
-        detail.session.waitingOn = live.waitingOn
-        detail.session.backgroundTasks = live.backgroundTasks
-        detail.session.usageLimit = live.usageLimit
+        let state = SessionLiveState(live, lastActive: detail.session.lastActive)
+        guard detail.liveState != state else { return }
+        detail.liveState = state
         selectedDetail = detail
     }
 
@@ -1484,11 +1481,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if event.data.kind == "context" {
             sessionMetadata.stream(context: event.data.context)
             detail.context = event.data.context
+            selectedDetail = detail
+            return
         } else if event.data.kind == "goal" {
             sessionMetadata.stream(goal: event.data.goal)
             detail.goal = event.data.goal
+            selectedDetail = detail
+            return
         }
-        selectedDetail = detail
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
             return

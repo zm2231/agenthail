@@ -391,6 +391,7 @@ struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     let session: SessionState
+    private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     @State private var showingInfo = false
     @State private var showingVoice = false
     @State private var activityOnly = false
@@ -510,7 +511,7 @@ struct SessionScreen: View {
                 atLatest = value
             }
             .refreshable { await model.refreshSession(session.id) }
-            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)") { await model.syncRequests(for: session) }
+            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let detail { SessionSummary(detail: detail) { showingInfo = true } }
             }
@@ -550,6 +551,12 @@ struct SessionScreen: View {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
                                 .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
                         } else {
+                            if !liveSession.composerTurnNotice.isEmpty {
+                                Label(liveSession.composerTurnNotice, systemImage: "terminal")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .padding(.horizontal).padding(.top, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                         }
                     }
@@ -1479,6 +1486,13 @@ struct SettingsView: View {
                             if let notice = peer.notice, !notice.isEmpty {
                                 Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
                             }
+                        }
+                    }
+                    if let person = host.person {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent("Your name", value: person.name)
+                            Text(person.set ? "Set in Settings on \(host.name) or with agenthail person name." : "\(host.name)'s account name. Set yours in Settings on \(host.name) or with agenthail person name.")
+                                .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                     if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }

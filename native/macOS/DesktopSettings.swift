@@ -46,6 +46,7 @@ struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @State private var personName = ""
 
     var body: some View {
         Form {
@@ -66,6 +67,30 @@ struct GeneralSettings: View {
                     Button("Restart Agenthail") { model.restartDaemon() }
                     Button("Login Item Settings…") { _ = NativeCommand.run(["service", "settings"]) }
                 }
+            }
+            if let person = model.snapshot?.person {
+                Section {
+                    TextField("Your name", text: $personName, prompt: Text(person.name))
+                        .onSubmit { savePersonName(person) }
+                    HStack {
+                        Button("Save") { savePersonName(person) }
+                            .disabled(PersonNameDraft.submission(personName, current: person) == nil)
+                        if person.set {
+                            Button("Use This Account's Name") {
+                                personName = ""
+                                model.setPersonName("")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Your name")
+                } footer: {
+                    Text(person.set ? "Agents on this computer see what you write in Agenthail as from \(person.name)." : "Agents on this computer see what you write in Agenthail as from \(person.name), this account's name, until you set yours.")
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+                .onAppear { personName = PersonNameDraft.field(for: person) }
+                .onChange(of: person) { _, current in personName = PersonNameDraft.field(for: current) }
             }
             Section("Sending while an agent works") {
                 Picker(shortcuts.label(.send) ?? "Send", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
@@ -91,6 +116,32 @@ struct GeneralSettings: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            if let remoteControl = model.claudeRemoteControl, remoteControl.available, !remoteControl.roots.isEmpty {
+                Section {
+                    ForEach(remoteControl.roots) { root in
+                        LabeledContent {
+                            if let problem = root.problem {
+                                Text(problem).foregroundStyle(DesktopPalette.failed).textSelection(.enabled)
+                            } else {
+                                Toggle("", isOn: Binding(get: { root.atStartup == true }, set: { model.setClaudeRemoteControl(root: root.root, atStartup: $0) }))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                            }
+                        } label: {
+                            Text(root.name)
+                            if root.problem == nil, root.atStartup == nil {
+                                Text("Not set; Claude's default applies")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Claude Remote Control at startup")
+                } footer: {
+                    Text("New Claude sessions in a config folder with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.")
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+            }
             Section("Spotlight") {
                 Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)
                 Text("Spotlight on this Mac can find sessions by name and folder. Choosing one opens it here.")
@@ -100,6 +151,10 @@ struct GeneralSettings: View {
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+
+    private func savePersonName(_ person: PersonState) {
+        if let name = PersonNameDraft.submission(personName, current: person) { model.setPersonName(name) }
     }
 
     private var connectionLabel: String {
@@ -401,7 +456,7 @@ struct DeliverySettings: View {
                         Button("Delete Channel", role: .destructive) { model.performOperation(action: "channel-delete", channel: selectedChannel) }
                         Spacer()
                         Button("Send") {
-                            model.performOperation(action: "channel-send", message: channelMessage, channel: selectedChannel)
+                            model.performOperation(action: "channel-send", message: channelMessage, channel: selectedChannel, author: "person")
                             channelMessage = ""
                         }
                         .disabled(channelMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

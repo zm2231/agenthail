@@ -397,10 +397,10 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 	lifecycle.Daemon().SetActiveFlags(id)
 	eventually(t, "the held steer after approval", func() bool {
 		thread, _ := lifecycle.Daemon().Thread(id)
-		return thread.Turns[0].User == "Apply the migration\nalso update the changelog"
+		return thread.Turns[0].User == "Apply the migration\n"+surface.CLILabel+"also update the changelog"
 	})
 	awaitThreadReads(t, lifecycle, 3)
-	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 1 || thread.Turns[0].User != "Apply the migration\nalso update the changelog" {
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 1 || thread.Turns[0].User != "Apply the migration\n"+surface.CLILabel+"also update the changelog" {
 		t.Fatalf("thread=%+v", thread.Turns)
 	}
 	if got := pushes.count("session.waiting"); got != 1 {

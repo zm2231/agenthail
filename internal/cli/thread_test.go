@@ -202,8 +202,8 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	if err != nil || intent.Status != "failed" || intent.TargetSessionID != "created" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
-	if got := app.Registry.QueueCount(registry.OperatorSessionID); got != 0 {
-		t.Fatalf("%d failure notices queued for the operator, which no session reads", got)
+	if got := app.Registry.QueueCount(surface.CLISessionID); got != 0 {
+		t.Fatalf("%d failure notices queued for the Agenthail CLI, which no session reads", got)
 	}
 	events, err := app.Registry.CatalogEventsAfter(0, 20)
 	if err != nil || len(events.Events) == 0 {
@@ -224,7 +224,7 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 			break
 		}
 	}
-	if problem.DeliveryID != result.DeliveryID || problem.SessionID != "created" || problem.SourceSessionID != registry.OperatorSessionID || problem.Reason != "initial message rejected" {
+	if problem.DeliveryID != result.DeliveryID || problem.SessionID != "created" || problem.SourceSessionID != surface.CLISessionID || problem.Reason != "initial message rejected" {
 		t.Fatalf("problem payload=%+v", problem)
 	}
 }

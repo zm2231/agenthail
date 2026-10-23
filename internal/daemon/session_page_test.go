@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -180,5 +181,39 @@ func TestReadJournalPageSkipsSourceErrorsWithoutProviderFallback(t *testing.T) {
 	result, err := d.readJournalPage(from.ID, 0, 4)
 	if err != nil || result.Source != "journal" || len(result.Items) != 0 {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestSessionStateRowsAreNeverTimelineItems(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	rows := []struct{ kind, payload string }{
+		{"message", `{"itemId":"m1","version":1,"op":"upsert","kind":"message","role":"user","turnId":"t1","ts":"2026-10-20T12:00:00Z","body":"ship it"}`},
+		{"goal", `{"itemId":"state:goal","providerKey":"state:goal","version":1,"op":"replace","kind":"goal","ts":"2026-10-23T02:30:17Z","goal":{"objective":"finished days ago","status":"complete"}}`},
+		{"context", `{"itemId":"state:context","providerKey":"state:context","version":1,"op":"replace","kind":"context","ts":"2026-10-23T02:30:18Z","context":{"usedTokens":12,"contextWindow":100}}`},
+	}
+	var entries []registry.SessionJournalEntry
+	for _, row := range rows {
+		entry := registry.SessionJournalEntry{SessionID: from.ID, Kind: row.kind, ProviderKey: row.kind, Payload: []byte(row.payload)}
+		stored, _, err := r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: 8, Bytes: 8192})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, stored)
+	}
+	result, err := d.readJournalPage(from.ID, 0, 4)
+	if err != nil || len(result.Items) != 1 || result.Items[0].ID != "m1" {
+		t.Fatalf("items=%+v err=%v", result.Items, err)
+	}
+	for _, entry := range entries[1:] {
+		recorder := httptest.NewRecorder()
+		if err := writeSessionStreamEntry(recorder, from.ID, entry, func(payload sessionJournalPayload) surface.TimelineItem {
+			return surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		body := recorder.Body.String()
+		if strings.Contains(body, `"item":`) || !strings.Contains(body, `"kind":"`+entry.Kind+`"`) {
+			t.Fatalf("%s stream entry=%s", entry.Kind, body)
+		}
 	}
 }

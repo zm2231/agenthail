@@ -432,3 +432,20 @@ func TestOnlyAHeldPromptIsAnswerable(t *testing.T) {
 		t.Fatalf("held wait = %+v, %v; want the held request %s, answerable", observation.WaitingOn, err, request.ID)
 	}
 }
+
+func TestAPromptHeldAfterARestartDoesNotReuseAnEarlierRequestID(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": time.Now().Add(-time.Second).UnixMilli()})
+	session := terminalSession(t)
+	var ids []string
+	for range 2 {
+		claude := NewClaude(nil, home)
+		_, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "AskUserQuestion", ToolInput: json.RawMessage(pickAColor), PID: os.Getpid()})
+		ids = append(ids, awaitRequests(t, claude, session)[0].ID)
+		cancel()
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("the daemon that held the prompt after a restart reused request %s, which clients cache by", ids[0])
+	}
+}

@@ -697,7 +697,7 @@ struct ConversationPane: View {
                         RemovedSessionBar(onClose: pane.closeRemovedSession)
                     } else {
                         VStack(spacing: 0) {
-                            if let waiting = session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: pane.detail?.readOnly == true, respond: session.capabilities.respond) {
+                            if let waiting = session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: session.isReadOnly, respond: session.capabilities.respond) {
                                 ElsewhereWaitCard(waiting: waiting, place: session.waitingPlace ?? .elsewhere, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
                                                   open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil,
                                                   restart: { model.stopAndResume(session.id) })
@@ -705,7 +705,7 @@ struct ConversationPane: View {
                                     .frame(maxWidth: 720)
                                     .padding(.horizontal, DesktopSpace.l)
                                     .padding(.top, DesktopSpace.s)
-                            } else if let request = pane.requests?.requests.first, pane.detail?.readOnly == false {
+                            } else if let request = pane.requests?.requests.first, !session.isReadOnly {
                                 RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
@@ -1584,6 +1584,14 @@ struct ComposerView: View {
                             DeliveryProblemBanner(problem: problem, model: model)
                                 .padding(.bottom, DesktopSpace.s)
                         }
+                        if !session.composerTurnNotice.isEmpty {
+                            Text(session.composerTurnNotice)
+                                .font(.system(size: DesktopType.caption))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 15)
+                                .padding(.bottom, DesktopSpace.s)
+                        }
                         if !queued.isEmpty {
                             QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
@@ -2251,7 +2259,7 @@ struct DetailsTab: View {
                 } else if let modelLabel = pane.detail?.modelLabel {
                     detailRow("Model", modelLabel)
                 }
-                if canControl && pane.detail?.capabilities.permissionMode == true, let current = pane.requests?.permissionMode {
+                if canControl && session.capabilities.permissionMode, let current = pane.requests?.permissionMode {
                     GridRow {
                         Text("Permissions").foregroundStyle(DesktopPalette.text2)
                         Menu(SessionRequests.permissionModeLabel(current)) {

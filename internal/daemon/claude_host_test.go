@@ -93,7 +93,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 		t.Fatalf("receipt = %+v, want delivered with turn %s", receipt, intent.UUID)
 	}
 
-	queued, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: registry.OperatorSessionID, TargetSessionID: id, Message: "sent from the queue", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	queued, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: surface.PersonSessionID, TargetSessionID: id, Message: "sent from the queue", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 	if err != nil {
 		t.Fatal(err)
 	}

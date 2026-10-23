@@ -32,6 +32,7 @@ type federatedSurface struct {
 	mu       sync.Mutex
 	messages []string
 	sources  []string
+	persons  []string
 }
 
 func (f *federatedSurface) record(message string) {
@@ -55,6 +56,7 @@ func (f *federatedSurface) delivered() []string {
 func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.mu.Lock()
 	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.persons = append(f.persons, surface.PersonName(ctx))
 	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
@@ -359,7 +361,7 @@ func awaitReplayed(t *testing.T, local, remote *federationNode, host *pairedHost
 		return len(remote.fake.delivered()) > 0
 	})
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != message {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+message {
 		t.Fatalf("remote delivered=%v", got)
 	}
 }
@@ -386,6 +388,46 @@ func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.
 		return len(sessionsOf(local.snapshot(t), record.ID)) == 2
 	})
 	return local, remote, record
+}
+
+func TestAPersonsMessageToAnotherHostKeepsTheNameTheirOwnHostHasForThem(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	for node, name := range map[*federationNode]string{local: "Ada at her Mac", remote: "root"} {
+		if err := node.reg.SetPersonName(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	for _, request := range []map[string]string{
+		{"action": "send", "sessionId": qualified, "message": "from the app", "author": "person"},
+		{"action": "send", "sessionId": "remote-a", "message": "typed on the server", "author": "person", "personName": "Someone Else"},
+	} {
+		node := local
+		if request["sessionId"] == "remote-a" {
+			node = remote
+		}
+		if response := node.request(t, http.MethodPost, "/api/v1/actions", request); response.Code != http.StatusOK {
+			t.Fatalf("send status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	for _, invalid := range []map[string]string{
+		{"author": "person", "sourceSessionId": surface.CLISessionID},
+		{"author": "invalid", "sourceSessionId": surface.PersonSessionID},
+	} {
+		request := map[string]string{"action": "send", "sessionId": qualified, "message": "not the person"}
+		for key, value := range invalid {
+			request[key] = value
+		}
+		if response := local.request(t, http.MethodPost, "/api/v1/actions", request); response.Code != http.StatusBadRequest {
+			t.Fatalf("%v: status=%d body=%s", invalid, response.Code, response.Body.String())
+		}
+	}
+	remote.fake.mu.Lock()
+	sources, persons := append([]string(nil), remote.fake.sources...), append([]string(nil), remote.fake.persons...)
+	remote.fake.mu.Unlock()
+	if len(sources) != 2 || sources[0] != surface.PersonSessionID || sources[1] != surface.PersonSessionID || persons[0] != "Ada at her Mac" || persons[1] != "root" {
+		t.Fatalf("sources=%v persons=%v", sources, persons)
+	}
 }
 
 func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
@@ -426,7 +468,7 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	if steer.Code != http.StatusOK {
 		t.Fatalf("steer status=%d body=%s", steer.Code, steer.Body.String())
 	}
-	if got := remote.fake.delivered(); len(got) != 2 || got[0] != "hello remote" || got[1] != "steer:turn left" {
+	if got := remote.fake.delivered(); len(got) != 2 || got[0] != surface.CLILabel+"hello remote" || got[1] != "steer:"+surface.CLILabel+"turn left" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	if got := local.fake.delivered(); len(got) != 0 {
@@ -631,7 +673,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	})
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "held for vps" {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+"held for vps" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	queue, err := local.reg.ListQueue(true, nil)
@@ -737,7 +779,7 @@ func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	host, _ := local.daemon.pairedHost(record.ID)
 	local.daemon.drainHostDeliveries(context.Background(), host)
 	local.daemon.drainHostDeliveries(context.Background(), host)
-	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "cut short" {
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != surface.CLILabel+"cut short" {
 		t.Fatalf("remote delivered=%v", got)
 	}
 	queue, err = local.reg.ListQueue(true, nil)

@@ -58,7 +58,7 @@ func claudeLocalCommandOutput(content string) (string, bool) {
 func claudeCommandItems(text string) []surface.TimelineItem {
 	text = strings.TrimSpace(text)
 	if claudeCommandInvocation(text) {
-		return []surface.TimelineItem{{Kind: "event", Title: "Command", Text: claudeCommandLine(text)}}
+		return []surface.TimelineItem{{Kind: "event", Title: surface.TimelineCommand, Text: claudeCommandLine(text)}}
 	}
 	if claudeCommandOutput.MatchString(text) {
 		return []surface.TimelineItem{claudeLocalCommandItem(text)}
@@ -68,7 +68,7 @@ func claudeCommandItems(text string) []surface.TimelineItem {
 
 func claudeLocalCommandItem(content string) surface.TimelineItem {
 	output, failed := claudeLocalCommandOutput(content)
-	item := surface.TimelineItem{Kind: "event", Title: "Local command", Text: output}
+	item := surface.TimelineItem{Kind: "event", Title: surface.TimelineLocalCommand, Text: output}
 	if failed {
 		item.Status = "error"
 	}

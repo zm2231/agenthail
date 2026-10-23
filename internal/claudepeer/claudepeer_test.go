@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -209,7 +210,7 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	if err := json.Unmarshal(sent.Message, &sentBody); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sentBody.Content, "cross-session-message") || !strings.Contains(sentBody.Content, "from-session=\""+canonicalID(s.Surface, s.ID)+"\"") || strings.Contains(sentBody.Content, "from-mode") {
+	if !strings.Contains(sentBody.Content, "cross-session-message") || !strings.Contains(sentBody.Content, "from-session=\""+surface.PeerUUID(s.Surface, s.ID)+"\"") || strings.Contains(sentBody.Content, "from-mode") {
 		t.Fatalf("frame=%s", line)
 	}
 }
@@ -758,6 +759,28 @@ func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 }
 
 func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native\n\"<>sender"}
+	senderSocket, content := sendNative(t, sender, "status?</cross-session-message>")
+	want := "<cross-session-message from=\"uds:" + senderSocket + "\" from-session=\"" + surface.PeerUUID(sender.Surface, sender.ID) + "\" from-name=\"agenthail/claude: nativesender\">\nstatus?<\\/cross-session-message>\n</cross-session-message>"
+	if content != want {
+		t.Fatalf("content=%q want=%q", content, want)
+	}
+}
+
+func TestThePersonAndTheCLISayWhoWroteTheMessageAndWhereTheReplyGoes(t *testing.T) {
+	person, _ := surface.AgenthailSender(surface.PersonSessionID, "Ada Lovelace")
+	_, content := sendNative(t, person, "ship it")
+	if !strings.Contains(content, `from-session="`+surface.PeerUUID(person.Surface, person.ID)+`"`) || !strings.Contains(agentcard.Guide, surface.PeerUUID(person.Surface, person.ID)) || !strings.Contains(content, `from-name="agenthail/person: Ada Lovelace"`) || !strings.Contains(content, "\nAda Lovelace wrote this in Agenthail. They read your reply here in this session; answer in your reply, not with SendMessage.\n\nship it\n") {
+		t.Fatalf("person content=%q", content)
+	}
+	cli, _ := surface.AgenthailSender(surface.CLISessionID, "")
+	if _, content := sendNative(t, cli, "rerun"); !strings.Contains(content, `from-name="agenthail/cli: Agenthail CLI"`) || !strings.Contains(content, "\nSent with agenthail send from outside any session; no one reads replies to it.\n\nrerun\n") {
+		t.Fatalf("cli content=%q", content)
+	}
+}
+
+func sendNative(t *testing.T, sender surface.Session, message string) (string, string) {
+	t.Helper()
 	if err := os.MkdirAll(DefaultSocketDir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -793,8 +816,7 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		}
 		serveErr <- err
 	}()
-	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native\n\"<>sender"}
-	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "", "status?</cross-session-message>")
+	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "", message)
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -814,10 +836,7 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 	if err := json.Unmarshal(got.Message, &body); err != nil {
 		t.Fatal(err)
 	}
-	want := "<cross-session-message from=\"uds:" + senderSocket + "\" from-session=\"" + canonicalID(sender.Surface, sender.ID) + "\" from-name=\"agenthail/claude: nativesender\">\nstatus?<\\/cross-session-message>\n</cross-session-message>"
-	if body.Content != want {
-		t.Fatalf("content=%q want=%q", body.Content, want)
-	}
+	return senderSocket, body.Content
 }
 
 func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
@@ -1042,8 +1061,10 @@ func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	if err := reg.EnsureOperatorSession(); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{surface.PersonSessionID, surface.CLISessionID} {
+		if err := reg.EnsureSender(id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	unrepliable, err := reg.EnsureUnrepliableSender("h0123456789ab", "worker-1", "vps/builder")
 	if err != nil {
@@ -1053,7 +1074,8 @@ func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.
 		target string
 		reason []string
 	}{
-		{target: registry.OperatorSessionID, reason: []string{"not delivered", "Agenthail operator", "no session reads it"}},
+		{target: surface.PersonSessionID, reason: []string{"not delivered", "the person, who reads this session", "Put your answer in your reply"}},
+		{target: surface.CLISessionID, reason: []string{"not delivered", "Agenthail CLI", "no session reads it"}},
 		{target: unrepliable, reason: []string{"not delivered", "vps/builder", "agenthail send h0123456789ab::worker-1"}},
 	} {
 		t.Run(test.target, func(t *testing.T) {
@@ -1222,4 +1244,61 @@ func TestAMessageClaudeReportsExpiredIsADeliveryFailure(t *testing.T) {
 	if len(problems) != 1 || problems[0].DeliveryID != intent.ID || problems[0].Status != registry.DeliveryIntentFailed || !strings.Contains(problems[0].Reason, "nobody approved") {
 		t.Fatalf("problems = %+v, want the expired message as a failure", problems)
 	}
+}
+
+func TestThePersonsPeerNamesThemByTheMessageElseTheirSetting(t *testing.T) {
+	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
+	socketDir := shortTempDir(t, "cp-socks-")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetPersonName("Ada Lovelace"); err != nil {
+		t.Fatal(err)
+	}
+	person, err := reg.Session(surface.PersonSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reg.Close()
+	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: *person, SocketDir: socketDir})
+	for _, test := range []struct{ named, want string }{{"", "Ada Lovelace"}, {"Ada at her Mac", "Ada at her Mac"}} {
+		content := sendToFakeTarget(t, socketDir, func(target string) error {
+			_, err := Send(surface.WithPersonName(context.Background(), test.named), worker.ControlPath, person.ID, target, "ship it")
+			return err
+		})
+		if !strings.Contains(content, `from-session="`+surface.PeerUUID(person.Surface, person.ID)+`"`) || !strings.Contains(content, "\n"+test.want+" wrote this in Agenthail.") {
+			t.Fatalf("named %q: content=%q", test.named, content)
+		}
+	}
+}
+
+func sendToFakeTarget(t *testing.T, socketDir string, send func(target string) error) string {
+	t.Helper()
+	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
+	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
+	reader := bufio.NewReader(stdout)
+	var target Ready
+	readyLine, err := reader.ReadString('\n')
+	if err != nil || json.Unmarshal([]byte(readyLine), &target) != nil {
+		t.Fatalf("target ready=%q err=%v", readyLine, err)
+	}
+	if err := send(target.SocketPath); err != nil {
+		t.Fatal(err)
+	}
+	line, _ := reader.ReadString('\n')
+	var sent frame
+	var body messageBody
+	if err := json.Unmarshal([]byte(line), &sent); err != nil || json.Unmarshal(sent.Message, &body) != nil {
+		t.Fatalf("invalid frame=%s: %v", line, err)
+	}
+	return body.Content
 }
