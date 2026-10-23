@@ -309,6 +309,25 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStreamStateEventsNeverBecomeTimelineRows() throws {
+        let model = Self.computerModel()
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.session.id = "computer::demo"
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+
+        let goalEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":2,"type":"item","data":{"itemId":"state:goal","version":1,"kind":"goal","op":"replace","ts":"2026-10-23T02:30:00Z","goal":{"objective":"An objective finished days ago","status":"complete"},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(goalEvent)
+        let contextEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":3,"type":"item","data":{"itemId":"state:context","version":1,"kind":"context","op":"replace","ts":"2026-10-23T02:30:01Z","context":{"usedTokens":12,"contextWindow":100,"compacting":false,"compactionCount":0},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(contextEvent)
+
+        XCTAssertEqual(model.selectedDetail?.goal?.status, "complete")
+        XCTAssertEqual(model.selectedDetail?.context?.usedTokens, 12)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items, [])
+    }
+
+    @MainActor
     func testSessionStreamSourceResetShowsTheBoundedReasonWithoutAddingTimelineActivity() async throws {
         let model = Self.computerModel()
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
