@@ -32,6 +32,9 @@ func (r *SessionTransportResolver) Options(ctx context.Context) []map[string]any
 	for id, launcher := range r.launchers {
 		available, detail := launcher.Available(ctx)
 		agents := launcher.Agents()
+		if agents == nil {
+			agents = []surface.SurfaceKind{}
+		}
 		result = append(result, map[string]any{"id": id, "label": string(id), "agents": agents, "available": available, "detail": detail, "sessionOptions": launcher.SessionOptions()})
 	}
 	sort.Slice(result, func(i, j int) bool {
