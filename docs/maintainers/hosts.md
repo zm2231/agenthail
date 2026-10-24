@@ -225,9 +225,12 @@ connected paired host, as `sets[{host, hostId, local, provider, account, root,
 primary, meters, problem}]`. Each machine lists its primary Claude account
 first, then Codex while it is healthy, then its other Claude accounts. A Claude
 account is named by the email it is signed in with, or by its root's name.
-Each meter has a `label`, `percent`, `severity`, `resetsAt`, `asOf`, `aged`
-and `until`; a client hides a meter once `until` passes and shows the reading's
-age instead of its reset when `aged` is true.
+Each meter has a `provider`, a `kind` (`session`, `5h`, `weekly`,
+`weekly_all`, `weekly_scoped` or `<n>m`), a `label`, `percent`, `asOf` and
+`aged`, and when known a `severity`, `resetsAt` and `until`. A client hides a
+meter once `until` passes and shows the reading's age instead of its reset when
+`aged` is true. `account`, `root`, `primary` and `problem` are left out when
+they do not apply.
 
 The daemon asks each connected host with `scope=local`, so a host never asks
 its own peers in turn, and waits at most a few seconds for each. A host that
