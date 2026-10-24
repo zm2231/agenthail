@@ -192,7 +192,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     private func requestLayers(_ key: Key) {
-        if let file = file(key), let saved = PhoneRenderCache.readLayers(file), saved.size == key.size {
+        if let file = file(key), let saved = PhoneRenderCache.readLayers(file, polarity: key.dark ? .dark : .light), saved.size == key.size {
             keep(saved, for: key)
             return
         }

@@ -29,14 +29,14 @@ enum PhoneRenderCache {
         try? JSONEncoder().encode(facts).write(to: sibling(url, "facts", ext: "json"), options: .atomic)
     }
 
-    static func readLayers(_ url: URL) -> BackdropLayers? {
+    static func readLayers(_ url: URL, polarity: ScrimField.Polarity) -> BackdropLayers? {
         guard let data = try? Data(contentsOf: sibling(url, "facts", ext: "json")),
               let facts = try? JSONDecoder().decode(LayerFacts.self, from: data), facts.tint.count == 3,
               let base = image(sibling(url, "base")) else { return nil }
         let scrim = facts.scrimPeak > 0 ? image(sibling(url, "scrim")) : nil
         guard facts.scrimPeak <= 0 || scrim != nil else { return nil }
         let tint = BackdropRGB(facts.tint[0], facts.tint[1], facts.tint[2])
-        return BackdropLayers(size: CGSize(width: facts.width, height: facts.height), base: nil, scrim: nil, scrimPeak: 0, scrimColor: tint, paneTint: tint,
+        return BackdropLayers(size: CGSize(width: facts.width, height: facts.height), polarity: polarity, base: nil, scrim: nil, scrimPeak: 0, scrimColor: tint, paneTint: tint,
                               panes: [.content: BackdropLayers.Pane(base: base, minimum: facts.minimum, scrim: scrim, scrimPeak: facts.scrimPeak)])
     }
 
