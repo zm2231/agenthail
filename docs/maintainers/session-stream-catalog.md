@@ -59,6 +59,14 @@ row from the transaction's count before retrying. A failed discovery records
 freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 
+The Mac and iPhone apps read the catalog stream off the main thread into a
+buffer for that connection, and apply everything it holds as one snapshot
+change per run-loop turn, so a burst of events costs one redraw rather than one
+each. A buffer past 2,000 events, a `stream_gap`, or a new catalog epoch drops
+the buffer and reloads a fresh snapshot; the stream resumes after it. A
+snapshot older than the events already applied keeps the app's sessions,
+surfaces and delivery problems.
+
 ## Runtime launchers
 
 Each catalog session may include `runtime`:

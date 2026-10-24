@@ -283,6 +283,9 @@ func ShowDefaults(docs bool) string {
 			if key.kind == kindChoice || key.kind == kindList {
 				fmt.Fprintf(&b, "# values: %s\n", strings.Join(key.choices, ", "))
 			}
+			if key.kind == kindTextColor {
+				fmt.Fprintf(&b, "# values: %s, #rrggbb, or #rrggbb/#rrggbb (dark/light); lifted until it meets contrast.target\n", strings.Join(key.choices, ", "))
+			}
 			if key.kind == kindNumber {
 				fmt.Fprintf(&b, "# range: %s to %s\n", formatNumber(key.min), formatNumber(key.max))
 			}

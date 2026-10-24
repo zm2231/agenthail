@@ -167,7 +167,7 @@ struct SessionPaneTest {
         check(lateStreamRequests.count == 1, "a session without a stream yet is asked once: \(lateStreamRequests)")
         let gainedStream = String(decoding: try! JSONEncoder().encode(newSession(stream: true)), as: UTF8.self)
         let upserted = "{\"stream\":\"catalog\",\"seq\":2,\"type\":\"session.upserted\",\"data\":{\"session\":\(gainedStream)}}"
-        lateStreamModel.applyCatalogEvent(try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(upserted.utf8)))
+        lateStreamModel.applyCatalogEvents([try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(upserted.utf8))])
         for _ in 0..<60 where lateStreamRequests.count < 2 { try? await Task.sleep(for: .milliseconds(50)) }
         check(lateStreamRequests.count >= 2 && lateStreamRequests[1].contains("after=100"), "the live stream starts once a new session gains it, from the reloaded journal position: \(lateStreamRequests)")
         lateStreamPane.close()
@@ -212,7 +212,7 @@ struct SessionPaneTest {
         let codexSurface = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
         catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
         let healthEvent = try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"surface.health","data":{"surface":"codex","health":"degraded","detail":"bridge closed","runtime":{"name":"Codex Desktop bridge","reachable":false,"durable":false,"problem":"bridge-unavailable","detail":"bridge closed","remediation":"run the launch command"}}}"#.utf8))
-        catalog.applyCatalogEvent(healthEvent)
+        catalog.applyCatalogEvents([healthEvent])
         check(catalog.snapshot?.surfaces.first?.runtime?.advice.isEmpty == false && catalog.snapshot?.surfaces.first?.health == "degraded", "a streamed surface health change keeps its runtime advice")
         let rekeyed = AgenthailModel(connecting: false)
         let retired = SessionState(id: "session_old", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
@@ -220,7 +220,7 @@ struct SessionPaneTest {
         let following = rekeyed.openPane()
         following.select("session_old")
         rekeyed.draft(for: "session_old").text = "unsent"
-        rekeyed.applyCatalogEvent(try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"session.removed","data":{"sessionId":"session_old","surface":"claude","reason":"rekeyed","rekeyedTo":"conversation-a"}}"#.utf8)))
+        rekeyed.applyCatalogEvents([try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"session.removed","data":{"sessionId":"session_old","surface":"claude","reason":"rekeyed","rekeyedTo":"conversation-a"}}"#.utf8))])
         check(following.selectedSessionID == "conversation-a" && following.removedSession == nil, "a pane on a rekeyed session follows it to its conversation id")
         check(rekeyed.draft(for: "conversation-a").text == "unsent", "a rekeyed session keeps its draft")
         let restored = rekeyed.openPane()

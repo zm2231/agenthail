@@ -79,8 +79,8 @@ final class AgenthailModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
-    private var catalogStreamTask: Task<Void, Never>?
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
+    lazy var catalogFeed = makeCatalogFeed()
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
@@ -151,7 +151,6 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
     }
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
@@ -175,7 +174,7 @@ final class AgenthailModel: ObservableObject {
                     lastEventID = 0
                     if await refresh(fresh: true) {
                         startEvents()
-                        startCatalogStream()
+                        catalogFeed.start()
                         startStatusRefresh()
                         return
                     }
@@ -217,10 +216,7 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
-            if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
-                startCatalogStream()
-            }
+            adoptRefreshed(loaded)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
             reconcilePanes()
@@ -231,6 +227,13 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    func adoptRefreshed(_ loaded: DashboardSnapshot) {
+        adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
+        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogFeed.isRunning {
+            catalogFeed.start()
+        }
     }
 
     // Rekeys are recorded before the snapshot is published, because publishing
@@ -1074,66 +1077,30 @@ final class AgenthailModel: ObservableObject {
         change(&localSends[sessionID]![index])
     }
 
-    private func startCatalogStream() {
-        catalogStreamTask?.cancel()
-        catalogStreamTask = Task {
-            let backoff = EventRetryBackoff()
-            while !Task.isCancelled {
-                guard let api else { return }
-                do {
-                    try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { [weak self] event in
-                        backoff.reset()
-                        await self?.applyCatalogEvent(event)
-                    })
-                } catch {
-                    if Task.isCancelled { return }
-                    if case AgenthailAPIError.streamGap = error {
-                        catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-                        _ = await refresh(fresh: true)
-                    }
-                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
-                }
-            }
-        }
+    private func makeCatalogFeed() -> CatalogFeed {
+        CatalogFeed(CatalogFeed.Host(
+            api: { [weak self] in self?.api },
+            cursor: { [weak self] in self?.catalogPosition.cursor ?? 0 },
+            refresh: { [weak self] in await self?.refresh(fresh: true) ?? false },
+            resetCursor: { [weak self] in self?.catalogPosition = CatalogPosition(epoch: nil, cursor: 0) },
+            apply: { [weak self] in self?.applyCatalogEvents($0) },
+            stopped: { [weak self] in self == nil }
+        ))
     }
 
-    func applyCatalogEvent(_ event: CatalogStreamEvent) {
-        guard event.stream == "catalog", var current = snapshot, catalogPosition.accept(event.seq) else { return }
-        switch event.type {
-        case "session.upserted":
-            guard let changed = event.data.session else { return }
-            if let index = current.sessions.firstIndex(where: { $0.id == changed.id }) {
-                current.sessions[index] = changed
-            } else {
-                current.sessions.append(changed)
-            }
-        case "session.removed":
-            guard let id = event.data.sessionId else { return }
-            current.sessions.removeAll { $0.id == id }
-            fetchedSubagents.sessionRemoved(id, unlisted: event.data.reason == "unlisted")
-            if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
-        case "delivery.problem":
-            guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
-            var problems = current.deliveryProblems ?? []
-            problems.removeAll { $0.deliveryId == deliveryID }
-            problems.insert(problem, at: 0)
-            current.deliveryProblems = problems
-        case "delivery.dismissed":
-            guard let deliveryID = event.data.deliveryId else { return }
-            current.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
-        case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
-            let previous = current.surfaces[index]
-            // The daemon derives the repair from the runtime problem, and health events carry no repair.
-            let repairs = event.data.runtime?.problem == previous.runtime?.problem
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime, repairAction: repairs ? previous.repairAction : nil, repairLabel: repairs ? previous.repairLabel : nil)
-        default:
-            return
+    func applyCatalogEvents(_ events: [CatalogStreamEvent]) {
+        guard let current = snapshot else { return }
+        let batch = current.applyingCatalog(events, after: catalogPosition.cursor)
+        catalogPosition.cursor = batch.cursor
+        for removal in batch.removals {
+            fetchedSubagents.sessionRemoved(removal.id, unlisted: removal.unlisted)
+            if let next = removal.rekeyedTo { rekeys.record([removal.id: next]) }
         }
-        current.totalSessions = current.sessions.count
-        snapshot = current
-        reconcilePanes()
+        if batch.changed {
+            snapshot = batch.snapshot
+            reconcilePanes()
+        }
+        if batch.needsSnapshot { Task { await refresh(fresh: true) } }
     }
 
     private func startEvents() {

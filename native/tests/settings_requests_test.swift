@@ -100,9 +100,9 @@ struct SettingsRequestsTest {
             copy.surfaces = [repairable]
             return copy
         }
-        catalog.applyCatalogEvent(event(seq: 2, problem: "runtime-stopped"))
+        catalog.applyCatalogEvents([event(seq: 2, problem: "runtime-stopped")])
         check(catalog.snapshot?.surfaces.first?.repairAction == "runtime-ensure" && catalog.snapshot?.surfaces.first?.repairLabel == "Start managed runtime", "a health event with the same runtime problem keeps the repair")
-        catalog.applyCatalogEvent(event(seq: 3, problem: "bridge-unavailable"))
+        catalog.applyCatalogEvents([event(seq: 3, problem: "bridge-unavailable")])
         check(catalog.snapshot?.surfaces.first?.repairAction == nil && catalog.snapshot?.surfaces.first?.repairLabel == nil, "a different runtime problem drops the stale repair until the snapshot names the new one")
         print("settings requests tests passed")
     }

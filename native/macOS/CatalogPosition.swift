@@ -13,12 +13,6 @@ struct CatalogPosition: Equatable {
         cursor = max(cursor, snapshotSeq ?? 0)
         return false
     }
-
-    mutating func accept(_ seq: UInt64) -> Bool {
-        guard seq > cursor else { return false }
-        cursor = seq
-        return true
-    }
 }
 
 func reconciledSelection(selected: String?, sessions: [SessionState]) -> String? {
