@@ -7,10 +7,8 @@ struct CatalogPositionTest {
         var position = CatalogPosition(epoch: nil, cursor: 0)
         expect(position.adopt(snapshotEpoch: "A", snapshotSeq: 100), "first snapshot adopts its epoch")
         expect(position.cursor == 100, "cursor starts at the snapshot sequence")
-        expect(!position.accept(100) && position.accept(101), "events at or before the cursor are ignored")
-        expect(!position.adopt(snapshotEpoch: "A", snapshotSeq: 90) && position.cursor == 101, "same epoch never moves backwards")
+        expect(!position.adopt(snapshotEpoch: "A", snapshotSeq: 90) && position.cursor == 100, "same epoch never moves backwards")
         expect(position.adopt(snapshotEpoch: "B", snapshotSeq: 1) && position.cursor == 1, "a new epoch resets the cursor")
-        expect(position.accept(2), "the new epoch's next event applies")
 
         let caps = Capabilities()
         func session(_ id: String, current: Bool) -> SessionState {

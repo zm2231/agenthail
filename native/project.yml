@@ -44,6 +44,9 @@ targets:
       - path: ClaudeSubagentList.swift
       - path: SessionStore.swift
       - path: EventRetryBackoff.swift
+      - path: CatalogBatch.swift
+      - path: CatalogInbox.swift
+      - path: CatalogFeed.swift
       - path: ToolPresentation.swift
       - path: TextDiff.swift
       - path: DiffPresentation.swift

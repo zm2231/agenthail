@@ -34,7 +34,7 @@ final class HostConnection {
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
-    private var catalogStreamTask: Task<Void, Never>?
+    lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
 
     init(credential: PairedHostCredential, session: URLSession) {
@@ -57,7 +57,6 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
     }
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
@@ -115,7 +114,7 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        catalogStreamTask?.cancel()
+        catalogFeed.stop()
         reachable = false
         reconnecting = false
     }
@@ -147,6 +146,7 @@ final class HostConnection {
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
                 catalogStreamCursor = loaded.catalogSeq ?? 0
+                if catalogFeed.isRunning { catalogFeed.start() }
             } else {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
@@ -205,7 +205,7 @@ final class HostConnection {
         guard !stopped else { return }
         await delegate?.hostEventStreamConnected(self)
         guard !stopped else { return }
-        startCatalogStream()
+        catalogFeed.start()
     }
 
     func recordStreamInterruption(probeError: Error?) {
@@ -229,81 +229,37 @@ final class HostConnection {
         }
     }
 
-    private func startCatalogStream() {
-        catalogStreamTask?.cancel()
-        catalogStreamTask = Task {
-            let backoff = EventRetryBackoff()
-            while !Task.isCancelled, !stopped {
-                do {
-                    try await api.streamCatalog(after: catalogStreamCursor, onConnected: {}, onEvent: { [weak self] event in
-                        backoff.reset()
-                        await self?.receiveCatalog(event)
-                    })
-                } catch {
-                    if Task.isCancelled || stopped { return }
-                    if case AgenthailAPIError.streamGap = error {
-                        catalogStreamCursor = 0
-                        _ = await refresh(fresh: true)
-                    }
-                    let delay = backoff.nextDelay()
-                    try? await Task.sleep(for: .seconds(delay))
-                }
-            }
-        }
+    private func makeCatalogFeed() -> CatalogFeed {
+        CatalogFeed(CatalogFeed.Host(
+            api: { [weak self] in self?.api },
+            cursor: { [weak self] in self?.catalogStreamCursor ?? 0 },
+            refresh: { [weak self] in await self?.refresh(fresh: true) ?? false },
+            resetCursor: { [weak self] in self?.catalogStreamCursor = 0 },
+            apply: { [weak self] events in
+                guard let self, applyCatalog(events) else { return }
+                Task { await self.refresh(fresh: true) }
+            },
+            stopped: { [weak self] in self?.stopped ?? true }
+        ))
     }
 
-    func receiveCatalog(_ event: CatalogStreamEvent) async {
-        guard !stopped else { return }
-        guard event.stream == "catalog" else { return }
-        guard event.seq > catalogStreamCursor else { return }
-        catalogStreamCursor = max(catalogStreamCursor, event.seq)
-        guard var current = snapshot else { return }
-        switch event.type {
-        case "session.upserted":
-            guard let changed = event.data.session else { _ = await refresh(); return }
-            if let index = current.sessions.firstIndex(where: { $0.id == changed.id }) { current.sessions[index] = changed }
-            else { current.sessions.append(changed) }
-            current.totalSessions = current.sessions.count
-            snapshotSeq = delegate?.nextStateRequest() ?? snapshotSeq
-        case "session.queue":
-            guard let id = event.data.sessionId, let count = event.data.queueCount,
-                  let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
-            current.sessions[index].queueCount = count
-        case "session.removed":
-            guard let id = event.data.sessionId else { _ = await refresh(); return }
-            current.sessions.removeAll { $0.id == id }
-            current.totalSessions = current.sessions.count
-            snapshot = current
-            delegate?.host(self, removedSession: id, unlisted: event.data.reason == "unlisted")
-            if let next = event.data.rekeyedTo { delegate?.host(self, rekeyed: [id: next]) }
-            delegate?.hostDidChange(self)
-            return
-        case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health,
-                  let index = current.surfaces.firstIndex(where: { $0.name == name }) else {
-                _ = await refresh(fresh: true)
-                return
+    func receiveCatalog(_ events: [CatalogStreamEvent]) async {
+        if applyCatalog(events) { _ = await refresh(fresh: true) }
+    }
+
+    private func applyCatalog(_ events: [CatalogStreamEvent]) -> Bool {
+        guard !stopped, let current = snapshot else { return false }
+        let batch = current.applyingCatalog(events, after: catalogStreamCursor)
+        catalogStreamCursor = batch.cursor
+        if batch.changed {
+            if batch.sessionsChanged { snapshotSeq = delegate?.nextStateRequest() ?? snapshotSeq }
+            snapshot = batch.snapshot
+            for removal in batch.removals {
+                delegate?.host(self, removedSession: removal.id, unlisted: removal.unlisted)
+                if let next = removal.rekeyedTo { delegate?.host(self, rekeyed: [removal.id: next]) }
             }
-            let previous = current.surfaces[index]
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime)
-        case "delivery.problem":
-            guard let deliveryId = event.data.deliveryId,
-                  let sessionId = event.data.sessionId,
-                  let message = event.data.message,
-                  let reason = event.data.reason,
-                  let at = event.data.at else { return }
-            var problems = current.deliveryProblems ?? []
-            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, attentionSessionId: event.data.attentionSessionId, message: message, reason: reason, status: event.data.status, at: at)
-            problems.removeAll { $0.deliveryId == deliveryId }
-            problems.insert(problem, at: 0)
-            current.deliveryProblems = Array(problems.prefix(50))
-        case "delivery.dismissed":
-            guard let deliveryId = event.data.deliveryId else { return }
-            current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != deliveryId }
-        default:
-            return
+            delegate?.hostDidChange(self)
         }
-        snapshot = current
-        delegate?.hostDidChange(self)
+        return batch.needsSnapshot
     }
 }

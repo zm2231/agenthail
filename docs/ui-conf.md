@@ -61,12 +61,30 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `scrim.tint` | `auto` | Colour of the layer that keeps text readable: `auto` takes the background's own hue, darkened; or `black` or `#rrggbb`. |
 | `scrim.feather` | `240` | 40 to 320. Points over which that layer fades out around text on open areas. |
 | `contrast.target` | `4.5` | 4.5 to 7. Minimum contrast for every kind of text. With Increase Contrast on in Accessibility settings, the app uses 7. |
+| `color.body` | `default` | Body text: replies, messages and anything without a role of its own. See [Text colours](#text-colours). |
+| `color.muted` | `default` | Secondary text: tool rows, labels and summaries. |
+| `color.faint` | `default` | Quiet text: annotations, hints and tool objects. |
+| `color.meta` | `default` | Timestamps, ages and turn footers. |
+| `color.link` | `accent` | Links. `accent` follows `theme.accent`. |
+| `color.code` | `default` | Code text, inline and in blocks; syntax colours stay the highlighter's. |
+| `color.working` | `default` | Live work: working labels, rings and progress. |
+| `color.needs-you` | `default` | What needs you: questions, approvals and waiting sessions. |
+| `color.error` | `default` | Errors, failures and unavailable sessions. |
+| `color.done` | `default` | Finished work and added diff lines. |
+| `color.diff.removed` | `default` | Removed diff lines. |
+| `color.peer` | `default` | Messages from another agent. |
 | `titlebar.tabs` | `sessions` | `sessions` opens sessions as tabs in the title bar; `none` turns tabs off. |
 | `titlebar.tabs.label` | `alias-title` | What a tab shows: `alias-title`, `alias`, `title`. |
 | `titlebar.tabs.preview` | `on` | `on`: a sidebar click opens a preview tab that the next click replaces. |
 | `statusbar` | `usage, working, needs-you, hosts, terminal` | Items in the bottom strip, in order, or `none`. |
 
 Whatever the background, text keeps at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed, around the text only, so the background stays visible in margins, gaps and empty views. `glass.readability = off` turns this off.
+
+## Text colours
+
+Each `color.*` key sets the colour of one kind of text. A value is `default`, the built-in colour; `#rrggbb`, one colour for dark and light appearance; or `#rrggbb/#rrggbb`, the dark colour and then the light one. Like every key it can differ per device, for example `color.faint@phone = #9a9aa2/#5a5a62`.
+
+The colour you choose is a preference, and readability wins over it. If it doesn't reach `contrast.target` on every surface that device draws text on, it is mixed toward white in dark appearance, or toward black in light, by the smallest step that reaches the target. Every colour is also worked out at 7, which is what Increase Contrast and the browser's increased-contrast setting use. A colour already readable at the target is used exactly.
 
 ## Backgrounds
 
@@ -111,9 +129,10 @@ An edit made by hand in a text editor is committed as your change once you save 
 
 Apps read and change `ui.conf` through the daemon, with the same checks as `agenthail ui`:
 
-- `GET /api/v1/ui?class=<kind>&device=<name>` (`read` scope) returns `values`, every key resolved for that device with `background` and `background.light` ready to draw; `chosen`, each key as `ui.conf` writes it for that device; `overrides`, the device (`mac` or `device:<name>`) of each value that comes from a `key@<device>` line; and `problems`.
+- `GET /api/v1/ui?class=<kind>&device=<name>` (`read` scope) returns `values`, every key resolved for that device with `background` and `background.light` ready to draw; `colors`, each text role and `accent` as `{"dark", "light", "increased": {"dark", "light"}, "lifted"}`, already lifted to the target on that kind of device's surfaces, where `lifted` names the variants that were moved and `systemAccent` means the colour is the device's own system accent, for it to lift itself; `chosen`, each key as `ui.conf` writes it for that device; `overrides`, the device (`mac` or `device:<name>`) of each value that comes from a `key@<device>` line; and `problems`.
 - `POST /api/v1/ui` (`settings` scope) with `{"action": "set", "set": ["key = value", ...]}`, `{"action": "unset", "unset": ["key@device", ...]}`, `{"action": "write", "text": ...}` or `{"action": "undo", "rev": ...}`, each with an optional `message`.
 - `GET /api/v1/ui/log` (`read` scope) lists changes.
+- `GET /palette.css` returns the built-in text colours as CSS custom properties (`--color-body` and so on), dark first and `[data-theme="light"]` after, for a page to start from before `/api/v1/ui` answers.
 - `GET /api/v1/ui/presets` (`read` scope) lists the built-in pictures and gradient presets, each with the `value` to write and what it draws in dark and light.
 - `GET /api/v1/ui/background?path=<path>` (`read` scope) returns an image from `background`, including the built-in pictures under `art/`.
 - `POST /api/v1/ui/background?name=<file name>` (`settings` scope) stores the request body as a background image and returns `{"path"}` to use as `image: <path>`. A name that is not an image, or a `Content-Length` over 30 MB, is refused before the body is read.
