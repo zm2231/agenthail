@@ -531,163 +531,161 @@ struct SessionScreen: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    Group { transcriptRows }.transcriptScrimRow()
-                }
-                .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
-                .environment(\.revealRow) { position.scrollTo(y: $0) }
-                .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
-                .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
-                .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .coordinateSpace(.named(TranscriptRows.contentSpace))
-                .transcriptScrimContent()
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                Group { transcriptRows }.transcriptScrimRow()
             }
-            .scrollPosition($position)
-            .accessibilityIdentifier("session-timeline")
-            .phoneBackdrop(.transcript)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
-            .defaultScrollAnchor(.top, for: .alignment)
-            .scrollDismissesKeyboard(.interactively)
-            .onScrollPhaseChange { _, phase in
+            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
+            .environment(\.revealRow) { position.scrollTo(y: $0) }
+            .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
+            .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
+            .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .coordinateSpace(.named(TranscriptRows.contentSpace))
+            .transcriptScrimContent()
+        }
+        .scrollPosition($position)
+        .accessibilityIdentifier("session-timeline")
+        .phoneBackdrop(.transcript)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .scrollDismissesKeyboard(.interactively)
+        .onScrollPhaseChange { _, phase in
 #if DEBUG
-                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
 #endif
-                if phase == .interacting {
-                    userScrolling = true
-                    followingLatest = false
-                } else if phase == .idle && userScrolling {
-                    followingLatest = atLatest
-                    userScrolling = false
-                }
+            if phase == .interacting {
+                userScrolling = true
+                followingLatest = false
+            } else if phase == .idle && userScrolling {
+                followingLatest = atLatest
+                userScrolling = false
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentSize.height - geometry.visibleRect.maxY < 60
-            } action: { _, value in
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height - geometry.visibleRect.maxY < 60
+        } action: { _, value in
 #if DEBUG
-                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
 #endif
-                atLatest = value
-            }
-            .refreshable { await model.refreshSession(session.id) }
-            .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
-            .edgeBar(.top, spacing: 0) {
-                if let detail { SessionSummary(detail: detail) { showingInfo = true } }
-            }
-            .edgeBar(.bottom) {
-                VStack(spacing: 0) {
-                    if !atLatest && detail != nil {
-                        Button {
-                            followingLatest = true
-                            position.scrollTo(edge: .bottom)
-                        } label: {
-                            Image(systemName: "arrow.down")
-                                .font(.body.weight(.semibold))
-                                .frame(width: 44, height: 44)
-                                .floatingGlass(in: Circle(), interactive: true)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Jump to latest")
+            atLatest = value
+        }
+        .refreshable { await model.refreshSession(session.id) }
+        .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
+        .edgeBar(.top, spacing: 0) {
+            if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+        }
+        .edgeBar(.bottom) {
+            VStack(spacing: 0) {
+                if !atLatest && detail != nil {
+                    Button {
+                        followingLatest = true
+                        position.scrollTo(edge: .bottom)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .floatingGlass(in: Circle(), interactive: true)
                     }
-                    if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
-                        ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
-                                          surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(PhonePalette.accentText),
-                                          open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil,
-                                          restart: { model.stopAndResume(session.id) })
-                            .id(waiting.id)
-                            .padding(.horizontal)
-                            .padding(.top, 6)
-                    } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
-                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText)) { decision in
-                            Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
-                        }
-                        .id(request.id)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Jump to latest")
+                }
+                if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
+                    ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
+                                      surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(PhonePalette.accentText),
+                                      open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil,
+                                      restart: { model.stopAndResume(session.id) })
+                        .id(waiting.id)
                         .padding(.horizontal)
                         .padding(.top, 6)
+                } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
+                    RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText)) { decision in
+                        Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
                     }
-                    if let detail {
-                        if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
-                            Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
+                    .id(request.id)
+                    .padding(.horizontal)
+                    .padding(.top, 6)
+                }
+                if let detail {
+                    if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
+                        Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
+                            .font(.footnote).foregroundStyle(PhonePalette.muted)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .floatingGlass(in: Capsule())
+                            .padding()
+                    } else {
+                        if !liveSession.composerTurnNotice.isEmpty {
+                            Label(liveSession.composerTurnNotice, systemImage: "terminal")
                                 .font(.footnote).foregroundStyle(PhonePalette.muted)
-                                .padding(.horizontal, 14).padding(.vertical, 10)
-                                .floatingGlass(in: Capsule())
-                                .padding()
-                        } else {
-                            if !liveSession.composerTurnNotice.isEmpty {
-                                Label(liveSession.composerTurnNotice, systemImage: "terminal")
-                                    .font(.footnote).foregroundStyle(PhonePalette.muted)
-                                    .padding(.horizontal, 12).padding(.vertical, 7)
-                                    .floatingGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .padding(.horizontal).padding(.top, 6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .floatingGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .padding(.horizontal).padding(.top, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                     }
                 }
             }
-            .toolbar(.hidden, for: .tabBar)
-            .navigationTitle(displayTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
-                        if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
-                        }
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .navigationTitle(displayTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
+                    if let cwd = detail?.session.cwd, !cwd.isEmpty {
+                        Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Session details", systemImage: "info.circle") { showingInfo = true }
-                        Picker("Transcript view", selection: $activityOnly) {
-                            Text("Chat").tag(false)
-                            Text("All events").tag(true)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Session details", systemImage: "info.circle") { showingInfo = true }
+                    Picker("Transcript view", selection: $activityOnly) {
+                        Text("Chat").tag(false)
+                        Text("All events").tag(true)
+                    }
+                    if model.canCallByVoice(session) {
+                        Button("Call this session", systemImage: "phone.fill") {
+                            voiceCalls.open(targetID: model.voiceTargetID(for: session))
+                            showingVoice = true
                         }
-                        if model.canCallByVoice(session) {
-                            Button("Call this session", systemImage: "phone.fill") {
-                                voiceCalls.open(targetID: model.voiceTargetID(for: session))
-                                showingVoice = true
-                            }
-                        }
-                    } label: { Image(systemName: "ellipsis") }
-                    .accessibilityLabel("Session menu")
-                    .disabled(detail == nil)
-                }
+                    }
+                } label: { Image(systemName: "ellipsis") }
+                .accessibilityLabel("Session menu")
+                .disabled(detail == nil)
             }
-            .sheet(isPresented: $showingInfo) {
-                if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
-                    SessionInspector(model: model, session: session, initialDetail: liveDetail)
-                }
+        }
+        .sheet(isPresented: $showingInfo) {
+            if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
+                SessionInspector(model: model, session: session, initialDetail: liveDetail)
             }
-            .sheet(isPresented: $showingVoice) {
-                if let call = voiceCalls.model {
-                    AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { _ in }
-                }
+        }
+        .sheet(isPresented: $showingVoice) {
+            if let call = voiceCalls.model {
+                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { _ in }
             }
-            .task(id: session.id) {
-                let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
-                followingLatest = !startsAtOldest
-                atLatest = !startsAtOldest
-                await model.loadSession(session.id)
-                if startsAtOldest, let first = items.first {
-                    position.scrollTo(id: first.id, anchor: .top)
-                } else {
-                    position.scrollTo(edge: .bottom)
-                }
+        }
+        .task(id: session.id) {
+            let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
+            followingLatest = !startsAtOldest
+            atLatest = !startsAtOldest
+            await model.loadSession(session.id)
+            if startsAtOldest, let first = items.first {
+                position.scrollTo(id: first.id, anchor: .top)
+            } else {
+                position.scrollTo(edge: .bottom)
             }
-            .onChange(of: detail?.timeline?.items) { _, _ in
-                if followingLatest { position.scrollTo(edge: .bottom) }
-            }
-            .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
-                if followingLatest { position.scrollTo(edge: .bottom) }
-            }
+        }
+        .onChange(of: detail?.timeline?.items) { _, _ in
+            if followingLatest { position.scrollTo(edge: .bottom) }
+        }
+        .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
+            if followingLatest { position.scrollTo(edge: .bottom) }
         }
     }
 }
