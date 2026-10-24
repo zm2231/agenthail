@@ -35,6 +35,7 @@ targets:
       - path: RoleStyle.swift
       - path: Backdrop.swift
       - path: ScrimField.swift
+      - path: GlassSolve.swift
       - path: HolderPins.swift
       - path: ComposerAttachment.swift
       - path: ComposerTextSync.swift

@@ -39,6 +39,7 @@ final class PhoneAppearance: ObservableObject {
     @Published private(set) var config = UIConfig.defaults
     @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
     @Published private(set) var rendered: [Key: BackdropImage] = [:]
+    @Published private(set) var extremes: [Key: Float] = [:]
     @Published private(set) var problem: String?
     private var pending: Set<Key> = []
     private var recent: [Key] = []
@@ -105,9 +106,7 @@ final class PhoneAppearance: ObservableObject {
                 if loaded != config || wallpapers != self.wallpapers {
                     config = loaded
                     self.wallpapers = wallpapers
-                    rendered = [:]
-                    recent = []
-                    pending = []
+                    forgetRenders()
                     save(loaded, wallpapers: fetched)
                 }
                 problem = nil
@@ -121,7 +120,12 @@ final class PhoneAppearance: ObservableObject {
     func preview(_ config: UIConfig, wallpapers: [WallpaperImage] = []) {
         self.config = config
         self.wallpapers = Dictionary(wallpapers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        forgetRenders()
+    }
+
+    private func forgetRenders() {
         rendered = [:]
+        extremes = [:]
         recent = []
         pending = []
     }
@@ -187,7 +191,21 @@ final class PhoneAppearance: ObservableObject {
         rendered[key] = image
         recent.removeAll { $0 == key }
         recent.append(key)
-        while recent.count > Self.keptRenders { rendered.removeValue(forKey: recent.removeFirst()) }
+        while recent.count > Self.keptRenders {
+            let dropped = recent.removeFirst()
+            rendered.removeValue(forKey: dropped)
+            extremes.removeValue(forKey: dropped)
+        }
+        measure(image, for: key)
+    }
+
+    private func measure(_ image: BackdropImage, for key: Key) {
+        let polarity: ScrimField.Polarity = key.dark ? .dark : .light
+        Task {
+            let extreme = await Task.detached(priority: .utility) { GlassSolve.extreme(image, polarity: polarity) }.value
+            guard rendered[key]?.image === image.image else { return }
+            extremes[key] = extreme
+        }
     }
 
     nonisolated private static func write(_ rendered: BackdropImage, to url: URL) {
@@ -384,6 +402,7 @@ private struct PhoneBackdropBody<Content: View>: View {
         let cards = appearance.active && surface == .list ? CardBackdrop(image: appearance.rendered[key(.cards)], frame: frame) : nil
         content
             .environment(\.cardBackdrop, cards)
+            .environment(\.backdropKey, key(surface))
             .scrollContentBackground(appearance.active ? .hidden : .automatic)
             .background {
                 BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame)
@@ -419,23 +438,6 @@ private struct BackdropLayer: View {
     }
 }
 
-private struct FloatingGlass<S: Shape>: ViewModifier {
-    let shape: S
-    let interactive: Bool
-    @Environment(\.phoneAppearance) private var appearance
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    func body(content: Content) -> some View {
-        let tint = PhonePalette.ground.opacity(appearance?.config.composerOpacity ?? 0.5)
-        if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemBackground), in: shape)
-        } else if #available(iOS 26, *) {
-            content.glassEffect(interactive ? .regular.tint(tint).interactive() : .regular.tint(tint), in: shape)
-        } else {
-            content.background(tint, in: shape).background(.regularMaterial, in: shape)
-        }
-    }
-}
 
 struct AppearanceScope<Content: View>: View {
     @ObservedObject var appearance: PhoneAppearance

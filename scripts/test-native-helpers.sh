@@ -74,6 +74,8 @@ SOURCES=(
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
   ScrimField.swift
+  GlassSolve.swift
+  macOS/DesktopGlass.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift

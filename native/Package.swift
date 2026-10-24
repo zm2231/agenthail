@@ -34,6 +34,7 @@ let package = Package(
                 "RoleStyle.swift",
                 "Backdrop.swift",
                 "ScrimField.swift",
+                "GlassSolve.swift",
                 "HolderPins.swift",
                 "ComposerAttachment.swift",
                 "ComposerTextSync.swift",

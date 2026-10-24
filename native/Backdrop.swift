@@ -364,7 +364,7 @@ enum BackdropRenderer {
 
     /// Points as rasters, each taking the pixel inside it that is hardest
     /// to read on: the brightest for light text, the darkest for dark.
-    private static func pool(_ image: CGImage, to pw: Int, _ ph: Int, polarity: ScrimField.Polarity) -> ScrimField.Raster? {
+    static func pool(_ image: CGImage, to pw: Int, _ ph: Int, polarity: ScrimField.Polarity) -> ScrimField.Raster? {
         let w = image.width, h = image.height
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: srgb, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let data = ctx.data else { return nil }

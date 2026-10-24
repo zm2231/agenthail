@@ -76,7 +76,7 @@ var Keys = []Key{
 	number("glass.opacity", "0.18", "Tint opacity of the content pane. A minimum: raised where text needs it.", 0, 1),
 	number("glass.sidebar.opacity", "0.45", "Tint opacity of the sidebar.", 0, 1),
 	number("glass.chrome.opacity", "0", "Tint opacity of the title bar and status strip.", 0, 1),
-	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers. With glass.readability auto it is at least 0.2.", 0, 1),
+	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers. With glass.readability auto it rises as far as the text colours over it need.", 0, 1),
 	choice("glass.readability", "auto", "auto raises pane tint and adds a scrim where text needs it to reach contrast.target; off uses the glass opacities exactly, so text may be harder to read. Increase Contrast always uses auto.", "auto", "off"),
 	number("glass.border", "0.08", "Opacity of pane hairlines.", 0, 0.3),
 	number("glass.gutter", "8", "Points between floating panes; 0 joins them edge to edge.", 0, 16),

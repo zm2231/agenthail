@@ -267,6 +267,19 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertEqual(PhonePalette.accent.resolve(in: environment), Color(hex: 0x3366FF), "accent fills use the chosen accent")
     }
 
+    func testFloatingGlassRisesOverBrightArtOnItsSurface() async throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["background": "mesh: 2x2, #ffffff, #ffffff, #ffffff, #ffffff", "glass.composer.opacity": 0]))
+        let list = PhoneAppearance.Key(surface: .list, size: CGSize(width: 200, height: 400), scale: 1, dark: true, solid: false, target: 4.5)
+        let unseen = PhoneAppearance.Key(surface: .pane, size: CGSize(width: 1, height: 1), scale: 1, dark: true, solid: false, target: 4.5)
+        let quiet = appearance.floatingOpacity(unseen)
+        XCTAssertEqual(quiet, Double(GlassSolve.measuredFloor), accuracy: 0.0001, "before a render, floating glass uses the calibrated glass level")
+        appearance.request(list)
+        for _ in 0..<400 where appearance.extremes[list] == nil { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNotNil(appearance.extremes[list])
+        XCTAssertGreaterThan(appearance.floatingOpacity(list), 0.9, "white art under the list makes its floating glass nearly solid")
+    }
+
     func testTheDefaultAccentIsSolvedFor() throws {
         let appearance = PhoneAppearance(cache: nil)
         appearance.preview(try config([:]))

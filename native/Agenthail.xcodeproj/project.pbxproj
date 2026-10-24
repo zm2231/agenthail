@@ -46,6 +46,7 @@
 		562095F79BCFF043C869EF49 /* NativeVoiceAudioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D70AE21617F9F5BF4E19E2 /* NativeVoiceAudioTests.swift */; };
 		57604F04AAC9A479B06C5A83 /* ComposerAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD2FB96608E03FFA524E352 /* ComposerAttachmentViews.swift */; };
 		57CE8CC39DF827D1604F7159 /* CatalogBatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B8A40C6D1F7B04C813965F /* CatalogBatch.swift */; };
+		5C92A911BA72DC8C5CF3D761 /* PhoneFloatingGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D0FC9BB88A10007383F5DA /* PhoneFloatingGlass.swift */; };
 		5DBB37D77EEC5FECE0E88A79 /* PhoneAccentStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A525C1EFD654AE4C9F0FD65E /* PhoneAccentStyle.swift */; };
 		5EB88952A972A0EB7D212C3B /* ScrimField.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB597912B0447C43772021FB /* ScrimField.swift */; };
 		61F8CE6CA6745FE7C914B14A /* ModelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD3260E1D6A28A6205AF17F /* ModelPicker.swift */; };
@@ -91,6 +92,7 @@
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
 		B9CD23CD91B154E5235B3813 /* ComposerPasteUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */; };
 		BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */; };
+		C0D50EB864E2776D060E60CA /* GlassSolve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 290B1B61AD1E0FE02DBE0269 /* GlassSolve.swift */; };
 		C1E3D5AA0B49FC262BEBBC28 /* CompletionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ECB33D989B1CDCB7BE3673C /* CompletionRow.swift */; };
 		C5FE4F8892E9F4ACA5B44216 /* ComposerCompletionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E7F9955F530D265404381A /* ComposerCompletionUITests.swift */; };
 		C7550AF149A2A94BF1F25789 /* HostConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C98CCED8E9A6D4C20F491 /* HostConnection.swift */; };
@@ -178,6 +180,7 @@
 		1ECB33D989B1CDCB7BE3673C /* CompletionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRow.swift; sourceTree = "<group>"; };
 		2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNavigationTests.swift; sourceTree = "<group>"; };
 		2839D66EF1BD794309CB554D /* StaleConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleConnectionTests.swift; sourceTree = "<group>"; };
+		290B1B61AD1E0FE02DBE0269 /* GlassSolve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassSolve.swift; sourceTree = "<group>"; };
 		293FF08862DDD7F0F2CFE623 /* TextColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextColors.swift; sourceTree = "<group>"; };
 		2C112D446D507CCBB273959C /* TranscriptReadingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReadingTests.swift; sourceTree = "<group>"; };
 		3085052480F0B14328A21215 /* PairingLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingLink.swift; sourceTree = "<group>"; };
@@ -276,6 +279,7 @@
 		F24B656FE4EB45788315815D /* SessionStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStyle.swift; sourceTree = "<group>"; };
 		F61606F9A50CEDA19D8E2CEE /* HolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolderPicker.swift; sourceTree = "<group>"; };
 		F6B8A40C6D1F7B04C813965F /* CatalogBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogBatch.swift; sourceTree = "<group>"; };
+		F8D0FC9BB88A10007383F5DA /* PhoneFloatingGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneFloatingGlass.swift; sourceTree = "<group>"; };
 		FDA795678500D6988089B512 /* HostCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostCatalog.swift; sourceTree = "<group>"; };
 		FE02D88989FB5526F2B617EC /* Backdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backdrop.swift; sourceTree = "<group>"; };
 		FED7A9C53E44AA65CD46E0A6 /* DiffPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffPresentation.swift; sourceTree = "<group>"; };
@@ -320,6 +324,7 @@
 				A525C1EFD654AE4C9F0FD65E /* PhoneAccentStyle.swift */,
 				0EFF169FA6A42F40EBAD8549 /* PhoneAppearance.swift */,
 				155647F24D35A824AC154886 /* PhoneComponents.swift */,
+				F8D0FC9BB88A10007383F5DA /* PhoneFloatingGlass.swift */,
 				D903EB5898313E810DEC5A0A /* PhonePalette.swift */,
 				0F615A5BED830A2197727378 /* ProjectSheets.swift */,
 				E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */,
@@ -387,6 +392,7 @@
 				C40DC2DE9D610F9A650F9EA3 /* ComposerTextSync.swift */,
 				FED7A9C53E44AA65CD46E0A6 /* DiffPresentation.swift */,
 				1C5287EF2BD6F1B5CC9EE0E8 /* EventRetryBackoff.swift */,
+				290B1B61AD1E0FE02DBE0269 /* GlassSolve.swift */,
 				A09357D1028E7F360CE47824 /* HolderPins.swift */,
 				3F91185845FD3DB37E5314A7 /* MetadataOverlay.swift */,
 				8DFA7D196BFE26BFAA11299B /* PairedCredential.swift */,
@@ -614,6 +620,7 @@
 				A5F7F3B69879B82C1B8DBE7A /* DiffPresentation.swift in Sources */,
 				1848D31E51AC4C2EC9A08CE5 /* DiffView.swift in Sources */,
 				7EED627B413EDDEB73D5EC42 /* EventRetryBackoff.swift in Sources */,
+				C0D50EB864E2776D060E60CA /* GlassSolve.swift in Sources */,
 				DB2AF99C9FAF1C8B32093333 /* HolderPicker.swift in Sources */,
 				79D778B9895C8D365EA2666A /* HolderPins.swift in Sources */,
 				099165D1DD05E11819B5E106 /* HostCatalog.swift in Sources */,
@@ -629,6 +636,7 @@
 				5DBB37D77EEC5FECE0E88A79 /* PhoneAccentStyle.swift in Sources */,
 				94D239B112B1802114C99D13 /* PhoneAppearance.swift in Sources */,
 				55C8326EDD6A70F75A28FB88 /* PhoneComponents.swift in Sources */,
+				5C92A911BA72DC8C5CF3D761 /* PhoneFloatingGlass.swift in Sources */,
 				C852CBC62C6D22CD6A750E26 /* PhonePalette.swift in Sources */,
 				94E0A4BF19A8DC81A49BB0B5 /* ProjectActions.swift in Sources */,
 				74EE3850D1C6BD945E00BF40 /* ProjectSheets.swift in Sources */,
