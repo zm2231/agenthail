@@ -27,6 +27,12 @@ struct GlassSolveTest {
             }
             let bright = GlassSolve.opacity(under: dark ? 1 : 0, polarity: polarity, window: window, boundary: boundary)
             precondition(bright > floor, "art under floating glass raises it (dark \(dark))")
+
+            let strongest = ScrimField.boundary(roles: [dark ? 1 : 0], polarity: polarity, target: 4.5)
+            for shown: Float? in [nil, dark ? 0 : 1] {
+                let alpha = GlassSolve.opacity(under: shown, polarity: polarity, window: window, boundary: strongest)
+                precondition(alpha == GlassSolve.measuredFloor, "the strongest served text keeps the measured floor (dark \(dark), shown \(String(describing: shown))), got \(alpha)")
+            }
         }
         print("ok")
     }

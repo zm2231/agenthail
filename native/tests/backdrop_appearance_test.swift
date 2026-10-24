@@ -79,6 +79,9 @@ struct BackdropAppearanceTest {
             check(base >= Double(GlassSolve.measuredFloor) - 0.0001, "readable floating glass never drops below the measured floor (dark \(dark)), got \(base)")
             glass.colors = ["muted": ServedColor(dark: "#77777c", light: "#85858b")]
             check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) > base, "a fainter served role raises floating glass (dark \(dark))")
+            glass.colors = Dictionary(uniqueKeysWithValues: (TextRole.allCases.map(\.rawValue) + ["accent"]).map { ($0, ServedColor(dark: "#ffffff", light: "#000000")) })
+            let strongest = DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false)
+            check(abs(strongest - Double(GlassSolve.measuredFloor)) < 0.0001, "the strongest served roles keep exactly the measured floor (dark \(dark)), got \(strongest)")
             glass.colors = nil
             glass.values["glass.composer.opacity"] = .number(0.99)
             check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) == 0.99, "a stronger setting is kept (dark \(dark))")
