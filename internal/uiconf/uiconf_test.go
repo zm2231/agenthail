@@ -101,10 +101,16 @@ func TestResolveFillsDefaultsAndExpandsPresets(t *testing.T) {
 }
 
 func TestBackgroundValues(t *testing.T) {
+	if want := []string{"field", "tide", "aurora", "dawn", "ink-ridges", "coast", "fog-forest", "still-sea", "dunes", "concrete", "arches", "night-sky", "nebula", "wave", "caustics", "ink-water"}; !reflect.DeepEqual(ArtNames, want) {
+		t.Fatalf("art names = %v, want %v", ArtNames, want)
+	}
 	good := []string{
-		"none", "desktop", "image: backgrounds/a1.png", "gradient: dusk", "art: tide", "art: field",
+		"none", "desktop", "image: backgrounds/a1.png", "gradient: dusk",
 		"gradient: 160deg, #1b1035 0%, #e0763a 100%",
 		"mesh: 2x2, #000000, #111111, #222222, #333333",
+	}
+	for _, name := range ArtNames {
+		good = append(good, "art: "+name)
 	}
 	for _, value := range good {
 		if _, problem := checkBackground(value); problem != "" {
