@@ -31,7 +31,7 @@ private struct SolidTabBarBody<Content: View>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let solid = appearance.active && appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency)
+        let solid = appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency)
         content
             .toolbarBackground(PhonePalette.ground, for: .tabBar)
             .toolbarBackgroundVisibility(solid ? .visible : .automatic, for: .tabBar)
