@@ -37,6 +37,17 @@ final class UsageMetersLineTests: XCTestCase {
         XCTAssertGreaterThan(width(at: 2000), width(at: 320), "with room the line shows reset times and other accounts")
     }
 
+    func testTheRowGoesAwayWhenItsLastMeterExpires() {
+        var expiring = meter("Claude", 40, hours: 1)
+        expiring.until = ISO8601DateFormatter().string(from: now.addingTimeInterval(30))
+        let feed = UsageFeed()
+        feed.ingest([[UsageReport.Set(host: "computer", hostId: "h1", local: true, provider: "claude", primary: true, meters: [expiring])]], at: now)
+        XCTAssertEqual(feed.strip.meters.count, 1)
+        feed.show(at: now.addingTimeInterval(60))
+        XCTAssertEqual(feed.strip, UsageStrip(), "after the minute tick past expiry there is nothing to show, so the row is gone")
+        XCTAssertEqual(feed.now, now.addingTimeInterval(60), "the line's text is built for the same minute")
+    }
+
     func testEveryItemReadsOutItsFullText() {
         let other = strip.others[0]
         XCTAssertEqual(UsageStrip.make([], now: now), UsageStrip())

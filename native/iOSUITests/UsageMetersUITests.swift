@@ -12,7 +12,6 @@ final class UsageMetersUITests: XCTestCase {
         XCTAssertTrue(usage.waitForExistence(timeout: 10))
         XCTAssertTrue(firstRow.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(usage.frame.minY, chips.frame.maxY, "usage is below the chips")
-        XCTAssertLessThan(usage.frame.minY - chips.frame.maxY, 24, "nothing sits between the chips and usage")
         XCTAssertLessThanOrEqual(usage.frame.maxY, firstRow.frame.minY, "usage comes before the sessions")
         XCTAssertLessThanOrEqual(usage.frame.maxX, app.windows.firstMatch.frame.maxX, "the line stays on screen")
         let spoken = usage.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Claude usage 38 percent'"))

@@ -4,14 +4,11 @@ struct UsageMetersRow: View {
     @ObservedObject var feed: UsageFeed
 
     var body: some View {
-        let shown = UsageStrip.make(feed.sets, now: Date())
-        if !shown.meters.isEmpty || !shown.others.isEmpty {
-            TimelineView(.everyMinute) { context in
-                UsageMetersLine(strip: UsageStrip.make(feed.sets, now: context.date), now: context.date)
-            }
-            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
+        if !feed.strip.meters.isEmpty || !feed.strip.others.isEmpty {
+            UsageMetersLine(strip: feed.strip, now: feed.now)
+                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
     }
 }
