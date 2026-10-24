@@ -33,6 +33,13 @@ struct UsageStripTest {
         let quiet = UsageStrip.make([failing], now: now)
         check(quiet.meters.isEmpty && quiet.problem == "claude.ai could not be asked", "with no meters the strip says why")
         check(UsageStrip.make([], now: now) == UsageStrip(), "no sets, nothing to show")
+
+        let mine = report.sets ?? []
+        let laptop = UsageReport.Set(host: "laptop", hostId: "h9", local: true, provider: "claude", account: "me@example.com", primary: true, meters: report.sets?[0].meters)
+        let both = UsageStrip.merged([mine, [laptop, mine[3]]])
+        check(both.count == mine.count + 1, "a host two paired computers both report appears once: \(both.map(\.host))")
+        check(both.last?.host == "laptop" && both.last?.local == false, "only the first paired computer's own accounts count as this computer's")
+        check(UsageStrip.make(both, now: now).others.map(\.title) == ["team", "me · laptop"], "the second computer's account shows compact with its name")
         print("ok")
     }
 

@@ -1,0 +1,69 @@
+import SwiftUI
+
+struct UsageMetersRow: View {
+    @ObservedObject var feed: UsageFeed
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let strip = UsageStrip.make(feed.sets, now: context.date)
+            if !strip.meters.isEmpty || !strip.others.isEmpty {
+                UsageMetersLine(strip: strip, now: context.date)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+        }
+    }
+}
+
+struct UsageMetersLine: View {
+    let strip: UsageStrip
+    let now: Date
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(details: true, others: true)
+            row(details: false, others: true)
+            row(details: false, others: false)
+            row(details: false, others: false, first: true)
+        }
+        .font(.footnote)
+        .lineLimit(1)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Usage limits")
+    }
+
+    private func row(details: Bool, others: Bool, first: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            ForEach(first ? Array(strip.meters.prefix(1)) : strip.meters, id: \.self) { meter in
+                let spoken = UsageMeterText.spokenLabel(meter, now: now)
+                HStack(spacing: 4) {
+                    Text(meter.label).foregroundStyle(PhonePalette.muted)
+                    value(details ? UsageMeterText.text(meter, now: now) : UsageMeterText.percent(meter.percent), critical: meter.severity == "critical")
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spoken)
+            }
+            if others {
+                ForEach(strip.others) { other in
+                    HStack(spacing: 4) {
+                        Text(other.title).foregroundStyle(PhonePalette.muted)
+                        value(UsageMeterText.percent(other.percent), critical: other.critical)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(other.spoken)
+                }
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func value(_ text: String, critical: Bool) -> some View {
+        if critical {
+            Text(text).monospacedDigit().foregroundStyle(PhonePalette.failed)
+        } else {
+            Text(text).monospacedDigit()
+        }
+    }
+}

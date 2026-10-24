@@ -44,6 +44,8 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: SessionTree.swift
+      - path: UsageMeterText.swift
+      - path: UsageStrip.swift
       - path: MetadataOverlay.swift
       - path: ClaudeSubagentList.swift
       - path: SessionStore.swift

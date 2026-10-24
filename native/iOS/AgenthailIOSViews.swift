@@ -217,6 +217,7 @@ struct ConversationListView: View {
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
     @State private var newSessionPlace: NewSessionPlace?
+    @StateObject private var usage = UsageFeed()
     @ScaledMetric(relativeTo: .body) private var titleInset: CGFloat = 53
 
     private var tree: SessionTree { model.sessionTree(scope: scope, search: search) }
@@ -235,6 +236,7 @@ struct ConversationListView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            UsageMetersRow(feed: usage)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))
@@ -341,6 +343,7 @@ struct ConversationListView: View {
         .navigationTitle("Sessions")
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
+        .task(id: model.usageReaders.map(ObjectIdentifier.init)) { await usage.run(model.usageReaders) }
         .toolbar {
             if model.isPaired {
                 ToolbarItem(placement: .topBarLeading) { VoiceToolbarButton(model: model) }
