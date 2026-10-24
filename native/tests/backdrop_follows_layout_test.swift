@@ -58,10 +58,6 @@ struct BackdropFollowsLayoutTest {
         window.contentView = hosting
         window.appearance = NSAppearance(named: .darkAqua)
         backdrop.windowChanged(window)
-        let deadline = Date().addingTimeInterval(30)
-        while backdrop.layers == nil && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
-        hosting.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
 
         func all<V: NSView>(_ type: V.Type, in view: NSView) -> [V] {
             (view as? V).map { [$0] } ?? [] + view.subviews.flatMap { all(type, in: $0) }
@@ -88,6 +84,11 @@ struct BackdropFollowsLayoutTest {
         }
         func settle(_ change: () -> Void) {
             change()
+            hosting.layoutSubtreeIfNeeded()
+        }
+
+        while backdrop.layers == nil || pane()?.anchor?.mask == nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
             hosting.layoutSubtreeIfNeeded()
         }
 

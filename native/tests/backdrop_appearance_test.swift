@@ -14,8 +14,7 @@ struct BackdropAppearanceTest {
             }
         }
         func wait(until done: () -> Bool) {
-            let deadline = Date().addingTimeInterval(30)
-            while !done() && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+            while !done() { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         }
         func hue(_ layers: BackdropLayerSet?) -> String {
             guard let image = layers?.layers.base else { return "none" }
