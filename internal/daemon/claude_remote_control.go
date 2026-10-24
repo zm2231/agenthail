@@ -17,7 +17,7 @@ type remoteControlSource interface{ RemoteControlAvailable() bool }
 func (d *Daemon) claudeRemoteControlHandler(w http.ResponseWriter, r *http.Request) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	source, ok := d.adapters().ForSurface(surface.KindClaude).(remoteControlSource)
@@ -26,7 +26,7 @@ func (d *Daemon) claudeRemoteControlHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodGet:
 		roots, err := surface.ReadClaudeRemoteControl(home)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			writeAPIError(w, http.StatusUnprocessableEntity, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"available": available, "roots": roots})
@@ -38,30 +38,30 @@ func (d *Daemon) claudeRemoteControlHandler(w http.ResponseWriter, r *http.Reque
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF || request.AtStartup == nil {
-			http.Error(w, "invalid Remote Control request: send root and atStartup", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid Remote Control request: send root and atStartup")
 			return
 		}
 		if !available {
-			http.Error(w, "this install has no Claude Remote Control", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "this install has no Claude Remote Control")
 			return
 		}
 		root, err := surface.ResolveClaudeConfigRoot(home, request.Root)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		if _, err := surface.WriteClaudeRemoteControl(root, *request.AtStartup); err != nil {
-			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			writeAPIError(w, http.StatusUnprocessableEntity, "invalid_request", err.Error())
 			return
 		}
 		d.publishEvent("settings.updated", "", map[string]string{"source": "claude-remote-control"})
 		roots, err := surface.ReadClaudeRemoteControl(home)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			writeAPIError(w, http.StatusUnprocessableEntity, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"available": available, "roots": roots})
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
 }

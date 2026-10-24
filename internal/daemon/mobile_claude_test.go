@@ -170,14 +170,16 @@ func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
 			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "launcher": surface.LauncherClaudeBG, "message": "fixture instruction", "cwd": home})
 			response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", string(body))
 			var failure struct {
-				Status string `json:"status"`
-				Error  string `json:"error"`
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
 			}
-			if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &failure) != nil || failure.Status != "failed" || strings.Count(failure.Error, "delivery did not start") != 1 || !strings.Contains(failure.Error, test.want) {
+			if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &failure) != nil || failure.Error.Code != "create_failed" || strings.Count(failure.Error.Message, "delivery did not start") != 1 || !strings.Contains(failure.Error.Message, test.want) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 			history, err := registry.ListHistory(10, "")
-			if err != nil || len(history) != 1 || history[0].Kind != "failed" || history[0].Message != "fixture instruction" || history[0].Error != failure.Error {
+			if err != nil || len(history) != 1 || history[0].Kind != "failed" || history[0].Message != "fixture instruction" || history[0].Error != failure.Error.Message {
 				t.Fatalf("history=%+v err=%v", history, err)
 			}
 		})

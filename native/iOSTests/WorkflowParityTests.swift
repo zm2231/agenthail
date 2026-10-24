@@ -173,19 +173,18 @@ final class WorkflowParityTests: XCTestCase {
             XCTFail("a failure receipt is an error unless requested")
         } catch {}
         let receipt = try await api.createSession(surface: "codex", message: "Build", cwd: "/project", model: "", failureReceipts: true)
-        XCTAssertEqual(receipt.error, "launcher busy")
-        XCTAssertEqual(receipt.accepted, true)
+        XCTAssertEqual(receipt.error?.code, "create_failed")
+        XCTAssertEqual(receipt.error?.message, "launcher busy")
     }
 
     @MainActor
     func testAnUnknownCreateKeepsItsKeyAndADefiniteFailureReleasesIt() async throws {
         let unknown = SessionCreationReceipt.unknownOutcomeMessage
         let cases: [(reply: (Int, String), error: String, sameKey: Bool)] = [
-            ((502, #"{"ok":false,"status":"unknown","code":"create_unknown","unknown":true,"retryable":false,"error":"no answer"}"#), unknown, true),
-            ((502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"ambiguous"}"#), unknown, true),
+            ((502, #"{"error":{"code":"create_unknown","message":"no answer"}}"#), unknown, true),
             ((504, #"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#), unknown, true),
-            ((502, #"{"ok":false,"status":"failed","code":"create_failed","unknown":false,"retryable":false,"error":"launcher refused"}"#), "launcher refused", false),
-            ((502, #"{"ok":false,"status":"failed","code":"initial_turn_failed","retryable":false,"session":{"id":"s1","surface":"codex","name":"","status":"idle","lastActive":"2026-10-23T00:00:00Z"},"error":"first turn rejected"}"#), "first turn rejected", true),
+            ((502, #"{"error":{"code":"create_failed","message":"launcher refused"}}"#), "launcher refused", false),
+            ((502, #"{"error":{"code":"initial_turn_failed","message":"first turn rejected"},"session":{"id":"s1","surface":"codex","name":"","status":"idle","lastActive":"2026-10-23T00:00:00Z"}}"#), "first turn rejected", true),
         ]
         for entry in cases {
             ParityProtocol.state.reset(create: entry.reply)
@@ -436,7 +435,7 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             records.append(body)
             actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
-            if failReceipt { return (409,#"{"ok":false,"accepted":true,"retryable":false,"launcher":"tmux","error":"launcher busy"}"#) }
+            if failReceipt { return (409,#"{"error":{"code":"create_failed","message":"launcher busy"}}"#) }
             if body["action"] as? String == "coordinator-set" {
                 if body["replace"] as? Bool != true { return (409, #"{"error":{"code":"coordinator_exists","message":"/p1 already has coordinator @lead; replace it to take over"}}"#) }
                 return (200, #"{"ok":true,"coordinator":{"name":"helper","projectRoot":"/p1"}}"#)
@@ -448,9 +447,9 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
                 if let create { return create }
                 if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"Submitted to tmux."}"#) }
                 if body["surface"] as? String == "claude" {
-                    return unknown ? (202, #"{"ok":false,"unknown":true,"session":null,"error":"registration delayed"}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
+                    return unknown ? (502, #"{"error":{"code":"create_unknown","message":"registration delayed"}}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
                 }
-                return (unknown ? 202 : 201, unknown ? #"{"ok":false,"unknown":true,"sessionId":"created"}"# : #"{"ok":true,"sessionId":"created"}"#)
+                return (unknown ? 202 : 201, unknown ? #"{"ok":true,"status":"submitted","accepted":true,"sessionId":"created"}"# : #"{"ok":true,"sessionId":"created"}"#)
             }
             return (200,#"{"ok":true}"#)
         } }

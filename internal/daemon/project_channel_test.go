@@ -123,7 +123,12 @@ func TestAChannelNameAProjectAnswersToIsRefused(t *testing.T) {
 	d.discoverCatalog(context.Background())
 
 	collided := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"standup","sourceSessionId":"from"}`)
-	if collided.Code != http.StatusBadRequest || !strings.Contains(collided.Body.String(), "#widget is both a channel and project widget (#repo:github.com/example/widget); rename the channel with 'agenthail channel rename widget <new-name>'") {
+	var collision struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(collided.Body.Bytes(), &collision) != nil || collided.Code != http.StatusBadRequest || collision.Error.Message != "#widget is both a channel and project widget (#repo:github.com/example/widget); rename the channel with 'agenthail channel rename widget <new-name>', or address the project by its id #repo:github.com/example/widget" {
 		t.Fatalf("send to a name a channel and a project share: %d %s", collided.Code, collided.Body)
 	}
 	if created := runDashboardAction(t, d, `{"action":"channel-create","channel":"widget"}`); created.Code != http.StatusBadRequest || !strings.Contains(created.Body.String(), "#widget already names project widget") {

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -604,21 +603,24 @@ func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *p
 	defer response.Body.Close()
 	sse.SetHeaders(w.Header())
 	w.WriteHeader(http.StatusOK)
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if data, found := strings.CutPrefix(line, "data: "); found {
-			if qualified, err := hosts.QualifyJSON(host.record.ID, []byte(data)); err == nil {
-				line = "data: " + string(qualified)
-			}
-		}
-		if _, err := fmt.Fprintln(w, line); err != nil {
+	reader := sse.NewReader(response.Body)
+	for {
+		event, err := reader.Next()
+		if errors.Is(err, io.EOF) {
 			return
 		}
-		if line == "" {
-			flusher.Flush()
+		if err != nil {
+			return
 		}
+		if event.HasData {
+			if qualified, err := hosts.QualifyJSON(host.record.ID, []byte(event.Data)); err == nil {
+				event.Data = string(qualified)
+			}
+		}
+		if err := sse.WriteEvent(w, event); err != nil {
+			return
+		}
+		flusher.Flush()
 	}
 }
 
@@ -634,7 +636,7 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 		raw, err := io.ReadAll(io.LimitReader(r.Body, actionRequestBodyLimit+1))
 		r.Body.Close()
 		if err != nil || len(raw) > actionRequestBodyLimit {
-			http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
@@ -993,21 +995,21 @@ func (d *Daemon) hostOwned(sessionID string) bool {
 // at the same limit as relays here.
 func (d *Daemon) queueHostRelay(w http.ResponseWriter, r *http.Request, session *surface.Session, message, sourceID, busyDelivery string, hops int) {
 	if _, fromHost := requestingHost(r.Context()); !fromHost {
-		http.Error(w, "relayHops is set only by a paired host forwarding a relay", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "relayHops is set only by a paired host forwarding a relay")
 		return
 	}
 	if hops < 1 || hops > maxRelayHops {
-		http.Error(w, fmt.Sprintf("a relay may take at most %d hops", maxRelayHops), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("a relay may take at most %d hops", maxRelayHops))
 		return
 	}
 	key := r.Header.Get(actionIdempotencyHeader)
 	if key == "" {
-		http.Error(w, "a forwarded relay needs its idempotency key", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "a forwarded relay needs its idempotency key")
 		return
 	}
 	queueID, err := d.Registry.QueueRelayMessageWithOptions(session.ID, message, "host-relay:"+key, hops, surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: busyDelivery})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: session.ID, QueueID: queueID, Detail: "relay queued"}})

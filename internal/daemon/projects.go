@@ -649,11 +649,11 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 		err = d.Registry.UnarchiveSession(sessionID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		http.Error(w, "session not found", http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	d.publishCatalogPresence()

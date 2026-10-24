@@ -17,7 +17,7 @@ import (
 // request naming a paired host is answered by that host.
 func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Use GET for session options.", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for session options.")
 		return
 	}
 	type option struct {
@@ -42,12 +42,12 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	projects, err := d.launchProjects()
 	if err != nil {
-		http.Error(w, "Projects are unavailable.", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "Projects are unavailable.")
 		return
 	}
 	folders, err := d.launchFolders()
 	if err != nil {
-		http.Error(w, "Folders are unavailable.", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "Folders are unavailable.")
 		return
 	}
 	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
@@ -207,12 +207,12 @@ func (d *Daemon) launchFolders() ([]string, error) {
 
 func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Use GET for queued instructions.", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for queued instructions.")
 		return
 	}
 	rows, err := d.Registry.ListQueue(true, d.adapters())
 	if err != nil {
-		http.Error(w, "Queued instructions are unavailable.", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "Queued instructions are unavailable.")
 		return
 	}
 	items := []dashboardQueue{}

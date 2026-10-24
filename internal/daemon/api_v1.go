@@ -399,7 +399,15 @@ func writeSSEEvent(w io.Writer, event apiEvent) {
 }
 
 func writeAPIError(w http.ResponseWriter, status int, code, message string) {
-	writeDashboardJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	writeAPIErrorWith(w, status, code, message, nil)
+}
+
+func writeAPIErrorWith(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	body := map[string]any{"error": map[string]string{"code": code, "message": message}}
+	for key, value := range extra {
+		body[key] = value
+	}
+	writeDashboardJSON(w, status, body)
 }
 
 func decodeAPIV1JSON(w http.ResponseWriter, r *http.Request, value any, allowEmpty bool) error {

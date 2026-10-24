@@ -487,15 +487,15 @@ func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) 
 		case err == nil:
 			writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 		case errors.As(err, &unknown):
-			writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "unknown": true, "error": err.Error(), "result": result})
+			writeAPIErrorWith(w, http.StatusAccepted, "move_outcome_unknown", err.Error(), map[string]any{"result": result})
 		case errors.As(err, &busy):
-			writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "busy": busy.Reason, "error": err.Error()})
+			writeAPIErrorWith(w, http.StatusConflict, "move_busy", err.Error(), map[string]any{"busy": busy.Reason})
 		case errors.As(err, &consent):
-			writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "needsConsent": true, "error": err.Error()})
+			writeAPIError(w, http.StatusConflict, "move_needs_consent", err.Error())
 		case errors.As(err, &refused):
-			writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": err.Error(), "result": result})
+			writeAPIErrorWith(w, http.StatusConflict, "move_refused", err.Error(), map[string]any{"result": result})
 		default:
-			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error(), "result": result})
+			writeAPIErrorWith(w, http.StatusBadGateway, "move_failed", err.Error(), map[string]any{"result": result})
 		}
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET or POST for this endpoint.")

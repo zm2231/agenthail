@@ -341,10 +341,14 @@ final class AgenthailAPI: @unchecked Sendable {
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if let reply = try? JSONDecoder().decode(SessionAdoptReply.self, from: data) {
-            if reply.ok, let result = reply.result { return .adopted(result) }
-            if reply.needsConsent == true { return .needsConsent(reply.error ?? "This session is open in a terminal.") }
-            if let busy = reply.busy { return .busy(busy) }
-            if let error = reply.error { throw reply.unknown == true ? AgenthailAPIError.outcomeUnknown(error) : AgenthailAPIError.request(status, error) }
+            if reply.ok == true, let result = reply.result { return .adopted(result) }
+            switch reply.error?.code {
+            case "session_adopt_needs_consent": return .needsConsent(reply.error?.message ?? "This session is open in a terminal.")
+            case "session_adopt_busy": return .busy(reply.busy ?? reply.error?.message ?? "This session is busy.")
+            case "session_adopt_unknown": throw AgenthailAPIError.outcomeUnknown(reply.error?.message ?? "The outcome is unknown.")
+            default: break
+            }
+            if let error = reply.error { throw AgenthailAPIError.request(status, error.message) }
         }
         try validate(response: response, data: data)
         throw AgenthailAPIError.invalidResponse
@@ -807,9 +811,8 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
-                if let detail = object["error"] as? String, !detail.isEmpty {
-                    if object["unknown"] as? Bool == true || object["code"] as? String == "create_unknown" { throw AgenthailAPIError.outcomeUnknown(detail) }
-                    message = detail
+                if let error = object["error"] as? [String: Any], ["create_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown"].contains(error["code"] as? String ?? "") {
+                    throw AgenthailAPIError.outcomeUnknown(message)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "control_failed",
                    (object["result"] as? [String: Any])?["evidence"] as? String == "unknown" {

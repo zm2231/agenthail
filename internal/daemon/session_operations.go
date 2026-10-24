@@ -27,7 +27,7 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		}
 		if creator != "" {
 			if _, lookupErr := d.Registry.Session(creator); lookupErr != nil {
-				http.Error(w, fmt.Sprintf("sourceSessionId %s is not a session here", creator), http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("sourceSessionId %s is not a session here", creator))
 				return
 			}
 		}
@@ -39,7 +39,7 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 			previous, found, lookupErr := d.Registry.JournalTurnBefore(session.ID, forkOptions.BeforeTurnID)
 			switch {
 			case lookupErr != nil:
-				http.Error(w, fmt.Sprintf("read the session's turns: %s", lookupErr), http.StatusInternalServerError)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("read the session's turns: %s", lookupErr))
 				return
 			case !found:
 				writeAPIError(w, http.StatusConflict, "fork_turn_unknown", "Agenthail no longer holds that part of this conversation, so it can't fork from there.")
@@ -94,7 +94,11 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if err != nil {
-		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(err), "error": err.Error()})
+		code := "session_operation_failed"
+		if surface.IsDeliveryOutcomeUnknown(err) {
+			code = "session_operation_unknown"
+		}
+		writeAPIError(w, http.StatusBadGateway, code, err.Error())
 		return
 	}
 	data, _ := json.Marshal(result)
@@ -112,7 +116,7 @@ const sessionAdoptTimeout = 2 * time.Minute
 func (d *Daemon) dashboardSessionAdopt(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, request surface.AdoptRequest) {
 	adopter, ok := adapter.(surface.SessionAdopter)
 	if !ok {
-		writeDashboardJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("%s sessions cannot be opened in Agenthail", session.Surface)})
+		writeAPIError(w, http.StatusBadRequest, "session_adopt_unsupported", fmt.Sprintf("%s sessions cannot be opened in Agenthail", session.Surface))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), sessionAdoptTimeout)
@@ -122,22 +126,29 @@ func (d *Daemon) dashboardSessionAdopt(w http.ResponseWriter, r *http.Request, a
 		var busy *surface.AdoptBusyError
 		var consent *surface.AdoptConsentError
 		status := http.StatusBadGateway
-		body := map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(err), "error": err.Error()}
+		code := "session_adopt_failed"
 		if errors.As(err, &busy) {
 			status = http.StatusConflict
-			body["busy"] = busy.Reason
+			code = "session_adopt_busy"
 		} else if errors.As(err, &consent) {
 			status = http.StatusConflict
-			body["needsConsent"] = true
+			code = "session_adopt_needs_consent"
 		} else if surface.IsDeliveryTerminal(err) {
 			status = http.StatusConflict
+			code = "session_adopt_refused"
+		} else if surface.IsDeliveryOutcomeUnknown(err) {
+			code = "session_adopt_unknown"
 		}
-		writeDashboardJSON(w, status, body)
+		extra := map[string]any{"session": session}
+		if busy != nil {
+			extra["busy"] = busy.Reason
+		}
+		writeAPIErrorWith(w, status, code, err.Error(), extra)
 		return
 	}
 	if result.Session != nil {
 		if err := d.Registry.RegisterSession(*result.Session); err != nil {
-			writeDashboardJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": fmt.Sprintf("session %s opened in Agenthail, but its registration failed: %s", session.ID, err)})
+			writeAPIError(w, http.StatusInternalServerError, "session_adopt_unrecorded", fmt.Sprintf("session %s opened in Agenthail, but its registration failed: %s", session.ID, err))
 			return
 		}
 	}

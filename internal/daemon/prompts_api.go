@@ -33,7 +33,7 @@ type promptItem struct {
 // Sessions the journal has not recorded contribute nothing.
 func (d *Daemon) promptsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	query := r.URL.Query()
@@ -58,7 +58,7 @@ func (d *Daemon) promptsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	prompts, next, err := d.typedPrompts(strings.TrimSpace(query.Get("sessionId")), text, before, limit)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("read prompts: %s", err), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("read prompts: %s", err))
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"prompts": prompts, "nextBefore": next.String()})

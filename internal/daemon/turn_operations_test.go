@@ -110,12 +110,8 @@ func TestACreationWithoutIdentityReportsItsOutcomeAsUnknownOrFailed(t *testing.T
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 				t.Fatal(err, w.Body.String())
 			}
-			unknown := tc.status == "unknown"
-			if w.Code != http.StatusBadGateway || body["ok"] != false || body["status"] != tc.status || body["code"] != tc.code || body["retryable"] != false || body["unknown"] != unknown || body["session"] != nil {
+			if w.Code != http.StatusBadGateway || body["error"].(map[string]any)["code"] != tc.code || body["session"] != nil {
 				t.Fatal(w.Code, w.Body.String())
-			}
-			if _, ok := body["error"].(string); !ok {
-				t.Fatalf("error is not a string: %s", w.Body.String())
 			}
 		})
 	}
@@ -152,7 +148,7 @@ func TestRetriedNativeQueueStartWithSameKeyStartsOnce(t *testing.T) {
 		t.Fatalf("starts=%d", adapter.starts)
 	}
 	for _, response := range []*httptest.ResponseRecorder{first, retry} {
-		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"unknown":true`) {
+		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"code":"session_operation_unknown"`) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
