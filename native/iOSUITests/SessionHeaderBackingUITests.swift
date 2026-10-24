@@ -10,8 +10,15 @@ final class SessionHeaderBackingUITests: XCTestCase {
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
         let working = app.staticTexts["Working"]
         XCTAssertTrue(working.waitForExistence(timeout: 10))
-        let bar = app.navigationBars.firstMatch
-        let band = CGRect(x: 48, y: bar.frame.minY, width: bar.frame.width - 140, height: working.frame.maxY + 8 - bar.frame.minY)
+        let bar = app.navigationBars.firstMatch.frame
+        let menu = app.buttons["Session menu"].frame.insetBy(dx: -4, dy: -4)
+        let bottom = working.frame.maxY + 8
+        // The menu is glass, which refracts whatever passes under it.
+        let band = [
+            CGRect(x: 0, y: bar.minY, width: menu.minX, height: bottom - bar.minY),
+            CGRect(x: menu.minX, y: menu.maxY, width: bar.width - menu.minX, height: bottom - menu.maxY),
+        ]
+        XCTAssertLessThan(menu.maxY, working.frame.minY)
 
         sleep(2)
         let before = try pixels(XCUIScreen.main.screenshot().image, in: band)
@@ -26,6 +33,10 @@ final class SessionHeaderBackingUITests: XCTestCase {
         // The backing's material may retint as content passes; glyph edges change far more.
         let worst = zip(before, after).map { abs($0 - $1) }.max() ?? 0
         XCTAssertLessThan(worst, 0.15, "transcript text shows through the header: a pixel changed by \(worst)")
+    }
+
+    private func pixels(_ image: UIImage, in rects: [CGRect]) throws -> [Float] {
+        try rects.flatMap { try pixels(image, in: $0) }
     }
 
     private func pixels(_ image: UIImage, in rect: CGRect) throws -> [Float] {
