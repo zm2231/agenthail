@@ -45,6 +45,7 @@ var (
 // included, well inside the hook's timeout: a prompt never waits on it.
 const claudeSessionContextLimit = 5 * time.Second
 
+// claudeSessionContextExpired starts the limit; tests run the hook without one.
 var claudeSessionContextExpired = func() <-chan time.Time { return time.After(claudeSessionContextLimit) }
 
 // claudePromptHookRetry is how often the hook posts its prompt again while
