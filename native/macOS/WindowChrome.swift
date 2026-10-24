@@ -302,39 +302,11 @@ struct StatusStrip: View {
 
     var body: some View {
         let items = interface.config.statusItems
-        let sessions = model.knownSessions.filter { $0.archived != true }
-        let working = sessions.filter(\.isWorking).count
-        let needsYou = model.sessionTree.needsYou
-        HStack(spacing: DesktopSpace.l) {
+        StatusStripFit {
             ConnectionControls(model: model)
-            if items.contains("usage") { UsageLimits(usage: usage) }
-            Spacer(minLength: DesktopSpace.l)
-            ForEach(items.filter { $0 != "usage" }, id: \.self) { item in
-                switch item {
-                case "working":
-                    Label { Text("\(working) working") } icon: { Circle().fill(DesktopPalette.working).frame(width: 7, height: 7) }
-                case "needs-you":
-                    Button { if let first = needsYou.first { pane.select(first.id) } } label: {
-                        Label { Text("\(needsYou.count) need\(needsYou.count == 1 ? "s" : "") you") } icon: { Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7) }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(needsYou.isEmpty)
-                case "hosts":
-                    Label(hosts, systemImage: "desktopcomputer")
-                case "terminal":
-                    let session = pane.displayedSession
-                    Button { if let session { model.focusInTerminal(session) } } label: {
-                        Label("Terminal", systemImage: "terminal")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(session?.runtime?.focusable != true)
-                    .help("Show this session's terminal")
-                default:
-                    EmptyView()
-                }
-            }
+        } tail: { density in
+            StatusTail(model: model, pane: pane, usage: usage, items: items, density: density)
         }
-        .labelStyle(StatusLabelStyle())
         .font(.system(size: DesktopType.meta))
         .foregroundStyle(DesktopPalette.text2)
         .padding(.horizontal, DesktopSpace.l)
@@ -343,48 +315,6 @@ struct StatusStrip: View {
         .task(id: model.isConnected) {
             guard items.contains("usage"), model.isConnected else { return }
             await usage.run(model)
-        }
-    }
-
-    private var hosts: String {
-        let remote = (model.snapshot?.daemon.hosts ?? []).filter { $0.state == "connected" }.map(\.name)
-        return (["this Mac"] + remote).joined(separator: " · ")
-    }
-}
-
-private struct StatusLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon
-            configuration.title
-        }
-    }
-}
-
-private struct UsageLimits: View {
-    @ObservedObject var usage: UsageMonitor
-
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            let meters = UsageMeters.meters(provider: "Claude", usage: usage.claude, now: context.date) + UsageMeters.meters(provider: "Codex", usage: usage.codex, now: context.date)
-            HStack(spacing: DesktopSpace.l) {
-                if meters.isEmpty {
-                    Text(usage.problem ?? "Claude")
-                }
-                ForEach(meters, id: \.label) { meter in
-                    HStack(spacing: 6) {
-                        Text(meter.label)
-                        ProgressView(value: min(max(meter.percent / 100, 0), 1))
-                            .progressViewStyle(.linear)
-                            .frame(width: 44)
-                            .tint(meter.percent >= 90 ? DesktopPalette.failed : DesktopPalette.text2)
-                        Text(meter.text)
-                            .monospacedDigit()
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(meter.spokenLabel)
-                }
-            }
         }
     }
 }

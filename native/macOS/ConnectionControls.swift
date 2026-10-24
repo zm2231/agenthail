@@ -29,6 +29,8 @@ struct ConnectionControls: View {
                 .accessibilityLabel(model.isConnected ? "Connected" : offlineLabel)
             if !model.isConnected {
                 Text(offlineLabel)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
             }
             if model.isConnected, let notice = model.daemonBuildNotice {
                 Button("Restart for this version") { model.restartDaemon() }
