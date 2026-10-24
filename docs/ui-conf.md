@@ -90,7 +90,7 @@ The colour you choose is a preference, and readability wins over it. If it doesn
 
 - `none`: the plain window colour.
 - `desktop`: the desktop picture shows through.
-- `art: <name>`: a built-in picture: `field`, `tide`, `aurora` or `dawn`. Each has a dark and a light version, and the app shows the one that matches its appearance.
+- `art: <name>`: a built-in picture: `field`, `tide`, `aurora`, `dawn`, `ink-ridges`, `coast`, `fog-forest`, `still-sea`, `dunes`, `concrete`, `arches`, `night-sky`, `nebula`, `wave`, `caustics` or `ink-water`. Each has a dark and a light version, and the app shows the one that matches its appearance.
 - `image: <path>`: a PNG, JPEG, HEIC or WebP image under 30 MB. `agenthail ui set` copies an image from anywhere into `~/.agenthail/ui/backgrounds/` and writes that path, so the image is versioned with the file. The Mac app's Appearance settings upload a chosen or dropped image the same way, also to a remote computer.
 - `gradient: <preset>`: one of `dusk`, `slate`, `forest`, `ember`, `violet`, `mono`. Each has a dark and a light version, like the built-in pictures.
 - `gradient: <angle>deg, <colour> <pos>%, <colour> <pos>%, ...`: a linear gradient with at least two stops, for example `gradient: 135deg, #1b2230 0%, #4a2c8a 100%`.

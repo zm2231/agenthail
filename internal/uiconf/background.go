@@ -47,7 +47,7 @@ var Presets = map[string]Variants{
 var PresetNames = []string{"dusk", "slate", "forest", "ember", "violet", "mono"}
 
 // ArtNames lists the built-in pictures, each drawn for dark and for light.
-var ArtNames = []string{"field", "tide", "aurora", "dawn"}
+var ArtNames = []string{"field", "tide", "aurora", "dawn", "ink-ridges", "coast", "fog-forest", "still-sea", "dunes", "concrete", "arches", "night-sky", "nebula", "wave", "caustics", "ink-water"}
 
 // ArtVariants is the picture pair for a built-in name, as background values.
 func ArtVariants(name string) (Variants, bool) {

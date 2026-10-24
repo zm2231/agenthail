@@ -140,10 +140,29 @@ func TestUIShowDefaultsNeedsNoRepository(t *testing.T) {
 	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	app.UIDir = filepath.Join(t.TempDir(), "never-created")
 	out, err := runUI(t, app, "show-defaults", "--docs")
-	if err != nil || !strings.Contains(out, "scrim.feather") || !strings.Contains(out, "aurora") {
+	if err != nil || !strings.Contains(out, "scrim.feather") {
 		t.Fatalf("show-defaults: %v\n%s", err, out)
+	}
+	for _, name := range uiconf.ArtNames {
+		if !strings.Contains(out, name) {
+			t.Errorf("show-defaults missing built-in art %q:\n%s", name, out)
+		}
 	}
 	if _, err := os.Stat(app.UIDir); !os.IsNotExist(err) {
 		t.Fatal("show-defaults created the ui repository")
+	}
+}
+
+func TestUISetAcceptsBuiltInArtAndRefusesUnknownArt(t *testing.T) {
+	app, store := uiFixture(t)
+	if _, err := runUI(t, app, "set", "background = art: ink-water"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Current()
+	if err != nil || !strings.Contains(state.Text, "background = art: ink-water") {
+		t.Fatalf("background = %q, %v", state.Text, err)
+	}
+	if _, err := runUI(t, app, "set", "background = art: unknown"); err == nil || !strings.Contains(err.Error(), "art must be one of") {
+		t.Fatalf("unknown art error = %v", err)
 	}
 }
