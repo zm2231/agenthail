@@ -23,4 +23,18 @@ enum PaletteTokens {
         .diffRemoved: (0xC4271B, 0xFF6B61),
         .peer: (0x2A64CC, 0x7AA7FF),
     ]
+
+    static let increasedRoles: [TextRole: Pair] = [
+        .body: (0x1D1D1F, 0xECECEE),
+        .muted: (0x4B4C51, 0xB7B7BB),
+        .faint: (0x4C4C51, 0xB7B7BA),
+        .meta: (0x4C4C51, 0xB7B7BA),
+        .code: (0x1D1D1F, 0xECECEE),
+        .working: (0x1F4995, 0x92B7FF),
+        .needsYou: (0x6E4200, 0xFFB224),
+        .error: (0x951E15, 0xFF9C95),
+        .done: (0x125836, 0x61CA98),
+        .diffRemoved: (0x951E15, 0xFF9C95),
+        .peer: (0x1F4995, 0x92B7FF),
+    ]
 }

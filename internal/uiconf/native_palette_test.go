@@ -30,15 +30,39 @@ func TestNativePaletteTokensMatchPaletteJSON(t *testing.T) {
 	}
 
 	names := map[string]string{"needsYou": "needs-you", "diffRemoved": "diff.removed"}
-	roles := map[string]Pair{}
-	for _, m := range regexp.MustCompile(`\.(\w+): \(0x(\w{6}), 0x(\w{6})\)`).FindAllStringSubmatch(string(source), -1) {
-		name := m[1]
-		if json, ok := names[name]; ok {
-			name = json
+	table := func(section string) map[string]Pair {
+		pairs := map[string]Pair{}
+		for _, m := range regexp.MustCompile(`\.(\w+): \(0x(\w{6}), 0x(\w{6})\)`).FindAllStringSubmatch(section, -1) {
+			name := m[1]
+			if json, ok := names[name]; ok {
+				name = json
+			}
+			pairs[name] = pair(m[2], m[3])
 		}
-		roles[name] = pair(m[2], m[3])
+		return pairs
 	}
-	if fmt.Sprint(roles) != fmt.Sprint(BuiltIn.Roles) {
+	rolesSource, increasedSource, found := strings.Cut(string(source), "static let increasedRoles")
+	if !found {
+		t.Fatal("PaletteTokens has no increasedRoles table")
+	}
+	if roles := table(rolesSource); fmt.Sprint(roles) != fmt.Sprint(BuiltIn.Roles) {
 		t.Errorf("PaletteTokens roles %v, palette.json %v", roles, BuiltIn.Roles)
+	}
+
+	grounds := map[string]Pair{}
+	for _, class := range []string{"mac", "phone"} {
+		for name, surface := range BuiltIn.Surfaces[class] {
+			grounds[class+"."+name] = surface
+		}
+	}
+	want := map[string]Pair{}
+	for role, colour := range BuiltIn.Roles {
+		want[role] = Pair{
+			Dark:  Readable(colour.Dark, surfaceList(grounds, true), true, IncreasedContrast),
+			Light: Readable(colour.Light, surfaceList(grounds, false), false, IncreasedContrast),
+		}
+	}
+	if increased := table(increasedSource); fmt.Sprint(increased) != fmt.Sprint(want) {
+		t.Errorf("PaletteTokens increasedRoles %v, palette.json lifted to %.0f:1 on the Mac and phone surfaces %v", increased, IncreasedContrast, want)
 	}
 }

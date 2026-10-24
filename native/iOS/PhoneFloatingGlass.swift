@@ -7,9 +7,17 @@ extension EnvironmentValues {
 extension PhoneAppearance {
     func floatingOpacity(_ key: Key) -> Double {
         guard key.readable else { return config.composerOpacity }
+        let solved = floatingOpacity(key, target: key.target)
+        guard key.target >= Self.increasedTarget else { return solved }
+        let normal = config.readability ? floatingOpacity(key, target: Self.contrastTarget(config, increased: false)) : config.composerOpacity
+        // Darker increased roles can need less glass; Increase Contrast never makes a surface more see-through.
+        return max(solved, normal)
+    }
+
+    private func floatingOpacity(_ key: Key, target: Float) -> Double {
         let polarity: ScrimField.Polarity = key.dark ? .dark : .light
-        let roles = PhonePalette.textRoles(TextColors(config), dark: key.dark, increased: key.target >= Self.increasedTarget)
-        let boundary = ScrimField.boundary(roles: roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }, polarity: polarity, target: key.target)
+        let roles = PhonePalette.textRoles(TextColors(config), dark: key.dark, increased: target >= Self.increasedTarget)
+        let boundary = ScrimField.boundary(roles: roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }, polarity: polarity, target: target)
         let window = GlassSolve.luminance(key.dark ? PaletteTokens.window.dark : PaletteTokens.window.light)
         let shown = active ? extremes[key] : nil
         return max(config.composerOpacity, Double(GlassSolve.opacity(under: shown, polarity: polarity, window: window, boundary: boundary)))
