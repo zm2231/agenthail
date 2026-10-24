@@ -45,6 +45,8 @@ var (
 // included, well inside the hook's timeout: a prompt never waits on it.
 const claudeSessionContextLimit = 5 * time.Second
 
+var claudeSessionContextExpired = func() <-chan time.Time { return time.After(claudeSessionContextLimit) }
+
 // claudePromptHookRetry is how often the hook posts its prompt again while
 // no daemon answers, as while one restarts for an update.
 var claudePromptHookRetry = 2 * time.Second
@@ -80,13 +82,14 @@ func (a *App) cmdHook(args []string) error {
 			}
 		}
 		done := make(chan map[string]any, 1)
-		go func() { done <- a.sessionContext(os.Stdin, kind, parent, time.Now()) }()
+		input := os.Stdin
+		go func() { done <- a.sessionContext(input, kind, parent, time.Now()) }()
 		select {
 		case output := <-done:
 			if output != nil {
 				_ = json.NewEncoder(os.Stdout).Encode(output)
 			}
-		case <-time.After(claudeSessionContextLimit):
+		case <-claudeSessionContextExpired():
 		}
 		return nil
 	}
