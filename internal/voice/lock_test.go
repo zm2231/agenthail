@@ -38,15 +38,18 @@ func (gatedProjects) SendToLead(context.Context, string, string, string) (LeadRe
 	return LeadReceipt{}, errors.New("no lead")
 }
 
-// within fails the test unless call returns inside limit.
-func within(t *testing.T, what string, limit time.Duration, call func()) {
+// Held I/O ends only on release, so returning first proves no wait.
+func whileHeld(t *testing.T, g *gate, what string, call func()) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() { call(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(limit):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("%s waited behind held I/O", what)
+	}
+	if g.waiters() == 0 {
+		t.Fatalf("the held I/O ended before %s returned", what)
 	}
 }
 
@@ -190,17 +193,24 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 			result := make(chan error, 1)
 			go func() { result <- test.run(f) }()
 			f.gate.reached(t, test.held)
-			within(t, "View", 100*time.Millisecond, func() { f.View() })
-			within(t, "a heartbeat", 100*time.Millisecond, func() { _, _ = f.Apply(Action{Action: "heartbeat", AttemptID: "call-a"}) })
+			whileHeld(t, f.gate, "View", func() { f.View() })
+			whileHeld(t, f.gate, "a heartbeat", func() { _, _ = f.Apply(Action{Action: "heartbeat", AttemptID: "call-a"}) })
 			if !test.call {
 				return
 			}
-			// A hangup writes the state file itself, so it gets longer.
-			within(t, "a hangup", time.Second, func() {
-				if _, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"}); err != nil {
-					t.Errorf("hangup: %v", err)
+			hungUp := make(chan error, 1)
+			go func() {
+				_, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"})
+				hungUp <- err
+			}()
+			select {
+			case err := <-hungUp:
+				if err != nil {
+					t.Fatalf("hangup: %v", err)
 				}
-			})
+			case <-time.After(10 * time.Second):
+				t.Fatal("a hangup waited behind held I/O")
+			}
 			testkit.Eventually(t, "the hangup to cancel the held call", 5*time.Second, func() bool { return f.gate.waiters() == 0 })
 			select {
 			case <-result:
