@@ -61,6 +61,7 @@ SOURCES=(
   macOS/DesktopPalette.swift
   macOS/InterfaceStore.swift
   Backdrop.swift
+  macOS/BackdropLayers.swift
   macOS/BoundedDock.swift
   macOS/UsageMeters.swift
   macOS/ContextRingGauge.swift
@@ -94,7 +95,19 @@ SOURCES=(
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
   macOS/VoiceController.swift
+  macOS/AncestorFrames.swift
+  macOS/BackdropLayerView.swift
+  macOS/BackdropSurface.swift
+  macOS/FloatingGlass.swift
+  macOS/GlassPane.swift
+  macOS/ScrimAnchor.swift
+  macOS/ScrimMask.swift
+  macOS/ScrimRegion.swift
+  macOS/ScrimText.swift
+  macOS/ScrollScrim.swift
+  macOS/SplitDividerHider.swift
   macOS/WindowBackdrop.swift
+  macOS/WindowBackdropHost.swift
   macOS/WindowImage.swift
   macOS/WindowRectReader.swift
 )

@@ -113,7 +113,7 @@ struct TitleBarStrip: View {
         .padding(.leading, Self.buttonsWidth)
         .padding(.trailing, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane("titlebar", .chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side)
         .background {
             Button("") { pane.stepTab(1) }.keyboardShortcut(.tab, modifiers: .control).hidden()
             Button("") { pane.stepTab(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift]).hidden()
@@ -338,7 +338,7 @@ struct StatusStrip: View {
         .foregroundStyle(DesktopPalette.text2)
         .padding(.horizontal, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane("statusbar", .chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side)
         .task(id: model.isConnected) {
             guard items.contains("usage"), model.isConnected else { return }
             await usage.run(model)

@@ -147,10 +147,8 @@ enum ScrimField {
         }
     }
 
-    /// The lowest tint opacity at each point of rect at which the shown
-    /// colour passes the boundary. Blending is in linear light, as Core
-    /// Image composites, so the shown luminance is linear in the opacity.
-    static func floor(image: Raster, tint: Raster, in rect: Rect, polarity: Polarity, boundary: Float) -> [Float] {
+    /// Window layers blend between linear and sRGB-encoded results (measured), so a layered floor takes the larger.
+    static func floor(image: Raster, tint: Raster, in rect: Rect, polarity: Polarity, boundary: Float, layered: Bool = false) -> [Float] {
         var out = [Float](repeating: 0, count: rect.width * rect.height)
         for y in 0..<rect.height {
             for x in 0..<rect.width {
@@ -158,18 +156,34 @@ enum ScrimField {
                 let lb = luminance(image.rgb[i], image.rgb[i + 1], image.rgb[i + 2])
                 guard !passes(lb, boundary: boundary, polarity: polarity) else { continue }
                 let lt = luminance(tint.rgb[i], tint.rgb[i + 1], tint.rgb[i + 2])
-                let a = lb == lt ? 1 : (lb - boundary) / (lb - lt)
+                var a = lb == lt ? 1 : (lb - boundary) / (lb - lt)
+                if layered {
+                    a = max(a, encodedFloor(base: (image.rgb[i], image.rgb[i + 1], image.rgb[i + 2]), tint: (tint.rgb[i], tint.rgb[i + 1], tint.rgb[i + 2]), polarity: polarity, boundary: boundary))
+                }
                 out[y * rect.width + x] = (min(max(a, 0), 1) * 255).rounded(.up) / 255
             }
         }
         return out
     }
 
-    static func needs(image: Raster, tint: Raster, texts: [Rect], polarity: Polarity, boundary: Float) -> [Float] {
+    static func encodedFloor(base: (Float, Float, Float), tint: (Float, Float, Float), polarity: Polarity, boundary: Float) -> Float {
+        func shown(_ a: Float) -> Float {
+            luminance(base.0 + (tint.0 - base.0) * a, base.1 + (tint.1 - base.1) * a, base.2 + (tint.2 - base.2) * a)
+        }
+        guard passes(shown(1), boundary: boundary, polarity: polarity) else { return 1 }
+        var low: Float = 0, high: Float = 1
+        for _ in 0..<12 {
+            let mid = (low + high) / 2
+            if passes(shown(mid), boundary: boundary, polarity: polarity) { high = mid } else { low = mid }
+        }
+        return high
+    }
+
+    static func needs(image: Raster, tint: Raster, texts: [Rect], polarity: Polarity, boundary: Float, layered: Bool = false) -> [Float] {
         var need = [Float](repeating: 0, count: image.width * image.height)
         for text in texts {
             let rect = text.clamped(width: image.width, height: image.height)
-            let local = floor(image: image, tint: tint, in: rect, polarity: polarity, boundary: boundary)
+            let local = floor(image: image, tint: tint, in: rect, polarity: polarity, boundary: boundary, layered: layered)
             for y in 0..<rect.height {
                 for x in 0..<rect.width {
                     let i = (rect.y + y) * image.width + rect.x + x
@@ -178,6 +192,22 @@ enum ScrimField {
             }
         }
         return need
+    }
+
+    /// Grown by r cells before a kernel no wider than r, so no point drops below its own floor.
+    static func fieldOpacity(need: [Float], width: Int, height: Int) -> [Float] {
+        let cell = 4, r = paneSmoothing / cell
+        let gw = max((width + cell - 1) / cell, 1), gh = max((height + cell - 1) / cell, 1)
+        var small = [Float](repeating: 0, count: gw * gh)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y / cell) * gw + x / cell
+                small[i] = max(small[i], need[y * width + x])
+            }
+        }
+        let grown = maxFilter(small, width: gw, height: gh, radius: r)
+        let smooth = gaussian(grown, width: gw, height: gh, sigma: Float(r) / 3, radius: r)
+        return upsample(smooth, width: gw, height: gh, channels: 1, to: width, height, as: [Float].self)
     }
 
     /// Opacity for a pane: the floor grown by r, then smoothed with a kernel

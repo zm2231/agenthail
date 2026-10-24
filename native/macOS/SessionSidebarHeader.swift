@@ -24,7 +24,7 @@ struct SessionSidebarHeader: View {
             .padding(.horizontal, DesktopSpace.l)
             .padding(.top, DesktopSpace.xs)
             .padding(.bottom, DesktopSpace.s)
-            .scrimText("sidebar-filters")
+            .scrimText()
 
             HStack(spacing: DesktopSpace.s) {
                 search
@@ -50,7 +50,7 @@ struct SessionSidebarHeader: View {
             .padding(.leading, DesktopSpace.m)
             .padding(.trailing, DesktopSpace.l)
             .padding(.bottom, 10)
-            .scrimText("sidebar-search")
+            .scrimText()
         }
     }
 

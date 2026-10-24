@@ -17,11 +17,11 @@ struct BackdropAppearanceTest {
             let deadline = Date().addingTimeInterval(30)
             while !done() && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         }
-        func hue(_ image: BackdropImage?) -> String {
-            guard let image else { return "none" }
+        func hue(_ layers: BackdropLayerSet?) -> String {
+            guard let image = layers?.layers.base else { return "none" }
             var pixel = [UInt8](repeating: 0, count: 4)
             let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.draw(image.image, in: CGRect(x: -CGFloat(image.image.width) / 2, y: -CGFloat(image.image.height) / 2, width: CGFloat(image.image.width), height: CGFloat(image.image.height)))
+            context.draw(image, in: CGRect(x: -CGFloat(image.width) / 2, y: -CGFloat(image.height) / 2, width: CGFloat(image.width), height: CGFloat(image.height)))
             return pixel[0] > pixel[2] ? "red" : "blue"
         }
 
@@ -43,13 +43,13 @@ struct BackdropAppearanceTest {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 140), styleMask: [.titled], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
         backdrop.windowChanged(window)
-        wait { hue(backdrop.image) == "blue" }
-        check(hue(backdrop.image) == "blue", "a dark window draws the dark background, got \(hue(backdrop.image))")
+        wait { hue(backdrop.layers) == "blue" }
+        check(hue(backdrop.layers) == "blue", "a dark window draws the dark background, got \(hue(backdrop.layers))")
 
         window.appearance = NSAppearance(named: .aqua)
         backdrop.windowChanged(window)
-        wait { hue(backdrop.image) == "red" }
-        check(hue(backdrop.image) == "red", "switching the window to light draws the light background, got \(hue(backdrop.image))")
+        wait { hue(backdrop.layers) == "red" }
+        check(hue(backdrop.layers) == "red", "switching the window to light draws the light background, got \(hue(backdrop.layers))")
 
         var pictures = UIConfig()
         pictures.values["background"] = .text("image: art/a-dark.jpg")
