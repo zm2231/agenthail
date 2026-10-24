@@ -22,6 +22,7 @@ type TimelineItem struct {
 	Timestamp string `json:"timestamp,omitempty"`
 	CallID    string `json:"callId,omitempty"`
 	TurnID    string `json:"turnId,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
 	Status    string `json:"status,omitempty"`
 	// ResetsAt is when a usage limit a notice reports lifts, in RFC 3339.
 	ResetsAt         string         `json:"resetsAt,omitempty"`

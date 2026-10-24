@@ -61,6 +61,8 @@ type targetFixture struct {
 	gate *gate
 	// perTurn gives each send its own turn, whose reply the test supplies.
 	perTurn         bool
+	quiet           bool
+	movesTo         string
 	turns           int
 	replies         map[string]chan string
 	session         surface.Session
@@ -112,12 +114,19 @@ func (f *targetFixture) Observe(ctx context.Context, _ *surface.Session) (*surfa
 	}
 	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
 }
-func (f *targetFixture) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *targetFixture) Send(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if err := f.gate.wait(ctx, "Send"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	if f.movesTo != "" {
+		session.ID = f.movesTo
+	}
+	if f.quiet {
+		f.mu.Unlock()
+		return &surface.SendResult{UUID: f.turnID, Accepted: true}, nil
+	}
 	if f.perTurn {
 		f.turns++
 		turnID := fmt.Sprintf("turn-%d", f.turns)

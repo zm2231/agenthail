@@ -972,7 +972,7 @@ func redactInlineImageData(value any, imageContext bool) any {
 	return value
 }
 
-func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
+func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 	kind := str(record, "type")
 	if kind == "system" {
 		subtype := str(record, "subtype")

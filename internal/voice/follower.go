@@ -22,7 +22,7 @@ type follower struct {
 	voice    map[string][]string
 	pending  int
 	settled  chan struct{}
-	unplaced []string
+	held     []string
 	typed    map[string]*typedTurn
 	retired  map[string]bool
 	earlier  []requestRecord
@@ -183,7 +183,7 @@ func (s *Service) refollow(f *follower, reason string) {
 	s.followTarget(&f.target, open)
 	if next := s.follow; next != nil {
 		f.next = next
-		next.retired, next.pending, next.unplaced = f.retired, f.pending, f.unplaced
+		next.retired, next.pending, next.held = f.retired, f.pending, f.held
 		for i := range replies {
 			replies[i].f = next
 		}
@@ -209,20 +209,15 @@ func (s *Service) followerFailed(f *follower, err error) {
 }
 
 // The caller holds s.mu.
-func (s *Service) settleDelegation(f *follower, messageID, turnID, text string) {
+func (s *Service) settleDelegation(f *follower, messageID, turnID string, held []string) {
 	for f.next != nil {
 		f = f.next
 	}
 	f.pending--
-	switch {
-	case turnID != "":
+	if turnID != "" {
 		f.voice[turnID] = append(f.voice[turnID], messageID)
-	case text != "":
-		f.unplaced = append(f.unplaced, text)
-		if len(f.unplaced) > queuedRepliesMax {
-			f.unplaced = f.unplaced[1:]
-		}
 	}
+	f.hold(held)
 	close(f.settled)
 	f.settled = make(chan struct{})
 }

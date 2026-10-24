@@ -16,6 +16,7 @@ type Event struct {
 	Operation        string
 	Kind             string
 	TurnID           string
+	MessageID        string
 	CallID           string
 	Role             string
 	Status           string
@@ -42,6 +43,7 @@ func DecodePayload(seq uint64, payload []byte) (Event, error) {
 		Operation        string `json:"op"`
 		Kind             string `json:"kind"`
 		TurnID           string `json:"turnId"`
+		MessageID        string `json:"messageId"`
 		CallID           string `json:"callId"`
 		Role             string `json:"role"`
 		Status           string `json:"status"`
@@ -56,7 +58,7 @@ func DecodePayload(seq uint64, payload []byte) (Event, error) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return Event{}, fmt.Errorf("decode session journal event: %w", err)
 	}
-	return Event{Seq: seq, ItemID: event.ItemID, ProviderKey: event.ProviderKey, Version: event.Version, Operation: event.Operation, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Role: event.Role, Status: event.Status, ResetsAt: event.ResetsAt, Body: event.Body, Reason: event.Reason, Final: event.Final, Truncated: event.Truncated, TruncationReason: event.TruncationReason, BodyRef: event.BodyRef}, nil
+	return Event{Seq: seq, ItemID: event.ItemID, ProviderKey: event.ProviderKey, Version: event.Version, Operation: event.Operation, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, CallID: event.CallID, Role: event.Role, Status: event.Status, ResetsAt: event.ResetsAt, Body: event.Body, Reason: event.Reason, Final: event.Final, Truncated: event.Truncated, TruncationReason: event.TruncationReason, BodyRef: event.BodyRef}, nil
 }
 
 func (e Event) Terminal() bool {

@@ -60,7 +60,7 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	s.unlock()
 	if err := s.flush(); err != nil {
 		s.mu.Lock()
-		s.settleDelegation(f, a.MessageID, "", "")
+		s.settleDelegation(f, a.MessageID, "", nil)
 		s.unlock()
 		return err
 	}
@@ -70,12 +70,12 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	held := ""
 	switch {
 	case err != nil:
-		s.settleDelegation(f, a.MessageID, "", "")
+		s.settleDelegation(f, a.MessageID, "", nil)
 	default:
 		if held = heldReason(target, addressed, receipt); held != "" {
-			s.settleDelegation(f, a.MessageID, "", a.Text)
+			s.settleDelegation(f, a.MessageID, "", heldIDs(receipt, target.Session.ID))
 		} else {
-			s.settleDelegation(f, a.MessageID, receipt.TurnID, "")
+			s.settleDelegation(f, a.MessageID, receipt.TurnID, nil)
 			s.keepRequest(requestRecord{MessageID: a.MessageID, TargetID: addressed.ID, TurnID: receipt.TurnID, Prompt: a.Text})
 		}
 	}
@@ -89,6 +89,9 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	if target.Session.ID != addressed.ID {
 		v.Target = target.Session
 		s.followTarget(target.Session, nil)
+		if next := s.follow; next != nil {
+			next.hold(f.held)
+		}
 	}
 	if err != nil {
 		s.unlock()

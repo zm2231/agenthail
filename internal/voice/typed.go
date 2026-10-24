@@ -26,6 +26,11 @@ func (s *Service) followTyped(f *follower, event sessionstream.Event, turn *type
 		s.unlock()
 		return
 	}
+	if f.releaseHeld(event) {
+		turn.voice = true
+		s.unlock()
+		return
+	}
 	switch {
 	case event.Role == "user" && turn.prompt == "" && strings.TrimSpace(event.Body) != "":
 		s.noteTyped(f, event, turn)
@@ -43,16 +48,7 @@ func (s *Service) followTyped(f *follower, event sessionstream.Event, turn *type
 
 // The caller holds s.mu; noteTyped releases it.
 func (s *Service) noteTyped(f *follower, event sessionstream.Event, turn *typedTurn) {
-	body := strings.TrimSpace(event.Body)
-	for i, text := range f.unplaced {
-		if strings.TrimSpace(text) == body {
-			f.unplaced = append(f.unplaced[:i], f.unplaced[i+1:]...)
-			turn.voice = true
-			s.unlock()
-			return
-		}
-	}
-	turn.prompt = clip(body, typedNoteBytes)
+	turn.prompt = clip(strings.TrimSpace(event.Body), typedNoteBytes)
 	s.appendEvent(Event{Method: "voice/target/typed", Params: map[string]any{"targetId": f.target.ID, "turnId": event.TurnID}})
 	session := s.state.State.Session
 	s.stage()

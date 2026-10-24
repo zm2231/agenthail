@@ -22,6 +22,7 @@ type Receipt struct {
 	TurnID     string                   `json:"turnId,omitempty"`
 	QueueID    int64                    `json:"queueId,omitempty"`
 	DeliveryID int64                    `json:"deliveryId,omitempty"`
+	MessageID  string                   `json:"messageId,omitempty"`
 	Detail     string                   `json:"detail,omitempty"`
 	Notice     string                   `json:"notice,omitempty"`
 	// WaitingOn is set on a queued receipt when the target is waiting on its
@@ -338,7 +339,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 				d.record(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceUnknown})
 				return nil, err
 			}
-			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}
+			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}
 			d.record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
 			return receipt, nil
 		}
@@ -351,7 +352,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	if result == nil {
 		err := fmt.Errorf("%s returned an empty delivery result", adapter.Name())
 		if intent != nil {
-			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
+			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 		}
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
@@ -522,7 +523,7 @@ func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, 
 	if intent == nil {
 		return
 	}
-	receipt.DeliveryID = intent.ID
+	receipt.DeliveryID, receipt.MessageID = intent.ID, intent.UUID
 	changed, err := d.Registry.MarkDeliveryIntentSent(intent.ID, providerKey, receipt.Evidence)
 	if err == nil && changed {
 		return
