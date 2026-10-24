@@ -12,10 +12,11 @@
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="manifest" href="/js/manifest.webmanifest" />
     <link rel="stylesheet" href="/tokens.css?v=18" />
+    <link rel="stylesheet" href="/css/panes.css" />
   </head>
   <body>
     <main class="shell">
-      <header class="topbar">
+      <header class="topbar" data-pane="chrome">
         <a class="brand" href="#overview" aria-label="Agenthail home"
           ><img
             class="brand-mark"
@@ -52,7 +53,7 @@
       </header>
 
       <section class="view" id="overview-view" data-view-panel="overview">
-        <header class="page-heading">
+        <header class="page-heading" data-pane="content">
           <div>
             <h1>Your agents, in one place.</h1>
             <p class="lede" id="daemon-detail">
@@ -63,7 +64,7 @@
             Open inbox <span>→</span>
           </button>
         </header>
-        <section class="attention-panel" id="attention-panel" hidden>
+        <section class="attention-panel" id="attention-panel" data-pane="content" hidden>
           <div class="section-heading">
             <div>
               <h2>Needs attention</h2>
@@ -72,12 +73,12 @@
           </div>
           <div class="attention-list" id="attention-list"></div>
         </section>
-        <section class="attention-panel" id="delivery-problems-panel" hidden>
+        <section class="attention-panel" id="delivery-problems-panel" data-pane="content" hidden>
           <div class="section-heading"><div><h2>Delivery problems</h2><p>Messages that could not be sent.</p></div></div>
           <div class="attention-list" id="delivery-problems-list"></div>
         </section>
         <section class="overview-grid">
-          <section>
+          <section data-pane="content">
             <div class="section-heading">
               <div>
                 <h2>Current conversations</h2>
@@ -85,7 +86,7 @@
             </div>
             <div class="activity-list" id="recent-activity"></div>
           </section>
-          <section>
+          <section data-pane="content">
             <div class="section-heading">
               <div>
                 <h2>Your surfaces</h2>
@@ -107,7 +108,7 @@
         data-view-panel="conversations"
       >
         <div class="conversation-layout">
-          <aside class="conversation-rail">
+          <aside class="conversation-rail" data-pane="sidebar">
             <div class="rail-heading">
               <div>
                 <h1>Conversations</h1>
@@ -127,7 +128,7 @@
                   <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
                 </span>
               </div>
-              <div class="host-picker-menu" id="new-conversation-host-menu" role="listbox" aria-label="Start on" hidden></div>
+              <div class="host-picker-menu" id="new-conversation-host-menu" data-pane="float" role="listbox" aria-label="Start on" hidden></div>
               <label>
                 <span>Surface</span>
                 <select name="surface" id="new-conversation-surface"></select>
@@ -223,7 +224,7 @@
               Show more
             </button>
           </aside>
-          <section class="notebook">
+          <section class="notebook" data-pane="content">
             <button class="mobile-chat-back" id="mobile-chat-back" type="button">
               <span aria-hidden="true">←</span> Conversations
             </button>
@@ -274,12 +275,12 @@
               </details>
               <section class="background-panel" id="background-panel" aria-label="Background work" aria-live="polite" hidden></section>
               <section class="request-panel" id="request-panel" aria-label="Waiting on you" aria-live="polite" hidden></section>
-              <div class="slash-menu" id="slash-menu" hidden></div>
+              <div class="slash-menu" id="slash-menu" data-pane="float" hidden></div>
               <label class="holder-picker" id="holder-picker" hidden
                 ><span id="holder-summary"></span
                 ><select id="holder-pid" aria-label="Terminal to send to"></select
               ></label>
-              <form id="composer">
+              <form id="composer" data-pane="float">
                 <textarea
                   id="message"
                   aria-label="Message selected conversation"
@@ -314,7 +315,7 @@
         id="operations-view"
         data-view-panel="operations"
       >
-        <header class="page-heading">
+        <header class="page-heading" data-pane="content">
           <div>
             <h1>Delivery and handoffs.</h1>
             <p class="lede">
@@ -322,7 +323,7 @@
             </p>
           </div>
         </header>
-        <div class="operation-tabs" aria-label="Operations sections">
+        <div class="operation-tabs" data-pane="float" aria-label="Operations sections">
           <button
             class="active"
             aria-pressed="true"
@@ -352,7 +353,7 @@
           </button>
         </div>
         <section class="operation-panel delivery-grid" data-operations-panel="queue">
-          <section>
+          <section data-pane="content">
             <div class="panel-heading">
               <div>
                 <h2>Messages waiting to move</h2>
@@ -361,7 +362,7 @@
             </div>
             <div id="queue-list" class="operation-list"></div>
           </section>
-          <aside class="delivery-recent">
+          <aside class="delivery-recent" data-pane="content">
             <div class="panel-heading">
               <div>
                 <h2>Recent outcomes</h2>
@@ -372,7 +373,7 @@
         </section>
         <section class="operation-panel hidden" data-operations-panel="network">
           <div class="settings-grid">
-            <section class="settings-card">
+            <section data-pane="content" class="settings-card">
               <div class="settings-card-heading">
                 <h2>Shared handoffs</h2>
                 <p>Group agents that should receive the same context.</p>
@@ -424,7 +425,7 @@
                 </form>
               </div>
             </section>
-            <section class="settings-card">
+            <section data-pane="content" class="settings-card">
               <div class="settings-card-heading">
                 <h2>Automatic handoffs</h2>
                 <p>Pass completed work from one agent to another.</p>
@@ -463,6 +464,7 @@
         </section>
         <section
           class="operation-panel audit-panel hidden"
+          data-pane="content"
           data-operations-panel="audit"
         >
           <div class="panel-heading">
@@ -480,14 +482,14 @@
         </section>
         <section class="operation-panel hidden" data-operations-panel="settings">
           <div class="settings-grid">
-            <section class="settings-card surface-health-card">
+            <section data-pane="content" class="settings-card surface-health-card">
               <div class="settings-card-heading">
                 <h2>Surface health</h2>
                 <p>Live connection checks and the exact fix when something is unavailable.</p>
               </div>
               <div id="surface-health-list" class="surface-health-list"></div>
             </section>
-            <section class="settings-card signin-card" id="signin-card">
+            <section data-pane="content" class="settings-card signin-card" id="signin-card">
               <div class="settings-card-heading">
                 <h2>Browser sign-in</h2>
                 <p>Notion and Claude sessions reached over Remote Control read your sign-in cookies from your system default browser's last used profile. Pick another profile or turn sign-in off for each below, or run <code>agenthail signin use</code>. Nothing else reads cookies.</p>
@@ -502,7 +504,7 @@
               </form>
               <p class="signin-note" id="signin-unavailable" hidden></p>
             </section>
-            <section class="settings-card remote-access-card">
+            <section data-pane="content" class="settings-card remote-access-card">
               <div class="settings-card-heading">
                 <h2>Open Agenthail on your phone</h2>
                 <p>Private to devices signed into your Tailscale network.</p>
@@ -511,14 +513,14 @@
                 <div class="empty-card">Checking Tailscale.</div>
               </div>
             </section>
-            <section class="settings-card browser-push-card" id="browser-push-card">
+            <section data-pane="content" class="settings-card browser-push-card" id="browser-push-card">
               <div class="settings-card-heading">
                 <h2>Notifications in this browser</h2>
                 <p>Get a notification when a session needs you or finishes, even with the dashboard closed. A question's notification goes away once it is answered anywhere.</p>
               </div>
               <label class="setting-row"><div><strong>Notify this browser</strong><p id="browser-push-note">Checking this browser.</p></div><input id="browser-push-toggle" type="checkbox" disabled></label>
             </section>
-            <section class="settings-card devices-card" id="devices-card">
+            <section data-pane="content" class="settings-card devices-card" id="devices-card">
               <div class="settings-card-heading">
                 <h2>iPhone app</h2>
                 <p>Pair the Agenthail iPhone app with this computer. A pairing code works once, for five minutes.</p>
@@ -526,7 +528,7 @@
               <div id="device-pairing" class="device-pairing"></div>
               <div id="devices-list" class="operation-list compact-list"><div class="empty-card">Loading devices.</div></div>
             </section>
-            <section class="settings-card">
+            <section data-pane="content" class="settings-card">
               <div class="settings-card-heading">
                 <h2>Current work</h2>
                 <p>Choose how long Codex threads remain in your current inbox.</p>
@@ -539,7 +541,7 @@
               <label class="setting-row"><div><strong>Resume after usage limits</strong><p>When a usage limit stops a Claude session, send its queued messages, or ask it to continue, once the limit resets.</p></div><input id="settings-resume-after-limit" type="checkbox"></label>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
-            <section class="settings-card">
+            <section data-pane="content" class="settings-card">
               <div class="settings-card-heading">
                 <h2>Claude compaction</h2>
                 <p>When Claude compacts a conversation, per Claude config folder. Applies to Claude sessions started after the change.</p>
@@ -558,7 +560,7 @@
         </section>
       </section>
     </main>
-    <dialog class="voice-dialog" id="voice-dialog" aria-labelledby="voice-title">
+    <dialog class="voice-dialog" id="voice-dialog" data-pane="float" aria-labelledby="voice-title">
       <form method="dialog" class="voice-dialog-card">
         <header>
           <div>
@@ -582,7 +584,7 @@
         <audio id="voice-audio" autoplay playsinline></audio>
       </form>
     </dialog>
-    <dialog class="voice-dialog" id="project-dialog" aria-labelledby="project-dialog-title">
+    <dialog class="voice-dialog" id="project-dialog" data-pane="float" aria-labelledby="project-dialog-title">
       <form class="voice-dialog-card" id="project-form">
         <header>
           <h2 id="project-dialog-title">Add project</h2>
@@ -599,7 +601,7 @@
         <div class="voice-actions"><button class="primary-button" type="submit">Save</button></div>
       </form>
     </dialog>
-    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="toast" id="toast" data-pane="float" role="status" hidden></div>
     <script src="/app.js?v=23"></script>
     <script type="module" src="/js/ui.js"></script>
     <script type="module" src="/js/usage.js"></script>

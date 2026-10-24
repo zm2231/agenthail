@@ -98,6 +98,18 @@ The colour you choose is a preference, and readability wins over it. If it doesn
 
 A background you write yourself, other than a built-in picture or preset, looks the same in dark and light. `agenthail ui get --resolved` shows both as `background` and `background.light`.
 
+## In the web dashboard
+
+The dashboard reads the `web` device's settings and follows every change as it is saved.
+
+- `theme` and `theme.accent` work as in the apps. `system` follows the browser's light or dark preference.
+- `background`, `background.light`, `background.fit`, `background.position`, `background.dim`, `background.opacity`, `background.session-opacity`, `texture`, `texture.strength` and `texture.spacing` draw the background, loaded from the daemon. `background.session-opacity` applies on the Conversations view.
+- `desktop` shows the plain window colour, since a browser cannot show the desktop.
+- While a background is drawn, every piece of text sits on a pane: the top bar, page headings, cards, the Conversations list, the conversation, the Operations tabs, and the composer, menus, dialogs and notices. The background shows only in the `glass.gutter` around and between panes.
+- In dark appearance, `glass` makes the panes translucent: the top bar takes `glass.chrome.opacity`, the Conversations list `glass.sidebar.opacity`, headings and cards `glass.opacity`, and the tabs, composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. Light appearance, `glass = off` and the browser's reduced transparency preference draw solid panes, with a soft shadow under floating ones.
+- `glass.tint` works as in the apps. A tint that would leave text below `contrast.target` is moved toward the ground colour until text reads on it, and each kind of pane's tint rises above its opacity as far as the background it can cover needs: a pane that stays put is measured against the art behind it, and one that scrolls against its whole column. `glass.readability = off` uses the opacities exactly.
+- Text keeps `contrast.target`. Text colours that would miss it on the dashboard's own surfaces are lifted toward white in dark, or black in light, until they reach it. With the browser's increased contrast preference, the target is 7.
+
 ## The agenthail ui command
 
 ```

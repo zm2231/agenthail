@@ -94,3 +94,32 @@ export function readableOnTint(accent, surfaces, dark, alpha) {
   }
   return colour;
 }
+
+export function readableText(colour, surfaces, dark, target) {
+  const toward = dark ? [1, 1, 1] : [0, 0, 0];
+  const lifted = (amount) => colour.map((v, i) => Math.round((v + (toward[i] - v) * amount) * 255) / 255);
+  const reads = (c) => surfaces.every((surface) => ratio(luminance(c), luminance(surface)) >= target);
+  if (reads(colour)) return colour;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step++) {
+    const mid = (low + high) / 2;
+    if (reads(lifted(mid))) high = mid;
+    else low = mid;
+  }
+  return lifted(reads(lifted(high)) ? high : 1);
+}
+
+export function readableSurface(surface, texts, toward, target) {
+  const mixed = (amount) => surface.map((v, i) => Math.round((v + (toward[i] - v) * amount) * 255) / 255);
+  const reads = (c) => texts.every((text) => ratio(luminance(text), luminance(c)) >= target);
+  if (reads(surface)) return surface;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step++) {
+    const mid = (low + high) / 2;
+    if (reads(mixed(mid))) high = mid;
+    else low = mid;
+  }
+  return mixed(reads(mixed(high)) ? high : 1);
+}

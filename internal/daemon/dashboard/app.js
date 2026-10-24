@@ -437,6 +437,7 @@ function showView(name) {
     .forEach((link) =>
       link.classList.toggle("active", link.dataset.view === view),
     );
+  document.documentElement.toggleAttribute("data-session-open", view === "conversations");
   if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
   if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView()) {
     const first = scopedSessions()[0] || app.state.sessions[0];
@@ -775,7 +776,7 @@ function projectMenu(project) {
   checkouts.forEach((checkout) => {
     if (checkout.added) items.push(`<button type="button" data-project-action="project-remove" data-project-id="${escape(checkout.projectId)}">Remove${escape(where(checkout))}</button>`);
   });
-  return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" role="menu">${items.join("")}</div></details>`;
+  return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" data-pane="float" role="menu">${items.join("")}</div></details>`;
 }
 // checkoutHost is the host an action on a checkout names: empty for this
 // machine.

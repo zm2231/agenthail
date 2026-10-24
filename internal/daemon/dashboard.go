@@ -314,6 +314,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
 	mux.Handle("/js/", dashboardModuleHandler())
+	mux.Handle("/css/", dashboardStylesHandler())
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
 	mux.HandleFunc("/palette.css", dashboard.asset("text/css; charset=utf-8", []byte(uiconf.PaletteCSS())))
 	mux.HandleFunc("/logo.png", dashboard.asset("image/png", dashboardLogo))
