@@ -29,4 +29,17 @@ final class RoleInlineStyleTests: XCTestCase {
         XCTAssertEqual(color(.link, chosen), Color(hex: 0x5577FF), "with no link colour, links use the readable accent")
         XCTAssertEqual(color(.code, chosen), Color(hex: PaletteTokens.roles[.code]!.dark), "code falls back to the built-in role")
     }
+
+    func testIncreasedContrastBeforeColoursAreServedReachesSevenToOne() {
+        let unserved = TextColors()
+        for dark in [true, false] {
+            let ground = GlassSolve.luminance(dark ? PaletteTokens.window.dark : PaletteTokens.window.light)
+            for role in TextRole.allCases {
+                guard let hex = unserved.hex(role, dark: dark, increased: true) else { continue }
+                let text = GlassSolve.luminance(hex)
+                let ratio = (max(text, ground) + 0.05) / (min(text, ground) + 0.05)
+                XCTAssertGreaterThanOrEqual(ratio, 7, "\(role) dark \(dark)")
+            }
+        }
+    }
 }

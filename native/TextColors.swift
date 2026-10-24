@@ -42,7 +42,7 @@ struct TextColors: Equatable, Sendable {
         if let color = served[role.rawValue] {
             return Self.pick(color, dark: dark, increased: increased)
         }
-        return PaletteTokens.roles[role].map { dark ? $0.dark : $0.light }
+        return (increased ? PaletteTokens.increasedRoles : PaletteTokens.roles)[role].map { dark ? $0.dark : $0.light }
     }
 
     func accentText(dark: Bool, increased: Bool) -> UInt32? {

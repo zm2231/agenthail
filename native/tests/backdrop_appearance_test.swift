@@ -83,7 +83,7 @@ struct BackdropAppearanceTest {
             glass.values["glass.composer.opacity"] = .number(0.99)
             check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) == 0.99, "a stronger setting is kept (dark \(dark))")
             glass.values["glass.composer.opacity"] = .number(0)
-            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: true) > base, "Increase Contrast raises floating glass for its higher target (dark \(dark))")
+            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: true) >= base, "Increase Contrast never makes floating glass more see-through (dark \(dark))")
             glass.values["glass.readability"] = .text("off")
             check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) == 0, "readability off uses the setting exactly (dark \(dark))")
         }

@@ -209,8 +209,8 @@ final class PhoneAppearanceTests: XCTestCase {
         for dark in [true, false] {
             let solid = try measureCards(dark: dark, target: 21)
             XCTAssertEqual(solid.spread, 0, accuracy: 0.002, "an unreachable target turns the cards solid")
-            let ceiling = solid.worst
             for target: Float in [4.5, 6, 7] {
+                let ceiling = try measureCards(dark: dark, target: target, solid: true).worst
                 let (worst, spread) = try measureCards(dark: dark, target: target)
                 XCTAssertGreaterThanOrEqual(worst, min(target, ceiling) - 0.02, "the dimmest text colour reads at every point a card can reach (dark \(dark), target \(target))")
                 if target + ScrimField.margin < ceiling {
@@ -220,13 +220,13 @@ final class PhoneAppearanceTests: XCTestCase {
         }
     }
 
-    private func measureCards(dark: Bool, target: Float) throws -> (worst: Float, spread: Float) {
+    private func measureCards(dark: Bool, target: Float, solid: Bool = false) throws -> (worst: Float, spread: Float) {
         let appearance = PhoneAppearance(cache: nil)
         appearance.preview(try config([
             "background": "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #c8d0e0, #2e3340, #591948, #8a3049, #682e2c",
             "glass.sidebar.opacity": 0.3,
         ]))
-        let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: dark, solid: false, target: target)
+        let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: dark, solid: solid, target: target)
         let spec = appearance.spec(small)
         let image = try XCTUnwrap(BackdropRenderer.render(spec)).image
         let width = image.width, height = image.height
@@ -278,6 +278,17 @@ final class PhoneAppearanceTests: XCTestCase {
         for _ in 0..<400 where appearance.extremes[list] == nil { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertNotNil(appearance.extremes[list])
         XCTAssertGreaterThan(appearance.floatingOpacity(list), 0.9, "white art under the list makes its floating glass nearly solid")
+    }
+
+    func testIncreaseContrastNeverMakesFloatingGlassMoreSeeThrough() throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["glass.composer.opacity": 0]))
+        for dark in [true, false] {
+            let normal = PhoneAppearance.Key(surface: .pane, size: CGSize(width: 1, height: 1), scale: 1, dark: dark, solid: false, target: 4.5)
+            var increased = normal
+            increased.target = PhoneAppearance.increasedTarget
+            XCTAssertGreaterThanOrEqual(appearance.floatingOpacity(increased), appearance.floatingOpacity(normal), "dark \(dark)")
+        }
     }
 
     func testTheDefaultAccentIsSolvedFor() throws {
