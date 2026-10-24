@@ -163,6 +163,9 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 			if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.Evidence != surface.EvidenceSubmitted || intent.ProviderKey != "" {
 				t.Fatalf("intent=%+v err=%v", intent, err)
 			}
+			if intent.UUID == "" || receipt.MessageID != intent.UUID {
+				t.Fatalf("receipt message id %q, intent uuid %q", receipt.MessageID, intent.UUID)
+			}
 			if r.QueueCount(session.ID) != 0 {
 				t.Fatal("ambiguous delivery was queued for retry")
 			}
@@ -212,6 +215,9 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	}
 	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 || !strings.Contains(receipt.Detail, "Claude target") {
 		t.Fatalf("receipt=%+v", receipt)
+	}
+	if intent, err := r.DeliveryIntent(receipt.DeliveryID); err != nil || intent.UUID == "" || receipt.MessageID != intent.UUID {
+		t.Fatalf("receipt message id %q, intent=%+v err=%v", receipt.MessageID, intent, err)
 	}
 	if state, found, err := r.RuntimeState(session.ID); err != nil || (found && state.ActiveTurnID != "") {
 		t.Fatalf("transport acceptance invented an active turn: state=%+v err=%v", state, err)

@@ -76,12 +76,24 @@ func (c *catalogWakes) sync() {
 			watch.awaits = append(watch.awaits, dir)
 		}
 	}
+	appeared := map[surface.SurfaceKind]bool{}
+	defer func() {
+		for kind := range appeared {
+			c.request(kind)
+		}
+	}()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return
 	}
 	for dir, watch := range c.watching {
+		// Its parent's wake may not have been forwarded yet, and is dropped with the watch.
+		if anyExistingDir(watch.awaits) {
+			for kind := range watch.kinds {
+				appeared[kind] = true
+			}
+		}
 		if wanted[dir] == nil {
 			watch.release()
 			delete(c.watching, dir)
@@ -111,7 +123,8 @@ func (c *catalogWakes) sync() {
 // forward turns a folder's wakes into discovery requests for its surfaces.
 // It syncs first, so a folder created by the wake, such as a new day's, is
 // followed before the pass it starts. A wake of an ancestor that only waits
-// for a folder asks for nothing until that folder exists.
+// for a folder asks for nothing itself: whichever sync first finds the folder
+// asks for its pass, since that sync drops the ancestor's watch.
 func (c *catalogWakes) forward(watch *catalogWake) {
 	defer c.forwards.Done()
 	for {
@@ -120,10 +133,10 @@ func (c *catalogWakes) forward(watch *catalogWake) {
 			return
 		case <-watch.wake.C():
 			c.mu.Lock()
-			kinds, named, awaits := watch.kinds, watch.named, watch.awaits
+			kinds, named := watch.kinds, watch.named
 			c.mu.Unlock()
 			c.sync()
-			if !named && !anyExistingDir(awaits) {
+			if !named {
 				continue
 			}
 			for kind := range kinds {

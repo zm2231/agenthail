@@ -256,7 +256,7 @@ func (s Service) queueUnavailable(session *surface.Session, message string, opti
 	if target == "" {
 		target = session.ID
 	}
-	receipt := &delivery.Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s, which cannot take it yet: %s", target, cause)}
+	receipt := &delivery.Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, MessageID: delivery.Dispatcher{Registry: s.Registry}.QueuedMessageID(deliveryID, session.ID), Detail: fmt.Sprintf("Queued for %s, which cannot take it yet: %s", target, cause)}
 	return &Outcome{Receipt: receipt, Session: session}, nil
 }
 
@@ -301,7 +301,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 			return nil, startErr
 		}
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
-		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: startedDetail(spec, previous, reason)}
+		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: startedDetail(spec, previous, reason)}
 		return outcome, nil
 	}
 	turn := ""

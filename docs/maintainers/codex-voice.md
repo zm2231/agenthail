@@ -127,8 +127,13 @@ about it is spoken:
   and voice has not spoken for two seconds. A transcript delta whose done never
   arrives holds it at most four seconds. Up to eight replies wait; past that the
   oldest is dropped and recorded.
-- A request sent on a route that gives no turn stays silent, as voice said:
-  its turn is known by its prompt.
+- A request sent on a route that gives no turn stays silent, as voice said,
+  wherever it lands, including a session the delivery moved to. Its turn is
+  known by the id the delivery gave the prompt, never by the prompt's text: the
+  receipt's turn ID, or its `messageId`, which a Claude prompt keeps in the
+  journal as its record uuid, its peer `msg_id` or, when absorbed mid-turn, its
+  queued command's `source_uuid`. A held request whose delivery returned no id
+  cannot be placed, and its turn is taken as typed.
 - While a request's turn is not yet known, a turn the host cannot place waits
   for that request to settle, at most 30 seconds. Past that it is taken as typed,
   recorded in the call as `voice/target/turn-unattributed` and written to the

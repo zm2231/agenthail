@@ -147,7 +147,7 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		{"markup followed by prose", user("<command-name>example</command-name> what does this tag mean?", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<command-name>example</command-name> what does this tag mean?"}}},
 	}
 	for _, tc := range cases {
-		got := claudeTimelineItems(tc.record)
+		got := claudeRecordItems(tc.record)
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("%s: got %+v want %+v", tc.name, got, tc.want)
 		}
