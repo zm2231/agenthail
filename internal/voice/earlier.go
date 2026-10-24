@@ -42,10 +42,13 @@ func (s *Service) catchUp(ctx context.Context, f *follower) bool {
 			s.retargetRequests(r.TurnID, outcome.TurnID)
 			r.TurnID = outcome.TurnID
 		}
+		_, seen := resolved[r.TurnID]
 		resolved[r.TurnID] = outcome
 		if outcome.Done {
 			f.retired[r.TurnID] = true
-			ended = append(ended, r)
+			if !seen {
+				ended = append(ended, r)
+			}
 			continue
 		}
 		f.voice[r.TurnID] = append(f.voice[r.TurnID], r.MessageID)

@@ -196,6 +196,33 @@ func TestAPeerTurnFollowedAgainMidTurnKeepsItsRequest(t *testing.T) {
 	assertDrained(t, f)
 }
 
+func TestTwoKeptPeerRequestsThatOneTurnAnsweredAreToldOnceInTheNextCall(t *testing.T) {
+	running := TurnOutcome{TurnID: "turn-a", Found: true}
+	done := TurnOutcome{TurnID: "turn-a", Found: true, Done: true, Reply: "Tests and build passed."}
+	briefer := &scriptedBriefer{reads: []map[string]TurnOutcome{
+		{"frame-1": running, "frame-2": running},
+		{"frame-1": done, "frame-2": done},
+	}}
+	f, target := peerTarget(t, briefer, true)
+	delegateToPeer(t, f, "voice-request-a", "Run the tests")
+	delegateToPeer(t, f, "voice-request-b", "Also run the build")
+	target.journal.end()
+	testkit.Eventually(t, "the follower to end with the journal", 5*time.Second, func() bool {
+		return hasEventWith(f.View(), "voice/delegation/failed", "error", "the session journal ended")
+	})
+	callAgain(t, f, "call-a", "call-b")
+	testkit.Eventually(t, "the shared turn's reply", 5*time.Second, func() bool {
+		return spokenWith(f, "Tests and build passed.") > 0 && len(f.keptRequests()) == 0
+	})
+	typeTurn(target.journal, "typed-1", "Check the lint", "Lint is clean.")
+	testkit.Eventually(t, "a later typed turn, read after catch-up", 5*time.Second, func() bool {
+		return spokenWith(f, "Lint is clean.") == 1
+	})
+	if spokenWith(f, "Tests and build passed.") != 1 {
+		t.Fatalf("spoken=%q", f.provider.spoken())
+	}
+}
+
 func TestAPeerRequestStillRunningAfterADroppedCallIsFollowedByTheNextCall(t *testing.T) {
 	briefer := fixedBriefer{outcomes: map[string]TurnOutcome{"peer-message": {TurnID: "peer-turn", Found: true}}}
 	f, target := peerTarget(t, briefer, false)

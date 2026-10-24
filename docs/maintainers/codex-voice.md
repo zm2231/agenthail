@@ -59,8 +59,9 @@ then records the delivery evidence and target turn ID before accepting speakable
 updates.
 
 Only a target with a correlatable turn stream can receive realtime delegation.
-Claude's native UDS peer transport is deliberately blocked for this path because
-socket acceptance alone cannot be joined to a later transcript turn. Busy, held,
+Claude's native UDS peer transport is joined to its transcript turn by the
+frame id the session keeps on the prompt, as described below; a socket
+acceptance without a frame id is held. Busy, held,
 read-only, unavailable, and unknown outcomes remain visible in the call state and
 are not represented as a spoken reply. Audio/provider identity is therefore not
 a claim that Claude supplies native audio.
