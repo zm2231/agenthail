@@ -358,9 +358,9 @@ func TestARestartWithAnActiveCallHoldsTheOperatorSourceOnce(t *testing.T) {
 	f := newFixture(t, fixtureOptions{})
 	connectFixture(t, f)
 	held := make(chan string, 4)
-	reopened := NewWithTargetsAndOperatorSource(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
+	reopened := NewWithTargetsAndOperatorSourceAndStream(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
 		held <- session.ID + ":" + strconv.FormatBool(active)
-	})
+	}, nil)
 	if v := reopened.View("phone"); v.Phase != "unknown" {
 		t.Fatalf("reopened phase=%q", v.Phase)
 	}

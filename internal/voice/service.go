@@ -260,17 +260,10 @@ var systemClock = clock{
 }
 
 func New(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string) *Service {
-	return NewWithTargets(path, provider, register, commandPath, nil, delivery.Dispatcher{})
+	return newService(path, provider, register, commandPath, nil, delivery.Dispatcher{}, nil, nil, systemClock)
 }
 
-func NewWithTargets(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer) *Service {
-	return NewWithTargetsAndOperatorSource(path, provider, register, commandPath, target, dispatcher, nil)
-}
-
-func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
-	return NewWithTargetsAndOperatorSourceAndStream(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, nil)
-}
-
+// A session-bound call follows its session's journal, so targets come with a stream.
 func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
 	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
 }
