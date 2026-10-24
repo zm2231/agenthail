@@ -62,7 +62,7 @@ SOURCES=(
   macOS/DesktopPalette.swift
   macOS/InterfaceStore.swift
   Backdrop.swift
-  macOS/BackdropLayers.swift
+  BackdropLayers.swift
   macOS/BoundedDock.swift
   UsageMeterText.swift
   UsageStrip.swift

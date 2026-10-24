@@ -35,6 +35,7 @@ let package = Package(
                 "RoleStyle.swift",
                 "RoleInlineStyle.swift",
                 "Backdrop.swift",
+                "BackdropLayers.swift",
                 "ScrimField.swift",
                 "GlassSolve.swift",
                 "HolderPins.swift",
