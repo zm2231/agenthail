@@ -196,7 +196,7 @@ func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session 
 	if err != nil {
 		if intent != nil {
 			if surface.IsDeliveryOutcomeUnknown(err) {
-				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
+				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 			}
 			d.failIntent(intent, session.ID, err)
 		}
@@ -223,7 +223,7 @@ func (d Dispatcher) queueForWaiting(session *surface.Session, message, target, s
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: sourceID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
+	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, MessageID: d.QueuedMessageID(deliveryID, session.ID), Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
 }
 
 // failureKind keeps an uncertain outcome distinct from a confirmed failure so every surface shows the same evidence.
@@ -484,7 +484,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
-	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
+	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, MessageID: d.QueuedMessageID(deliveryID, session.ID), Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
 	if waiting != nil {
 		receipt.Detail = fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target)
 	}
