@@ -1109,7 +1109,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func syncRequests(for session: SessionState) async {
         guard session.capabilities.respond, !session.isReadOnly else {
-            sessionRequests = nil
+            if sessionRequests != nil { sessionRequests = nil }
             sessionRequestsKey = nil
             return
         }

@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import Combine
 import Foundation
 
 final class StaleRequestStub: URLProtocol, @unchecked Sendable {
@@ -50,6 +51,15 @@ struct StaleRequestCardTest {
         let state = SessionRequests(permissionMode: "acceptEdits", requests: [dead])
         check(state.removing("dead").requests.isEmpty && state.removing("dead").permissionMode == "acceptEdits", "removing keeps the permission mode")
         check(state.removing("other") == state, "removing another id changes nothing")
+
+        let quiet = SessionState(id: "S", surface: "claude", name: "s", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        await pane.syncRequests(for: quiet)
+        check(pane.requests == nil, "a session that can't answer requests clears the cards")
+        var published = 0
+        let watch = pane.objectWillChange.sink { published += 1 }
+        await pane.syncRequests(for: quiet)
+        watch.cancel()
+        check(published == 0, "resyncing a session that can't answer requests publishes nothing: \(published)")
         print("stale request card tests passed")
     }
 

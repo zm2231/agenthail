@@ -781,9 +781,9 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func syncRequests(for session: SessionState) async {
         guard session.capabilities.respond, !session.isReadOnly else {
-            requests = nil
+            if requests != nil { requests = nil }
             requestsKey = nil
-            requestError = nil
+            if requestError != nil { requestError = nil }
             return
         }
         let key = "\(session.id)|\(session.waitingOn?.id ?? "")"

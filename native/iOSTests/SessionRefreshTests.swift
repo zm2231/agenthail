@@ -116,6 +116,18 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningASessionThatCannotAnswerRequestsPublishesNothing() async {
+        let model = AgenthailIOSModel(autoConnect: false)
+        let session = SessionState(id: "computer::demo", surface: "claude", name: "demo", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil)
+        var published = 0
+        let watch = model.objectWillChange.sink { published += 1 }
+        await model.syncRequests(for: session)
+        watch.cancel()
+        XCTAssertNil(model.sessionRequests)
+        XCTAssertEqual(published, 0)
+    }
+
+    @MainActor
     func testASessionWhoseSourceResetWhileShownReadsAPageWhenReopened() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         SessionRefreshProtocol.state.set(journalSeq: 10)
