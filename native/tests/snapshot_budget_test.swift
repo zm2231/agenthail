@@ -24,7 +24,7 @@ struct SnapshotBudgetTest {
             return (counted, sleeps)
         }
 
-        let expiry = ContinuousClock.now + .milliseconds(900)
+        let requested = ContinuousClock.now
         let budget = SnapshotBudget(deadlineMs: 900, reserve: .milliseconds(300))
         let started = ContinuousClock.now
 
@@ -35,7 +35,7 @@ struct SnapshotBudgetTest {
         await afterDeadline.wait { false }
         await afterDeadline.pause(.milliseconds(300))
         check(afterSleeps.count == 0, "a window that never loads and the settle get nothing once the budget is spent, slept \(afterSleeps.count) times")
-        check(budget.deadline < expiry, "the answer goes out before the daemon stops waiting, \(expiry - budget.deadline) to spare")
+        check(budget.deadline >= requested + .milliseconds(600) && budget.deadline <= started + .milliseconds(600), "the answer goes out the reserve before the daemon stops waiting, deadline \(budget.deadline - requested) after arrival")
 
         let skewed = try JSONDecoder().decode(AgenthailEvent.self, from: Data("""
         {"id":1,"type":"ui.snapshot.requested","timestamp":"2027-10-23T08:00:00Z","data":{"id":"a","deadlineMs":20000}}
