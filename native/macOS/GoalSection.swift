@@ -6,6 +6,9 @@ struct GoalSection: View {
     let session: SessionState
     @State private var editor = GoalEditorState()
     @State private var text = ""
+    @State private var expanded = false
+    @State private var fullHeight: CGFloat = 0
+    @State private var shownHeight: CGFloat = 0
 
     private var editable: Bool {
         !session.isReadOnly && session.capabilities.goalSet && pane.removedSession == nil
@@ -30,6 +33,7 @@ struct GoalSection: View {
         .onChange(of: pane.selectedSessionID) {
             if pane.selectedSessionID != editor.sessionID { reset() }
         }
+        .onChange(of: pane.detail?.goal?.objective) { expanded = false }
     }
 
     private func goalView(_ goal: GoalState) -> some View {
@@ -45,7 +49,22 @@ struct GoalSection: View {
                     .background(DesktopPalette.fill, in: Capsule())
             }
             Text(goal.objective)
+                .lineLimit(expanded ? nil : 4)
                 .textSelection(.enabled)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shownHeight = $0 }
+                .background(alignment: .topLeading) {
+                    Text(goal.objective)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
+                }
+            if expanded || fullHeight > shownHeight + 1 {
+                Button(expanded ? "Less" : "More") { expanded.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.accentText)
+                    .accessibilityLabel(expanded ? "Show less of the goal" : "Show the whole goal")
+            }
             if let reason = goal.reason {
                 Text(reason)
                     .font(.system(size: DesktopType.caption))

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
@@ -480,6 +481,12 @@ func TestAStartWhoseStateCannotBeSavedClosesTheCallsConnection(t *testing.T) {
 	}
 }
 
+type quietJournal struct{}
+
+func (quietJournal) PrepareSessionStream(context.Context, *surface.Session) (sessionstream.Subscription, error) {
+	return sessionstream.Subscription{Events: make(chan sessionstream.Event), Cancel: func() {}}, nil
+}
+
 func TestASpokenRequestOnASessionBoundCallReachesOnlyTheSession(t *testing.T) {
 	daemon := startManagedCodex(t, signedIn(chatgptAccount))
 	codex := isolatedManagedRuntime(t)
@@ -492,7 +499,7 @@ func TestASpokenRequestOnASessionBoundCallReachesOnlyTheSession(t *testing.T) {
 		}
 		return &voice.Target{Session: session, Adapter: codex}, nil
 	}
-	service := voice.NewWithTargets(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: codex}, nil, "/fixture/agenthail", resolve, delivery.Dispatcher{})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: codex}, nil, "/fixture/agenthail", resolve, delivery.Dispatcher{}, nil, quietJournal{})
 	t.Cleanup(service.Close)
 	ctx := context.Background()
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "select", TargetID: targetID}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {

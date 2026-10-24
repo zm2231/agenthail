@@ -135,6 +135,11 @@ struct ComposerTextViewTest {
         check(abs(height("a\n", 1...10) - line * 2) <= 1, "a trailing newline counts as a line: \(height("a\n", 1...10) / line)")
         check(height(String(repeating: "word ", count: 40), 1...10) > line * 2, "long text wraps and grows at the given width")
         check(height(String(repeating: "x\n", count: 40)) == ceil(line * 10), "past ten lines the composer scrolls instead of growing")
+        let composer = ComposerNSTextView.composerLines
+        check(height("", composer) == ceil(line), "an empty session composer is one row: \(height("", composer) / line)")
+        check(height("one line", composer) == ceil(line), "a single line keeps the session composer one row: \(height("one line", composer) / line)")
+        check(abs(height("1\n2\n3", composer) - line * 3) <= 1, "the session composer grows with its text: \(height("1\n2\n3", composer) / line)")
+        check(height(String(repeating: "x\n", count: 40), composer) == ceil(line * CGFloat(composer.upperBound)), "the session composer stops growing at its cap and scrolls")
 
         var commands: [ComposerCommand] = []
         var handles = true

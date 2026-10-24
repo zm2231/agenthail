@@ -149,6 +149,7 @@ enum ColumnFit {
     /// Narrower than this, a docked inspector would pin the window at the
     /// columns' minimum widths, so it stops docking before the window does.
     static let inspectorDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min + DesktopColumns.inspector.ideal
+    static let inspectorOpens: CGFloat = 1600
     /// The same for the sidebar, once the inspector has collapsed.
     static let sidebarDocks = DesktopColumns.sidebar.max + DesktopColumns.detail.min
 }

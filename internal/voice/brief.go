@@ -39,12 +39,15 @@ type BriefSource struct {
 	JournalSeq  uint64
 	Missing     []string
 	AsOf        time.Time
+	Earlier     []EarlierRequest
 }
 
 // Briefer reads a session's records for its voice brief. It makes no model
 // call.
 type Briefer interface {
 	BriefSource(ctx context.Context, session *surface.Session) BriefSource
+	// TurnOutcomes reads what the session's records say about each turn.
+	TurnOutcomes(ctx context.Context, session *surface.Session, turnIDs []string) (map[string]TurnOutcome, error)
 }
 
 // BriefInfo is what a call was told about its session, as the phone shows it.
@@ -55,13 +58,16 @@ type BriefInfo struct {
 	Bytes      int       `json:"bytes"`
 	Exchanges  int       `json:"exchanges"`
 	Omitted    []string  `json:"omitted,omitempty"`
+	// Compactions is the session's compaction count when the brief was read,
+	// so a later compaction is noticed.
+	Compactions *int `json:"compactions,omitempty"`
 }
 
 // RenderBrief writes the brief voice is given about its session, newest
 // exchanges first, within briefBytes. Every part it leaves out or shortens is
 // named in the brief and in the returned info.
 func RenderBrief(src BriefSource) (string, BriefInfo) {
-	info := BriefInfo{SessionID: src.Session.ID, AsOf: src.AsOf, JournalSeq: src.JournalSeq}
+	info := BriefInfo{SessionID: src.Session.ID, AsOf: src.AsOf, JournalSeq: src.JournalSeq, Compactions: src.Compactions}
 	var omitted []string
 	field := func(text string, limit int, label string) string {
 		text, short := clipped(text, limit)
@@ -86,6 +92,9 @@ func RenderBrief(src BriefSource) (string, BriefInfo) {
 	}
 	if src.Compactions != nil {
 		fmt.Fprintf(&head, "Context compactions so far: %d. Details from before the latest one may no longer be in the session's memory.\n", *src.Compactions)
+	}
+	if left := writeEarlier(&head, src.Earlier); left > 0 {
+		omitted = append(omitted, fmt.Sprintf("%d more earlier request(s) kept for a later call", left))
 	}
 
 	var shown []string
@@ -189,10 +198,12 @@ func clipped(text string, limit int) (string, bool) {
 
 // buildBrief reads and renders the brief for a session, or nothing when there
 // is no session or no briefer.
-func buildBrief(ctx context.Context, briefer Briefer, session *surface.Session) (string, *BriefInfo) {
+func buildBrief(ctx context.Context, briefer Briefer, session *surface.Session, requests []requestRecord) (string, *BriefInfo, map[string]TurnOutcome) {
 	if briefer == nil || session == nil {
-		return "", nil
+		return "", nil, nil
 	}
-	text, info := RenderBrief(briefer.BriefSource(ctx, session))
-	return text, &info
+	src := briefer.BriefSource(ctx, session)
+	outcomes := earlierOutcomes(ctx, briefer, session, requests, &src)
+	text, info := RenderBrief(src)
+	return text, &info, outcomes
 }

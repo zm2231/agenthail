@@ -159,10 +159,9 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 			return err
 		}},
 		{name: "stream cancel", held: "Cancel", stream: true, setup: func(t *testing.T, f *voiceFixture, target *targetFixture) {
-			target.turnID = target.session.ID
 			selectAndConnect(t, f, target)
 		}, run: func(f *voiceFixture) error {
-			_, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
+			_, err := f.Apply(Action{Action: "transfer", AttemptID: "call-a", TargetID: ""})
 			return err
 		}},
 		{name: "event poll", held: "Poll", setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
@@ -359,9 +358,9 @@ func TestARestartWithAnActiveCallHoldsTheOperatorSourceOnce(t *testing.T) {
 	f := newFixture(t, fixtureOptions{})
 	connectFixture(t, f)
 	held := make(chan string, 4)
-	reopened := NewWithTargetsAndOperatorSource(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
+	reopened := NewWithTargetsAndOperatorSourceAndStream(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
 		held <- session.ID + ":" + strconv.FormatBool(active)
-	})
+	}, nil)
 	if v := reopened.View("phone"); v.Phase != "unknown" {
 		t.Fatalf("reopened phase=%q", v.Phase)
 	}

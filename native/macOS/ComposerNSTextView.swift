@@ -47,6 +47,7 @@ final class ComposerNSTextView: NSTextView {
     }
 
     static let lineHeight = font.ascender - font.descender + font.leading
+    static let composerLines: ClosedRange<Int> = 1...10
 
     /// Measures the text apart from the view: SwiftUI asks during its layout
     /// pass, and resizing or laying out the view there makes AppKit schedule
