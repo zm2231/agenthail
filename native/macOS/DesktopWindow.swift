@@ -664,7 +664,7 @@ struct ConversationPane: View {
 
     var body: some View {
         if let session = pane.displayedSession {
-            TranscriptView(model: model, pane: pane, session: session)
+            TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
@@ -857,9 +857,9 @@ struct ConversationHeader: View {
 }
 
 struct TranscriptView: View {
-    @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
+    let sends: [LocalSend]
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var underfilled = false
@@ -870,7 +870,6 @@ struct TranscriptView: View {
 
     var body: some View {
         let blocks = TranscriptBlock.build(pane.timelineItems)
-        let sends = model.localSends[session.id] ?? []
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         ScrollView {
@@ -897,14 +896,15 @@ struct TranscriptView: View {
                     .padding(.top, 60)
                 }
                 ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-                    TranscriptBlockView(block: block, onEdit: canResend ? { resend($0) } : nil)
+                    TranscriptBlockView(block: block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
+                        .equatable()
                         .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
                 }
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
-                        if send.failure != nil { model.discardSend(send, in: session.id) }
+                        if send.failure != nil { pane.model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
-                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
+                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { pane.model.retrySend(send, in: session.id) })
                     .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
                 if session.isWaitingOnBackground, let background = session.backgroundTasks {
@@ -1040,104 +1040,6 @@ struct TranscriptView: View {
 
     private func jumpToLatest() {
         scrollToLatest($position, following: $following)
-    }
-}
-
-struct TranscriptBlockView: View {
-    let block: TranscriptBlock
-    var onEdit: ((String) -> Void)? = nil
-    @State private var opened: RowChoice<Bool>?
-    @Environment(\.transcriptRows) private var rows
-    @Environment(\.holdTranscriptPlace) private var holdPlace
-    @Environment(\.transcriptOverhang) private var overhang
-
-    private var note: String? { block.truncated ? TimelineMetadata.shortened : nil }
-    private var expanded: Bool { rows.current(opened) ?? rows.isOpen(block.id) ?? false }
-
-    var body: some View {
-        switch block.kind {
-        case .user(let text, let files):
-            let envelope = PeerEnvelope(text)
-            if let sender = envelope.sender {
-                PeerMessage(sender: sender, text: envelope.body, time: TurnClock.time(block.timestamp), note: note)
-            } else {
-                UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit, row: block.id)
-            }
-        case .assistant(let text):
-            AssistantReply(text: text, note: note, footer: block.finished.map { TurnClock.footer(duration: $0, at: block.timestamp) })
-        case .peer(let sender, let text):
-            PeerMessage(sender: sender, text: text, time: TurnClock.time(block.timestamp), note: note)
-        case .tools(let items):
-            ToolRunView(id: block.id, items: items)
-                .padding(.trailing, -overhang)
-        default:
-            VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-                record
-                if let note {
-                    Text(note)
-                        .font(.system(size: DesktopType.caption))
-                        .foregroundStyle(DesktopPalette.muted)
-                }
-            }
-        }
-    }
-
-    private func toggle() {
-        holdPlace()
-        let next = !expanded
-        opened = rows.choice(next)
-        rows.set(block.id, open: next)
-    }
-
-    @ViewBuilder private var record: some View {
-        switch block.kind {
-        case .user, .assistant, .peer, .tools:
-            EmptyView()
-        case .annotation(let text):
-            Text(text)
-                .font(.system(size: DesktopType.meta))
-                .foregroundStyle(DesktopPalette.muted)
-        case .notice(let text):
-            Button(action: toggle) {
-                HStack(spacing: DesktopSpace.s) {
-                    Rectangle().fill(DesktopPalette.line).frame(width: 18, height: 1)
-                    Text(text)
-                        .lineLimit(expanded ? nil : 1)
-                        .multilineTextAlignment(.leading)
-                        .layoutPriority(1)
-                    Rectangle().fill(DesktopPalette.line).frame(minWidth: 18, maxWidth: .infinity, maxHeight: 1)
-                }
-                .font(.system(size: DesktopType.meta))
-                .foregroundStyle(DesktopPalette.muted)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(expanded ? "" : text)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-        case .image(let attachment):
-            AttachmentImageView(attachment: attachment)
-        case .instructions(let text):
-            VStack(alignment: .leading, spacing: 6) {
-                Button(action: toggle) {
-                    HStack(spacing: 6) {
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        Text("Instructions")
-                    }
-                    .font(.system(size: DesktopType.meta))
-                    .foregroundStyle(DesktopPalette.muted)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Shows what the agent was told")
-                if expanded {
-                    Text(text)
-                        .font(.system(size: DesktopType.meta, design: .monospaced))
-                        .foregroundStyle(DesktopPalette.muted)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
     }
 }
 
