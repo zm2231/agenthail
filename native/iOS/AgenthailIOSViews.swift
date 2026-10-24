@@ -730,6 +730,80 @@ struct IOSComposer: View {
             && (steering || detail.capabilities.send)
     }
 
+    @ViewBuilder private var turnControls: some View {
+        if detail.capabilities.attach && detail.capabilities.send {
+            ComposerAttachmentMenu(model: model)
+                .disabled(sending)
+        }
+        if detail.capabilities.model {
+            Button { showingModels = true } label: { modelLabel }
+            .buttonStyle(.plain)
+            .disabled(model.pendingControls.contains(session.id))
+            .accessibilityLabel("Change model, " + modelName)
+            .accessibilityIdentifier("composer-model-picker")
+        } else { modelLabel }
+        if let mode = permissionMode {
+            Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
+                Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mode, " + SessionRequests.permissionModeLabel(mode))
+            .accessibilityHint("Changes to the next mode")
+            .accessibilityIdentifier("composer-mode")
+        } else if session.surface == "codex" && detail.capabilities.send {
+            let mode = model.turnSettings(for: session.id).mode
+            Button {
+                var settings = model.turnSettings(for: session.id)
+                settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
+                model.setTurnSettings(settings, for: session.id)
+            } label: {
+                Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session mode").font(.footnote.weight(.medium))
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Mode, " + (mode == .plan ? "Plan" : mode == .default ? "Work" : "session setting"))
+            .accessibilityHint("Switches between Work and Plan for the next message")
+            .accessibilityIdentifier("composer-mode")
+        }
+        if session.surface == "codex" && detail.capabilities.send {
+            Button { showingTurnSettings = true } label: {
+                Image(systemName: model.turnSettings(for: session.id).isEmpty ? "slider.horizontal.3" : "slider.horizontal.3.circle.fill")
+                    .font(.body).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Effort and plan mode")
+            .accessibilityIdentifier("composer-turn-settings")
+        }
+    }
+
+    @ViewBuilder private var sendControls: some View {
+        if detail.session.status == "busy" && detail.capabilities.interrupt {
+            Button { model.action("interrupt", session: session) } label: {
+                Image(systemName: "stop.fill").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .background(Color.primary.opacity(0.08), in: Circle())
+            .accessibilityLabel("Stop current turn")
+            .disabled(model.pendingControls.contains(session.id))
+        }
+        Button { model.send(to: session) } label: {
+            if sending { ProgressView().frame(width: 44, height: 44) }
+            else { Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(PhonePalette.muted))
+        .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.clear), in: Circle())
+        .overlay(Circle().strokeBorder(canSend ? AnyShapeStyle(Color.clear) : AnyShapeStyle(PhonePalette.muted), lineWidth: 1))
+        .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
+        .disabled(!canSend)
+        .contextMenu { composerMenu }
+        .accessibilityAction(named: "Recent prompts") { showingPrompts = true }
+        .accessibilityAction(named: stashActionTitle) { model.toggleStash() }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let status = model.deliveryStatus[session.id] {
@@ -772,86 +846,23 @@ struct IOSComposer: View {
                     text: $draft.text,
                     placeholder: steering ? "Steer this turn…" : "Message this agent…",
                     label: steering ? "Instruction for the current turn" : "Message to this agent",
-                    lines: 1 ... 6,
+                    lines: dynamicTypeSize.isAccessibilitySize ? 1 ... 2 : 1 ... 6,
                     pasteAttachments: detail.capabilities.attach && detail.capabilities.send && !sending ? { model.paste($0) } : nil,
                     editor: editor,
                     onCaret: { caret in updateCompletion { $0.caret = caret } }
                 )
                 .padding(.horizontal, 8).padding(.top, 8)
-                let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
-                layout {
-                    if detail.capabilities.attach && detail.capabilities.send {
-                        ComposerAttachmentMenu(model: model)
-                            .disabled(sending)
+                let row = HStack(spacing: 8) { turnControls; Spacer(minLength: 0); sendControls }
+                if dynamicTypeSize.isAccessibilitySize {
+                    ViewThatFits(in: .horizontal) {
+                        row
+                        VStack(alignment: .leading, spacing: 8) {
+                            turnControls
+                            HStack(spacing: 8) { Spacer(minLength: 0); sendControls }
+                        }
                     }
-                    if detail.capabilities.model {
-                        Button { showingModels = true } label: { modelLabel }
-                        .buttonStyle(.plain)
-                        .disabled(model.pendingControls.contains(session.id))
-                        .accessibilityLabel("Change model, " + modelName)
-                        .accessibilityIdentifier("composer-model-picker")
-                    } else { modelLabel }
-                    if let mode = permissionMode {
-                        Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
-                            Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
-                                .padding(.horizontal, 10).frame(minHeight: 44)
-                                .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Mode, " + SessionRequests.permissionModeLabel(mode))
-                        .accessibilityHint("Changes to the next mode")
-                        .accessibilityIdentifier("composer-mode")
-                    } else if session.surface == "codex" && detail.capabilities.send {
-                        let mode = model.turnSettings(for: session.id).mode
-                        Button {
-                            var settings = model.turnSettings(for: session.id)
-                            settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
-                            model.setTurnSettings(settings, for: session.id)
-                        } label: {
-                            Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session mode").font(.footnote.weight(.medium))
-                                .padding(.horizontal, 10).frame(minHeight: 44)
-                                .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Mode, " + (mode == .plan ? "Plan" : mode == .default ? "Work" : "session setting"))
-                        .accessibilityHint("Switches between Work and Plan for the next message")
-                        .accessibilityIdentifier("composer-mode")
-                    }
-                    if session.surface == "codex" && detail.capabilities.send {
-                        Button { showingTurnSettings = true } label: {
-                            Image(systemName: model.turnSettings(for: session.id).isEmpty ? "slider.horizontal.3" : "slider.horizontal.3.circle.fill")
-                                .font(.body).frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Effort and plan mode")
-                        .accessibilityIdentifier("composer-turn-settings")
-                    }
-                    if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                    HStack(spacing: 8) {
-                        if dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                        if detail.session.status == "busy" && detail.capabilities.interrupt {
-                            Button { model.action("interrupt", session: session) } label: {
-                                Image(systemName: "stop.fill").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
-                            }
-                            .buttonStyle(.plain)
-                            .background(Color.primary.opacity(0.08), in: Circle())
-                            .accessibilityLabel("Stop current turn")
-                            .disabled(model.pendingControls.contains(session.id))
-                        }
-                        Button { model.send(to: session) } label: {
-                            if sending { ProgressView().frame(width: 44, height: 44) }
-                            else { Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(PhonePalette.muted))
-                        .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.clear), in: Circle())
-                        .overlay(Circle().strokeBorder(canSend ? AnyShapeStyle(Color.clear) : AnyShapeStyle(PhonePalette.muted), lineWidth: 1))
-                        .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
-                        .disabled(!canSend)
-                        .contextMenu { composerMenu }
-                        .accessibilityAction(named: "Recent prompts") { showingPrompts = true }
-                        .accessibilityAction(named: stashActionTitle) { model.toggleStash() }
-                    }
+                } else {
+                    row
                 }
             }
             .padding(10)
