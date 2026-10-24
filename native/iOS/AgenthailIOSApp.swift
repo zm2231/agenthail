@@ -67,7 +67,7 @@ extension Notification.Name {
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
     @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
-    @StateObject private var voiceCalls = VoiceCallCoordinator(makeModel: sessionPreviewEnabled ? { VoiceOperatorModel(preview: true) } : { VoiceOperatorModel.paired() })
+    @State private var voiceCalls = VoiceCallCoordinator(makeModel: { Self.voiceModel() })
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
 
@@ -78,7 +78,7 @@ struct AgenthailIOSApp: App {
                 if ProcessInfo.processInfo.arguments.contains("--preview-voice") {
                     AgenthailVoiceOperatorSheet(model: VoiceOperatorModel(preview: true), rowMemory: TranscriptRowMemory(), openSession: { _ in })
                 } else if ProcessInfo.processInfo.arguments.contains("--preview-session") {
-                    SessionPreview()
+                    SessionPreview().overlay(alignment: .topLeading) { SceneEvaluationStamp(count: SceneEvaluations.next()) }
                 } else { connectedRoot }
 #else
                 connectedRoot
@@ -87,6 +87,14 @@ struct AgenthailIOSApp: App {
             .environmentObject(voiceCalls)
         }
     }
+
+    private static func voiceModel() -> VoiceOperatorModel {
+#if DEBUG
+        if sessionPreviewEnabled { return PreviewVoice.model() }
+#endif
+        return VoiceOperatorModel.paired()
+    }
+
     private var connectedRoot: some View {
         AgenthailIOSRoot(model: model)
             .onOpenURL { model.handlePairingURL($0) }
