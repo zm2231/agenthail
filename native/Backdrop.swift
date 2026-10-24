@@ -38,6 +38,11 @@ struct BackdropSpec: Equatable, Sendable {
         case mesh(columns: Int, rows: Int, colors: [BackdropRGB])
     }
 
+    struct PaneStyle: Equatable, Sendable {
+        var minimum: Float
+        var strength: Float
+    }
+
     struct Pane: Equatable, Sendable {
         var id: String
         var rect: CGRect
@@ -92,7 +97,7 @@ enum BackdropRenderer {
     /// pane's minimum. Short, so margins and gaps inside a pane show the
     /// background.
     static let paneFeather: Float = 72
-    private static let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+    static let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
 
     static func render(_ spec: BackdropSpec) -> BackdropImage? {
         let w = Int((spec.size.width * spec.scale).rounded()), h = Int((spec.size.height * spec.scale).rounded())
@@ -202,7 +207,7 @@ enum BackdropRenderer {
         CGColor(colorSpace: srgb, components: [CGFloat(c.x), CGFloat(c.y), CGFloat(c.z), alpha])!
     }
 
-    private static func wallpaperImage(_ spec: BackdropSpec, width w: Int, height h: Int) -> CGImage? {
+    static func wallpaperImage(_ spec: BackdropSpec, width w: Int, height h: Int) -> CGImage? {
         guard let ctx = bitmap(w, h) else { return nil }
         let bounds = CGRect(x: 0, y: 0, width: w, height: h)
         ctx.setFillColor(cgColor(spec.ground))
@@ -296,7 +301,7 @@ enum BackdropRenderer {
         ctx.restoreGState()
     }
 
-    private static func base(_ spec: BackdropSpec, wallpaper: CGImage?, strength: Float, texture: Bool, width w: Int, height h: Int) -> CGImage {
+    static func base(_ spec: BackdropSpec, wallpaper: CGImage?, strength: Float, texture: Bool, width w: Int, height h: Int) -> CGImage {
         let ctx = bitmap(w, h)!
         let bounds = CGRect(x: 0, y: 0, width: w, height: h)
         ctx.setFillColor(cgColor(spec.ground))

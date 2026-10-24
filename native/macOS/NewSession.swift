@@ -35,13 +35,13 @@ struct NewSessionView: View {
                 .padding(.bottom, DesktopSpace.s)
             }
             .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
+            .scrimSurface(radius: DesktopRadius.sheet)
             .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(DesktopPalette.line))
             .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
             .disabled(draft.starting || draft.submitted != nil)
             status
         }
         .frame(maxWidth: 680)
-        .scrimText("new-session")
         .padding(.horizontal, DesktopSpace.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .backdropSurface(DesktopPalette.window)
@@ -206,6 +206,7 @@ struct NewSessionView: View {
             .padding(DesktopSpace.s)
             .frame(maxWidth: .infinity, alignment: .leading)
             .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+            .scrimSurface(radius: DesktopRadius.card)
         }
     }
 

@@ -56,8 +56,6 @@ struct WindowRectReaderTest {
             failures += 1
         }
 
-        var left = 0
-        probe.onLeave = { left += 1 }
         reported = nil
         probe.post(force: true)
         probe.removeFromSuperview()
@@ -66,37 +64,8 @@ struct WindowRectReaderTest {
             print("FAIL: a report queued before the probe left its window was delivered: \(String(describing: reported))")
             failures += 1
         }
-        if left != 1 {
-            print("FAIL: leaving the window called onLeave \(left) times, want 1")
-            failures += 1
-        }
-
-        let backdrop = WindowBackdrop()
-        let rect = CGRect(x: 0, y: 0, width: 10, height: 10)
-        func rects(_ id: String) -> [CGRect] { backdrop.regions.values.filter { $0.id == id }.map(\.rect) }
-
-        let outgoing = RegionHandle(id: "swap", region: .text, backdrop: backdrop)
-        let incoming = RegionHandle(id: "swap", region: .text, backdrop: backdrop)
-        outgoing.report(rect)
-        incoming.report(rect.offsetBy(dx: 5, dy: 0))
-        outgoing.report(rect)
-        outgoing.leave()
-        if rects("swap") != [rect.offsetBy(dx: 5, dy: 0)] {
-            print("FAIL: the view that replaced another lost or shared the region when the old one left, got \(rects("swap"))")
-            failures += 1
-        }
-
-        let before = RegionHandle(id: "order", region: .text, backdrop: backdrop)
-        let after = RegionHandle(id: "order", region: .text, backdrop: backdrop)
-        before.report(rect)
-        before.leave()
-        after.report(rect.offsetBy(dx: 7, dy: 0))
-        if rects("order") != [rect.offsetBy(dx: 7, dy: 0)] {
-            print("FAIL: a view that left before its replacement appeared still affects the region, got \(rects("order"))")
-            failures += 1
-        }
 
         if failures > 0 { exit(1) }
-        print("window rect reader: a probe follows its ancestors' moves, and a region lasts exactly as long as its reader is in the window")
+        print("window rect reader: a probe follows its ancestors' moves and stops reporting once it leaves the window")
     }
 }
