@@ -32,7 +32,7 @@ type promptRestart struct {
 func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 	t.Helper()
 	previousRetry, previousHeld := claudePromptHookRetry, claudePromptHookHeld
-	claudePromptHookRetry, claudePromptHookHeld = 20*time.Millisecond, 20*time.Millisecond
+	claudePromptHookRetry, claudePromptHookHeld = 20*time.Millisecond, time.Hour
 	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookHeld = previousRetry, previousHeld })
 	t.Setenv("HOME", t.TempDir())
 	claude := claudetest.New(t)
