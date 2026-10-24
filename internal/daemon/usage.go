@@ -30,10 +30,14 @@ func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	sets := d.localUsageSets(r.Context(), time.Now())
+	var sets, remote []usageSet
+	var wait sync.WaitGroup
+	wait.Go(func() { sets = d.localUsageSets(r.Context(), time.Now()) })
 	if r.URL.Query().Get("scope") != "local" {
-		sets = append(sets, d.remoteUsageSets(r.Context())...)
+		wait.Go(func() { remote = d.remoteUsageSets(r.Context()) })
 	}
+	wait.Wait()
+	sets = append(sets, remote...)
 	for i := range sets {
 		if sets[i].Meters == nil {
 			sets[i].Meters = []usageMeter{}
