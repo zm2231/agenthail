@@ -8,8 +8,6 @@ const themes = JSON.parse(process.env.AGENTHAIL_GUARD_DASHBOARDS);
 const shots = process.env.AGENTHAIL_GUARD_SHOTS;
 const CANDIDATES = ["art: field", "art: tide", "art: aurora", "art: dawn", "gradient: dusk", "gradient: slate", "gradient: forest", "gradient: ember", "gradient: violet", "gradient: mono"];
 const SIZES = { wide: [1440, 900], phone: [390, 844] };
-const PHONE_VIEWS = new Set(["overview", "session open"]);
-
 async function setUI(dashboard, lines) {
   const response = await fetch(`${dashboard.url}/api/v1/ui`, {
     method: "POST",
@@ -91,10 +89,8 @@ async function guardTheme(browser, theme, dashboards) {
     for (const dashboard of Object.values(dashboards)) await setUI(dashboard, [`theme = ${theme}`, `background = ${background}`]);
     for (const contrast of ["no-preference", "more"]) {
       const target = contrast === "more" ? 7 : 4.5;
-      for (const [size, [width, height]] of Object.entries(SIZES)) {
-        if (size === "phone" && contrast === "more") continue;
+      for (const [width, height] of Object.values(SIZES)) {
         for (const view of VIEWS) {
-          if (size === "phone" && !PHONE_VIEWS.has(view.name)) continue;
           const page = pages[view.dashboard];
           await page.setViewport({ width, height });
           await page.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);

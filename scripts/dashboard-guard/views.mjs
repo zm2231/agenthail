@@ -1,19 +1,22 @@
+const press = async (page, selector) => {
+  await page.waitForSelector(selector, { visible: true });
+  await page.$eval(selector, (element) => element.click());
+};
+
 const operations = (tab) => async (page) => {
-  await page.$eval(`[data-operations-tab="${tab}"]`, (button) => button.click());
+  await press(page, `[data-operations-tab="${tab}"]`);
   await page.waitForSelector(`[data-operations-tab="${tab}"].active`);
 };
 
 const openSession = async (page) => {
-  await page.waitForSelector('#session-list [data-session="review"]', { visible: true });
-  await page.click('#session-list [data-session="review"]');
+  await press(page, '#session-list [data-session="review"]');
   await page.waitForFunction(() => document.querySelector("#chat-body")?.textContent.includes("contrast target"));
   await page.waitForSelector("#background-panel .background-card", { visible: true });
   await page.waitForSelector("#request-panel:not([hidden])", { visible: true });
 };
 
 const projects = async (page) => {
-  await page.waitForSelector('[data-inbox-mode="projects"]', { visible: true });
-  await page.click('[data-inbox-mode="projects"]');
+  await press(page, '[data-inbox-mode="projects"]');
   await page.waitForSelector("[data-project-new]", { visible: true });
 };
 
@@ -25,10 +28,10 @@ const opened = (trigger, shown) => async (page) => {
 export const VIEWS = [
   { name: "slash menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await openSession(page), await page.type("#message", "/")), "#slash-menu") },
   { name: "toast", dashboard: "full", hash: "overview", ready: "#recent-activity > *", act: opened((page) => page.evaluate(() => toast("Sent to review. Its reply appears in Conversations.")), "#toast") },
-  { name: "voice dialog", dashboard: "full", hash: "overview", act: opened((page) => page.click("#voice-orchestrator"), "#voice-dialog[open]") },
-  { name: "project dialog", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await page.click("[data-project-new]")), "#project-dialog[open]") },
-  { name: "project menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await page.click(".project-menu summary")), ".project-menu[open] .project-menu-items") },
-  { name: "host picker", dashboard: "full", hash: "conversations", act: opened(async (page) => (await page.click("#new-conversation-toggle"), await page.waitForSelector("#new-conversation-host", { visible: true }), await page.click("#new-conversation-host")), "#new-conversation-host-menu") },
+  { name: "voice dialog", dashboard: "full", hash: "overview", act: opened((page) => press(page, "#voice-orchestrator"), "#voice-dialog[open]") },
+  { name: "project dialog", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, "[data-project-new]")), "#project-dialog[open]") },
+  { name: "project menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, ".project-menu summary")), ".project-menu[open] .project-menu-items") },
+  { name: "host picker", dashboard: "full", hash: "conversations", act: opened(async (page) => (await press(page, "#new-conversation-toggle"), await press(page, "#new-conversation-host")), "#new-conversation-host-menu") },
   { name: "overview", dashboard: "full", hash: "overview", ready: "#recent-activity > *" },
   { name: "conversations", dashboard: "full", hash: "conversations", ready: "#session-list [data-session]" },
   { name: "session open", dashboard: "full", hash: "conversations", act: openSession },
