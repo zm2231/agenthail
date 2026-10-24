@@ -246,8 +246,12 @@ textarea:focus-visible {
   max-width: 320px;
 }
 @container (max-width: 900px) {
-  .usage-meter meter {
+  .usage-meter meter,
+  .usage-other:not(.critical) {
     display: none;
+  }
+  .usage-line .critical {
+    order: -1;
   }
 }
 @container (max-width: 700px) {
