@@ -301,7 +301,7 @@ extension SessionSidebar {
                         .padding(.vertical, 6)
                         .padding(.horizontal, 14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(pane.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                        .background(DesktopPalette.selection.when(pane.selectedSessionID == result.session.id), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -408,7 +408,7 @@ extension SessionSidebar {
                 .padding(.vertical, 6)
                 .padding(.horizontal, DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(selected ? DesktopPalette.selection : (needsYou ? DesktopPalette.attentionBackground : Color.clear), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                .background(selected ? AnyShapeStyle(DesktopPalette.selection) : DesktopPalette.attentionBackground.when(needsYou), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -750,7 +750,7 @@ struct ConversationPane: View {
                     } else {
                         VStack(spacing: 0) {
                             if let waiting = session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: session.isReadOnly, respond: session.capabilities.respond) {
-                                ElsewhereWaitCard(waiting: waiting, place: session.waitingPlace ?? .elsewhere, surface: session.surface, hostName: session.runtime?.hostName, accent: DesktopPalette.accentText,
+                                ElsewhereWaitCard(waiting: waiting, place: session.waitingPlace ?? .elsewhere, surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(DesktopPalette.accentText),
                                                   open: session.runtime?.focusable == true ? { model.focusInTerminal(session) } : nil,
                                                   restart: { model.stopAndResume(session.id) })
                                     .id(waiting.id)
@@ -759,7 +759,7 @@ struct ConversationPane: View {
                                     .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
                             } else if let request = pane.requests?.requests.first, !session.isReadOnly {
-                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: DesktopPalette.accentText) { decision in
+                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText)) { decision in
                                     Task { await pane.respond(to: request, decision: decision) }
                                 }
                                 .id(request.id)
@@ -908,7 +908,7 @@ struct ConversationHeader: View {
             } label: {
                 Image(systemName: "sidebar.right")
                     .frame(width: 28, height: 28)
-                    .background(inspectorVisible ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                    .background(DesktopPalette.selection.when(inspectorVisible), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)
@@ -1591,7 +1591,7 @@ struct ComposerView: View {
                                         .foregroundStyle(mode == "" || mode == "manual" ? DesktopPalette.text2 : DesktopPalette.accentText)
                                         .padding(.horizontal, 8)
                                         .frame(height: 22)
-                                        .background(modeChanged ? DesktopPalette.accent.opacity(0.18) : .clear, in: Capsule())
+                                        .background(DesktopPalette.accent.opacity(0.18).when(modeChanged), in: Capsule())
                                         .overlay(Capsule().strokeBorder(DesktopPalette.line))
                                 }
                                 .buttonStyle(.plain)
@@ -1631,7 +1631,7 @@ struct ComposerView: View {
                                 .font(.system(size: primaryIsStop ? 10 : 14, weight: .semibold))
                                 .foregroundStyle(DesktopPalette.onAccent)
                                 .frame(width: 28, height: 28)
-                                .background(primaryIsStop ? DesktopPalette.stop : DesktopPalette.accent, in: Circle())
+                                .background(primaryIsStop ? AnyShapeStyle(DesktopPalette.stop) : AnyShapeStyle(DesktopPalette.accent), in: Circle())
                         }
                         .buttonStyle(.plain)
                         .disabled(!session.isWorking && !hasText)
@@ -1655,7 +1655,7 @@ struct ComposerView: View {
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .scrimText("composer")
-                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
+                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? AnyShapeStyle(DesktopPalette.accent) : AnyShapeStyle(DesktopPalette.line), lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
                     guard session.capabilities.attach else { return false }

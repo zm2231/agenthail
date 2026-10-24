@@ -170,11 +170,13 @@ final class WindowBackdrop: ObservableObject {
         guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let ground = DesktopPalette.ground(dark: dark)
-        let roles = DesktopPalette.textRoles(dark: dark) + [DesktopPalette.readableAccent(in: appearance)]
+        let colors = TextColors(config)
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let roles = colors.roles(dark: dark, increased: increased).map(AccentContrast.RGB.init(hex:)) + [DesktopPalette.readableAccent(colors, in: appearance, increased: increased)]
         let paneTint: AccentContrast.RGB
         switch config.glassTint {
         case "ground": paneTint = ground
-        case "accent": paneTint = DesktopPalette.accentRGB(in: appearance)
+        case "accent": paneTint = DesktopPalette.accentRGB(colors, in: appearance)
         default: paneTint = UIConfig.RGBColor(hex: config.glassTint).map { AccentContrast.RGB(r: $0.red, g: $0.green, b: $0.blue) } ?? ground
         }
         let scrimTint: ScrimField.Tint

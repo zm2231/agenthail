@@ -593,6 +593,7 @@ private struct AgenthailMenuBarApp: App {
                 SessionWindow(model: model, sessionID: sessionID)
                     .frame(minWidth: 620, minHeight: 480)
                     .environmentObject(voice)
+                    .textColors(model.interface)
             }
         }
         .defaultSize(width: 900, height: 820)
@@ -600,12 +601,14 @@ private struct AgenthailMenuBarApp: App {
 
         Window("Voice", id: "voice") {
             VoiceWindow(voice: voice) { model.openSession(reference: $0) }
+                .textColors(model.interface)
         }
         .defaultSize(width: 460, height: 620)
         .windowResizability(.contentMinSize)
 
         Settings {
             DesktopSettings(model: model)
+                .textColors(model.interface)
         }
 
         MenuBarExtra {

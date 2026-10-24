@@ -4,51 +4,6 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-enum PhonePalette {
-    private static let groundHex = PaletteTokens.window
-    private static let textHex = PaletteTokens.text
-    private static let text2Hex = PaletteTokens.text2
-    private static let mutedHex = PaletteTokens.muted
-    private static let attentionHex = PaletteTokens.attention
-    private static let workingHex = PaletteTokens.working
-    private static let doneHex = PaletteTokens.done
-    private static let failedHex = PaletteTokens.failed
-
-    static let text = dynamic(textHex)
-    static let text2 = dynamic(text2Hex)
-    static let muted = dynamic(mutedHex)
-    static let attention = dynamic(attentionHex)
-    static let working = dynamic(workingHex)
-    static let done = dynamic(doneHex)
-    static let failed = dynamic(failedHex)
-    static let ground = dynamic(groundHex)
-    static let hairline = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10) : UIColor(white: 0, alpha: 0.08) })
-
-    static func textRoles(dark: Bool) -> [BackdropRGB] {
-        PaletteTokens.textRoles.map { rgb(dark ? $0.dark : $0.light) }
-    }
-
-    static func ground(dark: Bool) -> BackdropRGB { rgb(dark ? groundHex.dark : groundHex.light) }
-
-    static func status(_ session: SessionState) -> Color? {
-        if session.isWaitingOnYou { return attention }
-        if session.isUnavailable { return failed }
-        if session.isWorking || session.isWaitingOnBackground { return working }
-        return nil
-    }
-
-    private static func rgb(_ hex: UInt32) -> BackdropRGB {
-        BackdropRGB(Float((hex >> 16) & 0xFF) / 255, Float((hex >> 8) & 0xFF) / 255, Float(hex & 0xFF) / 255)
-    }
-
-    private static func dynamic(_ pair: (light: UInt32, dark: UInt32)) -> Color {
-        Color(uiColor: UIColor { traits in
-            let hex = traits.userInterfaceStyle == .dark ? pair.dark : pair.light
-            return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-        })
-    }
-}
-
 @MainActor
 final class PhoneAppearance: ObservableObject {
     /// A list shows the background as it is and its cards show the same
@@ -252,14 +207,18 @@ final class PhoneAppearance: ObservableObject {
         return BackdropImage(image: image, size: size)
     }
 
+    static let increasedTarget: Float = 7
+
     static func contrastTarget(_ config: UIConfig, increased: Bool) -> Float {
-        increased ? 7 : Float(config.contrastTarget)
+        increased ? increasedTarget : Float(config.contrastTarget)
     }
 
     func spec(_ key: Key) -> BackdropSpec {
         let dark = key.dark
         let ground = PhonePalette.ground(dark: dark)
-        let roles = PhonePalette.textRoles(dark: dark)
+        let colors = TextColors(config)
+        let accent = colors.accentChoice ?? (dark ? SessionStyle.accentHex.dark : SessionStyle.accentHex.light)
+        let roles = PhonePalette.textRoles(colors, accent: accent, dark: dark, increased: key.target >= Self.increasedTarget)
         let paneTint: BackdropRGB
         switch config.glassTint {
         case "ground": paneTint = ground
@@ -492,6 +451,7 @@ struct AppearanceScope<Content: View>: View {
     var body: some View {
         content
             .environment(\.phoneAppearance, appearance)
+            .environment(\.textColors, TextColors(appearance.config))
             .tint(appearance.accent)
             .preferredColorScheme(appearance.colorScheme)
     }

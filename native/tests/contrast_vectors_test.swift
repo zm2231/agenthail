@@ -38,7 +38,7 @@ struct ContrastVectorsTest {
         for hex: UInt32 in [0x0A84FF, 0x1B2A6B, 0xE9A23B, 0xF2F2F2, 0x3FB68B, 0x101010] {
             for dark in [true, false] {
                 let accent = AccentContrast.RGB(hex: hex)
-                let readable = AccentContrast.readable(accent, on: surfaces[dark]!, dark: dark)
+                let readable = AccentContrast.readable(accent, on: surfaces[dark]!, dark: dark, target: 4.5)
                 let foreground = AccentContrast.foreground(on: readable)
                 accents.append([
                     "accent": [accent.r, accent.g, accent.b], "dark": dark,

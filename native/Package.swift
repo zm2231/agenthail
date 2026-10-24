@@ -30,6 +30,8 @@ let package = Package(
                 "AgenthailAPI.swift",
                 "UIConfig.swift",
                 "PaletteTokens.swift",
+                "TextColors.swift",
+                "RoleStyle.swift",
                 "Backdrop.swift",
                 "ScrimField.swift",
                 "HolderPins.swift",

@@ -162,7 +162,7 @@ struct AppearanceSettings: View {
             fill()
                 .frame(width: 18, height: 18)
                 .padding(2)
-                .overlay(Circle().strokeBorder(selected ? DesktopPalette.text : .clear, lineWidth: 1.5))
+                .overlay(Circle().strokeBorder(DesktopPalette.text.when(selected), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .help(help)
@@ -202,7 +202,7 @@ struct AppearanceSettings: View {
                     .frame(height: 52)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: DesktopRadius.control + 2))
-                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control + 2).strokeBorder(selected ? DesktopPalette.accent : DesktopPalette.line, lineWidth: selected ? 2.5 : 1))
+                    .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control + 2).strokeBorder(selected ? AnyShapeStyle(DesktopPalette.accent) : AnyShapeStyle(DesktopPalette.line), lineWidth: selected ? 2.5 : 1))
                 Text(name)
                     .font(.system(size: DesktopType.caption, weight: selected ? .semibold : .regular))
                     .foregroundStyle(selected ? DesktopPalette.text : DesktopPalette.text2)
@@ -487,7 +487,7 @@ struct ActionSwatch: View {
         ZStack {
             DesktopPalette.fill
             RoundedRectangle(cornerRadius: DesktopRadius.control + 2)
-                .strokeBorder(highlighted ? DesktopPalette.accent : DesktopPalette.text2.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                .strokeBorder(highlighted ? AnyShapeStyle(DesktopPalette.accent) : AnyShapeStyle(DesktopPalette.text2.opacity(0.6)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 .padding(3)
             VStack(spacing: 2) {
                 Image(systemName: symbol).font(.system(size: 16, weight: .medium))

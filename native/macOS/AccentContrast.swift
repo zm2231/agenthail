@@ -26,8 +26,6 @@ enum AccentContrast {
         }
     }
 
-    static let minimumTextContrast = 4.5
-
     static func luminance(_ color: RGB) -> Double {
         func channel(_ value: Double) -> Double {
             value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
@@ -40,13 +38,13 @@ enum AccentContrast {
         return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
 
-    static func readable(_ accent: RGB, on surfaces: [RGB], dark: Bool) -> RGB {
-        let target = dark ? RGB.white : RGB.black
+    static func readable(_ accent: RGB, on surfaces: [RGB], dark: Bool, target: Double) -> RGB {
+        let toward = dark ? RGB.white : RGB.black
         var amount = 0.0
         var color = accent
-        while amount < 1, surfaces.contains(where: { contrast(color, $0) < minimumTextContrast }) {
+        while amount < 1, surfaces.contains(where: { contrast(color, $0) < target }) {
             amount = min(1, amount + 0.05)
-            color = accent.mixed(with: target, by: amount)
+            color = accent.mixed(with: toward, by: amount)
         }
         return color
     }

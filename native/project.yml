@@ -31,6 +31,8 @@ targets:
       - path: AgenthailAPI.swift
       - path: UIConfig.swift
       - path: PaletteTokens.swift
+      - path: TextColors.swift
+      - path: RoleStyle.swift
       - path: Backdrop.swift
       - path: ScrimField.swift
       - path: HolderPins.swift

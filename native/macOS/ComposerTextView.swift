@@ -58,6 +58,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.setAccessibilityPlaceholderValue(placeholder)
         }
         textView.setAccessibilityLabel(accessibilityLabel ?? placeholder)
+        textView.placeholderColor = NSColor(DesktopPalette.text2.resolve(in: context.environment))
         textView.show(bound: text, sync: context.coordinator.sync)
         if focused, textView.window != nil, textView.window?.firstResponder !== textView {
             DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }

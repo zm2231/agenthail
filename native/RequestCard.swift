@@ -3,7 +3,7 @@ import SwiftUI
 struct RequestCard: View {
     let request: SessionRequest
     let answering: Bool
-    let accent: Color
+    let accent: AnyShapeStyle
     let respond: (RequestDecision) -> Void
     @State private var picks: [Int: Set<String>] = [:]
     @State private var typed: [Int: String] = [:]
@@ -276,7 +276,7 @@ struct ElsewhereWaitCard: View {
     let place: WaitingPlace
     let surface: String
     let hostName: String?
-    let accent: Color
+    let accent: AnyShapeStyle
     let open: (() -> Void)?
     var restart: (() -> Void)? = nil
 

@@ -46,11 +46,14 @@ SOURCES=(
   TurnSettings.swift
   UIConfig.swift
   PaletteTokens.swift
+  TextColors.swift
+  RoleStyle.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
+  macOS/DesktopStyle.swift
   macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift

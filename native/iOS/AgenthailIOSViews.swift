@@ -589,14 +589,14 @@ struct SessionScreen: View {
                     }
                     if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
                         ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
-                                          surface: session.surface, hostName: session.runtime?.hostName, accent: SessionStyle.accent,
+                                          surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(SessionStyle.accent),
                                           open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil,
                                           restart: { model.stopAndResume(session.id) })
                             .id(waiting.id)
                             .padding(.horizontal)
                             .padding(.top, 6)
                     } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
-                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: SessionStyle.accent) { decision in
+                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(SessionStyle.accent)) { decision in
                             Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
                         }
                         .id(request.id)
@@ -1646,7 +1646,7 @@ struct IOSHostBadge: View {
             Text(name).lineLimit(1).truncationMode(.tail)
         }
         .font(.caption)
-        .foregroundStyle(unavailable ? PhonePalette.failed : Color.secondary)
+        .foregroundStyle(unavailable ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(Color.secondary))
         .frame(maxWidth: 110, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)

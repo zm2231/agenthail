@@ -108,7 +108,7 @@ struct SessionScopeChips: View {
                 if filter == .running, runningCount > 0 {
                     Text("\(runningCount)")
                         .monospacedDigit()
-                        .foregroundStyle(selected ? Color.white : PhonePalette.working)
+                        .foregroundStyle(selected ? AnyShapeStyle(Color.white) : AnyShapeStyle(PhonePalette.working))
                 }
             }
             .font(.subheadline.weight(.semibold))
@@ -143,7 +143,7 @@ struct VoiceToolbarButton: View {
             presented = true
         } label: {
             Image(systemName: live ? "phone.fill" : "waveform")
-                .foregroundStyle(live ? PhonePalette.done : Color.primary)
+                .foregroundStyle(live ? AnyShapeStyle(PhonePalette.done) : AnyShapeStyle(Color.primary))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }

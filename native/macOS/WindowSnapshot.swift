@@ -29,6 +29,7 @@ struct MainWindowContent: View {
         DesktopWindow(model: model, snapshot: snapshot)
             .frame(minHeight: 560)
             .environmentObject(voice)
+            .textColors(model.interface)
     }
 }
 
