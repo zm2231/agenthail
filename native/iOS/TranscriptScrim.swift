@@ -31,6 +31,7 @@ final class TranscriptScrim {
 final class TranscriptScrimView: UIView {
     private let base = CALayer()
     private let tint = CALayer()
+    private let flat = CALayer()
     private let scrim = CALayer()
     private let maskRoot = CALayer()
     private let content = CALayer()
@@ -43,12 +44,13 @@ final class TranscriptScrimView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
-        for layer in [base, tint, scrim, maskRoot, content] { layer.actions = still }
+        for layer in [base, tint, flat, scrim, maskRoot, content] { layer.actions = still }
         base.contentsGravity = .resize
         scrim.contentsGravity = .resize
         maskRoot.addSublayer(content)
         layer.addSublayer(base)
         layer.addSublayer(tint)
+        layer.addSublayer(flat)
         layer.addSublayer(scrim)
     }
 
@@ -77,10 +79,14 @@ final class TranscriptScrimView: UIView {
         defer { CATransaction.commit() }
         let pane = layers?.panes[.content]
         let stale = layers.map { $0.size != bounds.size } ?? true
-        for sub in [base, tint, scrim, maskRoot] { sub.frame = bounds }
+        for sub in [base, tint, flat, scrim, maskRoot] { sub.frame = bounds }
         base.contents = pane?.base
-        tint.backgroundColor = layers.map { CGColor(srgbRed: CGFloat($0.paneTint.x), green: CGFloat($0.paneTint.y), blue: CGFloat($0.paneTint.z), alpha: 1) }
-        tint.opacity = stale ? max(pane?.minimum ?? 0, pane?.scrimPeak ?? 0) : pane?.minimum ?? 0
+        let color = layers.map { CGColor(srgbRed: CGFloat($0.paneTint.x), green: CGFloat($0.paneTint.y), blue: CGFloat($0.paneTint.z), alpha: 1) }
+        tint.backgroundColor = color
+        tint.opacity = pane?.minimum ?? 0
+        flat.backgroundColor = color
+        flat.opacity = pane?.scrimPeak ?? 0
+        flat.isHidden = !stale || (pane?.scrimPeak ?? 0) <= 0
         scrim.contents = pane?.scrim
         scrim.isHidden = stale || pane?.scrim == nil
         if let placed { place(placed.mask, origin: placed.origin) }

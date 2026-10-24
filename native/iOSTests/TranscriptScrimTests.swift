@@ -40,14 +40,35 @@ final class TranscriptScrimTests: XCTestCase {
         XCTAssertLessThan(alpha[0], 2)
     }
 
-    func testEveryRowIsReadableMidScrollAndArtShowsBetweenRows() throws {
+    private static let bright = "mesh: 3x3, #e8a33d, #4fa3c7, #d95f76, #7fc8a9, #f2d16b, #6b8fd9, #c46bd9, #59c7c7, #e88d5a"
+
+    private func render(_ background: String, size: CGSize, dark: Bool, solid: Bool) throws -> (BackdropLayers, Float) {
         let appearance = PhoneAppearance(cache: nil)
-        let data = try JSONSerialization.data(withJSONObject: ["rev": "r", "values": ["background": "mesh: 3x3, #e8a33d, #4fa3c7, #d95f76, #7fc8a9, #f2d16b, #6b8fd9, #c46bd9, #59c7c7, #e88d5a"],
+        let data = try JSONSerialization.data(withJSONObject: ["rev": "r", "values": ["background": background],
                                                                "colors": [String: Any](), "chosen": [String: String](), "overrides": [String: String](), "problems": []])
         appearance.preview(try JSONDecoder().decode(UIConfig.self, from: data))
-        let key = PhoneAppearance.Key(surface: .transcript, size: size, scale: 3, dark: true, solid: false, target: 4.5)
+        let key = PhoneAppearance.Key(surface: .transcript, size: size, scale: 3, dark: dark, solid: solid, target: 4.5)
         let spec = appearance.spec(key)
-        let layers = try XCTUnwrap(BackdropRenderer.layers(spec, panes: [.content: BackdropSpec.PaneStyle(minimum: Float(appearance.config.contentOpacity), strength: spec.strength)]))
+        let minimum: Float = solid ? 1 : Float(appearance.config.contentOpacity)
+        let layers = try XCTUnwrap(BackdropRenderer.layers(spec, panes: [.content: BackdropSpec.PaneStyle(minimum: minimum, strength: spec.strength)]))
+        let roles = PhonePalette.textRoles(TextColors(appearance.config), dark: dark, increased: false).map { ScrimField.luminance($0.x, $0.y, $0.z) }
+        return (layers, ScrimField.boundary(roles: roles, polarity: dark ? .dark : .light, target: 4.5))
+    }
+
+    func testStaleLayersAfterARotationScrimTheWholePane() throws {
+        let (layers, boundary) = try render(Self.bright, size: CGSize(width: size.height, height: size.width), dark: true, solid: false)
+        let peak = try XCTUnwrap(layers.panes[.content]?.scrimPeak)
+        XCTAssertGreaterThan(peak, 0)
+        XCTAssertLessThan(peak, 1, "the case where a flat peak alone would not be enough over the minimum")
+        let view = host()
+        view.show(layers)
+        let shot = try alphasAndLuminance(view)
+        let failing = shot.filter { !ScrimField.passes($0, boundary: boundary, polarity: .dark) }.count
+        XCTAssertEqual(failing, 0, "until layers for the new size arrive, every point is readable")
+    }
+
+    func testEveryRowIsReadableMidScrollAndArtShowsBetweenRows() throws {
+        let (layers, boundary) = try render(Self.bright, size: size, dark: true, solid: false)
         XCTAssertNotNil(layers.panes[.content]?.scrim, "bright art needs a scrim")
 
         let view = host()
@@ -61,8 +82,6 @@ final class TranscriptScrimTests: XCTestCase {
         scrim.move(to: origin)
 
         let shot = try alphasAndLuminance(view)
-        let roles = PhonePalette.textRoles(TextColors(appearance.config), dark: true, increased: false).map { ScrimField.luminance($0.x, $0.y, $0.z) }
-        let boundary = ScrimField.boundary(roles: roles, polarity: .dark, target: 4.5)
         for row in rows {
             let onScreen = row.offsetBy(dx: origin.x, dy: origin.y)
             for y in Int(onScreen.minY)..<Int(onScreen.maxY) {
@@ -80,24 +99,21 @@ final class TranscriptScrimTests: XCTestCase {
     }
 
     func testSolidTranscriptHasNoScrimAndCoversTheArt() throws {
-        let appearance = PhoneAppearance(cache: nil)
-        let data = try JSONSerialization.data(withJSONObject: ["rev": "r", "values": ["background": "mesh: 2x2, #ffffff, #f0e0d0, #e0f0ff, #ffffff"],
-                                                               "colors": [String: Any](), "chosen": [String: String](), "overrides": [String: String](), "problems": []])
-        appearance.preview(try JSONDecoder().decode(UIConfig.self, from: data))
-        let key = PhoneAppearance.Key(surface: .transcript, size: size, scale: 3, dark: false, solid: true, target: 4.5)
-        let spec = appearance.spec(key)
-        let layers = try XCTUnwrap(BackdropRenderer.layers(spec, panes: [.content: BackdropSpec.PaneStyle(minimum: 1, strength: spec.strength)]))
-        XCTAssertNil(layers.panes[.content]?.scrim)
-        let view = host()
-        view.show(layers)
-        let shot = try alphasAndLuminance(view)
-        let tint = ScrimField.luminance(layers.paneTint.x, layers.paneTint.y, layers.paneTint.z)
-        for i in stride(from: 0, to: shot.count, by: 997) {
-            XCTAssertEqual(shot[i], tint, accuracy: 0.01)
+        for dark in [true, false] {
+            let (layers, _) = try render(Self.bright, size: size, dark: dark, solid: true)
+            XCTAssertNil(layers.panes[.content]?.scrim)
+            let view = host()
+            view.show(layers)
+            let shot = try alphasAndLuminance(view)
+            let tint = ScrimField.luminance(layers.paneTint.x, layers.paneTint.y, layers.paneTint.z)
+            for i in stride(from: 0, to: shot.count, by: 997) {
+                XCTAssertEqual(shot[i], tint, accuracy: 0.01, "dark \(dark)")
+            }
         }
     }
 
     private func host() -> TranscriptScrimView {
+        self.window?.isHidden = true
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first!
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(origin: .zero, size: size)
