@@ -452,6 +452,7 @@ struct SessionScreen: View {
     @State private var atLatest = true
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
+    @State private var window = TranscriptWindow()
 
     private var displayTitle: String {
         session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
@@ -470,7 +471,7 @@ struct SessionScreen: View {
         timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
     }
 
-    @ViewBuilder private var transcriptRows: some View {
+    @ViewBuilder private func transcriptRows(_ items: [TimelineItem], _ groups: [TimelineGroup], _ rowIDs: [String]) -> some View {
         let connection = model.connectionState(for: session.id)
         if let error = connection.error {
             Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(PhonePalette.muted)
@@ -491,7 +492,7 @@ struct SessionScreen: View {
             }
             if let timeline = detail.timeline,
                Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
-                if (model.activityCursor ?? 0) > 0 {
+                if (model.activityCursor ?? 0) > 0, !window.hidesOlder(in: rowIDs) {
                     Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
                         if model.loadingOlderActivity { ProgressView("Loading older activity") }
                         else { Label("Load older activity", systemImage: "arrow.up") }
@@ -503,9 +504,9 @@ struct SessionScreen: View {
                         .font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
                 if activityOnly {
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
+                    ForEach(window.shown(items)) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
                 } else {
-                    ForEach(TimelineGroup.make(items)) { group in
+                    ForEach(window.shown(groups)) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
                     }
                 }
@@ -531,9 +532,12 @@ struct SessionScreen: View {
     }
 
     var body: some View {
+        let items = items
+        let groups = TimelineGroup.make(items)
+        let rowIDs = activityOnly ? items.map(\.id) : groups.map(\.id)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Group { transcriptRows }.transcriptScrimRow()
+                Group { transcriptRows(items, groups, rowIDs) }.transcriptScrimRow()
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) { position.scrollTo(y: $0) }
@@ -551,11 +555,12 @@ struct SessionScreen: View {
         .phoneBackdrop(.transcript)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
+        .transcriptWindow($window, ids: rowIDs)
         .defaultScrollAnchor(.top, for: .alignment)
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !SessionPreview.holdsScroll else { return }
 #endif
             if phase == .interacting {
                 userScrolling = true
@@ -569,7 +574,7 @@ struct SessionScreen: View {
             geometry.contentSize.height - geometry.visibleRect.maxY < 60
         } action: { _, value in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !SessionPreview.holdsScroll else { return }
 #endif
             atLatest = value
         }
@@ -674,12 +679,18 @@ struct SessionScreen: View {
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
             atLatest = !startsAtOldest
+            window = TranscriptWindow()
             await model.loadSession(session.id)
-            if startsAtOldest, let first = items.first {
+            if startsAtOldest, let first = self.items.first {
+                window.revealThrough(first.id, in: activityOnly ? self.items.map(\.id) : TimelineGroup.make(self.items).map(\.id))
                 position.scrollTo(id: first.id, anchor: .top)
             } else {
                 position.scrollTo(edge: .bottom)
             }
+        }
+        .onChange(of: activityOnly) { window = TranscriptWindow() }
+        .onChange(of: followingLatest) { _, following in
+            if !following { window.pin(in: rowIDs) }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { position.scrollTo(edge: .bottom) }

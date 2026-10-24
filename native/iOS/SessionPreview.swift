@@ -2,6 +2,12 @@
 import SwiftUI
 
 // Public demo data exercises the real session views without pairing or network access.
+extension SessionPreview {
+    static var holdsScroll: Bool {
+        ProcessInfo.processInfo.arguments.contains("--preview-session") && !ProcessInfo.processInfo.arguments.contains("--preview-live-scroll")
+    }
+}
+
 struct SessionPreview: View {
     @StateObject private var model: AgenthailIOSModel
     private let session: SessionState
@@ -157,6 +163,12 @@ struct SessionPreview: View {
                 ["id": "edit-1", "kind": "toolCall", "title": "Edit", "text": String(data: try! JSONSerialization.data(withJSONObject: edit, options: .sortedKeys), encoding: .utf8)!, "callId": "edit-1", "truncated": false],
                 ["id": "edit-1-result", "kind": "toolResult", "title": "Edit result", "text": "The file has been updated.", "callId": "edit-1", "truncated": false],
             ], at: items.count - 3)
+            if ProcessInfo.processInfo.arguments.contains("--preview-long-history") {
+                let history: [[String: Any]] = (1...60).map { n in
+                    ["id": "history-\(n)", "kind": "message", "role": n.isMultiple(of: 2) ? "assistant" : "user", "title": n.isMultiple(of: 2) ? "assistant" : "user", "text": "Earlier step \(n)", "truncated": false]
+                }
+                items.insert(contentsOf: history, at: 2)
+            }
             items[items.count - 2]["text"] = "# The session stays readable while work continues\n\nI found the reconnect boundary. The saved instruction is present, and the agent has its original session identity.\n\n## What the checks show\n\nThe regression suite passes. You can expand the recorded command above to inspect its full input and result.\n\nThe latest update is visible above the composer."
         }
         timeline["items"] = items
