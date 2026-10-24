@@ -15,13 +15,37 @@ export function brightLuminance({ width, height, data }, share = 0.01) {
   return values[Math.floor((values.length - 1) * (1 - share))];
 }
 
-export function worstContrast(entry, ground, scale) {
+const INK = 8;
+
+function inked(entry, ground, shown, scale) {
+  const out = [];
+  for (const [x, y, w, h] of entry.rects) {
+    const left = Math.max(Math.floor(x * scale), 0);
+    const top = Math.max(Math.floor(y * scale), 0);
+    const right = Math.min(Math.ceil((x + w) * scale), ground.width);
+    const bottom = Math.min(Math.ceil((y + h) * scale), ground.height);
+    for (let row = top; row < bottom; row++) {
+      for (let column = left; column < right; column++) {
+        const i = (row * ground.width + column) * 4;
+        if (Math.max(Math.abs(shown.data[i] - ground.data[i]), Math.abs(shown.data[i + 1] - ground.data[i + 1]), Math.abs(shown.data[i + 2] - ground.data[i + 2])) >= INK) out.push([column, row, 1 / scale, 1 / scale]);
+      }
+    }
+  }
+  return out.map(([column, row, w, h]) => [column / scale, row / scale, w, h]);
+}
+
+export function worstContrast(entry, ground, scale, shown = null) {
+  const glyphs = shown ? inked(entry, ground, shown, scale) : [];
+  return worstOver(entry, glyphs.length ? glyphs : entry.rects, ground, scale);
+}
+
+function worstOver(entry, rects, ground, scale) {
   const [r, g, b, a] = entry.colour;
   const alpha = a * entry.opacity;
   let worst = Infinity;
   let at = null;
   let over = null;
-  for (const [x, y, w, h] of entry.rects) {
+  for (const [x, y, w, h] of rects) {
     const left = Math.max(Math.floor(x * scale), 0);
     const top = Math.max(Math.floor(y * scale), 0);
     const right = Math.min(Math.ceil((x + w) * scale), ground.width);

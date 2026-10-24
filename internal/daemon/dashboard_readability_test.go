@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type readabilityDashboard struct {
@@ -30,7 +31,7 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	for _, theme := range []string{"dark", "light"} {
 		themes[theme] = map[string]readabilityDashboard{
 			"full":  serveReadabilityDashboard(t, seedReadabilityFixture),
-			"empty": serveReadabilityDashboard(t, func(*testing.T, *registry.Registry, *daemonSurface) {}),
+			"empty": serveReadabilityDashboard(t, func(*testing.T, *registry.Registry, *followingSurface) {}),
 		}
 	}
 	dashboards, err := json.Marshal(themes)
@@ -46,9 +47,19 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	}
 }
 
-type followingSurface struct{ *daemonSurface }
+type followingSurface struct {
+	*daemonSurface
+	usage *surface.Usage
+}
 
-func (f followingSurface) Stream(ctx context.Context, session *surface.Session, cursor string, onEvent func(surface.StreamEvent), idle time.Duration) error {
+func (f *followingSurface) Usage(context.Context) (*surface.Usage, error) {
+	if f.usage == nil {
+		return nil, surfaces.ErrNoCodexUsage
+	}
+	return f.usage, nil
+}
+
+func (f *followingSurface) Stream(ctx context.Context, session *surface.Session, cursor string, onEvent func(surface.StreamEvent), idle time.Duration) error {
 	if err := f.daemonSurface.Stream(ctx, session, cursor, onEvent, idle); err != nil {
 		return err
 	}
@@ -56,16 +67,16 @@ func (f followingSurface) Stream(ctx context.Context, session *surface.Session, 
 	return ctx.Err()
 }
 
-func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Registry, *daemonSurface)) readabilityDashboard {
+func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Registry, *followingSurface)) readabilityDashboard {
 	t.Helper()
 	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+	fake := &followingSurface{daemonSurface: &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}}
 	seed(t, store, fake)
-	d := newTestDaemon(t, store, []surface.Surface{followingSurface{fake}})
+	d := newTestDaemon(t, store, []surface.Surface{fake})
 	d.discoverCatalog(t.Context())
 	paired, err := store.ListHosts()
 	if err != nil {
@@ -85,7 +96,7 @@ func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Reg
 	return readabilityDashboard{URL: server.URL, Cookie: cookie.Name + "=" + cookie.Value, Token: dashboardTestToken}
 }
 
-func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *daemonSurface) {
+func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *followingSurface) {
 	t.Helper()
 	now := time.Now()
 	dialog := &surface.Waiting{Kind: surface.WaitingDialog, ID: "dialog-1", Since: now}
@@ -111,6 +122,10 @@ func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *daemon
 		fake.sessions[session.ID] = session
 	}
 	fake.caps = surface.Capabilities{Stream: true}
+	fake.usage = &surface.Usage{FetchedAt: now, Limits: []surface.UsageWindow{
+		{Kind: "5h", Percent: 62, ResetsAt: now.Add(2 * time.Hour)},
+		{Kind: "weekly", Percent: 94, Severity: "critical", ResetsAt: now.Add(48 * time.Hour)},
+	}}
 	fake.streamEvents = []surface.StreamEvent{
 		{Kind: "user", Text: "Check the dashboard reads over every background."},
 		{Kind: "text", Text: "Every text node sits on a pane whose tint meets the contrast target."},

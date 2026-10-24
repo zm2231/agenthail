@@ -45,10 +45,14 @@ export const VIEWS = [
   { name: "empty audit", dashboard: "empty", hash: "operations", act: operations("audit") },
 ];
 
+const LOADED = { full: "#usage-line .usage-meter" };
+
 export async function openView(page, dashboard, view) {
   await page.goto("about:blank");
   await page.goto(`${dashboard.url}/#${view.hash}`, { waitUntil: "load" });
   await page.waitForFunction(() => document.querySelector("#daemon-status")?.textContent !== "Connecting");
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" });
+  if (LOADED[view.dashboard]) await page.waitForSelector(LOADED[view.dashboard]);
   if (view.act) await view.act(page);
   if (view.ready) await page.waitForSelector(view.ready, { visible: true });
   await settle(page);
