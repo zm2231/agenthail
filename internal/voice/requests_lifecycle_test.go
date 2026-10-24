@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -51,6 +52,41 @@ func TestAJournalThatEndsBeforeTheReplyKeepsTheRequestForTheNextCall(t *testing.
 	}
 	if kept := f.keptRequests(); len(kept) != 0 {
 		t.Fatalf("a reported request was kept: %+v", kept)
+	}
+}
+
+func TestARequestDeliveredAcrossASourceErrorIsFollowedByTheNewFollower(t *testing.T) {
+	target := workingTarget()
+	f := newFixture(t, fixtureOptions{target: target})
+	f.target = target
+	selectAndConnect(t, f, target)
+	testkit.Eventually(t, "the call to follow its session", 5*time.Second, func() bool {
+		prepared, _ := target.journal.subscriptions()
+		return prepared == 1
+	})
+	f.gate.hold("Send")
+	delegated := make(chan error, 1)
+	go func() {
+		_, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Run the tests"})
+		delegated <- err
+	}()
+	f.gate.reached(t, "Send")
+	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "transcript read failed"})
+	testkit.Eventually(t, "voice to follow the session again", 5*time.Second, func() bool {
+		prepared, _ := target.journal.subscriptions()
+		return prepared == 2 && hasEventWith(f.View(), "voice/target/refollowed", "error", "transcript read failed")
+	})
+	f.gate.release("Send")
+	if err := <-delegated; err != nil {
+		t.Fatal(err)
+	}
+	target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "All 40 tests pass.", Final: true})
+	target.journal.emit(sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "target-turn"})
+	testkit.Eventually(t, "the reply as the request's own", 5*time.Second, func() bool {
+		return spokenWith(f, "All 40 tests pass.") == 1 && hasEventWith(f.View(), "voice/delegation/final", "messageId", "m") && len(f.keptRequests()) == 0
+	})
+	if hasEventWith(f.View(), "voice/target/typed", "turnId", "target-turn") {
+		t.Fatalf("the request's turn was taken as typed: %+v", f.View().Events)
 	}
 }
 

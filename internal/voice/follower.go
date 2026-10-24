@@ -26,6 +26,7 @@ type follower struct {
 	typed    map[string]*typedTurn
 	retired  map[string]bool
 	earlier  []requestRecord
+	next     *follower
 }
 
 // followTarget replaces the current follower with one for target. The caller holds s.mu.
@@ -181,7 +182,8 @@ func (s *Service) refollow(f *follower, reason string) {
 	replies := s.replies
 	s.followTarget(&f.target, open)
 	if next := s.follow; next != nil {
-		next.retired = f.retired
+		f.next = next
+		next.retired, next.pending, next.unplaced = f.retired, f.pending, f.unplaced
 		for i := range replies {
 			replies[i].f = next
 		}
@@ -208,6 +210,9 @@ func (s *Service) followerFailed(f *follower, err error) {
 
 // The caller holds s.mu.
 func (s *Service) settleDelegation(f *follower, messageID, turnID, text string) {
+	for f.next != nil {
+		f = f.next
+	}
 	f.pending--
 	switch {
 	case turnID != "":
