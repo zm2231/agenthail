@@ -42,6 +42,7 @@ final class SpotlightSync {
 
     private let store: SpotlightStore
     private let retryDelay: Duration
+    private let coalesce: Duration
     private let permanent: (Error) -> Bool
     private let failed: (Error) -> Void
     private var target: Target?
@@ -52,9 +53,10 @@ final class SpotlightSync {
     private var consecutiveFailures = 0
     private(set) var indexed: [String: SpotlightEntry] = [:]
 
-    init(store: SpotlightStore, retryDelay: Duration = .seconds(30), permanent: @escaping (Error) -> Bool = { _ in false }, failed: @escaping (Error) -> Void = { _ in }) {
+    init(store: SpotlightStore, retryDelay: Duration = .seconds(30), coalesce: Duration = .zero, permanent: @escaping (Error) -> Bool = { _ in false }, failed: @escaping (Error) -> Void = { _ in }) {
         self.store = store
         self.retryDelay = retryDelay
+        self.coalesce = coalesce
         self.permanent = permanent
         self.failed = failed
     }
@@ -84,7 +86,9 @@ final class SpotlightSync {
 
     private func drain() async {
         var applied = -1
-        while applied != generation, let target {
+        while applied != generation {
+            if coalesce > .zero { try? await Task.sleep(for: coalesce) }
+            guard let target else { return }
             let current = generation
             do {
                 try await apply(target)
@@ -163,7 +167,7 @@ struct CoreSpotlightStore: SpotlightStore {
 enum SpotlightIndex {
     static let preferenceKey = "spotlightSessions"
     private static let log = Logger(subsystem: "com.agenthail.app", category: "spotlight")
-    static let shared = SpotlightSync(store: CoreSpotlightStore(), permanent: { ($0 as? CSIndexError)?.code == .indexingUnsupported }) { error in
+    static let shared = SpotlightSync(store: CoreSpotlightStore(), coalesce: .seconds(1), permanent: { ($0 as? CSIndexError)?.code == .indexingUnsupported }) { error in
         log.error("Spotlight index update failed: \(error.localizedDescription, privacy: .public)")
     }
 }

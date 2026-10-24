@@ -1,0 +1,36 @@
+{
+  "roles": {
+    "body": {"dark": "#ececee", "light": "#1d1d1f"},
+    "muted": {"dark": "#a3a3a8", "light": "#5f6066"},
+    "faint": {"dark": "#8e8e93", "light": "#6e6e76"},
+    "meta": {"dark": "#8e8e93", "light": "#6e6e76"},
+    "code": {"dark": "#ececee", "light": "#1d1d1f"},
+    "working": {"dark": "#7aa7ff", "light": "#2a64cc"},
+    "needs-you": {"dark": "#ffb224", "light": "#965a00"},
+    "error": {"dark": "#ff6b61", "light": "#c4271b"},
+    "done": {"dark": "#4cc38a", "light": "#1a7f4e"},
+    "diff.removed": {"dark": "#ff6b61", "light": "#c4271b"},
+    "peer": {"dark": "#7aa7ff", "light": "#2a64cc"}
+  },
+  "surfaces": {
+    "mac": {
+      "window": {"dark": "#17181a", "light": "#ffffff"},
+      "side": {"dark": "#1d1e21", "light": "#f3f3f4"},
+      "raised": {"dark": "#232427", "light": "#ffffff"},
+      "bubble": {"dark": "#26272a", "light": "#f1f1f3"},
+      "fill": {"dark": "#2a2b2f", "light": "#e9e9ec"}
+    },
+    "phone": {
+      "window": {"dark": "#17181a", "light": "#ffffff"},
+      "raised": {"dark": "#232427", "light": "#ffffff"},
+      "code": {"dark": "#1c1c1e", "light": "#f2f2f7"}
+    },
+    "web": {
+      "paper": {"dark": "#0d0806", "light": "#f9f6f2"},
+      "panel": {"dark": "#140e0b", "light": "#fefbf9"},
+      "raised": {"dark": "#1c1411", "light": "#f4efeb"},
+      "hover": {"dark": "#241b17", "light": "#ede6e2"},
+      "code": {"dark": "#050302", "light": "#f1eeea"}
+    }
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/uiconf"
 	"io"
 	"io/fs"
 	"net"
@@ -314,6 +315,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
 	mux.Handle("/js/", dashboardModuleHandler())
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
+	mux.HandleFunc("/palette.css", dashboard.asset("text/css; charset=utf-8", []byte(uiconf.PaletteCSS())))
 	mux.HandleFunc("/logo.png", dashboard.asset("image/png", dashboardLogo))
 	mux.HandleFunc("/favicon.png", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/favicon.ico", dashboard.asset("image/png", dashboardFavicon))

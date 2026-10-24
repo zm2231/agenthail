@@ -48,13 +48,14 @@ func (u *uiState) open() (*uiconf.Store, error) {
 // Chosen is what ui.conf says for the device, and Overrides names the device
 // line each overridden key comes from, for settings screens.
 type uiView struct {
-	Rev       string            `json:"rev"`
-	Text      string            `json:"text"`
-	Values    map[string]any    `json:"values"`
-	Chosen    map[string]string `json:"chosen"`
-	Overrides map[string]string `json:"overrides"`
-	Problems  []uiconf.Problem  `json:"problems"`
-	Change    *uiconf.Entry     `json:"change,omitempty"`
+	Rev       string                      `json:"rev"`
+	Text      string                      `json:"text"`
+	Values    map[string]any              `json:"values"`
+	Colors    map[string]uiconf.RoleColor `json:"colors"`
+	Chosen    map[string]string           `json:"chosen"`
+	Overrides map[string]string           `json:"overrides"`
+	Problems  []uiconf.Problem            `json:"problems"`
+	Change    *uiconf.Entry               `json:"change,omitempty"`
 }
 
 func viewFor(state uiconf.State, device uiconf.Device) uiView {
@@ -63,7 +64,9 @@ func viewFor(state uiconf.State, device uiconf.Device) uiView {
 		problems = []uiconf.Problem{}
 	}
 	chosen, overrides := state.Parsed.Chosen(device)
-	return uiView{Rev: state.Rev, Text: state.Text, Values: state.Parsed.Resolve(device), Chosen: chosen, Overrides: overrides, Problems: problems}
+	values := state.Parsed.Resolve(device)
+	target, _ := values["contrast.target"].(float64)
+	return uiView{Rev: state.Rev, Text: state.Text, Values: values, Colors: uiconf.Colors(chosen, device.Class, target), Chosen: chosen, Overrides: overrides, Problems: problems}
 }
 
 func requestDevice(r *http.Request) uiconf.Device {
