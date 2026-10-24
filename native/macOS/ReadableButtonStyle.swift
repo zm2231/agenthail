@@ -13,7 +13,7 @@ private struct ReadableButtonLabel<Label: View>: View {
 
     var body: some View {
         label
-            .foregroundStyle(enabled ? AnyShapeStyle(.foreground) : AnyShapeStyle(DesktopPalette.muted))
+            .foregroundStyle(enabled ? AnyShapeStyle(.foreground) : AnyShapeStyle(DesktopPalette.text2))
             .opacity(pressed ? 0.7 : 1)
     }
 }
@@ -28,9 +28,9 @@ struct SendButtonFace: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(enabled ? AnyShapeStyle(DesktopPalette.onAccent) : AnyShapeStyle(DesktopPalette.muted))
+            .foregroundStyle(enabled ? AnyShapeStyle(DesktopPalette.onAccent) : AnyShapeStyle(DesktopPalette.text2))
             .frame(width: diameter, height: diameter)
             .background(enabled ? fill : AnyShapeStyle(Color.clear), in: Circle())
-            .overlay(Circle().strokeBorder(enabled ? AnyShapeStyle(Color.clear) : AnyShapeStyle(DesktopPalette.muted), lineWidth: 1))
+            .overlay(Circle().strokeBorder(enabled ? AnyShapeStyle(Color.clear) : AnyShapeStyle(DesktopPalette.text2), lineWidth: 1))
     }
 }

@@ -79,7 +79,7 @@ var Keys = []Key{
 	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers. With glass.readability auto it rises as far as the text colours over it need.", 0, 1),
 	choice("glass.readability", "auto", "auto raises pane tint and adds a scrim where text needs it to reach contrast.target; off uses the glass opacities exactly, so text may be harder to read. Increase Contrast always uses auto.", "auto", "off"),
 	number("glass.border", "0.08", "Opacity of pane hairlines.", 0, 0.3),
-	number("glass.gutter", "8", "Points between panes and around them; 0 joins them edge to edge.", 0, 16),
+	number("glass.gutter", "12", "Points between panes and around them; 0 joins them edge to edge.", 0, 16),
 
 	choice("texture", "none", "Texture over the background, never over panes or text.", "none", "scanlines", "grain"),
 	number("texture.strength", "0.2", "How strongly the texture darkens.", 0, 0.6),

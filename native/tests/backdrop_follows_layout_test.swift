@@ -106,7 +106,7 @@ struct BackdropFollowsLayoutTest {
             model.inspector = 220
         }
         check(coverage(region()!) == 1, "after the inspector widens, the same pass scrims the region, got \(String(describing: coverage(region()!)))")
-        let paneRect = pane().map { $0.convert($0.bounds, to: nil).insetBy(dx: backdrop.gutter / 2, dy: backdrop.gutter / 2) }
+        let paneRect = pane().map { $0.convert($0.bounds, to: nil) }
         check(paneRect?.width == 480 - 220 - backdrop.gutter && pane()?.anchor?.area == paneRect, "the pane's scrim area follows its new width, got \(String(describing: pane()?.anchor?.area)) for \(String(describing: paneRect))")
         check(baseFrame() == window.contentView.map { $0.convert($0.bounds, to: nil) }, "the background stays at the window's origin as the pane resizes, got \(String(describing: baseFrame()))")
 

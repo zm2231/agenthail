@@ -53,6 +53,13 @@ struct DesktopWindow: View {
         .onDisappear { if snapshot == nil { model.windowDisappeared() } }
     }
 
+    private var contentGaps: Edge.Set {
+        var gaps: Edge.Set = []
+        if pane.sidebarDocks { gaps.insert(.leading) }
+        if pane.inspectorDocks && pane.inspectorVisible && pane.displayedSession != nil { gaps.insert(.trailing) }
+        return gaps
+    }
+
     @ViewBuilder private var splitView: some View {
         // The sidebar collapses to a column of no width rather than through
         // the split view's visibility: hiding and showing a column there
@@ -70,7 +77,7 @@ struct DesktopWindow: View {
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
-            ConversationPane(model: model, pane: pane)
+            ConversationPane(model: model, pane: pane, gaps: contentGaps)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .hidesSplitDividers()
                 .belowWindowChrome()
@@ -241,7 +248,7 @@ struct SessionSidebar: View {
             }
             .scrollScrim()
         }
-        .glassPane(.sidebar, fallback: DesktopPalette.side)
+        .glassPane(.sidebar, fallback: DesktopPalette.side, gaps: [])
         .background {
             let order = visibleOrder(tree)
             Button("") { step(order, by: -1) }
@@ -629,10 +636,7 @@ struct StatusIndicator: View {
     var body: some View {
         Group {
             if session.isWorking && !needsYou {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(DesktopPalette.working)
-                    .scaleEffect(0.8)
+                WorkingSpinner()
             } else if session.isWaitingOnBackground && !needsYou {
                 Circle()
                     .strokeBorder(DesktopPalette.working, lineWidth: 1.5)
@@ -653,6 +657,7 @@ struct ConversationPane: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
+    var gaps: Edge.Set = []
     @EnvironmentObject private var voice: VoiceController
     @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
@@ -703,11 +708,11 @@ struct ConversationPane: View {
                         }
                     }
                 }
-            .glassPane(.content, fallback: DesktopPalette.window)
+            .glassPane(.content, fallback: DesktopPalette.window, gaps: gaps)
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
-                .solidContentPane()
+                .solidContentPane(gaps: gaps)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -734,7 +739,7 @@ struct ConversationPane: View {
             .scrimText()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .backdropSurface(DesktopPalette.window)
-            .solidContentPane()
+            .solidContentPane(gaps: gaps)
         }
     }
 }
@@ -922,6 +927,7 @@ struct TranscriptView: View {
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
         }
+        .clipped()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .background {
             Color.clear
@@ -2031,7 +2037,7 @@ struct SessionInspector: View {
                 Spacer()
             }
         }
-        .glassPane(.sidebar, fallback: DesktopPalette.side)
+        .glassPane(.sidebar, fallback: DesktopPalette.side, gaps: [])
     }
 }
 

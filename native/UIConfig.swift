@@ -121,7 +121,7 @@ struct UIConfig: Codable, Equatable {
     var composerOpacity: Double { number("glass.composer.opacity", 0.5) }
     var readability: Bool { text("glass.readability", "auto") == "auto" }
     var border: Double { number("glass.border", 0.08) }
-    var gutter: Double { number("glass.gutter", 8) }
+    var gutter: Double { number("glass.gutter", 12) }
 
     var texture: String { text("texture", "none") }
     var textureStrength: Double { number("texture.strength", 0.2) }

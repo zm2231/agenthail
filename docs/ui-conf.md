@@ -54,7 +54,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. With `glass.readability = auto` it rises to the least that keeps every text colour readable over the glass and the background under it: about 0.2 with the default colours and target, and more for fainter `color.*` values or a higher `contrast.target`. On the iPhone it also rises over bright art under it. |
 | `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
-| `glass.gutter` | `8` | 0 to 16. Points between panes and around them; 0 joins them edge to edge. |
+| `glass.gutter` | `12` | 0 to 16. Points between panes and around them; 0 joins them edge to edge. |
 | `texture` | `none` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
 | `texture.strength` | `0.2` | 0 to 0.6. How strongly the texture darkens. |
 | `texture.spacing` | `3` | 2 to 8. Points between scanlines. |
