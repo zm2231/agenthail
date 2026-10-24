@@ -12,7 +12,7 @@ enum UsagePreview {
         let codex = [meter("codex", "week", "Codex week", 19, hours: 120)]
         let team = [meter("claude", "week", "Claude week", 92, hours: 30, critical: true)]
         let build = [meter("claude", "session", "Claude", 14, hours: 4)]
-        return #"{"sets":[{"host":"computer","hostId":"computer","local":true,"provider":"claude","account":"demo@example.com","root":"/Users/demo/.claude","primary":true,"meters":[\#(primary.joined(separator: ","))]},{"host":"computer","hostId":"computer","local":true,"provider":"codex","meters":[\#(codex.joined(separator: ","))]},{"host":"computer","hostId":"computer","local":true,"provider":"claude","account":"team@example.com","root":"/Users/demo/.claude-team","meters":[\#(team.joined(separator: ","))]},{"host":"build-box","hostId":"h0123456789ab","local":false,"provider":"claude","account":"ops@example.com","root":"/home/ops/.claude","primary":true,"meters":[\#(build.joined(separator: ","))]}]}"#
+        return #"{"sets":[{"host":"computer","hostId":"computer","local":true,"provider":"claude","account":"demo@example.com","root":"/Users/demo/.claude","primary":true,"meters":[\#(primary.joined(separator: ","))]},{"host":"computer","hostId":"computer","local":true,"provider":"codex","meters":[\#(codex.joined(separator: ","))]},{"host":"computer","hostId":"computer","local":true,"provider":"claude","account":"team@example.com","root":"/Users/demo/.claude-team","meters":[\#(team.joined(separator: ","))]},{"host":"build-box","hostId":"h0123456789ab","local":false,"provider":"claude","account":"ops@example.com","root":"/home/dev/.claude","primary":true,"meters":[\#(build.joined(separator: ","))]}]}"#
     }
 }
 #endif
