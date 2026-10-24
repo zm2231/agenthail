@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -135,7 +134,7 @@ func buildSessionFileList(ctx context.Context, cwd string, now time.Time) *sessi
 }
 
 func gitIndexPath(ctx context.Context, cwd string) string {
-	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--git-path", "index").Output()
+	out, err := gitCommand(ctx, cwd, "rev-parse", "--git-path", "index").Output()
 	if err != nil {
 		return ""
 	}
@@ -158,10 +157,10 @@ func modTime(name string) time.Time {
 }
 
 func listGitFiles(ctx context.Context, cwd string) (*sessionFileList, bool) {
-	if err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+	if err := gitCommand(ctx, cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
 		return nil, false
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	cmd := gitCommand(ctx, cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, false
