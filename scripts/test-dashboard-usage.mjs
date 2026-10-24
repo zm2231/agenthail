@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { POLL_MS, render, start, text, usageStrip, visible } from "../internal/daemon/dashboard/js/usage.js";
+import { dropOrder, fit } from "../internal/daemon/dashboard/js/usage-fit.js";
 
 const now = Date.parse("2026-10-23T14:00:00Z");
 const meter = (label, percent, until, extra = {}) => ({ provider: "claude", kind: "session", label, percent, asOf: "2026-10-23T13:59:00Z", aged: false, until, resetsAt: until, ...extra });
@@ -48,6 +49,16 @@ assert.equal(line.children[0].children[1].tagName, "meter");
 assert.equal(line.children[2].attributes["aria-label"], strip.others[0].spoken, "every item reads out its full text");
 render(document, line, usageStrip([], now), now);
 assert.equal(line.hidden, true, "nothing to show hides the line");
+
+const item = (className) => ({ className, hidden: true });
+const crowded = { children: [item("usage-problem"), item("usage-meter"), item("usage-meter critical"), item("usage-other critical"), item("usage-other"), item("usage-other")] };
+const [problem, calmMeter, criticalMeter, criticalOther, calmOther, lastOther] = crowded.children;
+assert.deepEqual(dropOrder(crowded.children), [lastOther, calmOther, calmMeter, criticalOther, criticalMeter], "calm accounts go first, then calm meters, then anything near its limit; the problem never");
+const room = (count) => (l) => l.children.filter((c) => !c.hidden).length > count;
+fit(crowded, room(3));
+assert.deepEqual(crowded.children.filter((c) => !c.hidden), [problem, criticalMeter, criticalOther], "a narrow line keeps the problem and what is near its limit");
+fit(crowded, room(6));
+assert.equal(crowded.children.every((c) => !c.hidden), true, "with room nothing is dropped");
 
 const intervals = [];
 let answer = { status: 200, ok: true, json: async () => ({ sets }) };

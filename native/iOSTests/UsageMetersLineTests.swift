@@ -22,6 +22,10 @@ final class UsageMetersLineTests: XCTestCase {
         )
     }
 
+    private func size(_ strip: UsageStrip, at available: CGFloat) -> CGSize {
+        UIHostingController(rootView: UsageMetersLine(strip: strip, now: now)).sizeThatFits(in: CGSize(width: available, height: .greatestFiniteMagnitude))
+    }
+
     private func width(at available: CGFloat) -> CGFloat {
         let host = UIHostingController(rootView: UsageMetersLine(strip: strip, now: now))
         return ceil(host.sizeThatFits(in: CGSize(width: available, height: .greatestFiniteMagnitude)).width)
@@ -30,6 +34,16 @@ final class UsageMetersLineTests: XCTestCase {
     func testTheLineNeverOverflowsAPhoneWidth() {
         for available in [320.0, 375, 393, 430] as [CGFloat] {
             XCTAssertLessThanOrEqual(width(at: available), available, "at \(available)pt the usage line must fall back rather than overflow")
+        }
+    }
+
+    func testAFailedReadForThisComputerStaysVisibleBesideOtherAccounts() {
+        let failed = UsageStrip(others: strip.others, problem: "claude.ai could not be asked for this computer's account, so its limits are unknown")
+        let quiet = UsageStrip(others: strip.others)
+        for available in [320.0, 393] as [CGFloat] {
+            let shown = size(failed, at: available)
+            XCTAssertLessThanOrEqual(ceil(shown.width), available, "at \(available)pt the problem truncates rather than overflowing")
+            XCTAssertGreaterThan(shown.height, size(quiet, at: available).height, "the problem takes its own line above the other accounts")
         }
     }
 

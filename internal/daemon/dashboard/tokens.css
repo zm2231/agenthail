@@ -245,13 +245,12 @@ textarea:focus-visible {
   text-overflow: ellipsis;
   max-width: 320px;
 }
+.usage-line > [hidden] {
+  display: none;
+}
 @container (max-width: 900px) {
-  .usage-meter meter,
-  .usage-other:not(.critical) {
+  .usage-meter meter {
     display: none;
-  }
-  .usage-line .critical {
-    order: -1;
   }
 }
 @container (max-width: 700px) {

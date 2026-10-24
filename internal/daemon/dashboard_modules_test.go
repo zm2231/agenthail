@@ -18,7 +18,7 @@ func TestDashboardServesModulesOnlyFromItsJSDirectory(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	for _, path := range []string{"/js/ui.js", "/js/ui-contrast.js", "/js/tool-activity.js", "/js/usage.js"} {
+	for _, path := range []string{"/js/ui.js", "/js/ui-contrast.js", "/js/tool-activity.js", "/js/usage.js", "/js/usage-fit.js"} {
 		response := get(http.MethodGet, path)
 		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/javascript; charset=utf-8" || response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), "export ") {
 			t.Fatalf("%s: status=%d type=%q cache=%q", path, response.Code, response.Header().Get("Content-Type"), response.Header().Get("Cache-Control"))

@@ -237,13 +237,18 @@ its own peers in turn, and waits at most a few seconds for each. A host that
 runs an older Agenthail, does not answer in time or fails is one set with no
 provider and a `problem` that names it. The Mac status strip and the web
 dashboard's top bar show this machine's primary account and Codex in full and
-every other account or host by name and its highest limit. When the Mac strip
-narrows, it keeps only the other accounts near their limit. The iPhone shows
+every other account or host by name and its highest limit. When this machine's
+own accounts have no meters, the line starts with the problem that explains why.
+When the Mac strip or the dashboard's usage area narrows (below 900px on the
+web), it keeps only the other accounts near their limit, and the web line puts
+that problem first, then anything near its limit, before it runs out of room.
+The iPhone shows
 the same line under the session filters; it asks each computer it is paired
 with, counts only the first one's own accounts as in use, and lists a host two
 computers both report once. A computer that does not answer keeps its place,
 so a later one is never taken for the first. When the line is too wide for the
-phone, the other accounts move to a second line before any of them is dropped.
+phone, the other accounts move to a second line before any of them is dropped;
+a problem with this computer's accounts takes its own line above them.
 
 ## Unreachable hosts and delivery
 

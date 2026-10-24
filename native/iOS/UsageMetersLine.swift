@@ -18,15 +18,27 @@ struct UsageMetersLine: View {
     let now: Date
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            row(details: true, others: true)
-            row(details: false, others: true)
-            VStack(alignment: .leading, spacing: 4) {
-                row(details: false, others: false)
-                if !strip.others.isEmpty { row(meters: false, details: false, others: true) }
+        Group {
+            if let problem = strip.problem {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(problem).foregroundStyle(PhonePalette.failed).truncationMode(.tail)
+                    ViewThatFits(in: .horizontal) {
+                        row(meters: false, details: false, others: true)
+                        row(meters: false, details: false, others: true, compact: true)
+                    }
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    row(details: true, others: true)
+                    row(details: false, others: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        row(details: false, others: false)
+                        if !strip.others.isEmpty { row(meters: false, details: false, others: true) }
+                    }
+                    row(details: false, others: false)
+                    row(details: false, others: false, first: true)
+                }
             }
-            row(details: false, others: false)
-            row(details: false, others: false, first: true)
         }
         .font(.footnote)
         .lineLimit(1)
@@ -35,7 +47,7 @@ struct UsageMetersLine: View {
         .accessibilityIdentifier("usage-limits")
     }
 
-    private func row(meters: Bool = true, details: Bool, others: Bool, first: Bool = false) -> some View {
+    private func row(meters: Bool = true, details: Bool, others: Bool, first: Bool = false, compact: Bool = false) -> some View {
         HStack(spacing: 12) {
             ForEach(meters ? (first ? Array(strip.meters.prefix(1)) : strip.meters) : [], id: \.self) { meter in
                 let spoken = UsageMeterText.spokenLabel(meter, now: now)
@@ -47,7 +59,7 @@ struct UsageMetersLine: View {
                 .accessibilityLabel(spoken)
             }
             if others {
-                ForEach(strip.others) { other in
+                ForEach(strip.others(compact: compact)) { other in
                     HStack(spacing: 4) {
                         Text(other.title).foregroundStyle(PhonePalette.muted)
                         value(UsageMeterText.percent(other.percent), critical: other.critical)

@@ -1,3 +1,5 @@
+import { fit, wrapped } from "./usage-fit.js";
+
 export const POLL_MS = 120_000;
 const REDRAW_MS = 60_000;
 
@@ -131,7 +133,11 @@ export function start({ document, fetch, setInterval, now = Date.now }) {
   const element = document.getElementById("usage-line");
   if (!element) return null;
   let sets = [];
-  const draw = () => render(document, element, usageStrip(sets, now()), now());
+  const draw = () => {
+    render(document, element, usageStrip(sets, now()), now());
+    fit(element, wrapped);
+  };
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => fit(element, wrapped)).observe(element);
   const load = async () => {
     try {
       const response = await fetch("/api/v1/usage", { headers: { accept: "application/json" } });
