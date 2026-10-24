@@ -1,8 +1,7 @@
 import SwiftUI
 
 extension View {
-    /// Floating controls over the edge of a scroll view; content fades out
-    /// under them instead of showing through behind their text.
+    /// Content under the top bar is covered, since header text sits on it; under the bottom bar it fades.
     func edgeBar<Bar: View>(_ edge: VerticalEdge, spacing: CGFloat? = nil, @ViewBuilder content: () -> Bar) -> some View {
         modifier(EdgeBar(edge: edge, spacing: spacing, bar: content()))
     }
@@ -17,13 +16,17 @@ private struct EdgeBar<Bar: View>: ViewModifier {
         if #available(iOS 26, *) {
             content
                 .safeAreaBar(edge: edge, spacing: spacing) { bar }
-                .scrollEdgeEffectStyle(.soft, for: edge == .top ? .top : .bottom)
+                .scrollEdgeEffectStyle(edge == .top ? .hard : .soft, for: edge == .top ? .top : .bottom)
         } else {
             content.safeAreaInset(edge: edge, spacing: spacing) {
                 bar.background {
-                    Rectangle().fill(.ultraThinMaterial)
-                        .mask(LinearGradient(colors: [.black, .black.opacity(0)], startPoint: edge == .top ? .top : .bottom, endPoint: edge == .top ? .bottom : .top))
-                        .ignoresSafeArea(edges: edge == .top ? .top : .bottom)
+                    if edge == .top {
+                        Rectangle().fill(.bar).ignoresSafeArea(edges: .top)
+                    } else {
+                        Rectangle().fill(.ultraThinMaterial)
+                            .mask(LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .bottom, endPoint: .top))
+                            .ignoresSafeArea(edges: .bottom)
+                    }
                 }
             }
         }
