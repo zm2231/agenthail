@@ -109,6 +109,11 @@ html[data-panes="solid"] [data-pane="float"] {
   background: var(--raised);
   box-shadow: 0 6px 16px rgb(0 0 0 / 0.12);
 }
+@media (prefers-contrast: more) {
+  html[data-panes="solid"] [data-pane="float"] {
+    box-shadow: none;
+  }
+}
 
 @media (max-width: 760px) {
   html[data-panes] {

@@ -427,7 +427,8 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   ]) {
     const target = effectiveTarget(values, highContrast);
     applyTheme(doc, values, name === "dark", colourOf, target);
-    const roles = ["--ink", "--muted", "--quiet"].map((token) => colourOf(`var(${token})`));
+    const roles = ["--ink", "--muted", "--quiet", "--accent", "--good", "--warn", "--bad"].map((token) => colourOf(`var(${token})`));
+    assert.ok(textRatio(set.paper.colour, colourOf("var(--accent)")) >= 7, `${name}, ${why}: paper text on an accent fill reads at 7:1`);
     const composer = over(set.composer, set.paper.colour);
     const surfaces = [set.paper, set.panel, set.raised, set.hover, set.code].map((t) => t.colour).concat([
       composer,
@@ -516,6 +517,26 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   assert.equal(reads, 2);
   assert.equal(await sampler.measure({ ...look, spec: { kind: "image", path: "missing.png" } }), null, "a picture that fails to load gives no measurement");
   assert.equal(await sampler.measure({ ...look, spec: { kind: "none" } }), null);
+}
+
+{
+  const makeCanvas = (width, height) => ({
+    getContext: () => ({
+      fillRect() {},
+      drawImage() {},
+      getImageData: () => {
+        const data = new Uint8ClampedArray(width * height * 4).fill(20);
+        data.set([255, 255, 255, 255], 2 * 4);
+        return { data };
+      },
+    }),
+  });
+  const sampler = createSampler({ makeCanvas, loadImage: async () => ({ width: 4, height: 1 }) });
+  const ground = [0.09, 0.094, 0.102];
+  const look = { spec: { kind: "image", path: "art/field-dark.jpg" }, fit: "cover", position: "center", width: 4, height: 1, scale: 1.25, strength: 1, dim: 0, ground, polarity: "dark", texture: "none", textureStrength: 0, roles: [contrast.luminance([0.93, 0.92, 0.9])], target: 4.5, glass: { tint: ground, panes: { content: 0 } } };
+  const edge = (await sampler.measure({ ...look, areas: { content: [[1, 0, 1, 1]] } })).panes.content;
+  assert.ok(edge > 0, "at a fractional scale, a pane covers every device pixel it touches, including the one its right edge only partly covers");
+  assert.equal((await sampler.measure({ ...look, areas: { content: [[0, 0, 1, 1]] } })).panes.content, 0, "and no pixel it does not touch");
 }
 
 {

@@ -7,7 +7,7 @@ const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
 const STORED = "agenthail.ui";
 const SOFT = 0.12;
-const ROLES = ["--ink", "--muted", "--quiet"];
+const ROLES = ["--ink", "--muted", "--quiet", "--accent", "--good", "--warn", "--bad"];
 const COMPOSER_FLOOR = 0.2;
 
 export function resolveTheme(theme, prefersDark) {

@@ -52,7 +52,11 @@ export function createSampler({ makeCanvas, loadImage }) {
     if (!cached.colours.has(key)) {
       if (cached.colours.size >= 16) cached.colours.clear();
       const { data, width, scale } = cached.pixels;
-      const scaled = rects.map((rect) => rect.map((v) => Math.round(v * scale)));
+      const scaled = rects.map(([x, y, w, h]) => {
+        const left = Math.floor(x * scale);
+        const top = Math.floor(y * scale);
+        return [left, top, Math.ceil((x + w) * scale) - left, Math.ceil((y + h) * scale) - top];
+      });
       cached.colours.set(key, distinctColours(data, width, scaled));
     }
     return cached.colours.get(key);
