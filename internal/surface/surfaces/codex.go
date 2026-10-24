@@ -613,16 +613,7 @@ func codexStatus(s any) surface.SessionStatus {
 		s = m["type"]
 	}
 	str, _ := s.(string)
-	switch strings.ToLower(str) {
-	case "idle":
-		return surface.StatusIdle
-	case "busy", "running", "in_progress", "inprogress", "active":
-		return surface.StatusBusy
-	case "":
-		return surface.StatusUnknown
-	default:
-		return surface.SessionStatus(str)
-	}
+	return surface.NormalizeStatus(str)
 }
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
@@ -1568,11 +1559,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
-	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: n})
-	if err != nil {
-		return nil, err
-	}
-	return read.Exchanges, nil
+	return surface.Tail(ctx, c, sess, n)
 }
 
 func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n int, recorded map[string]*surface.TurnMetadata) (*surface.SessionReadResult, error) {

@@ -14,6 +14,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -84,7 +85,7 @@ func devicesList(ctx context.Context, client *daemonAPIClient, jsonOut bool) err
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"devices": devices})
+		return emit(map[string]any{"devices": devices})
 	}
 	if len(devices) == 0 {
 		fmt.Println("no paired devices; pair an iPhone with 'agenthail devices pair'")
@@ -202,23 +203,27 @@ func isTerminal(out io.Writer) bool {
 }
 
 func awaitPairing(client *daemonAPIClient, pairing devicePairing) (string, error) {
-	for {
+	name := ""
+	err := poll.Until(context.Background(), devicePairPoll, func() (bool, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		var status registry.DevicePairingStatus
 		err := client.getJSON(ctx, "/api/v1/pairings", url.Values{"id": {pairing.ID}}, &status)
 		cancel()
 		if err != nil {
-			return "", fmt.Errorf("check pairing: %w", err)
+			return false, fmt.Errorf("check pairing: %w", err)
 		}
 		switch status.State {
 		case registry.PairingPaired:
 			if status.Device == nil {
-				return "a device", nil
+				name = "a device"
+			} else {
+				name = status.Device.Name
 			}
-			return status.Device.Name, nil
+			return true, nil
 		case registry.PairingExpired:
-			return "", errors.New("the pairing code expired before a device used it; run agenthail devices pair again")
+			return false, errors.New("the pairing code expired before a device used it; run agenthail devices pair again")
 		}
-		time.Sleep(devicePairPoll)
-	}
+		return false, nil
+	})
+	return name, err
 }

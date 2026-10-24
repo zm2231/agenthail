@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -178,7 +177,7 @@ func (a *App) signinList(ctx context.Context, jsonOut bool) error {
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(listing)
+		return emit(listing)
 	}
 	labels := map[string]string{}
 	for _, profile := range listing.Profiles {

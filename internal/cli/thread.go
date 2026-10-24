@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -179,7 +178,7 @@ func (a *App) cmdThread(args []string) error {
 	}
 	recordThreadCreateHistory(a.registry(), "sent", session, request.message, result, "")
 	if request.jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(output)
+		return emit(output)
 	}
 	target := string(session.Surface) + "/" + session.ID
 	if request.alias != "" {
@@ -201,7 +200,7 @@ func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateO
 	output.Delivery = nil
 	output.Detail = submittedThreadDetail(output.Session, request.alias)
 	if request.jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(output)
+		return emit(output)
 	}
 	fmt.Println(output.Detail)
 	return nil
@@ -223,7 +222,7 @@ func emitCreateStorageFailure(request threadCreateRequest, session *surface.Sess
 
 func emitThreadFailure(request threadCreateRequest, output threadCreateOutput, err error) error {
 	if request.jsonOut {
-		if encodeErr := json.NewEncoder(os.Stdout).Encode(output); encodeErr != nil {
+		if encodeErr := emit(output); encodeErr != nil {
 			return fmt.Errorf("write JSON output: %w", encodeErr)
 		}
 	}

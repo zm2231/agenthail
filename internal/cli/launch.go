@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
+	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -73,14 +74,17 @@ func launchCodex(codex surface.Surface) error {
 	pid = cmd.Process.Pid
 	cmd.Process.Release()
 	fmt.Println("Opening Codex and waiting for it to connect")
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 200*time.Millisecond, func() (bool, error) {
 		if err := probeCodexDesktop(codex); err == nil {
-			fmt.Println("Codex is ready for Agenthail")
-			fmt.Println("Run 'agenthail doctor' to check every connection")
-			return nil
+			return true, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		return false, nil
+	}); err == nil {
+		fmt.Println("Codex is ready for Agenthail")
+		fmt.Println("Run 'agenthail doctor' to check every connection")
+		return nil
 	}
 	return fmt.Errorf("Codex opened but its Desktop bridge did not become ready; run 'agenthail doctor' for details")
 }

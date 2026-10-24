@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -248,19 +249,18 @@ func (c *Claude) controlRequest(ctx context.Context, sess *surface.Session, acti
 	}
 	result.Evidence = surface.EvidenceTransportAccepted
 	after := uuid
-	ticker := time.NewTicker(claudeControlPoll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s was accepted but no matching control response arrived: %w", action, ctx.Err()))
-		case <-ticker.C:
+	first := true
+	var controlErr error
+	err := poll.Until(ctx, claudeControlPoll, func() (bool, error) {
+		if first {
+			first = false
+			return false, nil
 		}
 		events, last, more, err := c.remoteEvents(ctx, sess, after)
 		if err != nil {
 			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(err)
+			controlErr = surface.DeliveryOutcomeUnknown(err)
+			return true, nil
 		}
 		for _, event := range events {
 			if event.Type != "control_response" || event.Response.RequestID != requestID {
@@ -269,46 +269,53 @@ func (c *Claude) controlRequest(ctx context.Context, sess *surface.Session, acti
 			switch event.Response.Subtype {
 			case "error":
 				result.Evidence = surface.EvidenceFailed
-				return result, fmt.Errorf("Claude rejected %s: %s", action, event.Response.Error)
+				controlErr = fmt.Errorf("Claude rejected %s: %s", action, event.Response.Error)
+				return true, nil
 			case "success":
 				result.Evidence = surface.EvidenceDelivered
-				return result, nil
+				return true, nil
 			}
 		}
 		if len(events) > 0 {
 			if last == "" || last == after {
 				result.Evidence = surface.EvidenceUnknown
-				return result, surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event cursor did not advance"))
+				controlErr = surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event cursor did not advance"))
+				return true, nil
 			}
 			after = last
 		} else if more {
 			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event page is incomplete"))
+			controlErr = surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event page is incomplete"))
+			return true, nil
 		}
+		return false, nil
+	})
+	if err != nil {
+		result.Evidence = surface.EvidenceUnknown
+		return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s was accepted but no matching control response arrived: %w", action, err))
 	}
+	return result, controlErr
 }
 
 // confirmInterrupt waits for the turn that was active to end. A turn that
 // finished on its own also ends, so this proves the turn stopped, not that the
 // interrupt stopped it.
 func (c *Claude) confirmInterrupt(ctx context.Context, sess *surface.Session, result *surface.ControlResult) (*surface.ControlResult, error) {
-	ticker := time.NewTicker(claudeControlPoll)
-	defer ticker.Stop()
-	for {
+	err := poll.Until(ctx, claudeControlPoll, func() (bool, error) {
 		observation, err := c.Observe(ctx, sess)
 		if err == nil && observation != nil && (observation.Status != surface.StatusBusy || result.TurnID != "" && observation.ActiveTurnID != result.TurnID) {
-			result.Source = "claude-control-response+transcript"
-			result.Detail = "Claude acknowledged the interrupt and the active turn ended."
-			return result, nil
+			return true, nil
 		}
-		select {
-		case <-ctx.Done():
-			result.Evidence = surface.EvidenceUnknown
-			result.Detail = "Claude acknowledged the interrupt; the active turn was not seen ending."
-			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("%s: %w", result.Detail, ctx.Err()))
-		case <-ticker.C:
-		}
+		return false, nil
+	})
+	if err != nil {
+		result.Evidence = surface.EvidenceUnknown
+		result.Detail = "Claude acknowledged the interrupt; the active turn was not seen ending."
+		return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("%s: %w", result.Detail, err))
 	}
+	result.Source = "claude-control-response+transcript"
+	result.Detail = "Claude acknowledged the interrupt and the active turn ended."
+	return result, nil
 }
 
 func (c *Claude) compactControl(ctx context.Context, sess *surface.Session) (*surface.ControlResult, error) {
@@ -325,26 +332,31 @@ func (c *Claude) compactControl(ctx context.Context, sess *surface.Session) (*su
 		return nil, err
 	}
 	result := &surface.ControlResult{SessionID: sess.ID, RequestID: sent.UUID, Action: "compact", Evidence: surface.EvidenceTransportAccepted, Source: "claude-compact-boundary"}
-	ticker := time.NewTicker(claudeControlPoll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("compact was accepted but completion was not observed: %w", ctx.Err()))
-		case <-ticker.C:
+	first := true
+	err = poll.Until(ctx, claudeControlPoll, func() (bool, error) {
+		if first {
+			first = false
+			return false, nil
 		}
 		completed, err := readClaudeCompactCompletion(path, info.Size(), sent.UUID)
 		if err != nil {
-			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("read compact completion: %w", err))
+			return false, fmt.Errorf("read compact completion: %w", err)
 		}
 		if completed {
-			result.Evidence = surface.EvidenceDelivered
-			result.Detail = "A new compact boundary followed this request."
-			return result, nil
+			return true, nil
 		}
+		return false, nil
+	})
+	if err != nil {
+		result.Evidence = surface.EvidenceUnknown
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("compact was accepted but completion was not observed: %w", err))
+		}
+		return result, surface.DeliveryOutcomeUnknown(err)
 	}
+	result.Evidence = surface.EvidenceDelivered
+	result.Detail = "A new compact boundary followed this request."
+	return result, nil
 }
 
 // commandControl runs one allowlisted slash command and returns its output.
@@ -378,19 +390,16 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 	failed := false
 	cloudEvents := map[string]bool{}
 	after := sent.UUID
-	ticker := time.NewTicker(claudeControlPoll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude /%s was accepted but its output was not observed: %w", action, ctx.Err()))
-		case <-ticker.C:
+	first := true
+	err = poll.Until(ctx, claudeControlPoll, func() (bool, error) {
+		if first {
+			first = false
+			return false, nil
 		}
 		current, err := os.Stat(path)
 		if err != nil || !os.SameFile(info, current) || current.Size() < offset {
 			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(errors.New("command transcript was replaced or truncated"))
+			return false, surface.DeliveryOutcomeUnknown(errors.New("command transcript was replaced or truncated"))
 		}
 		found := false
 		offset, err = scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
@@ -408,18 +417,18 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 		})
 		if err != nil {
 			result.Evidence = surface.EvidenceUnknown
-			return result, surface.DeliveryOutcomeUnknown(err)
+			return false, surface.DeliveryOutcomeUnknown(err)
 		}
 		if !found {
 			events, last, _, err := c.remoteEvents(ctx, sess, after)
 			if err != nil {
 				result.Evidence = surface.EvidenceUnknown
-				return result, surface.DeliveryOutcomeUnknown(err)
+				return false, surface.DeliveryOutcomeUnknown(err)
 			}
 			for _, event := range events {
 				if event.Type == "user" && event.UUID != sent.UUID {
 					result.Evidence = surface.EvidenceUnknown
-					return result, surface.DeliveryOutcomeUnknown(errors.New("another prompt arrived before the command output"))
+					return false, surface.DeliveryOutcomeUnknown(errors.New("another prompt arrived before the command output"))
 				}
 				if event.UUID != "" {
 					cloudEvents[event.UUID] = true
@@ -428,7 +437,7 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 			if len(events) > 0 {
 				if last == "" || last == after {
 					result.Evidence = surface.EvidenceUnknown
-					return result, surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event cursor did not advance"))
+					return false, surface.DeliveryOutcomeUnknown(errors.New("Claude Remote Control event cursor did not advance"))
 				}
 				after = last
 			}
@@ -442,13 +451,21 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 			}
 		}
 		if !found {
-			continue
+			return false, nil
 		}
 		if failed {
 			result.Evidence = surface.EvidenceFailed
-			return result, fmt.Errorf("Claude rejected /%s: %s", action, result.Output)
+			return false, fmt.Errorf("Claude rejected /%s: %s", action, result.Output)
 		}
 		result.Evidence = surface.EvidenceReplyObserved
-		return result, nil
+		return true, nil
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			result.Evidence = surface.EvidenceUnknown
+			return result, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude /%s was accepted but its output was not observed: %w", action, err))
+		}
+		return result, err
 	}
+	return result, nil
 }

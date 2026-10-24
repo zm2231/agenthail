@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -191,7 +190,7 @@ func (a *App) cmdDoctor(args []string) error {
 		} else if grants != nil {
 			report["permissions"] = grants
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+		if err := emit(report); err != nil {
 			return err
 		}
 	} else {

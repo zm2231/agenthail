@@ -92,7 +92,7 @@ func (a *App) cmdHook(args []string) error {
 		select {
 		case output := <-done:
 			if output != nil {
-				_ = json.NewEncoder(os.Stdout).Encode(output)
+				_ = emit(output)
 			}
 		case <-claudeSessionContextExpired():
 		}
@@ -114,7 +114,7 @@ func (a *App) cmdHook(args []string) error {
 	go cancelWhenOrphaned(ctx, parent, cancel)
 	decision := holdClaudePrompt(ctx, client, os.Stdin, parent, a.isDaemonServiceLoaded)
 	if decision != nil {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PermissionRequest", "decision": decision}})
+		_ = emit(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PermissionRequest", "decision": decision}})
 	}
 	return nil
 }

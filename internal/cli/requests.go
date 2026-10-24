@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -32,7 +31,7 @@ func (a *App) cmdRequests(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(state)
+		return emit(state)
 	}
 	if len(state.Requests) == 0 {
 		fmt.Printf("%s has no open requests\n", label)
@@ -81,7 +80,7 @@ func (a *App) cmdAnswer(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]string{"requestId": request.ID, "outcome": outcome})
+		return emit(map[string]string{"requestId": request.ID, "outcome": outcome})
 	}
 	fmt.Printf("%s %s for %s\n", request.ID, outcome, label)
 	return nil
@@ -105,7 +104,7 @@ func (a *App) cmdPermissionMode(args []string) error {
 			return err
 		}
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]string{"permissionMode": state.PermissionMode})
+			return emit(map[string]string{"permissionMode": state.PermissionMode})
 		}
 		fmt.Println(permissionModeLabel(state.PermissionMode))
 		return nil
@@ -125,7 +124,7 @@ func (a *App) cmdPermissionMode(args []string) error {
 			return fmt.Errorf("decode permission-mode answer for %s: %w", remote.label(), err)
 		}
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return emit(result)
 		}
 		printControl(remote.label(), &result)
 		return nil

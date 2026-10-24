@@ -2,11 +2,9 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"runtime"
 	"time"
 
@@ -30,7 +28,7 @@ func (a *App) cmdPermissions(args []string) error {
 			return err
 		}
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(report)
+			return emit(report)
 		}
 		printPermissions(report)
 		return nil
@@ -56,7 +54,7 @@ func permissionsOffMacOS(args []string) error {
 	switch positional := stripFlags(args); {
 	case len(positional) == 0:
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(permissions.Report{Grants: []permissions.Grant{}})
+			return emit(permissions.Report{Grants: []permissions.Grant{}})
 		}
 		fmt.Println("[permissions] privacy grants are a macOS setting; this system has none")
 		return nil

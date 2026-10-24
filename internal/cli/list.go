@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -35,7 +34,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 		return fmt.Errorf("read Claude subagent records: %w", err)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"runs": runs, "subagents": links})
+		return emit(map[string]any{"runs": runs, "subagents": links})
 	}
 	for _, run := range runs {
 		fmt.Printf("%s\t%s\t%s\t%s\n", run.JobID, run.ProviderState, run.SessionID, run.RunType)
@@ -67,7 +66,7 @@ func (a *App) cmdList(args []string) error {
 	catalog, catalogBacked, catalogErr := a.listCatalogSnapshot()
 	if catalogErr != nil {
 		if jsonOut {
-			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": map[string]string{"catalog": catalogErr.Error()}}); err != nil {
+			if err := emit(map[string]any{"sessions": allSessions, "errors": map[string]string{"catalog": catalogErr.Error()}}); err != nil {
 				return err
 			}
 		}
@@ -241,7 +240,7 @@ func (a *App) cmdList(args []string) error {
 			document["catalog"] = listCatalogMetadata(catalog)
 			document["scope"] = scope
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(document); err != nil {
+		if err := emit(document); err != nil {
 			return err
 		}
 		if successfulSurfaces == 0 && len(surfaceErrors) > 0 {

@@ -590,9 +590,5 @@ func (n *Notion) Steer(ctx context.Context, sess *surface.Session, message strin
 }
 
 func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) ([]surface.Exchange, error) {
-	read, err := n.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: msgCount})
-	if err != nil {
-		return nil, err
-	}
-	return read.Exchanges, nil
+	return surface.Tail(ctx, n, sess, msgCount)
 }

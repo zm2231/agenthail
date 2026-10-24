@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/delivery"
@@ -92,7 +91,7 @@ func (a *App) goalRemote(ctx context.Context, remote *remoteTarget, positional [
 		var goal *surface.GoalState
 		_ = json.Unmarshal(raw, &goal)
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": remote.Surface, "session": remote.ID, "goal": goal})
+			return emit(map[string]any{"surface": remote.Surface, "session": remote.ID, "goal": goal})
 		}
 		if goal == nil || goal.Objective == "" {
 			fmt.Println("(no active goal)")
@@ -168,7 +167,7 @@ func (a *App) threadOperationRemote(ctx context.Context, remote *remoteTarget, o
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(result)
+	return emit(result)
 }
 
 // queueRemote hands the message to the host's own busy queue; the daemon
@@ -220,7 +219,7 @@ func (a *App) historyRemote(ctx context.Context, remote *remoteTarget, limit int
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"history": raw.Items})
+		return emit(map[string]any{"history": raw.Items})
 	}
 	if err := json.Unmarshal(data, &page); err != nil {
 		return err
@@ -285,7 +284,7 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 		return printModelChange(remote.ID, *result.Change, args)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(result)
+		return emit(result)
 	}
 	printControl(remote.label(), &result)
 	return nil

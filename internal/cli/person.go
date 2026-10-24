@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -40,7 +38,7 @@ func (a *App) cmdPerson(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"name": name, "set": setting != ""})
+		return emit(map[string]any{"name": name, "set": setting != ""})
 	}
 	fmt.Println(describePersonName(name, setting != ""))
 	return nil

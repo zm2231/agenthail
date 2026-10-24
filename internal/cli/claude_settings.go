@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -64,7 +63,7 @@ func (a *App) cmdClaude(args []string) error {
 		results = append(results, settings)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"roots": results})
+		return emit(map[string]any{"roots": results})
 	}
 	for _, settings := range results {
 		fmt.Println(describeClaudeCompactSettings(settings))

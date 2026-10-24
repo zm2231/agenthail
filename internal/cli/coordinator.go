@@ -216,7 +216,7 @@ func (a *App) coordinatorShow(path string, jsonOut bool) error {
 		return fmt.Errorf("%s has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'", found.RootPath)
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"projectId": found.ID, "coordinators": specs})
+		return emit(map[string]any{"projectId": found.ID, "coordinators": specs})
 	}
 	if len(specs) > 1 {
 		fmt.Printf("%s has %d coordinators; resolve it with 'agenthail coordinator set --replace' on one host\n", found.RootPath, len(specs))
@@ -269,7 +269,7 @@ func (a *App) coordinatorList(jsonOut bool) error {
 		rows = append(rows, entry)
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"coordinators": rows})
+		return emit(map[string]any{"coordinators": rows})
 	}
 	if len(rows) == 0 {
 		fmt.Println("(no coordinators; use: agenthail coordinator new <claude|codex>)")
@@ -426,7 +426,7 @@ func (a *App) runCoordinatorChange(ctx context.Context, payload map[string]any, 
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(answer)
+		return emit(answer)
 	}
 	spec := answer.Coordinator
 	for _, previous := range answer.Replaced {
@@ -462,7 +462,7 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(answer)
+		return emit(answer)
 	}
 	if answer.Cleared == nil {
 		fmt.Printf("%s has no coordinator\n", found.RootPath)
@@ -515,7 +515,7 @@ func (a *App) sendToPeerCoordinator(ctx context.Context, spec registry.Coordinat
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(answer)
+		return emit(answer)
 	}
 	fmt.Println(answer.Result.Detail)
 	if answer.Started {
@@ -547,7 +547,7 @@ func (a *App) startCoordinator(ctx context.Context, coord coordinator.Service, s
 
 func printCoordinatorStart(outcome *coordinator.Outcome, target string, jsonOut bool) error {
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(outcome)
+		return emit(outcome)
 	}
 	fmt.Println(outcome.Receipt.Detail)
 	fmt.Printf("read its reply with 'agenthail last %s'\n", target)
@@ -556,7 +556,7 @@ func printCoordinatorStart(outcome *coordinator.Outcome, target string, jsonOut 
 
 func printCoordinatorReceipt(outcome *coordinator.Outcome, jsonOut bool) error {
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(outcome.Receipt)
+		return emit(outcome.Receipt)
 	}
 	fmt.Println(outcome.Receipt.Detail)
 	return nil

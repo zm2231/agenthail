@@ -812,27 +812,18 @@ func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surf
 }
 
 func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
-	switch strings.ToLower(string(status)) {
-	case "idle", "shell":
-		return surface.StatusIdle
-	case "busy", "running", "active", "in_progress", "inprogress", "waiting":
-		return surface.StatusBusy
-	case "offline":
-		return surface.StatusOffline
-	default:
-		return surface.StatusUnknown
-	}
+	return surface.NormalizeStatus(string(status))
 }
 
 // claudePeerStatus reads a Claude session record's status. Claude writes
 // "shell" when its prompt is ready but a background shell is still running,
 // and "waiting" while the turn is blocked on the user.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	switch str(record, "status") {
-	case "busy", "waiting":
+	status := surface.NormalizeStatus(str(record, "status"))
+	if status == surface.StatusBusy {
 		return surface.StatusBusy
-	case "idle", "shell":
-	default:
+	}
+	if status != surface.StatusIdle {
 		return surface.StatusUnknown
 	}
 	features, _ := record["peerFeatures"].([]any)
@@ -1584,11 +1575,7 @@ func fileExists(path string) bool {
 }
 
 func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
-	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: n})
-	if err != nil {
-		return nil, err
-	}
-	return read.Exchanges, nil
+	return surface.Tail(ctx, c, sess, n)
 }
 
 // awaitHostTranscript waits for a hosted session's first transcript write.

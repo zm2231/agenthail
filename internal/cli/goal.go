@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -36,7 +34,7 @@ func (a *App) cmdGoal(args []string) error {
 			return getErr
 		}
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "goal": goal})
+			return emit(map[string]any{"surface": sess.Surface, "session": sess.ID, "goal": goal})
 		}
 		if goal == nil || goal.Objective == "" {
 			fmt.Println("(no active goal)")

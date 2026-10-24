@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -144,7 +143,7 @@ func (a *App) cmdUI(args []string) error {
 			return err
 		}
 		if parsed.json {
-			return json.NewEncoder(os.Stdout).Encode(entries)
+			return emit(entries)
 		}
 		for _, e := range entries {
 			fmt.Fprintf(os.Stdout, "%s  %s  %-12s %s\n", e.Rev, e.Time.Local().Format("2006-01-02 15:04"), e.Author, e.Message)
@@ -181,14 +180,14 @@ func (a *App) uiGet(store *uiconf.Store, parsed uiArgs) error {
 	}
 	if !parsed.resolved {
 		if parsed.json {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"rev": state.Rev, "text": state.Text, "problems": nonNilProblems(state.Parsed.Problems)})
+			return emit(map[string]any{"rev": state.Rev, "text": state.Text, "problems": nonNilProblems(state.Parsed.Problems)})
 		}
 		fmt.Fprint(os.Stdout, state.Text)
 		return nil
 	}
 	values := state.Parsed.Resolve(uiconf.Device{Class: parsed.device, Name: parsed.name})
 	if parsed.json {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"rev": state.Rev, "values": values, "problems": nonNilProblems(state.Parsed.Problems)})
+		return emit(map[string]any{"rev": state.Rev, "values": values, "problems": nonNilProblems(state.Parsed.Problems)})
 	}
 	for _, key := range uiconf.Keys {
 		value := values[key.Name]
