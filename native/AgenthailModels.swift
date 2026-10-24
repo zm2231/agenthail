@@ -3,17 +3,12 @@ import Foundation
 
 enum TimestampParser {
     static func date(_ value: String) -> Date? {
-        guard let date = fractional.date(from: value) ?? wholeSecond.date(from: value), date.timeIntervalSince1970 > 0 else { return nil }
+        guard let date = (try? fractional.parse(value)) ?? (try? wholeSecond.parse(value)), date.timeIntervalSince1970 > 0 else { return nil }
         return date
     }
 
-    private static let fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let wholeSecond = ISO8601DateFormatter()
+    private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecond = Date.ISO8601FormatStyle()
 }
 
 struct ClaudeCreationSettings {

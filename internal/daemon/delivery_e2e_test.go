@@ -536,7 +536,7 @@ func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T
 	if item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued || len(agent.deliveredTo("target")) != 0 {
 		t.Fatalf("held item=%+v delivered=%+v", item, agent.deliveredTo("target"))
 	}
-	if queuedAt, err := time.ParseInLocation("2006-01-02 15:04:05", item.QueuedAt, time.UTC); err != nil || time.Since(queuedAt) < 3*time.Hour {
+	if queuedAt, err := time.Parse(time.RFC3339Nano, item.QueuedAt); err != nil || time.Since(queuedAt) < 3*time.Hour {
 		t.Fatalf("queuedAt=%q err=%v", item.QueuedAt, err)
 	}
 	agent.setStatus("target", surface.StatusIdle)

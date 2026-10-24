@@ -89,7 +89,7 @@ func TestPromptsAreWhatAPersonTypedNewestFirst(t *testing.T) {
 	if got, want := promptTexts(body.Prompts), long+"|second prompt|first prompt"; got != want {
 		t.Fatalf("prompts = %q, want %q", got, want)
 	}
-	if first := body.Prompts[1]; first.SessionID != session.ID || first.ItemID != "m7" || first.TurnID != "turn-m7" || first.TS != "2026-10-20T10:00:07Z" || body.NextBefore != "" {
+	if first := body.Prompts[1]; first.SessionID != session.ID || first.ItemID != "m7" || first.TurnID != "turn-m7" || first.TS != "2026-10-20T10:00:07.000000000Z" || body.NextBefore != "" {
 		t.Fatalf("prompt = %+v next = %q", first, body.NextBefore)
 	}
 
