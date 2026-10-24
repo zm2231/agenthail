@@ -35,7 +35,7 @@ func (r *Registry) SaveBrowserPushSubscription(subscription BrowserPushSubscript
 	}
 	result, err := r.db.Exec(`INSERT INTO browser_push_subscriptions (device_id,endpoint,p256dh,auth,updated_at)
 		SELECT id,?,?,?,? FROM paired_devices WHERE id=? AND browser=1 AND revoked_at=''
-		ON CONFLICT(device_id) DO UPDATE SET endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at`, endpoint, p256dh, auth, time.Now().UTC().Format(time.RFC3339Nano), deviceID)
+		ON CONFLICT(device_id) DO UPDATE SET endpoint=excluded.endpoint,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=excluded.updated_at`, endpoint, p256dh, auth, formatTimestamp(time.Now()), deviceID)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (r *Registry) HasBrowserPushSubscription(deviceID string) (bool, error) {
 // BrowserPushSubscriptions lists the subscriptions of browsers still signed
 // in. A browser past BrowserIdleLimit is left out even before it is pruned.
 func (r *Registry) BrowserPushSubscriptions() ([]BrowserPushSubscription, error) {
-	cutoff := time.Now().UTC().Add(-BrowserIdleLimit).Format(time.RFC3339Nano)
+	cutoff := formatTimestamp(time.Now().Add(-BrowserIdleLimit))
 	rows, err := r.read.Query(`SELECT b.device_id,b.endpoint,b.p256dh,b.auth
 		FROM browser_push_subscriptions b JOIN paired_devices d ON d.id=b.device_id
 		WHERE d.revoked_at='' AND d.browser=1

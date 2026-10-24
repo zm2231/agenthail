@@ -196,7 +196,7 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 		problem.AttentionSessionID = deliveryAttentionSession(problem.SourceSessionID, notified)
 		problem.Message = boundedIntentMessage(problem.Message)
 		problem.Status = DeliveryIntentStatus(status)
-		at, err := time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+		at, err := parseSQLiteTimestamp(updatedAt)
 		if err != nil {
 			return problem, fmt.Errorf("parse delivery problem timestamp: %w", err)
 		}
@@ -707,7 +707,7 @@ func queueDeliveryRefusalNotice(tx *sql.Tx, queueID, refusal int64, reason strin
 
 func appendDeliveryProblemEvent(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 	at := time.Now().UTC()
-	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "status": intent.Status, "at": at.Format(time.RFC3339Nano)})
+	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "status": intent.Status, "at": formatTimestamp(at)})
 	if err != nil {
 		return false, err
 	}
@@ -740,11 +740,11 @@ func scanDeliveryIntent(row *sql.Row) (*DeliveryIntent, error) {
 	intent.Status = DeliveryIntentStatus(status)
 	intent.Evidence = surface.DeliveryEvidence(evidence)
 	var err error
-	intent.CreatedAt, err = time.ParseInLocation("2006-01-02 15:04:05", createdAt, time.UTC)
+	intent.CreatedAt, err = parseSQLiteTimestamp(createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("parse delivery intent creation timestamp: %w", err)
 	}
-	intent.UpdatedAt, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+	intent.UpdatedAt, err = parseSQLiteTimestamp(updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("parse delivery intent update timestamp: %w", err)
 	}

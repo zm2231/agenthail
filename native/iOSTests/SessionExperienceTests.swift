@@ -224,7 +224,7 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 body = #"{"context":{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0},"goal":{"objective":"Metadata goal","status":"active"},"model":"Metadata model","models":[{"id":"metadata-model","displayName":"Metadata model"}],"claudeRuns":[{"recordPath":"/tmp/job-1.json","jobId":"job-1","sessionId":"metadata","resumeSessionId":"resume-1","runType":"bg","providerState":"working","createdAt":"2026-10-04T00:00:00Z","updatedAt":"2026-10-04T00:01:00Z"}],"claudeSubagents":[{"parentSessionId":"metadata","agentId":"agent-1","transcriptPath":"/tmp/agent-1.jsonl"}],"errors":{"context":"fixture warning"}}"#
             }
         } else if request.url!.path == "/api/v1/queue" {
-            body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
+            body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z"}]}"#
         } else if request.url!.path == "/api/v1/actions" {
             var data = request.httpBody ?? Data()
             if let stream = request.httpBodyStream {

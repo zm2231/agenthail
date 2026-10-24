@@ -147,7 +147,7 @@ func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry regi
 		item := toItem(row)
 		envelope.Item = &item
 	}
-	encoded, err := json.Marshal(envelope)
+	encoded, err := marshalAPIJSON(envelope)
 	if err != nil {
 		return err
 	}

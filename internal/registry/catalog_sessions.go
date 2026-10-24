@@ -130,7 +130,7 @@ func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	changed := err == sql.ErrNoRows || priorHealth != state.Health || priorDetail != state.Detail
-	observedAt := state.ObservedAt.UTC().Format(time.RFC3339Nano)
+	observedAt := formatTimestamp(state.ObservedAt)
 	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, observedAt); err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -236,7 +236,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		VALUES(?,?,?,?,?,?,?,0,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks, usage_limit=excluded.usage_limit`,
-		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit); err != nil {
+		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -410,7 +410,7 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET discovery_failures=1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
 			return nil, err
 		}
-		lastObserved, err := time.Parse(time.RFC3339Nano, row.observedAt)
+		lastObserved, err := parseTimestamp(row.observedAt)
 		if err != nil {
 			return nil, fmt.Errorf("parse catalog observation: %w", err)
 		}
@@ -470,7 +470,7 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	lastObserved, err := parseTimestamp(observedAt)
 	if err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
 	}
@@ -521,7 +521,7 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE catalog_sessions SET observed_at=? WHERE session_id IN (SELECT value FROM json_each(?)) AND misses=0 AND discovery_failures=0`, observedAt.UTC().Format(time.RFC3339Nano), string(encodedIDs)); err != nil {
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET observed_at=? WHERE session_id IN (SELECT value FROM json_each(?)) AND misses=0 AND discovery_failures=0`, formatTimestamp(observedAt), string(encodedIDs)); err != nil {
 		return nil, err
 	}
 	if !complete {
@@ -635,7 +635,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	if string(next) == fingerprint {
 		return CatalogEvent{}, false, nil
 	}
-	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	lastObserved, err := parseTimestamp(observedAt)
 	if err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
 	}
@@ -782,7 +782,7 @@ func catalogSurfaces(q rowQuerier) ([]CatalogSurfaceState, error) {
 		if err := row.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
 			return state, err
 		}
-		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+		parsed, err := parseTimestamp(observedAt)
 		if err != nil {
 			return state, fmt.Errorf("parse catalog surface observation: %w", err)
 		}

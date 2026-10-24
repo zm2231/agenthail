@@ -32,7 +32,7 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	state.LastStatus = surface.SessionStatus(status)
 	state.NotificationArmed = notificationArmed != 0
 	if updatedAt != "" {
-		state.UpdatedAt, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+		state.UpdatedAt, err = parseSQLiteTimestamp(updatedAt)
 		if err != nil {
 			return state, false, fmt.Errorf("parse runtime state timestamp: %w", err)
 		}

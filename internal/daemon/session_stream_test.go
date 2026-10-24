@@ -289,6 +289,15 @@ func TestASessionStreamCarriesEachRowAsTheSessionPageReadsIt(t *testing.T) {
 			t.Fatal(err)
 		}
 		want, onPage := paged[envelope.Data.ItemID]
+		if onPage {
+			encoded, err := marshalAPIJSON(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(encoded, &want); err != nil {
+				t.Fatal(err)
+			}
+		}
 		switch {
 		case !onPage && envelope.Item != nil:
 			t.Fatalf("a row the page leaves out carries an item: %s %+v", envelope.Data.ItemID, envelope.Item)

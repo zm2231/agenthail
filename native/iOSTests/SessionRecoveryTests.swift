@@ -245,7 +245,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     var fields = ""
                     if let queueHistorical { fields += ",\"historical\":\(queueHistorical)" }
                     fields += ",\"evidence\":\"\(evidence ?? (queueStatus == "pending" || queueStatus == "inflight" ? "queued" : queueStatus))\""
-                    return (200, "{\"items\":[{\"id\":7,\"sessionId\":\"demo\",\"target\":\"demo\",\"message\":\"Keep the regression test\",\"status\":\"\(queueStatus)\",\"attempts\":0,\"queuedAt\":\"2026-09-12 04:00:00\"\(fields)}]}")
+                    return (200, "{\"items\":[{\"id\":7,\"sessionId\":\"demo\",\"target\":\"demo\",\"message\":\"Keep the regression test\",\"status\":\"\(queueStatus)\",\"attempts\":0,\"queuedAt\":\"2026-09-12T04:00:00.000000000Z\"\(fields)}]}")
                 default: return (404, "{}")
                 }
             }

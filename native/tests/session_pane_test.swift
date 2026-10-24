@@ -312,7 +312,7 @@ struct SessionPaneTest {
         let queuePort = await queueServer.ready()
         let queueModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(queuePort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
         func queued(_ id: Int64, _ message: String) -> QueueState {
-            try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"Q","target":"q","message":"\#(message)","status":"pending","attempts":0,"queuedAt":"2026-10-22 12:00:00","evidence":""}"#.utf8))
+            try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"Q","target":"q","message":"\#(message)","status":"pending","attempts":0,"queuedAt":"2026-10-22T12:00:00.000000000Z","evidence":""}"#.utf8))
         }
         queueModel.draft(for: "Q").text = "draft"
         queueModel.takeBackQueued([queued(2, "second"), queued(1, "first")], sessionID: "Q")

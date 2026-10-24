@@ -1,6 +1,16 @@
 import Combine
 import Foundation
 
+enum TimestampParser {
+    static func date(_ value: String) -> Date? {
+        guard let date = (try? fractional.parse(value)) ?? (try? wholeSecond.parse(value)), date.timeIntervalSince1970 > 0 else { return nil }
+        return date
+    }
+
+    private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecond = Date.ISO8601FormatStyle()
+}
+
 struct ClaudeCreationSettings {
     var name = ""
     var worktree = ""
@@ -29,11 +39,8 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     var signedIn: Bool { signedInAs != nil }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
         let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
-            limit.resetsAt.flatMap { parser.date(from: $0) ?? plain.date(from: $0) }
+            limit.resetsAt.flatMap(TimestampParser.date)
         }.filter { $0 > now }
         return resets.max()
     }
@@ -694,7 +701,7 @@ struct UsageLimitState: Codable, Hashable {
     var resetsAt: String? = nil
 
     var label: String {
-        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit reached" }
+        guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return "Usage limit reached" }
         return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
     }
 }
@@ -710,7 +717,7 @@ struct LimitResumeState: Codable, Hashable {
 
     var label: String {
         guard isWaiting else { return "Stopped by usage limit" }
-        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return "Usage limit, resumes when it lifts" }
+        guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return "Usage limit, resumes when it lifts" }
         let time = Calendar.current.isDateInToday(date) ? date.formatted(date: .omitted, time: .shortened) : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
         return "Usage limit, resumes \(time)"
     }
@@ -1079,16 +1086,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         historical == true || status == "delivered" || status == "canceled"
     }
 
-    /// The queue stores queuedAt as SQLite's UTC "yyyy-MM-dd HH:mm:ss".
-    var queuedDate: Date? { QueueState.queuedAtFormat.date(from: queuedAt) }
-
-    private static let queuedAtFormat: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
+    var queuedDate: Date? { TimestampParser.date(queuedAt) }
 
     /// The send receipt for a queued message, worded as the daemon words it.
     var queuedReceipt: String {
@@ -1975,7 +1973,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     /// A notice's text with the time its usage limit resets, when it reports one.
     var noticeText: String {
         let text = self.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let resetsAt, let date = ISO8601DateFormatter().date(from: resetsAt) else { return text }
+        guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return text }
         return "\(text) Resets \(date.formatted(date: .abbreviated, time: .shortened))."
     }
 }
@@ -2259,11 +2257,7 @@ struct PromptItem: Decodable, Equatable, Identifiable {
     let text: String
 
     var sentAt: Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: ts) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: ts)
+        TimestampParser.date(ts)
     }
 }
 

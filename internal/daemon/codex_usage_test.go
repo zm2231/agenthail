@@ -39,7 +39,7 @@ func TestCodexUsageAnswersTheAccountsLimitsFromItsRollouts(t *testing.T) {
 	body, _ := raw["usage"].(map[string]any)
 	limits, _ := body["limits"].([]any)
 	first, _ := limits[0].(map[string]any)
-	if len(limits) != 1 || first["kind"] != "weekly" || first["percent"] != 19.0 || body["fetchedAt"] != "2026-10-23T13:00:00Z" {
+	if len(limits) != 1 || first["kind"] != "weekly" || first["percent"] != 19.0 || body["fetchedAt"] != "2026-10-23T13:00:00.000000000Z" {
 		t.Fatalf("usage=%+v", raw)
 	}
 	if _, leaked := body["credits"]; leaked {

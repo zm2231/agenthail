@@ -1407,7 +1407,7 @@ struct SessionInspector: View {
                                     Spacer(minLength: 0)
                                     if link.working == true {
                                         Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText)
-                                    } else if let value = link.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+                                    } else if let value = link.lastActive, let date = TimestampParser.date(value) {
                                         Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                                     }
                                 }
@@ -1515,17 +1515,6 @@ func formatGoalDuration(_ seconds: Int) -> String {
     return "\(minutes / 60)h \(minutes % 60)m"
 }
 
-extension ISO8601DateFormatter {
-    static func sessionDate(_ value: String) -> Date? {
-        guard let date = (try? fractionalSessionDate.parse(value)) ?? (try? wholeSecondSessionDate.parse(value)),
-              date.timeIntervalSince1970 > 0 else { return nil }
-        return date
-    }
-
-    private static let fractionalSessionDate = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
-    private static let wholeSecondSessionDate = Date.ISO8601FormatStyle()
-}
-
 struct IOSSessionRow: View {
     let session: SessionState
     var title: String? = nil
@@ -1609,7 +1598,7 @@ struct IOSSessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
+                if let value = session.lastActive, let date = TimestampParser.date(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()
                 }

@@ -186,7 +186,7 @@ struct UIChangeEntry: Decodable, Equatable, Identifiable {
     let message: String
 
     var id: String { rev }
-    var date: Date? { ISO8601DateFormatter().date(from: time) }
+    var date: Date? { TimestampParser.date(time) }
 }
 
 struct UIChangeLog: Decodable {

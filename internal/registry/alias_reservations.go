@@ -23,7 +23,7 @@ type AliasReservedError struct {
 }
 
 func (e AliasReservedError) Error() string {
-	return fmt.Sprintf("@%s is the name of a conversation being started; choose another name or try again after %s", e.Name, e.Until.Local().Format(time.TimeOnly))
+	return fmt.Sprintf("@%s is the name of a conversation being started; choose another name or try again after %s", e.Name, formatLocalTime(e.Until, time.TimeOnly))
 }
 
 func (r *Registry) ReserveAlias(name string, until time.Time) (AliasReservation, error) {

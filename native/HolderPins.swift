@@ -20,10 +20,7 @@ struct SessionHolder: Codable, Hashable, Identifiable {
     }
 
     private static func parse(_ text: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: text) { return date }
-        return ISO8601DateFormatter().date(from: text)
+        TimestampParser.date(text)
     }
 }
 

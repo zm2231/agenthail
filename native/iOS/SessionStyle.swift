@@ -77,7 +77,7 @@ struct SessionTimestamp: View {
     let value: String?
 
     var body: some View {
-        if let value, let date = ISO8601DateFormatter.sessionDate(value) {
+        if let value, let date = TimestampParser.date(value) {
             Text(date, format: Calendar.current.isDateInToday(date) ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day().hour().minute())
                 .font(.caption)
                 .foregroundStyle(PhonePalette.muted)

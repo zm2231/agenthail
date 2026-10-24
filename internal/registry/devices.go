@@ -93,7 +93,7 @@ func (r *Registry) CreateDevicePairing(name string, scopes []string, ttl time.Du
 		return DevicePairing{}, err
 	}
 	pairing := DevicePairing{ID: uuid.NewString(), Secret: secret, Scopes: scopes, ExpiresAt: time.Now().UTC().Add(ttl)}
-	_, err = r.db.Exec(`INSERT INTO device_pairings (id,secret_hash,requested_name,scopes,expires_at) VALUES (?,?,?,?,?)`, pairing.ID, hashDeviceSecret(secret), name, strings.Join(scopes, ","), pairing.ExpiresAt.Format(time.RFC3339Nano))
+	_, err = r.db.Exec(`INSERT INTO device_pairings (id,secret_hash,requested_name,scopes,expires_at) VALUES (?,?,?,?,?)`, pairing.ID, hashDeviceSecret(secret), name, strings.Join(scopes, ","), formatTimestamp(pairing.ExpiresAt))
 	if err != nil {
 		return DevicePairing{}, fmt.Errorf("store device pairing: %w", err)
 	}
@@ -101,10 +101,10 @@ func (r *Registry) CreateDevicePairing(name string, scopes []string, ttl time.Du
 }
 
 func (r *Registry) pruneDevicePairings(now time.Time) error {
-	cutoff := now.Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	cutoff := formatTimestamp(now.Add(-24 * time.Hour))
 	_, err := r.db.Exec(`DELETE FROM device_pairings
 		WHERE (consumed_at<>'' AND datetime(consumed_at)<datetime(?))
-		   OR (datetime(expires_at)<datetime(?) AND datetime(created_at)<datetime(?))`, cutoff, now.Format(time.RFC3339Nano), cutoff)
+		   OR (datetime(expires_at)<datetime(?) AND datetime(created_at)<datetime(?))`, cutoff, formatTimestamp(now), cutoff)
 	return err
 }
 
@@ -143,7 +143,7 @@ func (r *Registry) completeDevicePairing(secret, name, hostID string, browser bo
 	if browser && storedScopes != strings.Join(BrowserScopes, ",") {
 		return Device{}, "", ErrPairingInvalid
 	}
-	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	expires, err := parseTimestamp(expiresAt)
 	if err != nil || !time.Now().UTC().Before(expires) {
 		return Device{}, "", ErrPairingExpired
 	}
@@ -168,7 +168,7 @@ func (r *Registry) completeDevicePairing(secret, name, hostID string, browser bo
 		return Device{}, "", err
 	}
 	token := deviceTokenPrefix + tokenSecret
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := formatTimestamp(time.Now())
 	device := Device{ID: uuid.NewString(), Name: name, Scopes: scopes, HostID: hostID, CreatedAt: now, Browser: browser}
 	result, err := tx.Exec(`UPDATE device_pairings SET consumed_at=?, device_id=? WHERE id=? AND consumed_at=''`, now, device.ID, pairingID)
 	if err != nil {
@@ -198,7 +198,7 @@ func (r *Registry) PairingStatus(id string) (DevicePairingStatus, error) {
 	if err != nil {
 		return DevicePairingStatus{}, err
 	}
-	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
+	expires, err := parseTimestamp(expiresAt)
 	if err != nil {
 		return DevicePairingStatus{}, err
 	}
@@ -240,10 +240,10 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	}
 	// Each authenticated request would otherwise be a write; last-seen is
 	// shown to the minute, so a recent stamp is left as is.
-	if lastSeen, err := time.Parse(time.RFC3339Nano, device.LastSeenAt); err == nil && now.Sub(lastSeen) < deviceLastSeenResolution {
+	if lastSeen, err := parseTimestamp(device.LastSeenAt); err == nil && now.Sub(lastSeen) < deviceLastSeenResolution {
 		return device, nil
 	}
-	device.LastSeenAt = now.Format(time.RFC3339Nano)
+	device.LastSeenAt = formatTimestamp(now)
 	r.stampLastSeen(device.ID, device.LastSeenAt)
 	return device, nil
 }
@@ -332,7 +332,7 @@ func (device Device) idleSince(now time.Time) time.Duration {
 	if last == "" {
 		last = device.CreatedAt
 	}
-	seen, err := time.Parse(time.RFC3339Nano, last)
+	seen, err := parseTimestamp(last)
 	if err != nil {
 		return 0
 	}
@@ -342,7 +342,7 @@ func (device Device) idleSince(now time.Time) time.Duration {
 // pruneIdleBrowsers forgets browsers unused for BrowserIdleLimit. Revoking one
 // stays available until then from the devices list.
 func (r *Registry) pruneIdleBrowsers(now time.Time) error {
-	cutoff := now.Add(-BrowserIdleLimit).Format(time.RFC3339Nano)
+	cutoff := formatTimestamp(now.Add(-BrowserIdleLimit))
 	_, err := r.db.Exec(`DELETE FROM paired_devices WHERE browser=1 AND datetime(CASE WHEN last_seen_at<>'' THEN last_seen_at ELSE created_at END)<datetime(?)`, cutoff)
 	return err
 }
@@ -383,7 +383,7 @@ func (r *Registry) RevokeDevice(id string) error {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE paired_devices SET revoked_at=? WHERE id=? AND revoked_at=''`, time.Now().UTC().Format(time.RFC3339Nano), id)
+	result, err := tx.Exec(`UPDATE paired_devices SET revoked_at=? WHERE id=? AND revoked_at=''`, formatTimestamp(time.Now()), id)
 	if err != nil {
 		return err
 	}
@@ -408,7 +408,7 @@ func (r *Registry) SaveDevicePushTarget(deviceID, installationID, credential str
 	}
 	result, err := r.db.Exec(`INSERT INTO device_push_targets (device_id,installation_id,credential,enabled,updated_at)
 		SELECT id,?,?,1,? FROM paired_devices WHERE id=? AND revoked_at=''
-		ON CONFLICT(device_id) DO UPDATE SET installation_id=excluded.installation_id,credential=excluded.credential,enabled=1,updated_at=excluded.updated_at`, installationID, credential, time.Now().UTC().Format(time.RFC3339Nano), deviceID)
+		ON CONFLICT(device_id) DO UPDATE SET installation_id=excluded.installation_id,credential=excluded.credential,enabled=1,updated_at=excluded.updated_at`, installationID, credential, formatTimestamp(time.Now()), deviceID)
 	if err != nil {
 		return err
 	}

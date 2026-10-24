@@ -104,7 +104,7 @@ func appendCatalogEventTx(tx *sql.Tx, input CatalogEvent) (CatalogEvent, bool, e
 	} else if err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
-	result, err := tx.Exec(`INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at) VALUES(?,?,?,?,?)`, input.DedupeKey, input.Type, input.EntityID, input.Payload, input.CreatedAt.Format(time.RFC3339Nano))
+	result, err := tx.Exec(`INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at) VALUES(?,?,?,?,?)`, input.DedupeKey, input.Type, input.EntityID, input.Payload, formatTimestamp(input.CreatedAt))
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -233,7 +233,7 @@ func scanCatalogEvent(row rowScanner) (CatalogEvent, error) {
 	if sequence < 1 {
 		return CatalogEvent{}, fmt.Errorf("invalid catalog sequence %d", sequence)
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, createdAt)
+	parsed, err := parseTimestamp(createdAt)
 	if err != nil {
 		return CatalogEvent{}, fmt.Errorf("parse catalog event timestamp: %w", err)
 	}

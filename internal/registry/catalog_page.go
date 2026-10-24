@@ -171,7 +171,7 @@ func scanCatalogSession(scanner rowScanner) (CatalogSessionState, error) {
 	if lastActiveMS > 0 {
 		state.Session.LastActive = time.UnixMilli(lastActiveMS)
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+	parsed, err := parseTimestamp(observedAt)
 	if err != nil {
 		return CatalogSessionState{}, fmt.Errorf("parse catalog observation: %w", err)
 	}
