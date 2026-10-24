@@ -105,7 +105,7 @@ var Keys = []Key{
 	choice("titlebar.tabs", "sessions", "Open sessions as tabs in the title bar.", "sessions", "none"),
 	choice("titlebar.tabs.label", "alias-title", "What a tab shows.", "alias-title", "alias", "title"),
 	choice("titlebar.tabs.preview", "on", "A sidebar click opens a preview tab that the next click replaces.", "on", "off"),
-	{Name: "statusbar", Default: "usage, working, needs-you, hosts, terminal", Doc: "Items in the bottom strip, in order, or none.", kind: kindList, choices: []string{"usage", "working", "needs-you", "hosts", "terminal"}},
+	{Name: "statusbar", Default: "usage, working, needs-you, hosts, terminal", Doc: "Items in the bottom strip, in order, or none. The connection and its controls always show.", kind: kindList, choices: []string{"usage", "working", "needs-you", "hosts", "terminal"}},
 }
 
 var keyIndex = func() map[string]Key {

@@ -76,7 +76,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `titlebar.tabs` | `sessions` | `sessions` opens sessions as tabs in the title bar; `none` turns tabs off. |
 | `titlebar.tabs.label` | `alias-title` | What a tab shows: `alias-title`, `alias`, `title`. |
 | `titlebar.tabs.preview` | `on` | `on`: a sidebar click opens a preview tab that the next click replaces. |
-| `statusbar` | `usage, working, needs-you, hosts, terminal` | Items in the bottom strip, in order, or `none`. |
+| `statusbar` | `usage, working, needs-you, hosts, terminal` | Items in the bottom strip, in order, or `none`. The connection and its controls always show. |
 
 Whatever the background, text keeps at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed, around the text only, so the background stays visible in margins, gaps and empty views. `glass.readability = off` turns this off.
 

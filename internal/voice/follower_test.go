@@ -261,9 +261,10 @@ func TestATurnVoiceCannotPlaceWhileADelegationIsUnsettledIsTakenAsTypedAfterItsB
 func TestMovingVoiceAwayEndsTheSessionsFollowerAndSpeaksNothingMoreFromIt(t *testing.T) {
 	f, target := followedTarget(t, nil)
 	apply(t, f, Action{Action: "transfer", AttemptID: "call-a", TargetID: ""})
-	if _, cancelled := target.journal.subscriptions(); cancelled != 1 {
-		t.Fatalf("cancelled=%d", cancelled)
-	}
+	testkit.Eventually(t, "the session's subscription to be cancelled", 5*time.Second, func() bool {
+		_, cancelled := target.journal.subscriptions()
+		return cancelled == 1
+	})
 	typeTurn(target.journal, "typed-1", "Run the linter", "The linter passed.")
 	if spoken := f.provider.spoken(); len(spoken) != 1 || !strings.HasPrefix(spoken[0], "Voice has returned to the Agenthail orchestrator.") {
 		t.Fatalf("spoken=%q", spoken)

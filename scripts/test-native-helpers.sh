@@ -92,6 +92,7 @@ SOURCES=(
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
+  macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
   macOS/VoiceController.swift

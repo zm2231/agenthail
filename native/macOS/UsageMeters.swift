@@ -5,7 +5,8 @@ struct UsageMeter: Equatable {
     let percent: Double
     let detail: String?
 
-    var text: String { "\(Int(percent.rounded()))%" + (detail.map { " · " + $0 } ?? "") }
+    var percentText: String { "\(Int(percent.rounded()))%" }
+    var text: String { percentText + (detail.map { " · " + $0 } ?? "") }
     var spokenLabel: String { "\(label) usage \(Int(percent.rounded())) percent" + (detail.map { ", " + $0 } ?? "") }
 }
 
