@@ -10,8 +10,15 @@ struct SpotlightEntry: Equatable {
     init(_ session: SessionState) {
         id = session.id
         title = session.displayName
-        let folder = (session.checkout?.path ?? session.cwd).map { URL(fileURLWithPath: $0).lastPathComponent }.flatMap { $0.isEmpty ? nil : $0 }
+        let folder = (session.checkout?.path ?? session.cwd).map(Self.folderName).flatMap { $0.isEmpty ? nil : $0 }
         detail = [session.surface.capitalized, folder].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private static let root = URL(fileURLWithPath: "/", isDirectory: true)
+
+    // A directory hint and a fixed base keep URL from statting the path or reading the working directory.
+    static func folderName(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: true, relativeTo: root).lastPathComponent
     }
 
     static func changes(from indexed: [String: SpotlightEntry], to sessions: [SessionState]) -> (upserts: [SpotlightEntry], removals: [String]) {
