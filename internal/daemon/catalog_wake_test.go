@@ -166,9 +166,34 @@ func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
 	if err := os.MkdirAll(records, 0700); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return claude.lists.Load() == 2 })
+	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return claude.lists.Load() >= 2 })
 	claude.start(t, "first-ever", records)
 	awaitCatalogRow(t, d, "first-ever")
+}
+
+func TestASyncThatFindsAnAwaitedFolderAsksForItsPass(t *testing.T) {
+	records := filepath.Join(t.TempDir(), "sessions")
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	watcher := filewake.New(filewake.DefaultLimit, t.Logf)
+	wakes := newCatalogWakes([]surface.Surface{claude}, watcher.FollowDir)
+	t.Cleanup(wakes.close)
+	wakes.sync()
+	// The parent's wake for the new folder never arrives, as when the loop syncs before it is forwarded.
+	if err := watcher.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(records, 0700); err != nil {
+		t.Fatal(err)
+	}
+	wakes.sync()
+	select {
+	case <-wakes.signal:
+	default:
+		t.Fatal("a sync that found the awaited folder dropped its parent's watch without asking for a pass")
+	}
+	if taken := wakes.take(); !taken[surface.KindClaude] {
+		t.Fatalf("took %v, want a Claude pass", taken)
+	}
 }
 
 func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
@@ -192,7 +217,7 @@ func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 	if err := os.Mkdir(day, 0700); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return codex.lists.Load() == 2 })
+	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return codex.lists.Load() >= 2 })
 	codex.start(t, "after-midnight", day)
 	awaitCatalogRow(t, d, "after-midnight")
 }
