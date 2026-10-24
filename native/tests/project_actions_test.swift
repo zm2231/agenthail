@@ -37,6 +37,7 @@ struct ProjectActionsTest {
             .remove(projectID: "folder:notes", label: "Remove"),
         ], "a project on this machine alone names no host")
         expect(ProjectMenu.items(for: projects[2]).isEmpty, "an archived project that was never added offers nothing")
+        expect(ProjectMenu.hosts(of: projects[0]) == ["server"] && ProjectMenu.hosts(of: projects[1]).isEmpty, "a project header names every other host with a checkout")
         expect(ProjectMenu.host(of: projects[0].checkouts[0]) == nil && ProjectMenu.host(of: projects[0].checkouts[1]) == "h-server", "an action on a remote checkout names its host")
 
         let options = try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"""

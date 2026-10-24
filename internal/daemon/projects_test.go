@@ -414,6 +414,19 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 	if project.DisplayName != "src" || project.Key != projectID || !project.Checkouts[0].Added || project.Checkouts[0].Host.State != hostStateLocal || project.Checkouts[1].Host.ID != record.ID || project.Checkouts[0].SessionCount != 1 || project.Checkouts[1].SessionCount != 2 {
 		t.Fatalf("project=%+v", project)
 	}
+	checkouts := map[string]string{}
+	for _, session := range local.snapshot(t).Sessions {
+		if session.Checkout != nil {
+			checkouts[session.ID] = session.Checkout.ID
+		}
+	}
+	remoteCheckout := storedProjection(t, remote.reg, "remote-a").Checkout.ID
+	if want := hosts.Qualify(record.ID, remoteCheckout); remoteCheckout == "" || checkouts[hosts.Qualify(record.ID, "remote-a")] != want {
+		t.Fatalf("mirrored checkout ids=%v, want %s", checkouts, want)
+	}
+	if id := checkouts["local-a"]; id == "" || strings.Contains(id, hosts.Separator) {
+		t.Fatalf("local checkout id=%q", id)
+	}
 
 	if response := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-archive", "projectId": projectID}); response.Code != http.StatusOK {
 		t.Fatalf("archive on vps: %d %s", response.Code, response.Body)

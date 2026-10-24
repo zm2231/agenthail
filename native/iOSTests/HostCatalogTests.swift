@@ -85,6 +85,24 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(Set(catalog.sessions.compactMap(\.project?.id)), ["repo:github.com/acme/widget"])
     }
 
+    func testTheSamePathOnTwoComputersIsTwoCheckoutsOfOneProject() {
+        func row(_ id: String) -> SessionState {
+            var row = local(id)
+            row.project = ProjectIdentity(id: "repo:github.com/acme/widget", displayName: "widget", rootPath: "/srv/widget", kind: "git")
+            row.checkout = CheckoutIdentity(id: "checkout-1", path: "/srv/widget", branch: "main", detachedHead: nil, isMain: true, dirty: false)
+            return row
+        }
+        let catalog = HostCatalog(hosts: [
+            host("hlaptop", "laptop.example.ts.net", reachable: true, sessions: [row("s1")]),
+            host("hserver", "server.example.ts.net", reachable: true, sessions: [row("s2")]),
+        ])
+        XCTAssertEqual(Set(catalog.sessions.compactMap(\.checkout?.id)), ["hlaptop::checkout-1", "hserver::checkout-1"])
+        let projects = SessionTree.build(catalog.sessions, filter: .all, attention: [:]).projects
+        XCTAssertEqual(projects.map(\.id), ["repo:github.com/acme/widget"])
+        XCTAssertEqual(projects.first?.checkouts.count, 2)
+        XCTAssertEqual(Set(projects.first?.hosts ?? []), ["laptop", "server"])
+    }
+
     func testARepositoryIDNamesNoComputer() {
         XCTAssertEqual(HostCatalog.qualify("hlaptop", "repo:github.com/acme/widget"), "repo:github.com/acme/widget")
         XCTAssertNil(HostCatalog.owner(of: "repo:github.com/acme/widget"))

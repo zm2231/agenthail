@@ -681,6 +681,11 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 		qualified.LocalID = hosts.Qualify(host.record.ID, qualified.LocalID)
 		row.Project = &qualified
 	}
+	if row.Checkout != nil {
+		qualified := *row.Checkout
+		qualified.ID = hosts.Qualify(host.record.ID, qualified.ID)
+		row.Checkout = &qualified
+	}
 	project, _ := json.Marshal(row.Project)
 	checkout, _ := json.Marshal(row.Checkout)
 	row.ID = hosts.Qualify(host.record.ID, row.ID)

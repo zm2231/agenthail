@@ -66,6 +66,10 @@ enum ProjectMenu {
         checkout.host.state == "local" ? nil : checkout.host.id
     }
 
+    static func hosts(of project: ProjectState) -> [String] {
+        project.checkouts.filter { $0.host.state != "local" }.map { shortHostName($0.host.name) }.reduce(into: []) { names, host in if !names.contains(host) { names.append(host) } }
+    }
+
     static func host(of session: SessionState) -> String? {
         guard let host = session.host, host.state != "local" else { return nil }
         return host.id

@@ -198,7 +198,7 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, host: project.host, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.listedSessionCount)
+                            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.listedSessionCount)
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
@@ -210,7 +210,7 @@ struct SessionSidebar: View {
                                 }
                             ForEach(shown.checkouts) { checkout in
                                 if single == nil {
-                                    CheckoutRowView(checkout: checkout)
+                                    CheckoutRowView(checkout: checkout, showsHost: project.spansHosts)
                                 }
                                 ForEach(checkout.families) { family in
                                     familyRows(family, attention: tree.attention)
@@ -229,7 +229,7 @@ struct SessionSidebar: View {
                         }
                     }
                     ForEach(projectsWithoutSessions(tree)) { project in
-                        ProjectHeaderView(name: project.displayName, host: project.checkouts.contains { $0.host.state == "local" } ? nil : project.checkouts.first.map { ProjectMenu.shortHostName($0.host.name) }, branch: nil, dirty: false, archived: false)
+                        ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), branch: nil, dirty: false, archived: false)
                             .contextMenu {
                                 Button("Archive Project") { model.setProjectArchived(project.id, true) }
                                 Divider()
@@ -452,7 +452,7 @@ struct SidebarCaption: View {
 
 struct ProjectHeaderView: View {
     let name: String
-    var host: String? = nil
+    var hosts: [String] = []
     var branch: String? = nil
     var dirty = false
     var archived = false
@@ -470,7 +470,7 @@ struct ProjectHeaderView: View {
                 .font(.system(size: DesktopType.body, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
                 .lineLimit(1)
-            if let host {
+            ForEach(hosts, id: \.self) { host in
                 HostBadge(name: host)
             }
             if let branch {
@@ -519,6 +519,7 @@ struct HostBadge: View {
 
 struct CheckoutRowView: View {
     let checkout: SessionTree.Checkout
+    var showsHost = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -528,6 +529,9 @@ struct CheckoutRowView: View {
                 .font(.system(size: DesktopType.caption, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if showsHost, let host = checkout.host {
+                HostBadge(name: host)
+            }
             if checkout.dirty {
                 Circle().fill(DesktopPalette.muted).frame(width: 5, height: 5)
                     .accessibilityLabel("Uncommitted changes")
