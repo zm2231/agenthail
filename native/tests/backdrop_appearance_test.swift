@@ -61,6 +61,11 @@ struct BackdropAppearanceTest {
         backdrop.windowChanged(window)
         check(!backdrop.active, "a dark window whose picture has not loaded shows no backdrop rather than the light one")
 
+        let before = backdrop.generation
+        NotificationCenter.default.post(name: NSColor.systemColorsDidChangeNotification, object: nil)
+        wait { backdrop.generation > before }
+        check(backdrop.generation > before, "a system colour change, such as a new accent, solves the backdrop again")
+
         var glass = UIConfig()
         glass.values["glass.composer.opacity"] = .number(0)
         check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0.2, "readable floating glass never drops below the measured floor")

@@ -3,10 +3,6 @@ import Textual
 
 enum SessionStyle {
     static let accentHex: PaletteTokens.Pair = (0xB8330F, 0xFF5E29)
-    static let accent = Color(uiColor: UIColor { traits in
-        let hex = traits.userInterfaceStyle == .dark ? accentHex.dark : accentHex.light
-        return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-    })
     static let readingWidth: CGFloat = 600
     static let surface = Color(uiColor: .secondarySystemBackground)
 

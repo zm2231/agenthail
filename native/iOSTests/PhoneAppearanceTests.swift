@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 import XCTest
 @testable import Agenthail
@@ -258,6 +259,12 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertTrue(normal.contains(PhonePalette.rgb(0x5577FF)))
         XCTAssertTrue(normal.contains(PhonePalette.rgb(PaletteTokens.roles[.body]!.dark)))
         XCTAssertTrue(appearance.spec(key(.cards, target: 7)).roles.contains(PhonePalette.rgb(0xABCDEF)))
+
+        var environment = EnvironmentValues()
+        environment.textColors = TextColors(appearance.config)
+        environment.colorScheme = .dark
+        XCTAssertEqual(PhonePalette.accentText.resolve(in: environment), Color(hex: 0x5577FF), "accent text draws the served accent the glass solves for")
+        XCTAssertEqual(PhonePalette.accent.resolve(in: environment), Color(hex: 0x3366FF), "accent fills use the chosen accent")
     }
 
     func testTheDefaultAccentIsSolvedFor() throws {

@@ -2,8 +2,6 @@ import SwiftUI
 import UIKit
 import ImageIO
 
-private let orange = SessionStyle.accent
-
 struct AgenthailIOSRoot: View {
     @ObservedObject var model: AgenthailIOSModel
 
@@ -54,7 +52,7 @@ struct PairingForm: View {
             ScrollView {
             VStack(spacing: 24) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 28).fill(orange)
+                    RoundedRectangle(cornerRadius: 28).fill(PhonePalette.accent)
                     Text("A").font(.system(size: 58, weight: .black)).foregroundStyle(.black)
                 }
                 .frame(width: 112, height: 112)
@@ -69,7 +67,7 @@ struct PairingForm: View {
                 } label: {
                     Label("Scan pairing code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).tint(orange).controlSize(.large)
+                .buttonStyle(.borderedProminent).tint(PhonePalette.accent).controlSize(.large)
                 .padding(.horizontal, 28)
                 TextField("Or paste a pairing link", text: $pastedURL)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -125,7 +123,6 @@ struct MainTabs: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(2)
         }
-        .tint(orange)
         .onChange(of: model.requestedSessionID) { _, sessionID in
             if sessionID != nil { selection = 0 }
         }
@@ -520,8 +517,8 @@ struct SessionScreen: View {
                                 Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(.secondary)
                             }
                             ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
-                                if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, color: orange, timestamp: exchange.timestamp) }
-                                if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, color: .secondary, timestamp: exchange.timestamp) }
+                                if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, timestamp: exchange.timestamp) }
+                                if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, timestamp: exchange.timestamp) }
                             }
                             if detail.exchanges.isEmpty {
                                 ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
@@ -589,14 +586,14 @@ struct SessionScreen: View {
                     }
                     if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
                         ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
-                                          surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(SessionStyle.accent),
+                                          surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(PhonePalette.accentText),
                                           open: session.runtime?.focusable == true ? { model.focusSession(session) } : nil,
                                           restart: { model.stopAndResume(session.id) })
                             .id(waiting.id)
                             .padding(.horizontal)
                             .padding(.top, 6)
                     } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
-                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(SessionStyle.accent)) { decision in
+                        RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText)) { decision in
                             Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
                         }
                         .id(request.id)
@@ -839,7 +836,7 @@ struct IOSComposer: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(canSend ? .white : .secondary)
-                        .background(canSend ? SessionStyle.accent : Color.primary.opacity(0.08), in: Circle())
+                        .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.primary.opacity(0.08)), in: Circle())
                         .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
                         .disabled(!canSend)
                         .contextMenu { composerMenu }
@@ -951,7 +948,6 @@ extension EnvironmentValues {
 struct IOSMessage: View {
     let label: String
     let text: String
-    let color: Color
     var timestamp: String? = nil
     var files: [AttachedFile] = []
     var peer = false
@@ -1018,7 +1014,7 @@ struct IOSMessage: View {
             }
         } else {
             HStack(spacing: 6) {
-                Text("✦").font(.caption).foregroundStyle(SessionStyle.accent).accessibilityHidden(true)
+                Text("✦").font(.caption).foregroundStyle(PhonePalette.accentText).accessibilityHidden(true)
                 if let finished {
                     Text(TurnClock.footer(duration: finished, at: timestamp)).font(.caption).foregroundStyle(.secondary)
                 } else {
@@ -1087,7 +1083,7 @@ struct IOSTimelineRow: View {
         } else if item.kind == "notice" {
             TranscriptDivider(text: "\(item.title): \(item.noticeText)")
         } else if item.isSaid {
-            IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp, files: item.files ?? [], peer: item.isPeerMessage, finished: finished)
+            IOSMessage(label: messageLabel, text: item.text, timestamp: item.timestamp, files: item.files ?? [], peer: item.isPeerMessage, finished: finished)
             if item.truncated { ShortenedNote() }
         } else if item.kind == "attachment" {
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
@@ -1251,7 +1247,7 @@ struct SessionSummary: View {
         Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
               systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
-        .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
+        .foregroundStyle(detail.session.status == "busy" ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(.secondary))
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
@@ -1374,7 +1370,7 @@ struct SessionInspector: View {
                                 HStack {
                                     Text(SessionFamilies.label(child)).lineLimit(1)
                                     Spacer(minLength: 0)
-                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
                                 }
                             }
                             .accessibilityIdentifier("subagent-" + child.id)
@@ -1390,7 +1386,7 @@ struct SessionInspector: View {
                                     Text(link.title).font(.body.weight(.medium)).lineLimit(2)
                                     Spacer(minLength: 0)
                                     if link.working == true {
-                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
+                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText)
                                     } else if let value = link.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
                                         Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -1872,7 +1868,7 @@ struct RecentPromptsSheet: View {
                     }
                     .swipeActions(edge: .trailing) {
                         if !allSessions, model.canFork(session), prompt.turnId != nil {
-                            Button("Fork from here") { fork(prompt) }.tint(SessionStyle.accent)
+                            Button("Fork from here") { fork(prompt) }.tint(PhonePalette.accentText)
                         }
                     }
                     .contextMenu {

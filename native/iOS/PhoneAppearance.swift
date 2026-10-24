@@ -78,11 +78,6 @@ final class PhoneAppearance: ObservableObject {
         }
     }
 
-    var accent: Color {
-        guard let accent = config.accent else { return SessionStyle.accent }
-        return Color(red: accent.red, green: accent.green, blue: accent.blue)
-    }
-
     func load(from api: AgenthailAPI) {
         loadTask?.cancel()
         loadTask = Task {
@@ -216,9 +211,7 @@ final class PhoneAppearance: ObservableObject {
     func spec(_ key: Key) -> BackdropSpec {
         let dark = key.dark
         let ground = PhonePalette.ground(dark: dark)
-        let colors = TextColors(config)
-        let accent = colors.accentChoice ?? (dark ? SessionStyle.accentHex.dark : SessionStyle.accentHex.light)
-        let roles = PhonePalette.textRoles(colors, accent: accent, dark: dark, increased: key.target >= Self.increasedTarget)
+        let roles = PhonePalette.textRoles(TextColors(config), dark: dark, increased: key.target >= Self.increasedTarget)
         let paneTint: BackdropRGB
         switch config.glassTint {
         case "ground": paneTint = ground
@@ -452,7 +445,7 @@ struct AppearanceScope<Content: View>: View {
         content
             .environment(\.phoneAppearance, appearance)
             .environment(\.textColors, TextColors(appearance.config))
-            .tint(appearance.accent)
+            .tint(PhonePalette.accentText)
             .preferredColorScheme(appearance.colorScheme)
     }
 }

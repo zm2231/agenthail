@@ -360,7 +360,7 @@ private struct VoiceCallButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
-            .background(isEnabled ? SessionStyle.accent : Color.secondary, in: Capsule())
+            .background(isEnabled ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.secondary), in: Capsule())
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
     }
 }

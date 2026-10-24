@@ -74,9 +74,9 @@ struct SessionPreview: View {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
             SessionInspector(model: model, session: session, initialDetail: detail)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
-            ConversationFlow(model: model, initialSessionID: session.id).tint(SessionStyle.accent)
+            ConversationFlow(model: model, initialSessionID: session.id)
         } else {
-            NavigationStack { SessionScreen(model: model, session: session) }.tint(SessionStyle.accent)
+            NavigationStack { SessionScreen(model: model, session: session) }
         }
     }
     /// The question a waiting preview session asks in its terminal.

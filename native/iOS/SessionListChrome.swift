@@ -116,7 +116,7 @@ struct SessionScopeChips: View {
             .padding(.horizontal, 14)
             .frame(minHeight: 44)
             .background {
-                if selected { Capsule().fill(SessionStyle.accent) }
+                if selected { Capsule().fill(PhonePalette.accent) }
             }
             .floatingGlass(in: Capsule(), interactive: true)
             .contentShape(Capsule())

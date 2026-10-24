@@ -9,9 +9,7 @@ import (
 	"testing"
 )
 
-// The apps fall back to these values for any key a config leaves out, so
-// they must be the daemon's defaults. background is the one exception: until
-// a config arrives the apps draw no background rather than guess one.
+// background is empty until a config arrives, so it has no fallback to match.
 func TestNativeFallbacksAreTheDefaults(t *testing.T) {
 	source, err := os.ReadFile(filepath.Join("..", "..", "native", "UIConfig.swift"))
 	if err != nil {

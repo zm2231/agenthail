@@ -33,19 +33,25 @@ final class WindowBackdrop: ObservableObject {
     private var renderTask: Task<Void, Never>?
     private(set) var rendering = false
     private var pending = false
-    private var generation = 0
+    private(set) var generation = 0
     private var rendered: BackdropSpec?
     private weak var window: NSWindow?
-    nonisolated(unsafe) private var accessibilityObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
     init() {
-        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        let watched = [
+            (NSWorkspace.shared.notificationCenter, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification),
+            (NotificationCenter.default, NSColor.systemColorsDidChangeNotification),
+        ]
+        observers = watched.map { center, name in
+            (center, center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            })
         }
     }
 
     deinit {
-        if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) }
+        for (center, observer) in observers { center.removeObserver(observer) }
     }
 
     var paneRadius: CGFloat { gutter > 0 ? DesktopRadius.sheet : 0 }
