@@ -314,7 +314,8 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 	if move.State != registry.MoveSent {
 		t.Fatalf("an unanswered move is %s", move.State)
 	}
-	if _, err := source.reg.QueueMessageWithOptions(session.ID, "queued while unresolved", "key-unresolved", surface.SendOptions{}); err != nil {
+	queued, err := source.reg.QueueMessageWithOptions(session.ID, "queued while unresolved", "key-unresolved", surface.SendOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if item, err := source.reg.ClaimNextMessage(session.ID, time.Now()); err != nil || item != nil {
@@ -324,6 +325,7 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 		t.Fatalf("an unresolved move left the transcript reachable at %s", path)
 	}
 
+	peers := claudetest.ListenPeerManager(t, target.host.Home)
 	target.gate.transfers.Store(nil)
 	close(hold.release)
 	// Dropping the connections also makes the source reconnect, and a
@@ -339,9 +341,12 @@ func TestAMoveWhoseTransferIsNotAnsweredStaysUnresolvedUntilTheTargetAnswers(t *
 	if spawns := target.host.Spawns(t, session.ID); len(spawns) != 1 {
 		t.Fatalf("the target resumed the conversation %d times", len(spawns))
 	}
-	held, _ := source.reg.HostDeliveries(record.ID)
-	if len(held) != 1 {
-		t.Fatalf("the send queued while unresolved was not handed to the target: %+v", held)
+	testkit.Eventually(t, "the send queued while unresolved to reach the target", 15*time.Second, func() bool {
+		source.daemon.drainHostDeliveries(context.Background(), mustPairedHost(t, source, record.ID))
+		return peers.Count("queued while unresolved") == 1
+	})
+	if item, err := source.reg.QueueItem(queued, nil); err != nil || item.Status != "delivered" {
+		t.Fatalf("the send queued while unresolved=%+v err=%v", item, err)
 	}
 }
 
