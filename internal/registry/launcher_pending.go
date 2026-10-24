@@ -31,7 +31,7 @@ func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKin
 		return 0, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, launcher, string(agent), cwd, name, alias.Name, alias.Token, expires.UnixMilli(), b, launchedAt.UTC().Format(time.DateTime))
+	result, err := tx.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, launcher, string(agent), cwd, name, alias.Name, alias.Token, expires.UnixMilli(), b, formatSQLiteTimestamp(launchedAt))
 	if err != nil {
 		return 0, err
 	}
@@ -60,7 +60,7 @@ func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
 		item.Agent = surface.SurfaceKind(agent)
 		item.ExpiresAt = time.UnixMilli(expires)
 		item.Alias.Until = item.ExpiresAt
-		item.LaunchedAt, _ = time.ParseInLocation(time.DateTime, launched, time.UTC)
+		item.LaunchedAt, _ = parseSQLiteTimestamp(launched)
 		return item, json.Unmarshal(location, &item.Location)
 	}, `SELECT id,launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at FROM launcher_pending ORDER BY id`)
 }

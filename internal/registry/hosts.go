@@ -148,7 +148,7 @@ func (r *Registry) AddHost(host PairedHost) (PairedHost, error) {
 	if host.State == "" {
 		host.State = "connecting"
 	}
-	host.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	host.CreatedAt = formatTimestamp(time.Now())
 	_, err = r.db.Exec(`INSERT INTO hosts(host_id,name,endpoint,address,token,state,created_at) VALUES(?,?,?,?,?,?,?)`, host.ID, host.Name, host.Endpoint, host.Address, host.Token, host.State, host.CreatedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "hosts.host_id") || strings.Contains(err.Error(), "PRIMARY KEY") {
@@ -218,7 +218,7 @@ func (r *Registry) RemoveHost(hostID string) ([]CatalogEvent, error) {
 		return nil, err
 	}
 	events := []CatalogEvent{}
-	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	stamp := formatTimestamp(time.Now())
 	for _, item := range cataloged {
 		payload, _ := json.Marshal(map[string]string{"sessionId": item.entity, "reason": "host_removed"})
 		event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + item.entity + ":" + stamp, Type: "session.removed", EntityID: item.entity, Payload: payload})
@@ -249,7 +249,7 @@ func projectionID(fingerprint, fallback string) string {
 
 func (r *Registry) RecordHostContact(hostID, state, lastError string, contacted bool) error {
 	if contacted {
-		_, err := r.db.Exec(`UPDATE hosts SET state=?,last_error=?,last_contact_at=? WHERE host_id=?`, state, lastError, time.Now().UTC().Format(time.RFC3339Nano), hostID)
+		_, err := r.db.Exec(`UPDATE hosts SET state=?,last_error=?,last_contact_at=? WHERE host_id=?`, state, lastError, formatTimestamp(time.Now()), hostID)
 		return err
 	}
 	_, err := r.db.Exec(`UPDATE hosts SET state=?,last_error=? WHERE host_id=?`, state, lastError, hostID)
@@ -398,7 +398,7 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit`,
-		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit); err != nil {
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
@@ -474,7 +474,7 @@ func (r *Registry) RefreshHostQueueCounts() (int, error) {
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, string(encoded), generation, row.id); err != nil {
 			return 0, err
 		}
-		observedAt, _ := time.Parse(time.RFC3339Nano, row.observedAt)
+		observedAt, _ := parseTimestamp(row.observedAt)
 		if _, _, err := appendHostUpsertTx(tx, entityID, projection, generation, observedAt, row.unavailable); err != nil {
 			return 0, err
 		}
@@ -497,7 +497,7 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 		return CatalogEvent{}, false, tx.Commit()
 	}
 	payload, _ := json.Marshal(map[string]string{"sessionId": entityID, "reason": reason})
-	event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + entityID + ":" + time.Now().UTC().Format(time.RFC3339Nano), Type: "session.removed", EntityID: entityID, Payload: payload})
+	event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + entityID + ":" + formatTimestamp(time.Now()), Type: "session.removed", EntityID: entityID, Payload: payload})
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -578,7 +578,7 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 		}
 		subagent.apply(&state.Session)
 		state.HostID = hostID
-		if parsed, err := time.Parse(time.RFC3339Nano, observedAt); err == nil {
+		if parsed, err := parseTimestamp(observedAt); err == nil {
 			state.ObservedAt = parsed
 		}
 		return state, nil

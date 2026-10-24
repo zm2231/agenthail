@@ -269,7 +269,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 				}
 			}
 			input.Position = existing.Position
-			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
+			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
 			if err := storeSessionJournalBody(tx, input); err != nil {
@@ -285,7 +285,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		}
 	}
 	input.Position = input.Seq
-	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	if err := storeSessionJournalBody(tx, input); err != nil {
@@ -407,7 +407,7 @@ func scanSessionJournalEntry(row rowScanner) (SessionJournalEntry, error) {
 	if seq < 1 || position < 1 {
 		return SessionJournalEntry{}, fmt.Errorf("invalid session journal sequence %d at %d", seq, position)
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+	parsed, err := parseTimestamp(observedAt)
 	if err != nil {
 		return SessionJournalEntry{}, fmt.Errorf("parse session journal observation time: %w", err)
 	}
@@ -477,7 +477,7 @@ func storeSessionJournalBody(tx *sql.Tx, entry SessionJournalEntry) error {
 	if len(entry.FullBody) == 0 {
 		return fmt.Errorf("session journal body reference requires a body")
 	}
-	_, err := tx.Exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,?,?) ON CONFLICT(ref) DO UPDATE SET body=excluded.body,session_id=excluded.session_id,created_at=excluded.created_at`, entry.BodyRef, entry.SessionID, entry.FullBody, entry.ObservedAt.Format(time.RFC3339Nano))
+	_, err := tx.Exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,?,?) ON CONFLICT(ref) DO UPDATE SET body=excluded.body,session_id=excluded.session_id,created_at=excluded.created_at`, entry.BodyRef, entry.SessionID, entry.FullBody, formatTimestamp(entry.ObservedAt))
 	return err
 }
 
@@ -576,7 +576,7 @@ func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJour
 		if entry.ObservedAt.IsZero() {
 			entry.ObservedAt = time.Now().UTC()
 		}
-		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, entry.ObservedAt.UTC().Format(time.RFC3339Nano), entry.Bytes, entry.BodyRef); err != nil {
+		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, formatTimestamp(entry.ObservedAt), entry.Bytes, entry.BodyRef); err != nil {
 			return nil, err
 		}
 		if err := storeSessionJournalBody(tx, *entry); err != nil {

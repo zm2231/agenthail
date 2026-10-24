@@ -23,7 +23,7 @@ func (r *Registry) AppendDaemonEvent(eventType, entityID string, payload []byte,
 	}
 	defer tx.Rollback()
 	createdAt = createdAt.UTC()
-	result, err := tx.Exec(`INSERT INTO daemon_events (event_type,entity_id,payload,created_at) VALUES (?,?,?,?)`, eventType, entityID, payload, createdAt.Format(time.RFC3339Nano))
+	result, err := tx.Exec(`INSERT INTO daemon_events (event_type,entity_id,payload,created_at) VALUES (?,?,?,?)`, eventType, entityID, payload, formatTimestamp(createdAt))
 	if err != nil {
 		return DaemonEvent{}, err
 	}
@@ -55,7 +55,7 @@ func (r *Registry) RecentDaemonEvents(limit int) ([]DaemonEvent, error) {
 			return event, fmt.Errorf("invalid daemon event id %d", id)
 		}
 		event.ID = uint64(id)
-		createdAtTime, err := time.Parse(time.RFC3339Nano, createdAt)
+		createdAtTime, err := parseTimestamp(createdAt)
 		event.CreatedAt = createdAtTime
 		return event, err
 	}, `SELECT id,event_type,entity_id,payload,created_at FROM (SELECT id,event_type,entity_id,payload,created_at FROM daemon_events ORDER BY id DESC LIMIT ?) ORDER BY id`, limit)

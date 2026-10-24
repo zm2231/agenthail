@@ -61,8 +61,8 @@ func scanSessionMove(row rowScanner) (SessionMove, error) {
 	if len(manifest) > 0 {
 		move.Manifest = manifest
 	}
-	move.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	move.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	move.CreatedAt, _ = parseTimestamp(created)
+	move.UpdatedAt, _ = parseTimestamp(updated)
 	return move, nil
 }
 
@@ -134,7 +134,7 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 	if busy {
 		return fmt.Errorf("a move of %s has not finished", conversation)
 	}
-	stamp := r.now().UTC().Format(time.RFC3339Nano)
+	stamp := formatTimestamp(r.now())
 	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func setMoveStateTx(tx *sql.Tx, now time.Time, id, state, detail string, from ..
 	if !allowed {
 		return MoveConflictError{ID: id, State: current, Want: fmt.Sprint(from)}
 	}
-	_, err = tx.Exec(`UPDATE session_moves SET state=?,detail=?,updated_at=? WHERE id=?`, state, detail, now.UTC().Format(time.RFC3339Nano), id)
+	_, err = tx.Exec(`UPDATE session_moves SET state=?,detail=?,updated_at=? WHERE id=?`, state, detail, formatTimestamp(now), id)
 	return err
 }
 
@@ -199,7 +199,7 @@ func (r *Registry) PrepareMoveIn(id, conversation, sourceHost string, manifest [
 	if !errors.Is(err, sql.ErrNoRows) {
 		return SessionMove{}, err
 	}
-	stamp := r.now().UTC().Format(time.RFC3339Nano)
+	stamp := formatTimestamp(r.now())
 	if _, err := tx.Exec(`UPDATE session_moves SET state=?,detail='superseded by a later move from the same host',updated_at=? WHERE conversation=? AND role='in' AND peer_host=? AND state=? AND id<>?`, MoveAborted, stamp, conversation, sourceHost, MovePrepared, id); err != nil {
 		return SessionMove{}, err
 	}
@@ -229,7 +229,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 		return SessionMove{}, err
 	}
 	defer tx.Rollback()
-	stamp := r.now().UTC().Format(time.RFC3339Nano)
+	stamp := formatTimestamp(r.now())
 	existing, err := scanSessionMove(tx.QueryRow(`SELECT `+sessionMoveColumns+` FROM session_moves WHERE id=?`, id))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -493,7 +493,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks)
-		VALUES(?,?,?,?,?,?,?,0,0,?,?)`, move.Conversation, []byte(`null`), []byte(`{}`), placeholder.UnavailableReason, movedAt.Format(time.RFC3339Nano), string(encoded), generation, []byte{}, []byte{}); err != nil {
+		VALUES(?,?,?,?,?,?,?,0,0,?,?)`, move.Conversation, []byte(`null`), []byte(`{}`), placeholder.UnavailableReason, formatTimestamp(movedAt), string(encoded), generation, []byte{}, []byte{}); err != nil {
 		return nil, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, placeholder.EntityID, projection, generation, movedAt, placeholder.UnavailableReason)

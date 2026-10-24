@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/signin"
 )
@@ -58,7 +57,7 @@ func (r *Registry) AddSigninProfile(label string, browser signin.Browser, select
 	if _, err := rand.Read(raw); err != nil {
 		return signin.Profile{}, fmt.Errorf("generate profile id: %w", err)
 	}
-	profile := signin.Profile{ID: "sp_" + hex.EncodeToString(raw), Label: label, Browser: browser, Profile: selector, CreatedAt: r.now().UTC().Format(time.RFC3339)}
+	profile := signin.Profile{ID: "sp_" + hex.EncodeToString(raw), Label: label, Browser: browser, Profile: selector, CreatedAt: formatSecondTimestamp(r.now())}
 	var labelTaken, sourceTaken string
 	_ = r.read.QueryRow(`SELECT id FROM signin_profiles WHERE label=?`, label).Scan(&labelTaken)
 	if labelTaken != "" {

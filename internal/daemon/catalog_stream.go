@@ -295,7 +295,7 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 	if !json.Valid(event.Payload) {
 		return fmt.Errorf("invalid catalog event payload")
 	}
-	payload, err := json.Marshal(catalogStreamEnvelope{Stream: "catalog", Seq: event.Seq, Type: event.Type, Data: event.Payload})
+	payload, err := marshalAPIJSON(catalogStreamEnvelope{Stream: "catalog", Seq: event.Seq, Type: event.Type, Data: event.Payload})
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,7 @@ func (r *Registry) ReserveActionReceipt(principal, key, requestHash string, now 
 		now = time.Now().UTC()
 	}
 	storageKey := actionReceiptStorageKey(principal, key)
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := formatTimestamp(now)
 	tx, err := r.db.Begin()
 	if err != nil {
 		return ActionReceiptReservation{}, err
@@ -83,7 +83,7 @@ func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, rec
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	result, err := r.db.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=? AND request_hash=? AND status=?`, ActionReceiptCompleted, append([]byte(nil), receipt...), now.UTC().Format(time.RFC3339Nano), actionReceiptStorageKey(principal, key), requestHash, ActionReceiptPending)
+	result, err := r.db.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=? AND request_hash=? AND status=?`, ActionReceiptCompleted, append([]byte(nil), receipt...), formatTimestamp(now), actionReceiptStorageKey(principal, key), requestHash, ActionReceiptPending)
 	if err != nil {
 		return err
 	}

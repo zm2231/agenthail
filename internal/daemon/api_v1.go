@@ -394,7 +394,7 @@ func constantTokenEqual(left, right string) bool {
 }
 
 func writeSSEEvent(w io.Writer, event apiEvent) {
-	payload, _ := json.Marshal(event)
+	payload, _ := marshalAPIJSON(event)
 	fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, payload)
 }
 
