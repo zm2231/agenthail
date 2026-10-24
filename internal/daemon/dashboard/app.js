@@ -776,7 +776,7 @@ function projectMenu(project) {
   checkouts.forEach((checkout) => {
     if (checkout.added) items.push(`<button type="button" data-project-action="project-remove" data-project-id="${escape(checkout.projectId)}">Remove${escape(where(checkout))}</button>`);
   });
-  return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" role="menu">${items.join("")}</div></details>`;
+  return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" data-pane="float" role="menu">${items.join("")}</div></details>`;
 }
 // checkoutHost is the host an action on a checkout names: empty for this
 // machine.

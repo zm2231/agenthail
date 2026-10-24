@@ -1,4 +1,5 @@
-import { backgroundURL, distinctColours, gradientLine, hex, imageRect, meshPixels, meshSize, paneAlphas, scrimForColours } from "./ui-backdrop.js";
+import { backgroundURL, distinctColours, gradientLine, hex, imageRect, meshPixels, meshSize } from "./ui-backdrop.js";
+import { paneAlphas } from "./ui-pane-solve.js";
 
 export function sampleSize({ width, height, scale }) {
   return { width: Math.max(Math.round(width * (scale || 1)), 1), height: Math.max(Math.round(height * (scale || 1)), 1) };
@@ -43,7 +44,18 @@ export function createSampler({ makeCanvas, loadImage }) {
     } else {
       return null;
     }
-    return distinctColours(context.getImageData(0, 0, w, h).data);
+    return { data: context.getImageData(0, 0, w, h).data, width: w, scale: k };
+  };
+
+  const coloursIn = (rects) => {
+    const key = JSON.stringify(rects);
+    if (!cached.colours.has(key)) {
+      if (cached.colours.size >= 16) cached.colours.clear();
+      const { data, width, scale } = cached.pixels;
+      const scaled = rects.map((rect) => rect.map((v) => Math.round(v * scale)));
+      cached.colours.set(key, distinctColours(data, width, scaled));
+    }
+    return cached.colours.get(key);
   };
 
   return {
@@ -51,12 +63,17 @@ export function createSampler({ makeCanvas, loadImage }) {
       const size = sampleSize(look);
       const key = JSON.stringify([look.spec, look.fit, look.position, size.width, size.height, look.ground]);
       if (cached?.key !== key) {
-        const colours = await draw(look);
-        if (!colours) return null;
-        cached = { key, colours };
+        const pixels = await draw(look);
+        if (!pixels) return null;
+        cached = { key, pixels, colours: new Map() };
       }
-      const page = scrimForColours(cached.colours, look);
-      return { page, panes: look.glass?.on ? paneAlphas(cached.colours, look, page) : {} };
+      const whole = [[0, 0, look.width, look.height]];
+      const colours = {};
+      for (const kind of Object.keys(look.glass.panes)) {
+        const rects = look.areas ? look.areas[kind] : whole;
+        if (rects?.length) colours[kind] = coloursIn(rects);
+      }
+      return { panes: paneAlphas(colours, look) };
     },
   };
 }

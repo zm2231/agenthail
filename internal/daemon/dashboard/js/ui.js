@@ -1,4 +1,6 @@
+import { paneAreas } from "./ui-areas.js";
 import { createBackdrop, parseBackground } from "./ui-backdrop.js";
+import { debounced, settledTracker } from "./ui-settled.js";
 import { foregroundOn, luminance, MARGIN, readableOnTint, readableSurface, readableText } from "./ui-contrast.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
@@ -68,7 +70,7 @@ export function applyTheme(document, values, prefersDark, colourOf, target = 4.5
   return theme;
 }
 
-export function backdropLook(values, theme, { sessionOpen, highContrast, reducedTransparency, colourOf, width, height, scale = 1 }) {
+export function backdropLook(values, theme, { sessionOpen, highContrast, reducedTransparency, colourOf, width, height, scale = 1, areas = null }) {
   const number = (key, fallback) => (Number.isFinite(values[key]) ? values[key] : fallback);
   const ground = colourOf("var(--paper)") || (theme === "dark" ? [0, 0, 0] : [1, 1, 1]);
   const texts = ROLES.map((token) => colourOf(`var(${token})`)).filter(Boolean);
@@ -90,8 +92,9 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
     roles: texts.map(luminance),
     target,
     readable,
+    gutter: number("glass.gutter", 8),
     glass: {
-      on: values.glass !== "off" && !reducedTransparency,
+      on: theme === "dark" && values.glass !== "off" && !reducedTransparency,
       tint: readable ? readableSurface(tint, texts, ground, target + MARGIN) : tint,
       edge: colourOf("var(--ink)") || (theme === "dark" ? [1, 1, 1] : [0, 0, 0]),
       panes: {
@@ -102,11 +105,11 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
       },
       blur: number("glass.blur", 30),
       border: number("glass.border", 0.08),
-      gutter: number("glass.gutter", 8),
     },
     width,
     height,
     scale,
+    areas,
   };
 }
 
@@ -161,7 +164,7 @@ export function workerMeasure(worker) {
     });
 }
 
-export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, backdrop, viewport, MutationObserver, addEventListener, debounce = 150 }) {
+export function start({ document, fetch, EventSource, matchMedia, storage, colourOf, backdrop, viewport, areas = () => null, MutationObserver, ResizeObserver, addEventListener, debounce = 150 }) {
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   const contrast = matchMedia("(prefers-contrast: more)");
   const transparency = matchMedia("(prefers-reduced-transparency: reduce)");
@@ -171,19 +174,24 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
   } catch {
     values = {};
   }
+  const track = settledTracker(document.documentElement);
   let painting = Promise.resolve();
+  let laidOut = "";
   const apply = () => {
     const theme = applyTheme(document, values, scheme.matches, colourOf, effectiveTarget(values, contrast.matches));
     if (!backdrop) return;
     const size = viewport();
+    const placed = areas();
+    laidOut = JSON.stringify(placed);
     const look = backdropLook(values, theme, {
       sessionOpen: document.documentElement.hasAttribute("data-session-open"),
       highContrast: contrast.matches,
       reducedTransparency: transparency.matches,
       colourOf,
+      areas: placed,
       ...size,
     });
-    painting = backdrop.render(look);
+    painting = track(backdrop.render(look));
   };
   apply();
 
@@ -201,26 +209,23 @@ export function start({ document, fetch, EventSource, matchMedia, storage, colou
     } catch {}
   };
 
-  let timer = null;
-  const reload = () => {
-    clearTimeout(timer);
-    timer = setTimeout(load, debounce);
-  };
-  let resizeTimer = null;
+  const reload = debounced(() => track(load()), debounce, track);
   scheme.addEventListener?.("change", apply);
   contrast.addEventListener?.("change", apply);
   transparency.addEventListener?.("change", apply);
+  const relayout = debounced(() => {
+    if (JSON.stringify(areas()) !== laidOut) apply();
+  }, debounce, track);
   if (backdrop) {
     if (MutationObserver) new MutationObserver(apply).observe(document.documentElement, { attributes: true, attributeFilter: ["data-session-open"] });
-    addEventListener?.("resize", () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(apply, debounce);
-    });
+    if (ResizeObserver) new ResizeObserver(relayout).observe(document.body);
+    addEventListener?.("resize", debounced(apply, debounce, track));
+    addEventListener?.("hashchange", relayout);
   }
   const events = new EventSource("/api/v1/events");
   events.addEventListener("ui.changed", reload);
   events.addEventListener("stream.reset", reload);
-  const ready = load();
+  const ready = track(load());
   return { ready, reload, events, current: () => values, painted: () => painting };
 }
 
@@ -234,7 +239,9 @@ if (typeof window !== "undefined" && window.document) {
     colourOf: browserColour(window.document),
     backdrop: createBackdrop({ document: window.document, measure: workerMeasure(new Worker("/js/ui-sampler-worker.js", { type: "module" })) }),
     viewport: () => ({ width: window.innerWidth, height: window.innerHeight, scale: window.devicePixelRatio || 1 }),
+    areas: () => paneAreas(window.document, window),
     MutationObserver: window.MutationObserver,
+    ResizeObserver: window.ResizeObserver,
     addEventListener: window.addEventListener.bind(window),
   });
 }
