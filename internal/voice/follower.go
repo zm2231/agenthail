@@ -3,6 +3,8 @@ package voice
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -79,7 +81,6 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 			if reason == "" {
 				reason = "the session journal source failed"
 			}
-			s.followerFailed(f, errors.New(reason))
 			s.refollow(f, reason)
 			return
 		}
@@ -151,7 +152,6 @@ func (s *Service) followVoiceTurn(ctx context.Context, f *follower, messages []s
 	}
 }
 
-// A voice turn followed to its end was reported, so its requests are done.
 func (s *Service) endTurn(f *follower, turnID string, voiceTurn bool) {
 	s.mu.Lock()
 	delete(f.voice, turnID)
@@ -165,15 +165,21 @@ func (s *Service) endTurn(f *follower, turnID string, voiceTurn bool) {
 	_ = s.commit()
 }
 
-// Carries the retired turns so a recovered source cannot recast them as typed.
+// Open turns are caught up, not retired, so their replies still come.
 func (s *Service) refollow(f *follower, reason string) {
 	s.mu.Lock()
 	if s.follow != f {
 		s.unlock()
 		return
 	}
+	var open []requestRecord
+	for _, turnID := range slices.Sorted(maps.Keys(f.voice)) {
+		for _, messageID := range f.voice[turnID] {
+			open = append(open, requestRecord{MessageID: messageID, TargetID: f.target.ID, TurnID: turnID})
+		}
+	}
 	replies := s.replies
-	s.followTarget(&f.target, nil)
+	s.followTarget(&f.target, open)
 	if next := s.follow; next != nil {
 		next.retired = f.retired
 		for i := range replies {

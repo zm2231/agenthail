@@ -8,7 +8,7 @@ import (
 
 const finishedWithoutReply = "The earlier request finished without a written reply."
 
-// Reads after the follower subscribed, so a turn that ended since the brief is not missed.
+// Runs after subscribing, so a turn ended since the brief is not missed.
 func (s *Service) catchUp(ctx context.Context, f *follower) bool {
 	s.mu.Lock()
 	connected, waiting := s.connected, s.state.State.Phase != "connected"

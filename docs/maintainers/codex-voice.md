@@ -133,11 +133,14 @@ about it is spoken:
   for that request to settle, at most 30 seconds. Past that it is taken as typed,
   recorded in the call as `voice/target/turn-unattributed` and written to the
   daemon log.
-- A journal source error ends the follower and the requests whose turns it
-  was following, as it ends any journal consumer. Voice then follows the
-  session again with a new subscription, recorded as `voice/target/refollowed`;
-  the turns of the failed requests are not followed again, even if the source
-  recovers, and replies waiting for a pause are kept.
+- A journal source error ends the follower, as it ends any journal consumer.
+  Voice then follows the session again with a new subscription, recorded as
+  `voice/target/refollowed`. The new follower takes over the requests whose
+  turns were open: it reads their outcomes again, speaks a reply that ended
+  meanwhile, and follows the rest, so a recovered source still speaks them.
+  Replies waiting for a pause are kept. A journal that ends without a source
+  error ends the follower's requests as failed in the call; they stay kept for
+  the next call.
 
 Everything said about the session runs under its follower, so moving voice to
 another session or back to the orchestrator cancels an update or reply still
@@ -145,8 +148,8 @@ being handed to the call.
 
 A request whose turn voice follows is kept, in the voice state file, until
 voice has its outcome. One whose turn ends during the call is spoken then and
-forgotten. One still open when the call ends, or whose follower failed before
-its turn ended, is reported once in the brief of the next call to the same
+forgotten. One still open when the call ends, or whose journal ended before its
+turn did, is reported once in the brief of the next call to the same
 session, read from the session's journal: its reply's opening sentences, how it
 failed, or that it is still working. A request still working is followed by the
 new call. Once the call connects, its follower reads those turns again after it

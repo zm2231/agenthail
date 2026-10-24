@@ -98,15 +98,19 @@ func TestAJournalSourceErrorEndsTheSubscriptionAndVoiceFollowsAgain(t *testing.T
 		t.Fatal("the failed subscription was not cancelled")
 	}
 	testkit.Eventually(t, "voice to follow the session again", 5*time.Second, func() bool {
-		return hasEventWith(f.View(), "voice/delegation/failed", "error", "journal write failed") && hasEventWith(f.View(), "voice/target/refollowed", "error", "journal write failed")
+		return hasEventWith(f.View(), "voice/target/refollowed", "error", "journal write failed")
 	})
 	stream.events <- sessionstream.Event{ItemID: "late", Version: 1, Kind: "text", Role: "assistant", TurnID: "turn-a", Body: "late reply", Final: true}
 	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a"}
 	stream.events <- sessionstream.Event{ItemID: "typed", Version: 1, Kind: "message", Role: "user", TurnID: "turn-b", Body: "typed later"}
 	testkit.Eventually(t, "the new follower to read on", 5*time.Second, func() bool { return hasEventWith(f.View(), "voice/target/typed", "turnId", "turn-b") })
-	for _, spoken := range f.provider.spoken() {
-		if strings.Contains(spoken, "late reply") {
-			t.Fatalf("a failed turn was spoken after the source error: %q", f.provider.spoken())
+	spoken := 0
+	for _, text := range f.provider.spoken() {
+		if strings.Contains(text, "late reply") {
+			spoken++
 		}
+	}
+	if spoken != 1 || !hasEventWith(f.View(), "voice/delegation/final", "messageId", "voice-request-a") || hasEventWith(f.View(), "voice/delegation/failed", "error", "journal write failed") {
+		t.Fatalf("the recovered turn was not spoken once as its request's: %q %+v", f.provider.spoken(), f.View().Events)
 	}
 }

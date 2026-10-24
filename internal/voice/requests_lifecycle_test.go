@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -32,19 +31,19 @@ func (b *scriptedBriefer) TurnOutcomes(context.Context, *surface.Session, []stri
 	return next, nil
 }
 
-func TestASourceErrorBeforeTheReplyKeepsTheRequestForTheNextCall(t *testing.T) {
+func TestAJournalThatEndsBeforeTheReplyKeepsTheRequestForTheNextCall(t *testing.T) {
 	target := workingTarget()
 	f := newFixture(t, fixtureOptions{target: target})
 	f.target = target
 	f.service.SetBriefer(&fixedBriefer{outcomes: map[string]TurnOutcome{"target-turn": {Found: true, Done: true, Reply: "All 40 tests pass."}}})
 	selectAndConnect(t, f, target)
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Run the tests"})
-	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "transcript read failed"})
-	testkit.Eventually(t, "the follower to follow the session again", 5*time.Second, func() bool {
-		return hasEventWith(f.View(), "voice/target/refollowed", "error", "transcript read failed")
+	target.journal.end()
+	testkit.Eventually(t, "the follower to end with the journal", 5*time.Second, func() bool {
+		return hasEventWith(f.View(), "voice/delegation/failed", "error", "the session journal ended")
 	})
 	if kept := f.keptRequests(); len(kept) != 1 {
-		t.Fatalf("a source error dropped the request: %+v", kept)
+		t.Fatalf("the journal's end dropped the request: %+v", kept)
 	}
 	callAgain(t, f, "call-a", "call-b")
 	if brief := lastStartBrief(t, f); !strings.Contains(brief, `- "Run the tests": the session replied: All 40 tests pass.`) {

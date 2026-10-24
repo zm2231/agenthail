@@ -54,15 +54,21 @@ func (j *targetJournal) subscriptions() (prepared, cancelled int) {
 
 func (j *targetJournal) emit(e sessionstream.Event) {
 	j.mu.Lock()
-	events, done := j.events, j.done
-	j.mu.Unlock()
-	if events == nil {
+	defer j.mu.Unlock()
+	if j.events == nil {
 		return
 	}
 	select {
-	case events <- e:
-	case <-done:
+	case j.events <- e:
+	case <-j.done:
 	}
+}
+
+func (j *targetJournal) end() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	close(j.events)
+	j.events = nil
 }
 
 func (j *targetJournal) replay(session surface.Session, turnID, prompt string) {
@@ -353,7 +359,7 @@ func TestSpeechAboutASessionStillBeingHandedOverIsCancelledWhenVoiceLeavesIt(t *
 	}
 }
 
-func TestASourceErrorEndsItsFollowerAndTheNextOneLeavesItsTurnsAlone(t *testing.T) {
+func TestASourceErrorEndsItsFollowerAndTheNextOneKeepsFollowingItsTurns(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Fieldnotes build", Transport: "desktop", Status: surface.StatusIdle}, streaming: make(chan struct{})}
 	f := newFixture(t, fixtureOptions{target: target})
 	f.target = target
@@ -364,15 +370,17 @@ func TestASourceErrorEndsItsFollowerAndTheNextOneLeavesItsTurnsAlone(t *testing.
 	})
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "m", Text: "Do work"})
 	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "transcript read failed"})
-	testkit.Eventually(t, "the source error to end the delegation and its follower", 5*time.Second, func() bool {
+	testkit.Eventually(t, "the source error to end the follower", 5*time.Second, func() bool {
 		prepared, cancelled := target.journal.subscriptions()
-		return hasEventWith(f.View(), "voice/delegation/failed", "error", "transcript read failed") && hasEventWith(f.View(), "voice/target/refollowed", "error", "transcript read failed") && prepared == 2 && cancelled == 1
+		return hasEventWith(f.View(), "voice/target/refollowed", "error", "transcript read failed") && prepared == 2 && cancelled == 1
 	})
 	target.journal.emit(sessionstream.Event{ItemID: "reply", Version: 1, Kind: "text", Role: "assistant", TurnID: "target-turn", Body: "Resumed reply.", Final: true})
 	target.journal.emit(sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "target-turn", Status: "failed", Body: "late failure"})
 	typeTurn(target.journal, "typed-1", "Run the linter", "The linter passed.")
-	testkit.Eventually(t, "a later typed turn to be spoken", 5*time.Second, func() bool { return spokenWith(f, "The linter passed.") == 1 })
-	if spokenWith(f, "Resumed reply.") != 0 || hasEventWith(f.View(), "voice/target/typed", "turnId", "target-turn") || hasEventWith(f.View(), "voice/delegation/failed", "error", "late failure") {
-		t.Fatalf("a retired turn was followed again: spoken=%q events=%+v", f.provider.spoken(), f.View().Events)
+	testkit.Eventually(t, "the recovered turn and a later typed turn to be spoken", 5*time.Second, func() bool {
+		return spokenWith(f, "Resumed reply.") == 1 && spokenWith(f, "The linter passed.") == 1 && hasEventWith(f.View(), "voice/delegation/failed", "error", "late failure")
+	})
+	if !hasEventWith(f.View(), "voice/delegation/final", "messageId", "m") || hasEventWith(f.View(), "voice/target/typed", "turnId", "target-turn") || hasEventWith(f.View(), "voice/delegation/failed", "error", "transcript read failed") {
+		t.Fatalf("the recovered turn was not followed as the request's own: spoken=%q events=%+v", f.provider.spoken(), f.View().Events)
 	}
 }

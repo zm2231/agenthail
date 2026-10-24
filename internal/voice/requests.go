@@ -110,7 +110,7 @@ func (s *Service) requestDone(turnID string) {
 	s.state.Requests = kept
 }
 
-// reported drops what the brief told and returns the requests to follow. The caller holds s.mu.
+// The caller holds s.mu.
 func (s *Service) reported(target *surface.Session, outcomes map[string]TurnOutcome) []requestRecord {
 	var open []requestRecord
 	kept := s.state.Requests[:0]

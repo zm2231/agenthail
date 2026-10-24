@@ -17,11 +17,13 @@ func (b voiceBriefs) TurnOutcomes(ctx context.Context, session *surface.Session,
 	defer cancel()
 	sessionID := session.ID
 	return within(ctx, func() (map[string]voice.TurnOutcome, error) {
-		return b.d.journalTurnOutcomes(sessionID, turnIDs)
+		return journalTurnOutcomes(func(before uint64) (registry.SessionJournalPage, error) {
+			return b.d.Registry.ReadSessionJournalPage(sessionID, before, 200)
+		}, turnIDs)
 	})
 }
 
-func (d *Daemon) journalTurnOutcomes(sessionID string, turnIDs []string) (map[string]voice.TurnOutcome, error) {
+func journalTurnOutcomes(readPage func(before uint64) (registry.SessionJournalPage, error), turnIDs []string) (map[string]voice.TurnOutcome, error) {
 	outcomes := make(map[string]voice.TurnOutcome, len(turnIDs))
 	open := map[string]bool{}
 	for _, id := range turnIDs {
@@ -29,7 +31,7 @@ func (d *Daemon) journalTurnOutcomes(sessionID string, turnIDs []string) (map[st
 	}
 	var before uint64
 	for read := 0; read < voiceOutcomeRows && len(open) > 0; {
-		page, err := d.Registry.ReadSessionJournalPage(sessionID, before, 200)
+		page, err := readPage(before)
 		var gap *registry.SessionJournalHistoryGapError
 		if before != 0 && errors.As(err, &gap) {
 			break
