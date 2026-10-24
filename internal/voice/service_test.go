@@ -30,7 +30,7 @@ type fixtureProvider struct {
 	err          error
 	createErr    error
 	pending      []Batch
-	polled       chan struct{}
+	consumed     time.Time
 	interrupts   int
 	speaking     chan struct{}
 	speakingText string
@@ -267,10 +267,13 @@ func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string, wait
 		defer p.waiting.Add(-1)
 		select {
 		case <-arrived:
-		case _, open := <-p.ticks:
+		case at, open := <-p.ticks:
 			if !open {
 				return Batch{Cursor: after}, errors.New("fixture closed")
 			}
+			p.mu.Lock()
+			p.consumed = at
+			p.mu.Unlock()
 		case <-ctx.Done():
 			return Batch{Cursor: after}, ctx.Err()
 		}
@@ -284,11 +287,15 @@ func (p *fixtureProvider) Poll(ctx context.Context, after Cursor, _ string, wait
 	if len(p.pending) > 0 {
 		b, p.pending = p.pending[0], p.pending[1:]
 	}
-	select {
-	case p.polled <- struct{}{}:
-	default:
-	}
 	return b, nil
+}
+
+func (p *fixtureProvider) cycleTick() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	at := p.consumed
+	p.consumed = time.Time{}
+	return at
 }
 
 func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID, _ string, success bool, text string) error {
@@ -391,7 +398,8 @@ type voiceFixture struct {
 	ticks    chan time.Time
 	mu       sync.Mutex
 	now      time.Time
-	cycles   chan struct{}
+	cycles   chan time.Time
+	ticked   int64
 	gate     *gate
 	target   *targetFixture
 }
@@ -480,7 +488,7 @@ func fixture(t *testing.T) (*voiceFixture, *fixtureProvider) {
 func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
 	g := &gate{entered: make(chan string, 16)}
-	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{polled: make(chan struct{}, 1), gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
+	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
 	f.provider.ticks = f.ticks
 	var resolver TargetResolver
 	if options.path != "" {
@@ -512,11 +520,13 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 		},
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
-	f.cycles = make(chan struct{}, 16)
+	f.cycles = make(chan time.Time, 16)
 	f.service.cycled = func() {
-		select {
-		case f.cycles <- struct{}{}:
-		default:
+		if at := f.provider.cycleTick(); !at.IsZero() {
+			select {
+			case f.cycles <- at:
+			default:
+			}
 		}
 	}
 	t.Cleanup(func() { close(f.ticks) })
@@ -536,24 +546,28 @@ func (f *voiceFixture) advance(d time.Duration) {
 	f.now = f.now.Add(d)
 }
 
+// A poll woken to recompute its wait finishes a cycle too, so tick waits for its own.
 func (f *voiceFixture) tick() {
 	f.t.Helper()
+	f.ticked++
+	at := time.Unix(0, f.ticked)
 	select {
-	case f.ticks <- time.Time{}:
+	case f.ticks <- at:
 	case <-time.After(time.Second):
 		f.t.Fatal("call observer is not running")
 	}
-	select {
-	case <-f.provider.polled:
-	case <-time.After(time.Second):
-		f.t.Fatal("call observer did not poll")
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case done := <-f.cycles:
+			if done.Equal(at) {
+				f.parked()
+				return
+			}
+		case <-deadline:
+			f.t.Fatal("call observer did not finish the cycle of its tick")
+		}
 	}
-	select {
-	case <-f.cycles:
-	case <-time.After(5 * time.Second):
-		f.t.Fatal("call observer did not finish its cycle")
-	}
-	f.parked()
 }
 
 // parked waits until the observer has computed its next poll's wait and is
