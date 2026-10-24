@@ -535,7 +535,6 @@ struct SessionScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     Group { transcriptRows }.transcriptScrimRow()
-                    Color.clear.frame(height: 1).id("bottom")
                 }
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
                 .environment(\.revealRow) { position.scrollTo(y: $0) }
@@ -585,7 +584,7 @@ struct SessionScreen: View {
                     if !atLatest && detail != nil {
                         Button {
                             followingLatest = true
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                            position.scrollTo(edge: .bottom)
                         } label: {
                             Image(systemName: "arrow.down")
                                 .font(.body.weight(.semibold))
@@ -678,16 +677,16 @@ struct SessionScreen: View {
                 atLatest = !startsAtOldest
                 await model.loadSession(session.id)
                 if startsAtOldest, let first = items.first {
-                    proxy.scrollTo(first.id, anchor: .top)
+                    position.scrollTo(id: first.id, anchor: .top)
                 } else {
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                    position.scrollTo(edge: .bottom)
                 }
             }
             .onChange(of: detail?.timeline?.items) { _, _ in
-                if followingLatest { proxy.scrollTo("bottom", anchor: .bottom) }
+                if followingLatest { position.scrollTo(edge: .bottom) }
             }
             .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
-                if followingLatest { proxy.scrollTo("bottom", anchor: .bottom) }
+                if followingLatest { position.scrollTo(edge: .bottom) }
             }
         }
     }
