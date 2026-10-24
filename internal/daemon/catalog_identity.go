@@ -284,7 +284,7 @@ func catalogGitStamp(dirs catalogGitDirs) string {
 			continue
 		}
 		if info, err := os.Stat(filepath.Join(file.dir, file.name)); err == nil {
-			fmt.Fprintf(&stamp, "%s:%d:%d;", file.name, info.ModTime().UnixNano(), info.Size())
+			fmt.Fprintf(&stamp, "%s:%s;", file.name, surface.Stamp(info))
 		} else {
 			fmt.Fprintf(&stamp, "%s:missing;", file.name)
 		}
@@ -438,7 +438,7 @@ type catalogRepositoryEntry struct {
 func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, error) {
 	stamp := "missing"
 	if info, err := os.Stat(filepath.Join(commonDir, "config")); err == nil {
-		stamp = fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
+		stamp = surface.Stamp(info).String()
 	}
 	if repositories != nil {
 		repositories.mu.Lock()

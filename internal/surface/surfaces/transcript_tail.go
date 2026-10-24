@@ -4,10 +4,75 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 )
+
+// maxJSONLRecordBytes bounds every transcript line read by shared JSONL readers.
+const maxJSONLRecordBytes = 32 * 1024 * 1024
+
+type transcriptCursor struct {
+	identity string
+	offset   int64
+}
+
+func (c *transcriptCursor) reset(info os.FileInfo) bool {
+	identity := transcriptFileIdentity(info)
+	if c.identity == identity && identity != "" && info.Size() >= c.offset {
+		return false
+	}
+	c.identity, c.offset = identity, 0
+	return true
+}
+
+func readFirstJSONL(path string, value any) (int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 64*1024)
+	var line []byte
+	for {
+		part, readErr := reader.ReadSlice('\n')
+		if len(line)+len(part) > maxJSONLRecordBytes {
+			return 0, transcriptRecordTooLarge{limit: maxJSONLRecordBytes}
+		}
+		line = append(line, part...)
+		if readErr != bufio.ErrBufferFull {
+			if readErr != nil && readErr != io.EOF {
+				return 0, readErr
+			}
+			break
+		}
+	}
+	return int64(len(line)), json.Unmarshal(line, value)
+}
+
+func findJSONL(path string, visit func([]byte) (bool, error)) error {
+	return findJSONLFrom(path, 0, visit)
+}
+
+func findJSONLFrom(path string, offset int64, visit func([]byte) (bool, error)) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = scanJSONL(context.Background(), file, offset, maxJSONLRecordBytes, true, func(line []byte) error {
+		found, err := visit(line)
+		if found && err == nil {
+			return io.EOF
+		}
+		return err
+	})
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
 
 func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit int64, recordLimit int) ([][]byte, int64, error) {
 	file, err := os.Open(path)
@@ -97,6 +162,10 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 	if info.Size() == offset {
 		return offset, nil
 	}
+	return scanJSONL(ctx, file, offset, limit, false, visit)
+}
+
+func scanJSONL(ctx context.Context, file *os.File, offset int64, limit int, final bool, visit func([]byte) error) (int64, error) {
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
@@ -122,7 +191,7 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 				return current, err
 			}
 		}
-		if readErr == io.EOF && len(line) > 0 {
+		if readErr == io.EOF && len(line) > 0 && !final {
 			return current, nil
 		}
 		if readErr != nil && readErr != io.EOF {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uiconf"
 )
 
@@ -357,7 +358,7 @@ func uiSignature(store *uiconf.Store) string {
 			parts = append(parts, "-")
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano()))
+		parts = append(parts, surface.Stamp(info).String())
 	}
 	return strings.Join(parts, "|")
 }

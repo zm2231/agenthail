@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const (
@@ -114,14 +114,5 @@ func (d *Daemon) typedPrompt(row registry.JournalPrompt) (promptItem, bool) {
 // Journal rows written before their provider marked injections carry no
 // origin, so the injected wrappers are recognised by their text.
 func isTypedPrompt(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || surface.IsCodexInjectedContext(trimmed) {
-		return false
-	}
-	for _, prefix := range []string{"<realtime_delegation>", "<task-notification>", "<cross-session-message", "<local-command-caveat>", "<artifact-content-authored-by-others"} {
-		if strings.HasPrefix(trimmed, prefix) {
-			return false
-		}
-	}
-	return !strings.HasPrefix(trimmed, "This session is being continued from a previous conversation")
+	return surfaces.IsTypedHumanPrompt(text)
 }

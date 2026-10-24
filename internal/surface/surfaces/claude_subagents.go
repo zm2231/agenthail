@@ -1,12 +1,10 @@
 package surfaces
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,8 +42,8 @@ type claudeSubagentFile struct {
 	hasMeta   bool
 	validated bool
 	read      bool
-	info      os.FileInfo
-	offset    int64
+	stamp     surface.FileStamp
+	cursor    transcriptCursor
 	done      bool
 }
 
@@ -218,18 +216,19 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 	if err != nil {
 		return fmt.Errorf("stat Claude subagent transcript %s: %w", f.path, err)
 	}
-	if f.info != nil && os.SameFile(f.info, info) && info.Size() == f.info.Size() && info.ModTime().Equal(f.info.ModTime()) {
+	stamp := surface.Stamp(info)
+	if !f.cursor.reset(info) && f.stamp.Equal(stamp) {
 		return nil
 	}
-	if f.info == nil || !os.SameFile(f.info, info) || info.Size() < f.offset {
-		f.validated, f.read, f.offset, f.done = false, false, 0, false
+	if f.cursor.offset == 0 {
+		f.validated, f.read, f.done = false, false, false
 	}
 	if !f.validated {
 		if err := f.validate(transcriptID); err != nil {
 			return err
 		}
 	}
-	f.info = info
+	f.stamp = stamp
 	if now.Sub(info.ModTime()) >= claudeSubagentStaleAfter {
 		f.read = false
 		return nil
@@ -243,14 +242,14 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 		for _, line := range lines {
 			f.apply(line)
 		}
-		f.offset, f.read = end, true
+		f.cursor.offset, f.read = end, true
 		return nil
 	}
-	offset, err := scanAppendedJSONL(ctx, f.path, f.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+	offset, err := scanAppendedJSONL(ctx, f.path, f.cursor.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 		f.apply(line)
 		return nil
 	})
-	f.offset = offset
+	f.cursor.offset = offset
 	if err != nil {
 		return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
 	}
@@ -258,26 +257,22 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 }
 
 func (f *claudeSubagentFile) validate(transcriptID string) error {
-	file, err := os.Open(f.path)
-	if err != nil {
-		return fmt.Errorf("open Claude subagent transcript %s: %w", f.path, err)
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
-	for scanner.Scan() {
+	err := findJSONL(f.path, func(line []byte) (bool, error) {
 		var record claudeSubagentRecord
-		if json.Unmarshal(scanner.Bytes(), &record) != nil || record.SessionID == "" || record.AgentID == "" {
-			continue
+		if json.Unmarshal(line, &record) != nil || record.SessionID == "" || record.AgentID == "" {
+			return false, nil
 		}
 		if record.SessionID != transcriptID || record.AgentID != f.agentID {
-			return fmt.Errorf("Claude subagent transcript %s does not match its path", f.path)
+			return false, fmt.Errorf("Claude subagent transcript %s does not match its path", f.path)
 		}
 		f.validated = true
-		return nil
-	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+		return true, nil
+	})
+	if err != nil {
 		return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
+	}
+	if f.validated {
+		return nil
 	}
 	return fmt.Errorf("Claude subagent transcript %s has no identifying record", f.path)
 }
@@ -309,8 +304,8 @@ func (f *claudeSubagentFile) link(parentSessionID string, now time.Time) surface
 		Depth:           depth,
 		TranscriptPath:  f.path,
 	}
-	if f.info != nil {
-		link.LastActive = f.info.ModTime()
+	if !f.stamp.Modified.IsZero() {
+		link.LastActive = f.stamp.Modified
 		link.Working = f.read && !f.done && now.Sub(link.LastActive) < claudeSubagentStaleAfter
 	}
 	return link

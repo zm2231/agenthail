@@ -1,17 +1,13 @@
 package surfaces
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,8 +23,7 @@ import (
 // earlier file holds past that offset was reverted.
 
 const (
-	codexRolloutHeaderLimit = 8 << 20
-	codexRolloutLineageMax  = 16
+	codexRolloutLineageMax = 16
 )
 
 var errCodexRolloutLineage = errors.New("Codex rollout continuation could not be verified")
@@ -54,19 +49,14 @@ type codexRolloutSegment struct {
 
 func readCodexRolloutHeader(path string) (codexRolloutHeader, int64, error) {
 	var header codexRolloutHeader
-	file, err := os.Open(path)
-	if err != nil {
-		return header, 0, err
-	}
-	defer file.Close()
-	line, err := bufio.NewReader(io.LimitReader(file, codexRolloutHeaderLimit)).ReadBytes('\n')
+	end, err := readFirstJSONL(path, &header)
 	if err != nil {
 		return header, 0, fmt.Errorf("read Codex rollout header: %w", err)
 	}
-	if err := json.Unmarshal(line, &header); err != nil || header.Type != "session_meta" {
+	if header.Type != "session_meta" {
 		return header, 0, fmt.Errorf("Codex rollout has no session header")
 	}
-	return header, int64(len(line)), nil
+	return header, end, nil
 }
 
 func codexRolloutLineage(current, threadID string) ([]codexRolloutSegment, error) {
@@ -177,7 +167,7 @@ func codexReadableRollout(source string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	key := sha256.Sum256([]byte(source + "\x00" + strconv.FormatInt(info.Size(), 10) + "\x00" + strconv.FormatInt(info.ModTime().UnixNano(), 10)))
+	key := sha256.Sum256([]byte(source + "\x00" + surface.Stamp(info).String()))
 	path := filepath.Join(dir, hex.EncodeToString(key[:16])+".jsonl")
 	if _, err := os.Stat(path); err == nil {
 		now := time.Now()

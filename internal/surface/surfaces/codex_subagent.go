@@ -1,10 +1,8 @@
 package surfaces
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -107,29 +105,8 @@ type codexSessionMetaLine struct {
 // The rollout spells the source key "subagent"; the app-server spells it
 // "subAgent".
 func readCodexRolloutSubagent(path string) (*surface.Subagent, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	reader := bufio.NewReaderSize(file, 64*1024)
-	line, err := reader.ReadSlice('\n')
-	if err != nil && err != bufio.ErrBufferFull && len(line) == 0 {
-		return nil, fmt.Errorf("read Codex rollout %s: %w", path, err)
-	}
-	if err == bufio.ErrBufferFull {
-		full := append([]byte(nil), line...)
-		for err == bufio.ErrBufferFull {
-			if len(full) > maxClaudeTranscriptRecordBytes {
-				return nil, fmt.Errorf("Codex rollout %s session_meta exceeds %d bytes", path, maxClaudeTranscriptRecordBytes)
-			}
-			line, err = reader.ReadSlice('\n')
-			full = append(full, line...)
-		}
-		line = full
-	}
 	var meta codexSessionMetaLine
-	if err := json.Unmarshal(line, &meta); err != nil {
+	if _, err := readFirstJSONL(path, &meta); err != nil {
 		return nil, fmt.Errorf("parse Codex rollout %s session_meta: %w", path, err)
 	}
 	if meta.Type != "session_meta" {

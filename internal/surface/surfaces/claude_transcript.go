@@ -1,7 +1,6 @@
 package surfaces
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -325,34 +324,27 @@ func isClaudeInterruptMarker(text string) bool {
 }
 
 func readClaudeCompactCompletion(path string, offset int64, requestUUID string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return false, err
-	}
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
 	matchedRequest := false
-	for scanner.Scan() {
+	completed := false
+	err := findJSONLFrom(path, offset, func(line []byte) (bool, error) {
 		var record claudeRecord
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
+		if json.Unmarshal(line, &record) != nil {
+			return false, nil
 		}
 		if record.Type == "user" && record.UUID == requestUUID && strings.TrimSpace(transcriptText(record.Message.Content)) == "/compact" {
 			matchedRequest = true
-			continue
+			return false, nil
 		}
 		if matchedRequest && record.Type == "system" && record.Subtype == "compact_boundary" {
+			completed = true
 			return true, nil
 		}
 		if _, human := claudePromptText(record.Origin.Kind, transcriptText(record.Message.Content)); matchedRequest && record.Type == "user" && human {
 			return false, fmt.Errorf("another prompt arrived before the compact boundary")
 		}
-	}
-	return false, scanner.Err()
+		return false, nil
+	})
+	return completed, err
 }
 
 func transcriptText(content any) string {
@@ -377,50 +369,19 @@ func transcriptText(content any) string {
 }
 
 func isHumanTranscriptText(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
-	}
-	// Claude writes slash commands as literal and tagged records; neither is an agent turn.
-	for _, command := range []string{"compact", "model", "context", "usage", "effort", "rename"} {
-		if text == "/"+command || strings.HasPrefix(text, "/"+command+" ") {
-			return false
-		}
-	}
-	if claudeCommandMarkup(text) {
-		return false
-	}
-	for _, prefix := range []string{
-		"<system", "[Request interrupted", "[Request to",
-		"This session is being continued from a previous conversation that ran out of context.",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return false
-		}
-	}
-	return true
+	return IsTypedHumanPrompt(text)
 }
 
 // claudeForkedFrom returns the conversation a transcript was branched from.
 // Claude copies the original's lines into a branch and marks each copy with
 // forkedFrom, so the first record carries it.
 func claudeForkedFrom(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
-	if !scanner.Scan() {
-		return ""
-	}
 	var record struct {
 		ForkedFrom struct {
 			SessionID string `json:"sessionId"`
 		} `json:"forkedFrom"`
 	}
-	if json.Unmarshal(scanner.Bytes(), &record) != nil {
+	if _, err := readFirstJSONL(path, &record); err != nil {
 		return ""
 	}
 	return record.ForkedFrom.SessionID
