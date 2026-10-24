@@ -53,7 +53,7 @@ struct TitleBarStrip: View {
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
     static let height: CGFloat = 40
-    static let buttonsWidth: CGFloat = 84
+    static let buttonsWidth = WindowButtons.stripInset + WindowButtons.span + 12
     private static let minimumTab: CGFloat = 120
     private static let maximumTab: CGFloat = 240
 
@@ -114,22 +114,11 @@ struct TitleBarStrip: View {
         .padding(.leading, Self.buttonsWidth)
         .padding(.trailing, DesktopSpace.l)
         .frame(height: Self.height)
+        .windowButtonBand(leading: WindowButtons.stripInset)
         .glassPane(.chrome, fallback: DesktopPalette.side, edge: .bottom)
         .background {
             Button("") { pane.stepTab(1) }.keyboardShortcut(.tab, modifiers: .control).hidden()
             Button("") { pane.stepTab(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift]).hidden()
-        }
-    }
-}
-
-extension TitleBarStrip {
-    /// Centres the close, minimise and zoom buttons on the strip.
-    static func placeWindowButtons(in window: NSWindow) {
-        let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-        for (index, kind) in kinds.enumerated() {
-            guard let button = window.standardWindowButton(kind), let container = button.superview else { continue }
-            let y = container.isFlipped ? (height - button.frame.height) / 2 : container.bounds.height - (height + button.frame.height) / 2
-            button.setFrameOrigin(NSPoint(x: 18 + CGFloat(index) * 20, y: y))
         }
     }
 }

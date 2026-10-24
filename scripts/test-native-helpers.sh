@@ -116,6 +116,7 @@ SOURCES=(
   macOS/WindowBackdropHost.swift
   macOS/WindowImage.swift
   macOS/WindowRectReader.swift
+  macOS/WindowButtons.swift
 )
 
 rm -rf "$OUT"
