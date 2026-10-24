@@ -13,9 +13,9 @@ enum GlassSolve {
     static func opacity(under shown: Float?, polarity: ScrimField.Polarity, window: Float, boundary: Float) -> Float {
         let glass = level(polarity: polarity, window: window)
         let worst = shown.map { polarity == .dark ? max($0, glass) : min($0, glass) } ?? glass
-        guard !ScrimField.passes(worst, boundary: boundary, polarity: polarity) else { return 0 }
+        guard !ScrimField.passes(worst, boundary: boundary, polarity: polarity) else { return measuredFloor }
         guard worst != window else { return 1 }
-        return min(max((worst - boundary) / (worst - window), 0), 1)
+        return min(max((worst - boundary) / (worst - window), measuredFloor), 1)
     }
 
     static func extreme(_ backdrop: BackdropImage, polarity: ScrimField.Polarity) -> Float? {
