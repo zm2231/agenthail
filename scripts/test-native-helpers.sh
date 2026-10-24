@@ -97,6 +97,7 @@ SOURCES=(
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptFollow.swift
+  macOS/TranscriptRowAction.swift
   macOS/VoiceController.swift
   macOS/AncestorFrames.swift
   macOS/BackdropLayerView.swift
