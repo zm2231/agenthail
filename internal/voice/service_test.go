@@ -1172,7 +1172,7 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 }
 
 func TestDelegationHoldsWhenTargetDoesNotProvideAnAuthoritativeTurnID(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "target-a", quiet: true}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the target"})
 	if v := f.View(); !hasEventWith(v, "voice/delegation/held", "turnId", "target-a") || hasEvent(v, "voice/delegation/dispatched") {

@@ -49,6 +49,19 @@ func TestAPeerHeldDelegationWhoseJournalWrapsThePromptStaysSilent(t *testing.T) 
 	assertOnlyTypedSpoken(t, f, target.journal)
 }
 
+func TestAHeldDelegationWithNoPlaceableIDHasItsTurnTakenAsTyped(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
+	f := heldTarget(t, target)
+	heldTurn(target.journal, "codex-turn", sessionstream.Event{Role: "user", Body: "Run the tests"})
+	testkit.Eventually(t, "the turn's typed reply", 5*time.Second, func() bool {
+		return spokenWith(f, "The session replied to what the person typed there: All tests passed.") == 1
+	})
+	v := f.View()
+	if !hasEventWith(v, "voice/target/typed", "turnId", "codex-turn") || hasEvent(v, "voice/delegation/final") || spokenWith(f, `The person typed in the session, not by voice: "Run the tests"`) != 1 {
+		t.Fatalf("spoken=%q events=%+v", f.provider.spoken(), v.Events)
+	}
+}
+
 func TestAHeldDelegationThatLandsInAnotherSessionStaysSilentThere(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "moved-turn", movesTo: "target-b"}
 	f := heldTarget(t, target)
