@@ -6,7 +6,7 @@ struct QueueFactsTest {
     static func main() {
         let caps = Capabilities()
         func queue(_ id: Int64, status: String, evidence: String = "queued", lastError: String? = nil, session: String = "s1", heldBy: String? = nil, historical: Bool? = nil) -> QueueState {
-            var fields: [String: Any] = ["id": id, "sessionId": session, "target": "@builder", "message": "check the build", "status": status, "attempts": 1, "queuedAt": "2026-10-18 06:00:00", "evidence": evidence]
+            var fields: [String: Any] = ["id": id, "sessionId": session, "target": "@builder", "message": "check the build", "status": status, "attempts": 1, "queuedAt": "2026-10-18T06:00:00.000000000Z", "evidence": evidence]
             if let lastError { fields["lastError"] = lastError }
             if let heldBy { fields["heldBy"] = heldBy }
             if let historical { fields["historical"] = historical }

@@ -30,6 +30,6 @@ enum TurnClock {
     }
 
     static func date(_ timestamp: String) -> Date? {
-        (try? Date(timestamp, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true))) ?? (try? Date(timestamp, strategy: Date.ISO8601FormatStyle()))
+        TimestampParser.date(timestamp)
     }
 }

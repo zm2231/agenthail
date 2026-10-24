@@ -196,21 +196,8 @@ struct SessionTree: Equatable {
     }
 
     static func parseTimestamp(_ raw: String) -> Date? {
-        if let date = try? fractionalTimestamp.parse(raw) { return date }
-        if let date = try? wholeSecondTimestamp.parse(raw) { return date }
-        return sqliteTimestamp.date(from: raw)
+        TimestampParser.date(raw)
     }
-
-    private static let fractionalTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
-    private static let wholeSecondTimestamp = Date.ISO8601FormatStyle()
-
-    private static let sqliteTimestamp: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
 
     private static func checkoutLabel(_ session: SessionState) -> String {
         branchLabel(session) ?? session.checkout?.path ?? session.cwd ?? "unknown checkout"

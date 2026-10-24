@@ -5,7 +5,7 @@ import Foundation
 struct SessionTreeTest {
     static func main() {
         let now = SessionTree.parseTimestamp("2026-10-04T12:00:00Z")!
-        expect(SessionTree.parseTimestamp("2026-10-04 12:00:00") == now, "SQLite UTC timestamps parse as UTC")
+        expect(SessionTree.parseTimestamp("2026-10-04T12:00:00.000000000Z") == now, "fractional RFC3339 timestamps parse as UTC")
         func flags(_ ids: [String]) -> [String: SessionAttention] {
             Dictionary(uniqueKeysWithValues: ids.map { ($0, SessionAttention(kind: .request, reason: "Asks you a question")) })
         }
@@ -157,10 +157,10 @@ struct SessionTreeTest {
         let mixed = [
             session("whole", status: "idle", lastActive: "2026-10-04T15:58:00Z", project: "agenthail", checkout: "main", branch: "main"),
             session("short-fraction", status: "idle", lastActive: "2026-10-04T11:59:58.03-04:00", project: "agenthail", checkout: "main", branch: "main"),
-            session("sqlite", status: "idle", lastActive: "2026-10-04 15:59:00", project: "agenthail", checkout: "main", branch: "main"),
+            session("fractional", status: "idle", lastActive: "2026-10-04T15:59:00.000000000Z", project: "agenthail", checkout: "main", branch: "main"),
             session("unparsed", status: "idle", lastActive: "yesterday", project: "agenthail", checkout: "main", branch: "main")
         ]
-        expect(SessionTree.newestFirst(mixed).map(\.id) == ["short-fraction", "sqlite", "whole", "unparsed"], "newest first across timestamp formats, unparsed last")
+        expect(SessionTree.newestFirst(mixed).map(\.id) == ["short-fraction", "fractional", "whole", "unparsed"], "newest first across timestamp formats, unparsed last")
         func waiting(_ id: String, kind: String, lastActive: String = "2026-10-04T11:00:00Z") -> SessionState {
             var state = session(id, status: "idle", lastActive: lastActive, project: "agenthail", checkout: "main", branch: "main")
             state.waitingOn = WaitingState(kind: kind, id: "req-\(id)")
@@ -235,7 +235,7 @@ struct SessionTreeTest {
         expect(places["terminal"]?.reason == "Waiting in its terminal", "a terminal prompt Agenthail does not hold is answered in its terminal: \(String(describing: places["terminal"]))")
         expect(places["hosted"]?.reason == "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it", "a hosted prompt no one holds says how to clear it: \(String(describing: places["hosted"]))")
         expect(places["held"]?.reason == "Needs your approval", "a request Agenthail holds asks for the answer")
-        let resets = ISO8601DateFormatter().date(from: "2026-10-04T18:20:00Z")!.formatted(date: .omitted, time: .shortened)
+        let resets = TimestampParser.date("2026-10-04T18:20:00Z")!.formatted(date: .omitted, time: .shortened)
         expect(places["limited"] == SessionAttention(kind: .usageLimit, reason: "Usage limit, resets \(resets)"), "a usage limit names when it resets: \(String(describing: places["limited"]))")
         expect(places["unknown-reset"]?.reason == "Usage limit reached", "a limit with no reset time says it was reached")
         expect(SessionTree.needsYou([limited, terminal], attention: places).map(\.id) == ["terminal", "limited"], "a usage limit comes after waits on the person")
