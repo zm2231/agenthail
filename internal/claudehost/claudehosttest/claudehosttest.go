@@ -432,32 +432,6 @@ func (f *Fixture) owns(pid int) bool {
 	return f.isHost(command) || strings.Contains(command, "fake-claude.mjs")
 }
 
-func commandLine(pid int) string {
-	output, err := stdout("ps", "-p", strconv.Itoa(pid), "-o", "command=")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func processes() (map[int]string, error) {
-	output, err := stdout("ps", "-axo", "pid=,command=")
-	if err != nil {
-		return nil, fmt.Errorf("list processes: %w", err)
-	}
-	out := map[int]string{}
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if pid, err := strconv.Atoi(fields[0]); err == nil {
-			out[pid] = strings.Join(fields[1:], " ")
-		}
-	}
-	return out, nil
-}
-
 // Diagnose describes the host serving this home, for a test that timed out
 // waiting on it: the last error the test saw, the host process and its open
 // files, the socket, the host log, and what the host is doing (Node's
@@ -547,11 +521,6 @@ func command(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
-}
-
-// stdout runs ps without a deadline: a listing slowed by load must not read as no processes.
-func stdout(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).Output()
 }
 
 func head(data []byte, limit int) []byte {
