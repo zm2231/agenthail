@@ -50,8 +50,7 @@ type claudeGoalRecord struct {
 // so a later read parses only what Claude appended since. version counts the
 // goal's changes and streamed is the version a stream last sent.
 type claudeGoalCursor struct {
-	identity string
-	offset   int64
+	cursor   transcriptCursor
 	goal     *surface.GoalState
 	version  uint64
 	streamed uint64
@@ -95,7 +94,6 @@ func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCu
 	if err != nil {
 		return nil, err
 	}
-	identity := transcriptFileIdentity(info)
 	if c.goals == nil {
 		c.goals = map[string]*claudeGoalCursor{}
 	}
@@ -104,8 +102,8 @@ func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCu
 		cursor = &claudeGoalCursor{}
 		c.goals[path] = cursor
 	}
-	goal, offset := cursor.goal, cursor.offset
-	if cursor.identity != identity || info.Size() < offset {
+	goal, offset := cursor.goal, cursor.cursor.offset
+	if cursor.cursor.reset(info) {
 		goal, offset = nil, 0
 	}
 	offset, err = scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
@@ -120,7 +118,7 @@ func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCu
 	if !sameGoal(cursor.goal, goal) {
 		cursor.version++
 	}
-	cursor.identity, cursor.offset, cursor.goal = identity, offset, goal
+	cursor.cursor.offset, cursor.goal = offset, goal
 	return cursor, nil
 }
 

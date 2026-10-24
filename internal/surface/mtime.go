@@ -1,6 +1,31 @@
 package surface
 
-import "time"
+import (
+	"fmt"
+	"os"
+	"time"
+)
+
+type FileStamp struct {
+	Size     int64
+	Modified time.Time
+}
+
+func Stamp(info os.FileInfo) FileStamp {
+	return FileStamp{Size: info.Size(), Modified: info.ModTime()}
+}
+
+func (s FileStamp) String() string {
+	return fmt.Sprintf("%d:%d", s.Size, s.Modified.UnixNano())
+}
+
+func (s FileStamp) Equal(other FileStamp) bool {
+	return s.Size == other.Size && s.Modified.Equal(other.Modified)
+}
+
+func (s FileStamp) UnchangedSince(readAt time.Time, current os.FileInfo) bool {
+	return s.Size == current.Size() && UnchangedSince(readAt, s.Modified, current.ModTime())
+}
 
 // MtimeGranularity bounds how coarse a file system's modification times are.
 // A change in the same tick as an earlier read leaves the time unchanged.

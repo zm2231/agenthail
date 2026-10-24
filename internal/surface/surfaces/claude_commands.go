@@ -22,6 +22,24 @@ func claudeCommandMarkup(text string) bool {
 	return claudeCommandInvocation(text) || claudeCommandOutput.MatchString(text) || claudeCommandCaveat.MatchString(text)
 }
 
+func IsTypedHumanPrompt(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || surface.IsCodexInjectedContext(text) || claudeCommandMarkup(text) {
+		return false
+	}
+	for _, prefix := range []string{"<system", "<realtime_delegation>", "<task-notification>", "<cross-session-message", "<local-command-caveat>", "<artifact-content-authored-by-others", "[Request interrupted", "[Request to", "This session is being continued from a previous conversation"} {
+		if strings.HasPrefix(text, prefix) {
+			return false
+		}
+	}
+	for _, command := range []string{"compact", "model", "context", "usage", "effort", "rename"} {
+		if text == "/"+command || strings.HasPrefix(text, "/"+command+" ") {
+			return false
+		}
+	}
+	return true
+}
+
 func claudeCommandInvocation(text string) bool {
 	text = strings.TrimSpace(text)
 	return claudeCommandNameTag.MatchString(text) && strings.TrimSpace(claudeCommandElement.ReplaceAllString(text, "")) == ""
@@ -80,7 +98,7 @@ func claudeLocalCommandItem(content string) surface.TimelineItem {
 // slash command among it reads as typed.
 func claudePromptText(originKind, text string) (string, bool) {
 	if originKind != claudeOriginHuman {
-		return text, isHumanTranscriptText(text)
+		return text, isHumanTranscriptText(text) || strings.HasPrefix(strings.TrimSpace(text), "<task-notification>")
 	}
 	if claudeCommandInvocation(text) {
 		return claudeCommandLine(text), true

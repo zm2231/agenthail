@@ -392,25 +392,19 @@ func (c *Claude) firstUserMessage(path string) string {
 	if path == "" || !fileExists(path) {
 		return ""
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for sc.Scan() {
+	message := ""
+	_ = findJSONL(path, func(line []byte) (bool, error) {
 		var e struct {
 			Type string `json:"type"`
 			Msg  struct {
 				Content any `json:"content"`
 			} `json:"message"`
 		}
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue
+		if json.Unmarshal(line, &e) != nil {
+			return false, nil
 		}
 		if e.Type != "user" {
-			continue
+			return false, nil
 		}
 		text := ""
 		switch c := e.Msg.Content.(type) {
@@ -428,14 +422,13 @@ func (c *Claude) firstUserMessage(path string) string {
 				}
 			}
 		}
-		if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
-			continue
+		if IsTypedHumanPrompt(text) {
+			message = surface.TruncateString(strings.TrimSpace(text), 60)
+			return true, nil
 		}
-		if text = strings.TrimSpace(text); text != "" {
-			return surface.TruncateString(text, 60)
-		}
-	}
-	return ""
+		return false, nil
+	})
+	return message
 }
 
 // List returns one session per conversation. A conversation open in several
@@ -1318,14 +1311,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if err != nil {
 		return err
 	}
-	identity := transcriptFileIdentity(state.fileInfo)
-	offset := state.offset
+	identity := state.cursor.identity
+	offset := state.cursor.offset
 	var closing surface.ClaudeClosingTurn
 	if uuid != "" {
 		// A targeted wait looks back so a turn submitted before the tail started is still found;
 		// events outside that turn are filtered below.
-		offset = max(int64(0), state.offset-initialClaudeObservationBytes)
-	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.offset && identity != "" && sess.TranscriptIdentity == identity {
+		offset = max(int64(0), state.cursor.offset-initialClaudeObservationBytes)
+	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.cursor.offset && identity != "" && sess.TranscriptIdentity == identity {
 		// The session source resumes at its seed or previous window boundary, so records written
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
@@ -1631,7 +1624,7 @@ var claudeHostTranscriptLookupTicks = 8
 // the change time, which no one can set back as they can the modification
 // time.
 func sameTranscriptState(a, b os.FileInfo) bool {
-	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
+	return surface.Stamp(a).Equal(surface.Stamp(b)) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
 }
 
 // transcriptChangeTime is a stat's inode change time, or "" where the platform

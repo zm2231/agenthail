@@ -167,12 +167,18 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		return fmt.Errorf("Codex transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	if session.TranscriptIdentity != "" && session.TranscriptIdentity != identity {
-		return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+		session.TranscriptOffset = 0
+		session.CodexCurrentTurnID = ""
+		session.CodexPendingEventUser = false
+		session.CodexPendingEventTurn = ""
 	}
 	session.TranscriptIdentity = identity
 	offset := session.TranscriptOffset
 	if fileInfo.Size() < offset {
-		return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+		offset, session.TranscriptOffset = 0, 0
+		session.CodexCurrentTurnID = ""
+		session.CodexPendingEventUser = false
+		session.CodexPendingEventTurn = ""
 	}
 	meter, err := codexStreamTurnMeter(ctx, path, offset)
 	if err != nil {
@@ -184,8 +190,20 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	currentTurnID := session.CodexCurrentTurnID
 	for first := true; first || time.Now().Before(deadline); first = false {
 		currentInfo, statErr := os.Stat(path)
-		if statErr != nil || currentInfo == nil || !os.SameFile(fileInfo, currentInfo) || currentInfo.Size() < offset {
+		if statErr != nil || currentInfo == nil {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+		}
+		if currentIdentity := transcriptFileIdentity(currentInfo); currentIdentity != identity || currentInfo.Size() < offset {
+			identity, offset = currentIdentity, 0
+			session.TranscriptIdentity, session.TranscriptOffset = identity, 0
+			currentTurnID = ""
+			session.CodexCurrentTurnID = ""
+			session.CodexPendingEventUser = false
+			session.CodexPendingEventTurn = ""
+			meter, err = codexStreamTurnMeter(ctx, path, 0)
+			if err != nil {
+				return err
+			}
 		}
 		lineOffset := offset
 		next, err := scanAppendedJSONL(ctx, path, offset, maxCodexTranscriptRecordBytes, func(line []byte) error {

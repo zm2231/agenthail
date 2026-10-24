@@ -13,8 +13,7 @@ import (
 )
 
 type claudeContextState struct {
-	offset              int64
-	fileInfo            os.FileInfo
+	cursor              transcriptCursor
 	usage               surface.ContextUsage
 	latestCommandAt     time.Time
 	latestCommandDoneAt time.Time
@@ -90,8 +89,9 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 		c.contextState = map[string]*claudeContextState{}
 	}
 	state := c.contextState[path]
-	if state == nil || info.Size() < state.offset || (state.fileInfo != nil && !os.SameFile(state.fileInfo, info)) {
+	if state == nil || state.cursor.reset(info) {
 		state = &claudeContextState{seenBoundaries: map[string]bool{}}
+		state.cursor.reset(info)
 		c.contextState[path] = state
 	}
 	if state.seenBoundaries == nil {
@@ -169,7 +169,7 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 		}
 		return nil
 	}
-	if state.offset == 0 {
+	if state.cursor.offset == 0 {
 		lines, offset, readErr := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if readErr != nil {
 			return surface.ContextUsage{}, "", readErr
@@ -179,12 +179,10 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 				return surface.ContextUsage{}, "", err
 			}
 		}
-		state.offset = offset
-		state.fileInfo = info
+		state.cursor.offset = offset
 	} else {
-		offset, scanErr := scanAppendedJSONL(ctx, path, state.offset, maxClaudeTranscriptRecordBytes, visit)
-		state.offset = offset
-		state.fileInfo = info
+		offset, scanErr := scanAppendedJSONL(ctx, path, state.cursor.offset, maxClaudeTranscriptRecordBytes, visit)
+		state.cursor.offset = offset
 		if scanErr != nil {
 			return surface.ContextUsage{}, "", scanErr
 		}

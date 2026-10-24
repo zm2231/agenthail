@@ -1,12 +1,9 @@
 package surfaces
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -159,23 +156,13 @@ func codexRolloutOriginator(path string) string {
 	if path == "" {
 		return ""
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	reader := bufio.NewReaderSize(file, 64<<10)
-	line, err := reader.ReadBytes('\n')
-	if err != nil && len(line) == 0 {
-		return ""
-	}
 	var record struct {
 		Type    string `json:"type"`
 		Payload struct {
 			Originator string `json:"originator"`
 		} `json:"payload"`
 	}
-	if json.Unmarshal(line, &record) != nil || record.Type != "session_meta" {
+	if _, err := readFirstJSONL(path, &record); err != nil || record.Type != "session_meta" {
 		return ""
 	}
 	return record.Payload.Originator

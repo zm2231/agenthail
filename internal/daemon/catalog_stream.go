@@ -663,7 +663,7 @@ func catalogFileStamps(paths []string) []string {
 	stamps := make([]string, len(paths))
 	for index, path := range paths {
 		if info, err := os.Stat(path); err == nil {
-			stamps[index] = fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+			stamps[index] = surface.Stamp(info).String()
 		}
 	}
 	return stamps

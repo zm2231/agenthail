@@ -15,8 +15,7 @@ import (
 var initialClaudeObservationBytes int64 = 32 * 1024 * 1024
 
 type claudeObservationState struct {
-	offset               int64
-	fileInfo             os.FileInfo
+	cursor               transcriptCursor
 	current              claudeTurn
 	completed            claudeTurn
 	hasCurrent           bool
@@ -42,8 +41,9 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 	if err != nil {
 		return nil, err
 	}
-	if state == nil || info.Size() < state.offset || (state.fileInfo != nil && !os.SameFile(state.fileInfo, info)) {
+	if state == nil || state.cursor.reset(info) {
 		state = &claudeObservationState{}
+		state.cursor.reset(info)
 		lines, offset, err := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if err != nil {
 			return nil, err
@@ -51,13 +51,11 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 		for _, line := range lines {
 			_ = state.apply(line)
 		}
-		state.offset = offset
-		state.fileInfo = info
+		state.cursor.offset = offset
 		c.observeState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.offset, maxClaudeTranscriptRecordBytes, state.apply)
-	state.offset = offset
-	state.fileInfo = info
+	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxClaudeTranscriptRecordBytes, state.apply)
+	state.cursor.offset = offset
 	if err != nil {
 		return nil, err
 	}

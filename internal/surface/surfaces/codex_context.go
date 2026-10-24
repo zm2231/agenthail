@@ -16,8 +16,7 @@ import (
 const maxCodexTranscriptRecordBytes = 32 * 1024 * 1024
 
 type codexContextState struct {
-	identity     string
-	offset       int64
+	cursor       transcriptCursor
 	usage        surface.ContextUsage
 	awaitingPost bool
 	pendingPre   int64
@@ -65,13 +64,12 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 		c.contextState = map[string]*codexContextState{}
 	}
 	state := c.contextState[path]
-	identity := transcriptFileIdentity(info)
-	if state == nil || identity == "" || state.identity != identity || info.Size() < state.offset {
+	if state == nil || state.cursor.reset(info) {
 		state = &codexContextState{}
-		state.identity = identity
+		state.cursor.reset(info)
 		c.contextState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
 		var record codexContextRecord
 		if json.Unmarshal(line, &record) != nil {
 			return nil
@@ -118,7 +116,7 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 		}
 		return nil
 	})
-	state.offset = offset
+	state.cursor.offset = offset
 	if err != nil {
 		return nil, err
 	}

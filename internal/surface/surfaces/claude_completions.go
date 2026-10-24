@@ -12,6 +12,7 @@ import (
 )
 
 type claudeCompletionCursor struct {
+	Identity    string
 	Offset      int64
 	Anchor      string
 	Current     claudeTurn
@@ -24,6 +25,10 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 		return surface.CompletionBatch{}, err
 	}
 	var checkpoint claudeCompletionCursor
+	info, err := os.Stat(path)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
 	if cursor != "" {
 		if err := json.Unmarshal([]byte(cursor), &checkpoint); err != nil {
 			return surface.CompletionBatch{}, err
@@ -35,6 +40,11 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 		if anchor != checkpoint.Anchor {
 			return surface.CompletionBatch{}, fmt.Errorf("relay transcript changed before its saved cursor; restore the transcript or recreate the relay")
 		}
+	}
+	tail := transcriptCursor{identity: checkpoint.Identity, offset: checkpoint.Offset}
+	reset := tail.reset(info)
+	if cursor != "" && reset {
+		return surface.CompletionBatch{}, fmt.Errorf("relay transcript changed before its saved cursor; restore the transcript or recreate the relay")
 	}
 	state := &claudeObservationState{current: checkpoint.Current, hasCurrent: checkpoint.Current.UserID != "" || checkpoint.Current.MessageID != ""}
 	batch := surface.CompletionBatch{}
@@ -70,20 +80,21 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 				return batch, err
 			}
 		}
-		checkpoint.Offset = offset
+		tail.offset = offset
 	} else {
-		offset, err := scanAppendedJSONL(ctx, path, checkpoint.Offset, maxClaudeTranscriptRecordBytes, apply)
+		offset, err := scanAppendedJSONL(ctx, path, tail.offset, maxClaudeTranscriptRecordBytes, apply)
 		if err != nil {
 			return surface.CompletionBatch{}, err
 		}
-		checkpoint.Offset = offset
+		tail.offset = offset
 	}
 	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
 		state.settle()
 		collect()
 	}
 	checkpoint.Current = state.current
-	anchor, err := completionAnchor(path, checkpoint.Offset)
+	checkpoint.Identity, checkpoint.Offset = tail.identity, tail.offset
+	anchor, err := completionAnchor(path, tail.offset)
 	if err != nil {
 		return surface.CompletionBatch{}, err
 	}

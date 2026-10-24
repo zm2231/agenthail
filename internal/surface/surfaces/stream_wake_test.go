@@ -143,3 +143,31 @@ func TestACodexStreamWakesOnAnAppend(t *testing.T) {
 		`{"type":"response_item","payload":{"id":"user-1","type":"message","role":"user","content":[{"type":"input_text","text":"woken by the append"}]}}`)
 	awaitWokenText(t, texts, "woken by the append", appended)
 }
+
+func TestACodexStreamFollowsAReplacedTranscript(t *testing.T) {
+	slowPoll(t)
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"old"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	codex := &Codex{desktopURL: "ws://127.0.0.1:1"}
+	session := &surface.Session{ID: "review", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusBusy, TranscriptIdentity: "old-file", TranscriptOffsetSet: true, TranscriptOffset: int64(len(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"old"}}` + "\n")), CodexCurrentTurnID: "old", CodexPendingEventUser: true, CodexPendingEventTurn: "old"}
+	texts := make(chan string, 1)
+	waits := streamWaits(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = codex.Stream(ctx, session, "", func(event surface.StreamEvent) {
+			if event.Text != "" {
+				texts <- event.Text
+			}
+		}, time.Minute)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	awaitWaitBeyond(t, waits, 0)
+	testkit.AppendLines(t, path, `{"type":"event_msg","payload":{"type":"user_message"}}`)
+	awaitWaitBeyond(t, waits, 1)
+	replaceTranscript(t, path, `{"type":"event_msg","payload":{"type":"task_started","turn_id":"new"}}`, `{"type":"response_item","payload":{"id":"user-new","type":"message","role":"user","content":[{"type":"input_text","text":"after replacement"}]}}`)
+	awaitWokenText(t, texts, "after replacement", time.Now().Add(-time.Second))
+}

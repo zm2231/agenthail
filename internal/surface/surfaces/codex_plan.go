@@ -12,10 +12,9 @@ import (
 const codexPlanFirstReadBytes = int64(4 << 20)
 
 type codexPlanState struct {
-	identity string
-	offset   int64
-	plan     *surface.Plan
-	read     bool
+	cursor transcriptCursor
+	plan   *surface.Plan
+	read   bool
 }
 
 type codexPlanRecord struct {
@@ -36,14 +35,15 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 	if c.planState == nil {
 		c.planState = map[string]*codexPlanState{}
 	}
-	identity := transcriptFileIdentity(info)
 	state := c.planState[path]
-	if state != nil && identity != "" && state.identity == identity && info.Size() == state.offset {
+	reset := state == nil || state.cursor.reset(info)
+	if !reset && info.Size() == state.cursor.offset {
 		state.read = true
 		return state.plan
 	}
-	if state == nil || identity == "" || state.identity != identity || info.Size() < state.offset {
-		state = &codexPlanState{identity: identity}
+	if reset {
+		state = &codexPlanState{}
+		state.cursor.reset(info)
 		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxCodexTranscriptRecordBytes)
 		if err != nil {
 			delete(c.planState, path)
@@ -52,15 +52,15 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 		for _, line := range lines {
 			state.apply(line)
 		}
-		state.offset = offset
+		state.cursor.offset = offset
 		c.planState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
 		state.apply(line)
 		return nil
 	})
 	if err == nil {
-		state.offset = offset
+		state.cursor.offset = offset
 	}
 	state.read = true
 	return state.plan

@@ -1,7 +1,6 @@
 package surfaces
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -355,22 +354,18 @@ func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
 }
 
 func claudeTranscriptCwd(path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), maxClaudeTranscriptRecordBytes)
-	for scanner.Scan() {
+	cwd := ""
+	_ = findJSONL(path, func(line []byte) (bool, error) {
 		var record struct {
 			Cwd string `json:"cwd"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &record) == nil && record.Cwd != "" {
-			return record.Cwd
+		if json.Unmarshal(line, &record) == nil && record.Cwd != "" {
+			cwd = record.Cwd
+			return true, nil
 		}
-	}
-	return ""
+		return false, nil
+	})
+	return cwd
 }
 
 // conversationTitle is the last title in the conversation's transcript under
@@ -388,34 +383,13 @@ func (c *Claude) conversationTitle(ctx context.Context, conversation, root strin
 	return ""
 }
 
-// maxClaudeTitleRecordBytes bounds a title record: a name reaches Claude in
-// a host request, which is at most 1 MiB.
-const maxClaudeTitleRecordBytes = 1 << 20
-
-// claudeTranscriptTitle reads the last custom-title record of a transcript.
-// A record longer than any title is skipped unread rather than stopping the
-// scan.
 func claudeTranscriptTitle(ctx context.Context, path string) string {
-	file, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	reader := bufio.NewReaderSize(file, 64*1024)
 	title := ""
-	for ctx.Err() == nil {
-		var line []byte
-		part, readErr := reader.ReadSlice('\n')
-		for readErr == bufio.ErrBufferFull && len(line)+len(part) <= maxClaudeTitleRecordBytes {
-			line = append(line, part...)
-			part, readErr = reader.ReadSlice('\n')
+	_ = findJSONL(path, func(line []byte) (bool, error) {
+		if ctx.Err() != nil {
+			return true, nil
 		}
-		line = append(line, part...)
-		if readErr == bufio.ErrBufferFull {
-			for readErr == bufio.ErrBufferFull {
-				_, readErr = reader.ReadSlice('\n')
-			}
-		} else if bytes.Contains(line, []byte(`"custom-title"`)) {
+		if bytes.Contains(line, []byte(`"custom-title"`)) {
 			var record struct {
 				Type        string `json:"type"`
 				CustomTitle string `json:"customTitle"`
@@ -424,9 +398,7 @@ func claudeTranscriptTitle(ctx context.Context, path string) string {
 				title = record.CustomTitle
 			}
 		}
-		if readErr != nil {
-			break
-		}
-	}
+		return false, nil
+	})
 	return title
 }
