@@ -19,29 +19,29 @@ import (
 // action.
 func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	session, err := d.Registry.Session(r.URL.Query().Get("sessionId"))
 	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
 	adapter, err := d.adapters().For(session)
 	if err != nil {
-		http.Error(w, "surface is not configured", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 		return
 	}
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
-		http.Error(w, "this session's requests are not answered through Agenthail", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	state, err := responder.Requests(ctx, session)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 	requests := make([]openRequestView, 0, len(state.Requests))
@@ -78,13 +78,13 @@ func sessionResponder(adapter surface.Surface, session *surface.Session) (surfac
 func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) {
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
-		http.Error(w, "this session's requests are not answered through Agenthail", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 		return
 	}
 	if decision.Choice != "" {
 		state, err := responder.Requests(ctx, session)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 			return
 		}
 		request, open := openRequest(state, requestID)
@@ -94,7 +94,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 			return
 		}
 		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 	}
@@ -105,7 +105,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 	entry := registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor}
@@ -153,7 +153,7 @@ func openRequest(state surface.RequestState, requestID string) (surface.Request,
 }
 
 func writeStaleRequest(w http.ResponseWriter) {
-	writeDashboardJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": map[string]string{"code": "stale", "message": surface.ErrRequestStale.Error()}})
+	writeAPIError(w, http.StatusConflict, "stale", surface.ErrRequestStale.Error())
 }
 
 // recordSetting writes a model or permission-mode change into the session's

@@ -1,12 +1,12 @@
 package daemon
 
 import (
-	"bufio"
 	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -533,15 +534,20 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 		return false, err
 	}
 	defer response.Body.Close()
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	for scanner.Scan() {
-		data, found := strings.CutPrefix(scanner.Text(), "data: ")
-		if !found {
+	reader := sse.NewReader(response.Body)
+	for {
+		event, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return false, fmt.Errorf("host %s catalog stream: %w", host.record.Name, err)
+		}
+		if !event.HasData {
 			continue
 		}
 		var envelope catalogStreamEnvelope
-		if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		if err := json.Unmarshal([]byte(event.Data), &envelope); err != nil {
 			return false, fmt.Errorf("host %s sent an invalid catalog event: %w", host.record.Name, err)
 		}
 		if err := d.applyHostCatalogEvent(host, envelope); err != nil {
@@ -550,9 +556,6 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 		if err := d.Registry.RecordHostCatalogCursor(host.record.ID, host.epoch, envelope.Seq); err != nil {
 			return false, err
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false, fmt.Errorf("host %s catalog stream: %w", host.record.Name, err)
 	}
 	return false, fmt.Errorf("host %s closed the catalog stream", host.record.Name)
 }

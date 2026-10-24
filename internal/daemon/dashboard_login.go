@@ -81,7 +81,7 @@ func (dashboard *dashboardServer) login(w http.ResponseWriter, r *http.Request, 
 	if !dashboard.authorized(r) {
 		_, token, err := dashboard.devices.CompleteBrowserPairing(secret)
 		if err != nil {
-			http.Error(w, "this login link was already used or has expired; run 'agenthail dashboard' for a new one", http.StatusUnauthorized)
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "this login link was already used or has expired; run 'agenthail dashboard' for a new one")
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: dashboardCookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: dashboardCookieMaxAge})

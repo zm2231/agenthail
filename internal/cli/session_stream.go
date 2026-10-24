@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/zm2231/agenthail/internal/sessionstream"
+	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -80,24 +80,28 @@ func (c *daemonSessionStreamClient) OpenSessionStream(ctx context.Context, sessi
 }
 
 func decodeSessionSSE(ctx context.Context, reader io.Reader, events chan<- sessionstream.Event) error {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4096), 2<<20)
-	var id string
-	var data []string
-	flush := func() error {
-		if len(data) == 0 {
+	sseReader := sse.NewReader(reader)
+	for {
+		sseEvent, err := sseReader.Next()
+		if errors.Is(err, io.EOF) {
 			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !sseEvent.HasData {
+			continue
 		}
 		var envelope struct {
 			Seq  uint64          `json:"seq"`
 			Data json.RawMessage `json:"data"`
 		}
-		if err := json.Unmarshal([]byte(strings.Join(data, "\n")), &envelope); err != nil {
+		if err := json.Unmarshal([]byte(sseEvent.Data), &envelope); err != nil {
 			return err
 		}
 		seq := envelope.Seq
-		if seq == 0 && id != "" {
-			seq, _ = strconv.ParseUint(id, 10, 64)
+		if seq == 0 && sseEvent.ID != "" {
+			seq, _ = strconv.ParseUint(sseEvent.ID, 10, 64)
 		}
 		event, err := sessionstream.DecodePayload(seq, envelope.Data)
 		if err != nil {
@@ -108,25 +112,5 @@ func decodeSessionSSE(ctx context.Context, reader io.Reader, events chan<- sessi
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		id = ""
-		data = data[:0]
-		return nil
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case line == "":
-			if err := flush(); err != nil {
-				return err
-			}
-		case strings.HasPrefix(line, "id:"):
-			id = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
-		case strings.HasPrefix(line, "data:"):
-			data = append(data, strings.TrimPrefix(line, "data:"))
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return flush()
 }

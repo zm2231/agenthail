@@ -150,17 +150,17 @@ final class ScriptedProtocol: URLProtocol {
         case .timedOut:
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
         case .unknown:
-            reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"synthetic ambiguous start"}"#)
+            reply(502, #"{"error":{"code":"create_unknown","message":"synthetic ambiguous start"}}"#)
         case .unknownCoded:
-            reply(502, #"{"ok":false,"status":"unknown","code":"create_unknown","unknown":true,"retryable":false,"error":"synthetic ambiguous start"}"#)
+            reply(502, #"{"error":{"code":"create_unknown","message":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: synthetic"}}"#)
         case .hostUnknown:
             reply(504, #"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#)
         case .refused:
-            reply(400, "no such folder")
+            reply(400, #"{"error":{"code":"invalid_request","message":"no such folder"}}"#)
         case .failedReceipt:
-            reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":false,"error":"synthetic start failure"}"#)
+            reply(502, #"{"error":{"code":"create_failed","message":"synthetic start failure"}}"#)
         case .createdFailure:
-            reply(502, #"{"ok":false,"status":"failed","retryable":false,"session":{"id":"s1","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"synthetic first turn failure"}"#)
+            reply(502, #"{"error":{"code":"initial_turn_failed","message":"synthetic first turn failure"},"deliveryId":1,"session":{"id":"s1","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"}}"#)
         case .replayedSubmission:
             reply(202, #"{"ok":true,"status":"submitted"}"#)
         case .accepted:

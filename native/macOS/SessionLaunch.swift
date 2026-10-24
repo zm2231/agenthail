@@ -37,11 +37,11 @@ enum SessionLaunchDecision: Equatable {
             self = .unconfirmed(receipt.id)
             return
         }
-        guard receipt.ok || receipt.accepted == true else {
-            if receipt.retryable == false, receipt.id != nil {
-                self = .halted(receipt.error ?? "The session didn't start.")
+        guard receipt.ok == true || receipt.accepted == true else {
+            if receipt.id != nil {
+                self = .halted(receipt.error?.message ?? "The session didn't start.")
             } else {
-                self = .failed(receipt.error ?? "The session didn't start.")
+                self = .failed(receipt.error?.message ?? "The session didn't start.")
             }
             return
         }

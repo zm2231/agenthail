@@ -736,9 +736,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 creationError = SessionCreationReceipt.unknownOutcomeMessage
                 return false
             }
-            if !receipt.ok && !receipt.outcomeUnknown && receipt.accepted != true {
-                creationError = receipt.error ?? "The session didn't start."
-                // The daemon replays a stored failure under the same key, so a retry needs a new one.
+            if receipt.ok != true && !receipt.outcomeUnknown && receipt.accepted != true {
+                creationError = receipt.error?.message ?? "The session didn't start."
                 if receipt.id == nil { creationRequestIdentity = nil; creationRequestKey = nil }
                 return false
             }

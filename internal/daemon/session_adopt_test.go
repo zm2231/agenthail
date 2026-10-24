@@ -44,7 +44,7 @@ func TestSessionAdoptActionOpensAClaudeSessionInTheHostAndReRegistersIt(t *testi
 		t.Fatalf("busy adoption: %d %s", response.Code, response.Body.String())
 	}
 	fixture.Record(conversation, fixture.Home, "")
-	if response := adopt(false); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"needsConsent":true`) {
+	if response := adopt(false); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"session_adopt_needs_consent"`) {
 		t.Fatalf("terminal adoption without consent: %d %s", response.Code, response.Body.String())
 	}
 	response := adopt(true)

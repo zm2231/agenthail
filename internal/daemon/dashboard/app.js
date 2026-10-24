@@ -1080,6 +1080,14 @@ function signinResolved(consumer) {
   if (consumer.mode === "automatic") return `Automatic: ${where}, the system default browser.`;
   return `${consumer.profileName}: ${consumer.browserLabel} · ${consumer.profile}.`;
 }
+async function responseError(response) {
+  const text = await response.text();
+  try {
+    const message = JSON.parse(text).error?.message;
+    if (typeof message === "string" && message) return Error(message);
+  } catch {}
+  return Error(text || `HTTP ${response.status}`);
+}
 async function signinRequest(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });
   const text = await response.text();
@@ -1313,7 +1321,7 @@ async function removeDevice(button) {
 async function loadClaudeCompact() {
   try {
     const response = await fetch("/api/claude/compact-settings");
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     app.claudeCompact = (await response.json()).roots || [];
     renderClaudeCompact();
   } catch (error) {
@@ -1348,7 +1356,7 @@ async function loadSettings() {
   loadClaudeCompact();
   try {
     const response = await fetch("/api/settings");
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     app.settings = await response.json();
     renderSettings();
   } catch (error) {
@@ -1420,7 +1428,7 @@ async function createLoginLink() {
 }
 async function updateSettings(body) {
   const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (!response.ok) throw Error(await response.text());
+  if (!response.ok) throw await responseError(response);
   await loadSettings();
 }
 function renderAudit() {
@@ -1452,7 +1460,7 @@ async function loadAudit(reset = false, silent = false) {
     if (app.audit.kind !== "all") params.set("kind", app.audit.kind);
     if (app.audit.query) params.set("q", app.audit.query);
     const response = await fetch(`/api/history?${params}`);
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     const page = await response.json();
     const previousIDs = previous ? new Set(previous.items.map((entry) => entry.id)) : null;
     const overlapsPrevious = previousIDs ? page.items.some((entry) => previousIDs.has(entry.id)) : false;
@@ -1509,7 +1517,7 @@ async function load(fresh = false) {
   try {
     await loadTools();
     const response = await fetch(`/api/state${fresh ? "?fresh=1" : ""}`);
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     const state = await response.json();
     app.state = {
       ...state,
@@ -1597,7 +1605,7 @@ async function selectSession(id, focus = false) {
     const response = await fetch(
       `/api/session?id=${encodeURIComponent(id)}&limit=20&timeline=1`,
     );
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     const detail = await response.json();
     if (app.selected?.id !== id) return;
     detail.transcriptWarning = detail.readError || "";
@@ -2123,7 +2131,7 @@ async function syncRequests() {
   app.requestsKey = key;
   try {
     const response = await fetch(`/api/requests?sessionId=${encodeURIComponent(session.id)}`);
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     const state = await response.json();
     if (app.selected?.id !== session.id) return;
     app.requests = state;
@@ -2406,7 +2414,7 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
         failure.message = typed;
         failure.code = body.code || "";
       }
-      failure.unknown = body.unknown === true || failure.code === "host_outcome_unknown";
+      failure.unknown = body.unknown === true || ["host_outcome_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown", "create_unknown"].includes(failure.code);
     } catch {}
     throw failure;
   }
@@ -2976,7 +2984,7 @@ function startCodexSearch(query) {
     search.controller = controller;
     try {
       const response = await fetch(`/api/search?surface=codex&q=${encodeURIComponent(query)}`, { signal: controller.signal });
-      if (!response.ok) throw Error(await response.text());
+      if (!response.ok) throw await responseError(response);
       const payload = await response.json();
       if (app.codexSearch !== search) return;
       search.results = (payload.results || []).map((result) => ({ ...result.session, snippet: result.snippet }));
@@ -3202,7 +3210,7 @@ function renderStartLaunchers() {
 async function loadStartOptions() {
   const host = app.startHost;
   const response = await fetch(`/api/v1/session-options${startHostQuery("?")}`);
-  if (!response.ok) throw Error(await response.text());
+  if (!response.ok) throw await responseError(response);
   const options = await response.json();
   if (host !== app.startHost) return;
   app.startOptions = options;
@@ -3219,7 +3227,7 @@ async function loadStartModels() {
   const cacheKey = `${host}/codex`;
   if (!app.startModels[cacheKey]) {
     const response = await fetch(`/api/models?surface=codex${startHostQuery("&")}`);
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     const payload = await response.json();
     app.startModels[cacheKey] = payload.models || [];
   }
@@ -3442,7 +3450,7 @@ $("#claude-compact-form").addEventListener("submit", async (event) => {
   }
   try {
     const response = await fetch("/api/claude/compact-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) throw await responseError(response);
     await loadClaudeCompact();
     toast("Saved. Claude sessions started from now on use it.");
   } catch (error) {

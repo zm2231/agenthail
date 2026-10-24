@@ -25,28 +25,22 @@ struct SessionLaunchTest {
         let opened = try decide(#"{"ok":true,"status":"submitted","accepted":true,"session":{"id":"s1","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"}}"#)
         check(opened == .open("s1"), "a receipt with a session opens it")
 
-        let unknown = try decide(#"{"ok":false,"unknown":true,"sessionId":"s2"}"#)
-        check(unknown == .unconfirmed("s2"), "an unknown outcome stays unconfirmed")
+        let hostUnknown = try decide(#"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#)
+        check(hostUnknown == .unconfirmed(nil), "an unanswered paired host stays unconfirmed")
 
-        let storage = try decide(#"{"ok":false,"status":"storage_failed","retryable":false,"session":{"id":"s3","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"session was created, but local registration failed: disk full; do not retry automatically"}"#)
+        let storage = try decide(#"{"error":{"code":"create_storage_failed","message":"session was created, but local registration failed: disk full; do not retry automatically"},"session":{"id":"s3","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"}}"#)
         check(storage == .halted("session was created, but local registration failed: disk full; do not retry automatically"), "a created session with a storage failure halts with the daemon message")
 
-        let ambiguous = try decide(#"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}"#)
+        let ambiguous = try decide(#"{"error":{"code":"create_unknown","message":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}}"#)
         check(ambiguous == .unconfirmed(nil), "an ambiguous outcome without a session stays unconfirmed")
 
-        let coded = try decide(#"{"ok":false,"status":"unknown","code":"create_unknown","retryable":false,"error":"no answer"}"#)
-        check(coded == .unconfirmed(nil), "a create_unknown code is unconfirmed without the unknown flag")
-
-        let failedCode = try decide(#"{"ok":false,"status":"failed","code":"create_failed","unknown":false,"retryable":false,"error":"launcher refused"}"#)
+        let failedCode = try decide(#"{"error":{"code":"create_failed","message":"launcher refused"}}"#)
         check(failedCode == .failed("launcher refused"), "a create_failed code is a definite failure")
 
-        let initial = try decide(#"{"ok":false,"status":"failed","retryable":false,"session":{"id":"s4","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"initial message rejected"}"#)
+        let initial = try decide(#"{"error":{"code":"initial_turn_failed","message":"initial message rejected"},"deliveryId":1,"session":{"id":"s4","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"}}"#)
         check(initial == .halted("initial message rejected"), "a created session whose first turn failed halts")
 
-        let definite = try decide(#"{"ok":false,"status":"failed","retryable":false,"unknown":false,"error":"model rejected"}"#)
-        check(definite == .failed("model rejected"), "a definite failure without a session is a failure")
-
-        let failed = try decide(#"{"ok":false,"error":"no such folder"}"#)
+        let failed = try decide(#"{"error":{"code":"invalid_request","message":"no such folder"}}"#)
         check(failed == .failed("no such folder"), "a failure shows the daemon's error")
     }
 

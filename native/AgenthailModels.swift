@@ -65,13 +65,16 @@ struct SessionAdoptResult: Decodable, Hashable {
     }
 }
 
+struct APIErrorEnvelope: Decodable {
+    let code: String
+    let message: String
+}
+
 struct SessionAdoptReply: Decodable {
-    let ok: Bool
+    let ok: Bool?
     var result: SessionAdoptResult? = nil
-    var error: String? = nil
+    var error: APIErrorEnvelope? = nil
     var busy: String? = nil
-    var needsConsent: Bool? = nil
-    var unknown: Bool? = nil
 }
 
 enum SessionAdoptOutcome: Equatable {
@@ -306,21 +309,17 @@ struct CreationHostPicker {
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
 struct SessionCreationReceipt: Decodable {
-    let ok: Bool
-    let unknown: Bool?
+    let ok: Bool?
     let status: String?
     let accepted: Bool?
-    let retryable: Bool?
     let warning: String?
     let session: RawSession?
     let sessionId: String?
-    let code: String?
-    let error: String?
+    let error: APIErrorEnvelope?
     let launcher: String?
     let location: SessionRuntime.Location?
     var id: String? { session?.id ?? sessionId }
-    /// Older daemons mark an unknown create with status "failed", so status alone never decides it.
-    var outcomeUnknown: Bool { unknown == true || code == "create_unknown" }
+    var outcomeUnknown: Bool { ["create_unknown", "host_outcome_unknown"].contains(error?.code) }
     static let unknownOutcomeMessage = "Agenthail can't tell whether this session started. Check the sidebar before trying again."
 }
 

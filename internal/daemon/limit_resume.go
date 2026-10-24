@@ -367,11 +367,11 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resume bool) {
 	stop, found, err := d.Registry.LimitResumeFor(sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	if !found || stop.State == registry.LimitResumeReleased {
-		http.Error(w, "this session is not stopped by a usage limit", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "this session is not stopped by a usage limit")
 		return
 	}
 	var moved bool
@@ -381,11 +381,11 @@ func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resu
 		moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	if !moved {
-		http.Error(w, "the session's usage-limit stop changed; check it again", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "the session's usage-limit stop changed; check it again")
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})

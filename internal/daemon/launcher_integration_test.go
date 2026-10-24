@@ -99,7 +99,7 @@ func TestSessionCreateStarterLauncherMatchesDefaultCreationOutcomes(t *testing.T
 			if tc.status == http.StatusAccepted && (body["ok"] != true || body["accepted"] != true || body["retryable"] != false) {
 				t.Fatalf("ambiguous receipt=%s", w.Body.String())
 			}
-			if tc.status == http.StatusBadGateway && (body["status"] != "failed" || body["code"] != "initial_turn_failed") {
+			if tc.status == http.StatusBadGateway && (body["error"].(map[string]any)["code"] != "initial_turn_failed") {
 				t.Fatalf("failed receipt=%s", w.Body.String())
 			}
 			created, err := r.Session("started")

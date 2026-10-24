@@ -744,7 +744,14 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"status":"failed"`) || strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"deliveryId":`) {
+	var reply struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		DeliveryID int64            `json:"deliveryId"`
+		Session    *surface.Session `json:"session"`
+	}
+	if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &reply) != nil || reply.Error.Code != "initial_turn_failed" || reply.DeliveryID <= 0 || reply.Session == nil || strings.Contains(response.Body.String(), `"accepted":true`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	problems, err := registry.ListDeliveryProblems()

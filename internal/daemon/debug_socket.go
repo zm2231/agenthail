@@ -87,7 +87,7 @@ func debugProfileHandler() http.Handler {
 		runtime.ReadMemStats(&stats)
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(stats); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	})
 	for _, name := range DebugProfiles {
@@ -97,7 +97,7 @@ func debugProfileHandler() http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")
 			if err := pprof.Lookup(name).WriteTo(w, 0); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			}
 		})
 	}

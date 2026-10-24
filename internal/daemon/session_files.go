@@ -292,7 +292,7 @@ func matchSessionFiles(files []sessionFile, query string, limit int) []sessionFi
 
 func (d *Daemon) sessionFilesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	query := r.URL.Query()

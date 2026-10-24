@@ -339,20 +339,20 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 
 func (d *Daemon) dashboardModelsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	adapter := d.adapters().ForSurface(surface.SurfaceKind(r.URL.Query().Get("surface")))
 	lister, ok := adapter.(surface.ModelLister)
 	if adapter == nil || !ok {
-		http.Error(w, "this surface does not list models", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "this surface does not list models")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	models, err := lister.Models(ctx)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("list models: %s", err), http.StatusBadGateway)
+		writeAPIError(w, http.StatusBadGateway, "bad_gateway", fmt.Sprintf("list models: %s", err))
 		return
 	}
 	if models == nil {
@@ -373,7 +373,7 @@ func (d *Daemon) person() (dashboardPerson, error) {
 func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	config, err := LoadDashboardConfig()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -381,7 +381,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	mutation := &mutationResponseWriter{ResponseWriter: w}
@@ -399,7 +399,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		ResumeAfterLimit bool   `json:"resumeAfterLimit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
-		http.Error(w, "invalid settings request", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid settings request")
 		return
 	}
 	switch request.Action {
@@ -433,11 +433,11 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 			err = Notify("Agenthail", "Notifications are working", "", "")
 		}
 	default:
-		http.Error(w, "unsupported settings action", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unsupported settings action")
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -445,21 +445,21 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 
 func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	link, err := d.createLoginLink(true)
 	if err == errRemoteAccessOff {
-		http.Error(w, "remote access is not enabled", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "remote access is not enabled")
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	image, err := RemoteAccessQR(link.URL)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
@@ -469,7 +469,7 @@ func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request
 
 func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	limit := 25
@@ -481,7 +481,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > maxLimit {
-			http.Error(w, fmt.Sprintf("limit must be between 1 and %d", maxLimit), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("limit must be between 1 and %d", maxLimit))
 			return
 		}
 		limit = parsed
@@ -490,7 +490,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 	if raw := r.URL.Query().Get("before"); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || parsed < 1 {
-			http.Error(w, "before must be a positive history id", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "before must be a positive history id")
 			return
 		}
 		beforeID = parsed
@@ -498,7 +498,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
 	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(kind) > 100 || len(queryText) > 200 {
-		http.Error(w, "history filters are too long", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "history filters are too long")
 		return
 	}
 	var entries []registry.HistoryEntry
@@ -506,7 +506,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 	var err error
 	if sessionID != "" {
 		if beforeID != 0 || kind != "" || queryText != "" {
-			http.Error(w, "a session's history takes only a limit", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a session's history takes only a limit")
 			return
 		}
 		entries, err = d.Registry.ListHistory(limit, sessionID)
@@ -514,12 +514,12 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		entries, hasMore, err = d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
 	}
 	if err != nil {
-		http.Error(w, fmt.Sprintf("read delivery history: %s", err), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("read delivery history: %s", err))
 		return
 	}
 	kinds, err := d.Registry.ListHistoryKinds()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("read delivery history kinds: %s", err), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("read delivery history kinds: %s", err))
 		return
 	}
 	items := make([]dashboardHistory, 0, len(entries))
@@ -539,7 +539,7 @@ func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHis
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	page, pageErr := catalogPageRequestFromHTTP(r)
@@ -589,7 +589,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 			d.writeDashboardSnapshot(w, r, stale)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	if cacheable {
@@ -742,7 +742,7 @@ func cloneDashboardDaemon(input map[string]any) map[string]any {
 func (dashboard *dashboardServer) asset(contentType string, body []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 		w.Header().Set("Content-Type", contentType)
@@ -759,7 +759,7 @@ func dashboardModuleHandler() http.Handler {
 	files := http.StripPrefix("/js/", http.FileServerFS(modules))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 		contentType, ok := dashboardModuleTypes[path.Ext(r.URL.Path)]
@@ -783,7 +783,7 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if secret := r.URL.Query().Get("login"); secret != "" {
@@ -791,7 +791,7 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !dashboard.authorized(r) {
-		http.Error(w, "sign in with a link from 'agenthail dashboard'", http.StatusUnauthorized)
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "sign in with a link from 'agenthail dashboard'")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -802,11 +802,11 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 func (dashboard *dashboardServer) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !dashboard.authorized(r) {
-			http.Error(w, "dashboard access token required", http.StatusUnauthorized)
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "dashboard access token required")
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
-			http.Error(w, "cross-origin dashboard request rejected", http.StatusForbidden)
+			writeAPIError(w, http.StatusForbidden, "forbidden", "cross-origin dashboard request rejected")
 			return
 		}
 		next(w, r)
@@ -1173,7 +1173,7 @@ func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Su
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	mutation := &mutationResponseWriter{ResponseWriter: w}
@@ -1233,11 +1233,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		ChangedBy       string                     `json:"changedBy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
-		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
 		return
 	}
 	if len(request.Attachments) > 0 && request.Action != "send" {
-		http.Error(w, "attachments are only accepted with send", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "attachments are only accepted with send")
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
@@ -1250,20 +1250,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "delivery-dismiss" {
 		if request.DeliveryID <= 0 {
-			http.Error(w, "deliveryId is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "deliveryId is required")
 			return
 		}
 		dismissed, err := d.Registry.DismissDeliveryProblem(request.DeliveryID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "delivery problem not found", http.StatusNotFound)
+				writeAPIError(w, http.StatusNotFound, "not_found", "delivery problem not found")
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		if err := d.catalog.flushCommitted(); err != nil {
-			http.Error(w, fmt.Sprintf("publish delivery dismissal: %s", err), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("publish delivery dismissal: %s", err))
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "dismissed": dismissed})
@@ -1272,13 +1272,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	if request.Action == "session-create" {
 		approval := strings.TrimSpace(request.Approval)
 		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
-			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "approval policy is invalid")
 			return
 		}
 		creator := strings.TrimSpace(request.SourceSessionID)
 		if creator != "" {
 			if _, err := d.Registry.Session(creator); err != nil {
-				http.Error(w, fmt.Sprintf("sourceSessionId %s is not a session here", creator), http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("sourceSessionId %s is not a session here", creator))
 				return
 			}
 		}
@@ -1287,22 +1287,22 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		if request.Launcher != "" {
 			if strings.TrimSpace(request.Message) == "" {
-				http.Error(w, "message is required", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "message is required")
 				return
 			}
 			alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 			if alias != "" && (strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80) {
-				http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "name must be 1 to 80 characters without spaces, /, or #")
 				return
 			}
 			cwd, cwdErr := dashboardStartCwd(request.Cwd)
 			if cwdErr != nil {
-				http.Error(w, cwdErr.Error(), http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", cwdErr.Error())
 				return
 			}
 			adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface))
 			if adapter == nil {
-				http.Error(w, "surface is not configured", http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 				return
 			}
 			reservation, reserved := d.reserveStartName(w, alias)
@@ -1316,17 +1316,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				}
 			}()
 			if d.transportResolver == nil {
-				http.Error(w, "launcher transport is unavailable", http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", "launcher transport is unavailable")
 				return
 			}
 			launcher, launchErr := d.transportResolver.Require(request.Launcher, surface.SurfaceKind(request.Surface))
 			if launchErr != nil {
-				http.Error(w, launchErr.Error(), http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", launchErr.Error())
 				return
 			}
 			available, detail := launcher.Available(r.Context())
 			if !available {
-				http.Error(w, detail, http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", detail)
 				return
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
@@ -1362,7 +1362,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				var acceptedErr surface.LaunchAcceptedError
 				switch {
 				case errors.Is(launchErr, surface.ErrLaunchOptionUnsupported):
-					http.Error(w, launchErr.Error(), http.StatusBadRequest)
+					writeAPIError(w, http.StatusBadRequest, "invalid_request", launchErr.Error())
 					return
 				case errors.As(launchErr, &acceptedErr):
 					pend(launchResult.Location, launchErr.Error())
@@ -1415,16 +1415,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface))
 		starter, ok := adapter.(surface.SessionStarter)
 		if adapter == nil || !ok {
-			http.Error(w, "this surface cannot start conversations", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this surface cannot start conversations")
 			return
 		}
 		if strings.TrimSpace(request.Message) == "" {
-			http.Error(w, "message is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "message is required")
 			return
 		}
 		cwd, cwdErr := dashboardStartCwd(request.Cwd)
 		if cwdErr != nil {
-			http.Error(w, cwdErr.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", cwdErr.Error())
 			return
 		}
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
@@ -1471,7 +1471,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		defer cancel()
 		receipt, createErr := d.createNotionThread(ctx, request.Message, name, request.Model)
 		if createErr != nil {
-			http.Error(w, createErr.Error(), http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", createErr.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "result": receipt, "sessionId": receipt.SessionID})
@@ -1479,17 +1479,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "queue-retry" {
 		if request.QueueID <= 0 {
-			http.Error(w, "queueId is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "queueId is required")
 			return
 		}
 		item, itemErr := d.Registry.QueueItem(request.QueueID, d.adapters())
 		if itemErr != nil {
-			http.Error(w, itemErr.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", itemErr.Error())
 			return
 		}
 		target, targetErr := d.Registry.Session(item.SessionID)
 		if targetErr != nil {
-			http.Error(w, targetErr.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", targetErr.Error())
 			return
 		}
 		// A paired host's session is retried by replaying the held request
@@ -1497,16 +1497,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if owner, ownerErr := d.Registry.SessionHost(target.ID); ownerErr != nil || owner == "" {
 			adapter, adapterErr := d.adapters().For(target)
 			if adapterErr != nil {
-				http.Error(w, "target surface is not configured", http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", "target surface is not configured")
 				return
 			}
 			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 				return
 			}
 		}
 		if err := d.Registry.RetryMessage(request.QueueID); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1514,11 +1514,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "queue-cancel" {
 		if request.QueueID <= 0 {
-			http.Error(w, "queueId is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "queueId is required")
 			return
 		}
 		if err := d.Registry.CancelMessage(request.QueueID); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1526,16 +1526,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "channel-create" {
 		if strings.TrimSpace(request.Channel) == "" {
-			http.Error(w, "channel name is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel name is required")
 			return
 		}
 		name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
 		if err := broadcast.ValidateChannelName(d.Registry, name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		if _, err := d.Registry.CreateChannel(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1543,7 +1543,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "channel-delete" {
 		if err := d.Registry.DeleteChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1551,18 +1551,18 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "channel-send" {
 		if strings.TrimSpace(request.Channel) == "" || strings.TrimSpace(request.Message) == "" {
-			http.Error(w, "channel and message are required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel and message are required")
 			return
 		}
 		target, err := broadcast.Resolve(d.Registry, request.Channel)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
 		if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-			http.Error(w, "author must be \"person\" and name no source session when set", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
 			return
 		}
 		service := d.coordinator()
@@ -1573,14 +1573,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		case request.Author == surface.AuthorPerson:
 			source = surface.PersonSessionID
 			if label, err = d.Registry.PersonName(); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 				return
 			}
 		}
 		broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
 		result, err := broadcaster.Send(operationCtx, target, request.Message, label, source)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
@@ -1597,7 +1597,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				}
 				outcomes = append(outcomes, outcome)
 			}
-			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")), http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")))
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
@@ -1607,11 +1607,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
 		newName := strings.TrimPrefix(strings.TrimSpace(request.NewChannel), "#")
 		if err := broadcast.ValidateChannelName(d.Registry, newName); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		if err := d.Registry.RenameChannel(name, newName); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1619,29 +1619,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "channel-add" || request.Action == "channel-remove" {
 		if request.TargetID == "" || strings.TrimSpace(request.Channel) == "" {
-			http.Error(w, "channel and targetId are required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel and targetId are required")
 			return
 		}
 		targetID, resolveErr := d.resolveLinkTarget(request.TargetID)
 		if resolveErr != nil {
-			http.Error(w, fmt.Sprintf("resolve agent: %s", resolveErr), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve agent: %s", resolveErr))
 			return
 		}
 		var actionErr error
 		if request.Action == "channel-add" {
 			target, targetErr := d.Registry.Session(targetID)
 			if targetErr != nil {
-				http.Error(w, "session not found", http.StatusNotFound)
+				writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 				return
 			}
 			if !d.hostOwned(target.ID) {
 				adapter, adapterErr := d.adapters().For(target)
 				if adapterErr != nil {
-					http.Error(w, "target surface is not configured", http.StatusConflict)
+					writeAPIError(w, http.StatusConflict, "conflict", "target surface is not configured")
 					return
 				}
 				if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-					http.Error(w, err.Error(), http.StatusConflict)
+					writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 					return
 				}
 			}
@@ -1650,7 +1650,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			actionErr = d.Registry.RemoveFromChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
 		}
 		if actionErr != nil {
-			http.Error(w, actionErr.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", actionErr.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1658,32 +1658,32 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "relay-add" {
 		if request.FromID == "" || request.ToID == "" {
-			http.Error(w, "fromId and toId are required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "fromId and toId are required")
 			return
 		}
 		fromID, fromErr := d.Registry.ResolveTarget(request.FromID)
 		if fromErr != nil {
-			http.Error(w, fmt.Sprintf("resolve source agent: %s", fromErr), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve source agent: %s", fromErr))
 			return
 		}
 		toID, toErr := d.resolveLinkTarget(request.ToID)
 		if toErr != nil {
-			http.Error(w, fmt.Sprintf("resolve destination agent: %s", toErr), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve destination agent: %s", toErr))
 			return
 		}
 		toSession, toSessionErr := d.Registry.Session(toID)
 		if toSessionErr != nil {
-			http.Error(w, "destination session not found", http.StatusNotFound)
+			writeAPIError(w, http.StatusNotFound, "not_found", "destination session not found")
 			return
 		}
 		if !d.hostOwned(toSession.ID) {
 			adapter, adapterErr := d.adapters().For(toSession)
 			if adapterErr != nil {
-				http.Error(w, "destination surface is not configured", http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", "destination surface is not configured")
 				return
 			}
 			if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 				return
 			}
 		}
@@ -1693,20 +1693,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		fromSession, err := d.Registry.Session(fromID)
 		if err != nil {
-			http.Error(w, "source session not found", http.StatusNotFound)
+			writeAPIError(w, http.StatusNotFound, "not_found", "source session not found")
 			return
 		}
 		fromAdapter, fromAdapterErr := d.adapters().For(fromSession)
 		if fromAdapterErr != nil {
-			http.Error(w, "source surface is not configured", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "source surface is not configured")
 			return
 		}
 		if err := d.Registry.PrepareRelaySource(r.Context(), fromAdapter, fromSession, request.Handoff); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		if _, err := d.Registry.AddRelayRoute(fromID, toID, pattern, request.Once, request.Handoff); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1714,7 +1714,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "relay-remove" {
 		if err := d.Registry.RemoveRoute(request.RelayID); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1723,7 +1723,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	if request.Action == "codex-launch" {
 		executable, executableErr := os.Executable()
 		if executableErr != nil {
-			http.Error(w, fmt.Sprintf("find Agenthail executable: %s", executableErr), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("find Agenthail executable: %s", executableErr))
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
@@ -1736,7 +1736,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			} else {
 				detail += ": " + launchErr.Error()
 			}
-			http.Error(w, detail, http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", detail)
 			return
 		}
 		if adapter := d.adapters().ForSurface(surface.KindCodex); adapter != nil {
@@ -1749,13 +1749,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		adapter := d.adapters().ForSurface(surface.KindCodex)
 		ensurer, ok := adapter.(surface.RuntimeEnsurer)
 		if adapter == nil || !ok {
-			http.Error(w, "Codex managed runtime cannot be repaired here", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "Codex managed runtime cannot be repaired here")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		if err := ensurer.EnsureRuntime(ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 			return
 		}
 		d.recordSurfaceHealth(ctx, adapter, nil)
@@ -1763,12 +1763,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.SessionID == "" {
-		http.Error(w, "sessionId is required", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId is required")
 		return
 	}
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
 	if request.Action == "limit-resume" || request.Action == "limit-resume-cancel" {
@@ -1777,31 +1777,31 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if request.Action == "session-focus" {
 		if session.Runtime == nil || !session.Runtime.Focusable || session.Runtime.Location == nil {
-			http.Error(w, "session is not focusable", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "session is not focusable")
 			return
 		}
 		if d.transportResolver == nil {
-			http.Error(w, "launcher transport is unavailable", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "launcher transport is unavailable")
 			return
 		}
 		launcher, ok := d.transportResolver.Launcher(session.Runtime.Launcher)
 		focuser, focusable := launcher.(surface.Focuser)
 		if !ok || !focusable {
-			http.Error(w, "launcher cannot focus sessions", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "launcher cannot focus sessions")
 			return
 		}
 		adapter, adapterErr := d.adapters().For(session)
 		if adapterErr != nil {
 			session.Runtime.Focusable = false
 			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			http.Error(w, "session surface is unavailable", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "session surface is unavailable")
 			return
 		}
 		located, err := adapter.List(r.Context())
 		if err != nil {
 			session.Runtime.Focusable = false
 			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			http.Error(w, "session location is unavailable", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "session location is unavailable")
 			return
 		}
 		locations := launcher.Locate(r.Context(), located)
@@ -1809,11 +1809,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if !found || current != *session.Runtime.Location {
 			session.Runtime.Focusable = false
 			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			http.Error(w, "session location is stale", http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", "session location is stale")
 			return
 		}
 		if err := focuser.Focus(r.Context(), *session.Runtime.Location); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 			return
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID})
@@ -1826,21 +1826,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	if request.Action == "alias" {
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
-			http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "name must be 1 to 80 characters without spaces, /, or #")
 			return
 		}
 		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
 			var taken registry.AliasTakenError
 			var reserved registry.AliasReservedError
 			if errors.As(err, &taken) {
-				http.Error(w, fmt.Sprintf("@%s is already used by another session", alias), http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", fmt.Sprintf("@%s is already used by another session", alias))
 				return
 			}
 			if errors.As(err, &reserved) {
-				http.Error(w, reserved.Error(), http.StatusConflict)
+				writeAPIError(w, http.StatusConflict, "conflict", reserved.Error())
 				return
 			}
-			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("name conversation: %s", err))
 			return
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "identified", SessionID: session.ID, Result: "@" + alias})
@@ -1849,12 +1849,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
-		http.Error(w, transportErr.Error(), http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", transportErr.Error())
 		return
 	}
 	if request.PID != 0 {
 		if err := pinHolder(r.Context(), adapter, session, request.PID, request.PIDStartedAt); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 			return
 		}
 	}
@@ -1867,7 +1867,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
 	effective := surface.EffectiveCapabilities(adapter, session)
@@ -1877,35 +1877,35 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	switch request.Action {
 	case "send":
 		if strings.TrimSpace(request.Message) == "" && len(request.Attachments) == 0 {
-			http.Error(w, "message is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "message is required")
 			return
 		}
 		attached, uploadErr := d.resolveUploads(request.Attachments)
 		if uploadErr != nil {
-			http.Error(w, uploadErr.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", uploadErr.Error())
 			return
 		}
 		if len(attached) > 0 && !effective.Attach {
-			http.Error(w, "this session cannot take attached files", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot take attached files")
 			return
 		}
 		if request.Author != "" && request.Author != surface.AuthorPerson {
-			http.Error(w, "author must be \"person\" when set", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" when set")
 			return
 		}
 		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-			http.Error(w, "a person's message cannot also name a source session", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a person's message cannot also name a source session")
 			return
 		}
 		if request.SourceSessionID != "" {
 			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
-				http.Error(w, "source session not found", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
 				return
 			}
 		}
 		if request.RelayHops != 0 {
 			if len(attached) > 0 {
-				http.Error(w, "a relay leg carries no attached files", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "a relay leg carries no attached files")
 				return
 			}
 			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
@@ -1914,26 +1914,26 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
 		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
-			http.Error(w, actionErr.Error(), http.StatusBadGateway)
+			writeAPIError(w, http.StatusBadGateway, "bad_gateway", actionErr.Error())
 			return
 		}
 		result = receipt
 	case "steer":
 		if !effective.Steer || strings.TrimSpace(request.Message) == "" {
-			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be steered")
 			return
 		}
 		if request.Author != "" && request.Author != surface.AuthorPerson {
-			http.Error(w, "author must be \"person\" when set", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" when set")
 			return
 		}
 		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-			http.Error(w, "a person's message cannot also name a source session", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a person's message cannot also name a source session")
 			return
 		}
 		if request.SourceSessionID != "" {
 			if _, sourceErr := d.Registry.Session(request.SourceSessionID); sourceErr != nil {
-				http.Error(w, "source session not found", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
 				return
 			}
 			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
@@ -1944,13 +1944,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message, request.Author)
 	case "interrupt":
 		if !effective.Interrupt {
-			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be interrupted")
 			return
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "interrupt"})
 	case "compact":
 		if !effective.Compact {
-			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be compacted")
 			return
 		}
 		result, err = d.dispatcher().Compact(ctx, adapter, session)
@@ -1961,7 +1961,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	case "goal-pause", "goal-resume", "goal-budget":
 		controller, ok := adapter.(surface.GoalController)
 		if !effective.Goal || !ok {
-			http.Error(w, "this session does not support typed goal controls", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support typed goal controls")
 			return
 		}
 		var update surface.GoalUpdate
@@ -1980,7 +1980,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			value, parseErr := strconv.ParseInt(budget, 10, 64)
 			if parseErr != nil || value < 0 {
-				http.Error(w, "token budget must be a non-negative integer", http.StatusBadRequest)
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "token budget must be a non-negative integer")
 				return
 			}
 			update = surface.GoalUpdate{TokenBudget: &value}
@@ -1988,11 +1988,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		err = controller.UpdateGoal(ctx, session, update)
 	case "model":
 		if !effective.Model {
-			http.Error(w, "this session does not support model switching", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support model switching")
 			return
 		}
 		if strings.TrimSpace(request.Model) == "" {
-			http.Error(w, "model is required", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "model is required")
 			return
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
@@ -2006,7 +2006,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	case "permission-mode":
 		if !effective.PermissionMode {
-			http.Error(w, "this session's permission mode cannot change while it runs", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's permission mode cannot change while it runs")
 			return
 		}
 		mode := strings.TrimSpace(request.PermissionMode)
@@ -2019,24 +2019,24 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	case "context", "usage", "status", "effort", "rename":
 		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
-			http.Error(w, "this session does not support Claude Remote Control commands", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support Claude Remote Control commands")
 			return
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: request.Action, Value: request.Message})
 	default:
-		http.Error(w, "unsupported dashboard action", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unsupported dashboard action")
 		return
 	}
 	if err != nil {
 		if control, ok := result.(*surface.ControlResult); ok && control != nil {
-			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "result": control, "error": map[string]string{"code": "control_failed", "message": err.Error()}})
+			writeAPIErrorWith(w, http.StatusBadGateway, "control_failed", err.Error(), map[string]any{"result": control})
 			return
 		}
 		if surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
@@ -2095,29 +2095,29 @@ func dashboardStartCwd(value string) (string, error) {
 
 func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if r.URL.Query().Get("surface") != "codex" {
-		http.Error(w, "only Codex history search is available", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "only Codex history search is available")
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len([]rune(query)) < 3 {
-		http.Error(w, "search requires at least 3 characters", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "search requires at least 3 characters")
 		return
 	}
 	adapter := d.adapters().ForSurface(surface.KindCodex)
 	searcher, ok := adapter.(surface.SessionSearcher)
 	if !ok {
-		http.Error(w, "Codex history search is unavailable", http.StatusNotImplemented)
+		writeAPIError(w, http.StatusNotImplemented, "request_failed", "Codex history search is unavailable")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 	stored, err := d.Registry.SearchSessions(surface.KindCodex, query, 20)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("search saved Codex conversations: %s", err), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("search saved Codex conversations: %s", err))
 		return
 	}
 	results := make([]surface.SessionSearchResult, 0, len(stored)+20)
@@ -2138,7 +2138,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 	payload := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		if err := d.Registry.RegisterSession(result.Session); err != nil {
-			http.Error(w, fmt.Sprintf("store search result: %s", err), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("store search result: %s", err))
 			return
 		}
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
@@ -2173,12 +2173,12 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 
 func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *http.Request, operationTimeout time.Duration) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	sessionID := r.URL.Query().Get("id")
 	if sessionID == "" {
-		http.Error(w, "session id is required", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "session id is required")
 		return
 	}
 	session, err := d.Registry.Session(sessionID)
@@ -2188,12 +2188,12 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
 	adapter, adapterErr := d.adapters().For(session)
 	if adapterErr != nil {
-		http.Error(w, "surface is not configured", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 		return
 	}
 	limit := 10
@@ -2212,7 +2212,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		var parseErr error
 		timelineBefore, parseErr = strconv.ParseInt(raw, 10, 64)
 		if parseErr != nil || timelineBefore < 0 {
-			http.Error(w, "invalid activity cursor", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid activity cursor")
 			return
 		}
 	}
@@ -2263,17 +2263,17 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 
 func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	session, err := d.Registry.Session(r.URL.Query().Get("id"))
 	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
+		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
 	adapter, adapterErr := d.adapters().For(session)
 	if adapterErr != nil {
-		http.Error(w, "surface is not configured", http.StatusConflict)
+		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -2441,7 +2441,7 @@ func (d *Daemon) writeUnstartedSession(w http.ResponseWriter, message string, st
 	if unknown {
 		detail = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 	}
-	writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": status, "code": code, "retryable": false, "unknown": unknown, "error": detail})
+	writeAPIError(w, http.StatusBadGateway, code, detail)
 }
 
 func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, creator, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
@@ -2514,22 +2514,19 @@ func submittedSessionDetail(session *surface.Session, alias string) string {
 }
 
 func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string, extra map[string]any) {
-	body := map[string]any{"ok": false, "status": "failed", "code": "initial_turn_failed", "retryable": false, "session": session, "error": message}
-	if deliveryID > 0 {
-		body["deliveryId"] = deliveryID
+	body := map[string]any{"session": session, "deliveryId": deliveryID}
+	for key, value := range extra {
+		body[key] = value
 	}
-	writeSessionCreateJSON(w, http.StatusBadGateway, body, extra)
+	writeAPIErrorWith(w, http.StatusBadGateway, "initial_turn_failed", message, body)
 }
 
 func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, warning string, extra map[string]any) {
-	writeSessionCreateJSON(w, http.StatusInternalServerError, map[string]any{
-		"ok":        false,
-		"status":    "storage_failed",
-		"code":      "create_storage_failed",
-		"retryable": false,
-		"session":   session,
-		"error":     warning,
-	}, extra)
+	body := map[string]any{"session": session}
+	for key, value := range extra {
+		body[key] = value
+	}
+	writeAPIErrorWith(w, http.StatusInternalServerError, "create_storage_failed", warning, body)
 }
 
 // writeAcceptedLaunch answers a launch that may be running without a
@@ -2575,9 +2572,9 @@ func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.
 		return reservation, true
 	}
 	if registry.AliasRefused(err) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	} else {
-		http.Error(w, fmt.Sprintf("reserve conversation name: %s", err), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("reserve conversation name: %s", err))
 	}
 	return registry.AliasReservation{}, false
 }

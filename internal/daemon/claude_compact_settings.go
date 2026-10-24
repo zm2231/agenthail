@@ -12,21 +12,21 @@ import (
 func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
 		roots, err := surface.ClaudeConfigRoots(home)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
 		results := make([]surface.ClaudeCompactSettings, 0, len(roots))
 		for _, root := range roots {
 			settings, err := surface.ReadClaudeCompactSettings(root)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				writeAPIError(w, http.StatusUnprocessableEntity, "invalid_request", err.Error())
 				return
 			}
 			results = append(results, settings)
@@ -43,22 +43,22 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid compaction settings request", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid compaction settings request")
 			return
 		}
 		root, err := surface.ResolveClaudeConfigRoot(home, request.Root)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		settings, err := surface.WriteClaudeCompactSettings(root, surface.ClaudeCompactChange{Model: request.Model, Window: request.Window, Enabled: request.Enabled, Idle: request.Idle})
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		d.publishEvent("settings.updated", "", map[string]string{"source": "claude-compact-settings"})
 		writeDashboardJSON(w, http.StatusOK, settings)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
 }
