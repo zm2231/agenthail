@@ -31,6 +31,7 @@ SOURCES=(
   RequestNotifications.swift
   SessionSelection.swift
   ProjectActions.swift
+  HostNames.swift
   SessionTree.swift
   MetadataOverlay.swift
   ClaudeSubagentList.swift

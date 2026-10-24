@@ -210,7 +210,7 @@ struct SessionSidebar: View {
                                 }
                             ForEach(shown.checkouts) { checkout in
                                 if single == nil {
-                                    CheckoutRowView(checkout: checkout, showsHost: project.spansHosts)
+                                    CheckoutRowView(checkout: checkout, host: project.spansHosts ? project.hostLabel(of: checkout) : nil)
                                 }
                                 ForEach(checkout.families) { family in
                                     familyRows(family, attention: tree.attention)
@@ -519,7 +519,7 @@ struct HostBadge: View {
 
 struct CheckoutRowView: View {
     let checkout: SessionTree.Checkout
-    var showsHost = false
+    var host: String? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -529,7 +529,7 @@ struct CheckoutRowView: View {
                 .font(.system(size: DesktopType.caption, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if showsHost, let host = checkout.host {
+            if let host {
                 HostBadge(name: host)
             }
             if checkout.dirty {

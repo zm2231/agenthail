@@ -44,8 +44,9 @@ enum ProjectMenu {
     static func items(for project: ProjectState) -> [ProjectMenuItem] {
         let checkouts = project.checkouts
         let several = Set(checkouts.map(\.host.id)).count > 1
+        let labels = HostNames.labels(checkouts.map(\.host))
         func place(_ checkout: ProjectState.Checkout) -> String {
-            several || checkout.host.state != "local" ? " on \(shortHostName(checkout.host.name))" : ""
+            several || checkout.host.state != "local" ? " on \(labels[checkout.host.id] ?? checkout.host.name)" : ""
         }
         var items: [ProjectMenuItem] = []
         if checkouts.contains(where: { $0.added == true }) { items.append(.rename) }
@@ -67,7 +68,7 @@ enum ProjectMenu {
     }
 
     static func hosts(of project: ProjectState) -> [String] {
-        project.checkouts.filter { $0.host.state != "local" }.map { shortHostName($0.host.name) }.reduce(into: []) { names, host in if !names.contains(host) { names.append(host) } }
+        HostNames.ordered(project.checkouts.map(\.host).filter { $0.state != "local" })
     }
 
     static func host(of session: SessionState) -> String? {
@@ -89,10 +90,6 @@ enum ProjectMenu {
     static func canMakeLead(_ session: SessionState, projects: [ProjectState]) -> Bool {
         guard let project = session.project, session.subagent == nil, session.surface == "claude" || session.surface == "codex" else { return false }
         return !projects.contains { $0.id == project.id && $0.leads.contains { $0.sessionId == session.id } }
-    }
-
-    static func shortHostName(_ name: String) -> String {
-        String(name.split(separator: ".", maxSplits: 1).first ?? Substring(name))
     }
 }
 

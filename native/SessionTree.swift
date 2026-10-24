@@ -73,12 +73,14 @@ struct SessionTree: Equatable {
         var listedSessionCount: Int { checkouts.reduce(0) { $0 + $1.families.reduce(0) { $0 + $1.sessions.count } } }
         var sessionCountLabel: String { SessionTree.sessionCountLabel(listedSessionCount) }
         var archived: Bool { identity?.archived == true }
-        /// Short names of the other hosts with a checkout, in list order.
-        var hosts: [String] {
-            checkouts.compactMap(\.host).reduce(into: []) { names, host in if !names.contains(host) { names.append(host) } }
-        }
+        /// The other hosts with a checkout, in list order.
+        var hosts: [String] { HostNames.ordered(checkouts.compactMap(\.host)) }
         var hostLabel: String? { hosts.isEmpty ? nil : hosts.joined(separator: ", ") }
-        var spansHosts: Bool { Set(checkouts.map(\.host)).count > 1 }
+        var spansHosts: Bool { Set(checkouts.map(\.host?.id)).count > 1 }
+
+        func hostLabel(of checkout: Checkout) -> String? {
+            checkout.host.flatMap { HostNames.labels(checkouts.compactMap(\.host))[$0.id] }
+        }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {
             let ordered = SessionTree.newestFirst(checkouts.flatMap(\.families), by: SessionTree.activity)
@@ -102,8 +104,8 @@ struct SessionTree: Equatable {
 
     struct Checkout: Identifiable, Equatable {
         let id: String
-        /// The short name of the host the checkout is on, nil on this host.
-        let host: String?
+        /// The host the checkout is on, nil on this host.
+        let host: SessionHost?
         let label: String
         let branchLabel: String?
         let isMain: Bool
@@ -140,7 +142,7 @@ struct SessionTree: Equatable {
             }
             let checkoutID = session.checkout?.id ?? (session.checkout?.path ?? session.cwd ?? projectID) + (session.remoteHostID.map { "@" + $0 } ?? "")
             if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
-                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, host: session.shortRemoteHostName, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
+                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, host: session.remoteHostName == nil ? nil : session.host, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
             }
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].families.append(family)

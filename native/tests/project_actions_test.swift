@@ -38,6 +38,13 @@ struct ProjectActionsTest {
         ], "a project on this machine alone names no host")
         expect(ProjectMenu.items(for: projects[2]).isEmpty, "an archived project that was never added offers nothing")
         expect(ProjectMenu.hosts(of: projects[0]) == ["server"] && ProjectMenu.hosts(of: projects[1]).isEmpty, "a project header names every other host with a checkout")
+        var twins = projects[0]
+        twins.checkouts = [
+            ProjectState.Checkout(host: SessionHost(id: "h-home", name: "build.home", state: "connected"), projectId: "h-home::repo:web", rootPath: "/srv/web", added: true),
+            ProjectState.Checkout(host: SessionHost(id: "h-office", name: "build.office", state: "connected"), projectId: "h-office::repo:web", rootPath: "/srv/web", added: true),
+        ]
+        expect(ProjectMenu.hosts(of: twins) == ["build.home", "build.office"], "hosts that share a short name keep their full names")
+        expect(ProjectMenu.items(for: twins).contains(.remove(projectID: "h-office::repo:web", label: "Remove on build.office")), "menus tell apart hosts that share a short name")
         expect(ProjectMenu.host(of: projects[0].checkouts[0]) == nil && ProjectMenu.host(of: projects[0].checkouts[1]) == "h-server", "an action on a remote checkout names its host")
 
         let options = try! JSONDecoder().decode(SessionCreationOptions.self, from: Data(#"""

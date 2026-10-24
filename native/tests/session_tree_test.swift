@@ -131,7 +131,11 @@ struct SessionTreeTest {
         let spread = SessionTree.build([onHost("here", nil, checkout: "checkout-1"), onHost("h1::there", vps, checkout: "h1::checkout-1"), onHost("h2::elsewhere", laptop, checkout: "h2::checkout-1")], filter: .all, attention: [:]).projects
         expect(spread.count == 1 && spread[0].checkouts.count == 3, "one repository on three hosts is one project with a checkout per host: \(spread.map { $0.checkouts.map(\.id) })")
         expect(Set(spread[0].hosts) == ["vps", "laptop"] && spread[0].spansHosts, "the project header names every other host: \(spread[0].hosts)")
-        expect(Set(spread[0].checkouts.map(\.host)) == [nil, "vps", "laptop"], "each checkout names its own host")
+        expect(Set(spread[0].checkouts.map { spread[0].hostLabel(of: $0) }) == [nil, "vps", "laptop"], "each checkout names its own host")
+        let home = SessionHost(id: "h3", name: "build.home", state: "connected")
+        let office = SessionHost(id: "h4", name: "build.office", state: "connected")
+        let twins = SessionTree.build([onHost("h3::a", home, checkout: "h3::checkout-1"), onHost("h4::b", office, checkout: "h4::checkout-1")], filter: .all, attention: [:]).projects
+        expect(Set(twins.first?.hosts ?? []) == ["build.home", "build.office"] && twins.first?.spansHosts == true, "hosts that share a short name keep their full names: \(twins.first?.hosts ?? [])")
         let unnamed = SessionTree.build([onHost("here", nil, checkout: nil), onHost("h1::there", vps, checkout: nil)], filter: .all, attention: [:]).projects
         expect(unnamed.first?.checkouts.count == 2, "the same path on two hosts stays two checkouts without a checkout id")
         let remoteOnly = SessionTree.build([onHost("h1::there", vps, checkout: "h1::checkout-1")], filter: .all, attention: [:]).projects
