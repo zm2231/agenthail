@@ -306,6 +306,7 @@ struct StatusStrip: View {
         let working = sessions.filter(\.isWorking).count
         let needsYou = model.sessionTree.needsYou
         HStack(spacing: DesktopSpace.l) {
+            ConnectionControls(model: model)
             if items.contains("usage") { UsageLimits(usage: usage) }
             Spacer(minLength: DesktopSpace.l)
             ForEach(items.filter { $0 != "usage" }, id: \.self) { item in
