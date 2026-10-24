@@ -59,8 +59,9 @@ then records the delivery evidence and target turn ID before accepting speakable
 updates.
 
 Only a target with a correlatable turn stream can receive realtime delegation.
-Claude's native UDS peer transport is deliberately blocked for this path because
-socket acceptance alone cannot be joined to a later transcript turn. Busy, held,
+Claude's native UDS peer transport is joined to its transcript turn by the
+frame id the session keeps on the prompt, as described below; a socket
+acceptance without a frame id is held. Busy, held,
 read-only, unavailable, and unknown outcomes remain visible in the call state and
 are not represented as a spoken reply. Audio/provider identity is therefore not
 a claim that Claude supplies native audio.
@@ -127,6 +128,13 @@ about it is spoken:
   and voice has not spoken for two seconds. A transcript delta whose done never
   arrives holds it at most four seconds. Up to eight replies wait; past that the
   oldest is dropped and recorded.
+- A request sent to a Claude peer over its socket is known by its frame id
+  until the journal shows the prompt: as `origin.msg_id` on the turn it
+  started, or as `source_uuid` when the peer absorbed it into a turn already
+  running. That turn becomes the request's turn and its reply streams to voice.
+  A typed turn that absorbs it becomes a voice turn, and two requests on one
+  turn are both answered by its reply. A request kept from an earlier call by
+  its frame id is found again the same way.
 - A request sent on a route that gives no turn stays silent, as voice said,
   wherever it lands, including a session the delivery moved to. Its turn is
   known by the id the delivery gave the prompt, never by the prompt's text: the

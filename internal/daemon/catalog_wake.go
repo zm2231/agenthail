@@ -19,6 +19,9 @@ type catalogWakes struct {
 	adapters []surface.Surface
 	follow   func(string) *filewake.Wake
 
+	// One sync at a time, so one that read the folders earlier cannot apply after a newer one.
+	syncing sync.Mutex
+
 	mu       sync.Mutex
 	closed   bool
 	watching map[string]*catalogWake
@@ -47,6 +50,8 @@ func newCatalogWakes(adapters []surface.Surface, follow func(string) *filewake.W
 // sync follows the folders the surfaces name now and drops the ones they no
 // longer name.
 func (c *catalogWakes) sync() {
+	c.syncing.Lock()
+	defer c.syncing.Unlock()
 	wanted := map[string]*catalogWake{}
 	want := func(dir string) *catalogWake {
 		if wanted[dir] == nil {

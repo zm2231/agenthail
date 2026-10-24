@@ -17,6 +17,7 @@ func (s *Service) place(ctx context.Context, f *follower, event sessionstream.Ev
 	var ticks <-chan time.Time
 	for {
 		s.mu.Lock()
+		s.claimPeerTurn(f, event)
 		if messages, ok := f.voice[event.TurnID]; ok {
 			s.unlock()
 			return messages, nil, true

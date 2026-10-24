@@ -196,6 +196,45 @@ func TestASyncThatFindsAnAwaitedFolderAsksForItsPass(t *testing.T) {
 	}
 }
 
+func TestASyncThatReadTheFoldersBeforeOneAppearedDoesNotUndoANewerSync(t *testing.T) {
+	records := filepath.Join(t.TempDir(), "sessions")
+	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	read, newer := make(chan struct{}), make(chan struct{})
+	var held atomic.Bool
+	codex := newWatchingSurface(surface.KindCodex, func() []string {
+		if held.CompareAndSwap(false, true) {
+			close(read)
+			select {
+			case <-newer:
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		return nil
+	})
+	watcher := filewake.New(filewake.DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = watcher.Close() })
+	wakes := newCatalogWakes([]surface.Surface{claude, codex}, watcher.FollowDir)
+	t.Cleanup(wakes.close)
+	stale := make(chan struct{})
+	go func() {
+		defer close(stale)
+		wakes.sync()
+	}()
+	<-read
+	if err := os.Mkdir(records, 0700); err != nil {
+		t.Fatal(err)
+	}
+	wakes.sync()
+	close(newer)
+	<-stale
+	wakes.mu.Lock()
+	_, followed := wakes.watching[records]
+	wakes.mu.Unlock()
+	if !followed {
+		t.Fatal("a sync that read the folders before the new one appeared dropped its watch after a newer sync followed it")
+	}
+}
+
 func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	root := t.TempDir()

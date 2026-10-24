@@ -24,6 +24,8 @@ type requestRecord struct {
 }
 
 type TurnOutcome struct {
+	// TurnID is the turn that took a request asked for by its message id.
+	TurnID string
 	Found  bool
 	Done   bool
 	Failed string
