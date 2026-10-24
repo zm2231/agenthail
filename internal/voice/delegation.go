@@ -129,10 +129,13 @@ func (s *Service) readyFollower(ctx context.Context, targetID string) (*follower
 }
 
 func heldReason(target *Target, addressed surface.Session, receipt *delivery.Receipt) string {
+	reached := receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted
+	peer := surface.RouteFor(target.Adapter, target.Session, surface.AuthorPerson).TransportOnly()
 	switch {
-	case (receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted) &&
-		(target.Session.ID != addressed.ID || surface.RouteFor(target.Adapter, target.Session, surface.AuthorPerson).TransportOnly()):
+	case reached && (target.Session.ID != addressed.ID || peer && (receipt.TurnID == "" || receipt.TurnID == target.Session.ID)):
 		return "Sent to " + addressed.Name + ". Voice cannot follow this session's reply; read it in the session transcript."
+	case peer && reached:
+		return ""
 	case receipt.Evidence != surface.EvidenceDelivered:
 		return "Target is " + string(receipt.Evidence) + "; no uncorrelated reply will be spoken."
 	case receipt.TurnID == "" || receipt.TurnID == target.Session.ID:

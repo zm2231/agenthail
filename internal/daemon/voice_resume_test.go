@@ -180,9 +180,21 @@ func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *tes
 	}
 	service, _ := connectVoice(t, f, "orphan")
 	state := delegate(t, service, "hello")
-	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes(t) != 0 || manager.Count("hello") != 1 {
-		t.Fatalf("message=%q resumes=%d peer=%d", state.Message, f.resumes(t), manager.Count("hello"))
+	if !followedFrame(state, f.session.ID) || f.resumes(t) != 0 || manager.Count("hello") != 1 {
+		t.Fatalf("events=%+v resumes=%d peer=%d", state.Events, f.resumes(t), manager.Count("hello"))
 	}
+}
+
+func followedFrame(state voice.State, sessionID string) bool {
+	for _, event := range state.Events {
+		if event.Method == "voice/delegation/held" {
+			return false
+		}
+		if turn, _ := event.Params["turnId"].(string); event.Method == "voice/delegation/dispatched" && turn != "" && turn != sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 func failed(state voice.State) bool {

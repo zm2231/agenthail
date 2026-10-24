@@ -23,14 +23,13 @@ func (b voiceBriefs) TurnOutcomes(ctx context.Context, session *surface.Session,
 	})
 }
 
-func journalTurnOutcomes(readPage func(before uint64) (registry.SessionJournalPage, error), turnIDs []string) (map[string]voice.TurnOutcome, error) {
-	outcomes := make(map[string]voice.TurnOutcome, len(turnIDs))
-	open := map[string]bool{}
-	for _, id := range turnIDs {
-		outcomes[id], open[id] = voice.TurnOutcome{}, true
+func journalTurnOutcomes(readPage func(before uint64) (registry.SessionJournalPage, error), requested []string) (map[string]voice.TurnOutcome, error) {
+	read := turnReads{turns: map[string]voice.TurnOutcome{}, took: map[string]string{}, wanted: map[string]bool{}}
+	for _, id := range requested {
+		read.wanted[id] = true
 	}
 	var before uint64
-	for read := 0; read < voiceOutcomeRows && len(open) > 0; {
+	for rows := 0; rows < voiceOutcomeRows && !read.answered(requested); {
 		page, err := readPage(before)
 		var gap *registry.SessionJournalHistoryGapError
 		if before != 0 && errors.As(err, &gap) {
@@ -40,23 +39,56 @@ func journalTurnOutcomes(readPage func(before uint64) (registry.SessionJournalPa
 			return nil, err
 		}
 		for i := len(page.Entries) - 1; i >= 0; i-- {
-			event, err := sessionstream.DecodePayload(page.Entries[i].Seq, page.Entries[i].Payload)
-			if err != nil || !open[event.TurnID] {
-				continue
-			}
-			outcome := withEvent(outcomes[event.TurnID], event)
-			outcomes[event.TurnID] = outcome
-			if outcome.Done && outcome.Reply != "" {
-				delete(open, event.TurnID)
+			if event, err := sessionstream.DecodePayload(page.Entries[i].Seq, page.Entries[i].Payload); err == nil {
+				read.add(event)
 			}
 		}
-		read += len(page.Entries)
+		rows += len(page.Entries)
 		if page.NextBefore == 0 || len(page.Entries) == 0 {
 			break
 		}
 		before = page.NextBefore
 	}
+	outcomes := make(map[string]voice.TurnOutcome, len(requested))
+	for _, id := range requested {
+		outcomes[id] = read.outcome(id)
+	}
 	return outcomes, nil
+}
+
+type turnReads struct {
+	turns  map[string]voice.TurnOutcome
+	took   map[string]string
+	wanted map[string]bool
+}
+
+func (r turnReads) add(event sessionstream.Event) {
+	if event.TurnID == "" {
+		return
+	}
+	r.turns[event.TurnID] = withEvent(r.turns[event.TurnID], event)
+	if _, seen := r.took[event.MessageID]; r.wanted[event.MessageID] && event.MessageID != event.TurnID && !seen {
+		r.took[event.MessageID] = event.TurnID
+	}
+}
+
+func (r turnReads) outcome(id string) voice.TurnOutcome {
+	turn, ok := r.took[id]
+	if !ok {
+		return r.turns[id]
+	}
+	outcome := r.turns[turn]
+	outcome.TurnID = turn
+	return outcome
+}
+
+func (r turnReads) answered(requested []string) bool {
+	for _, id := range requested {
+		if outcome := r.outcome(id); !outcome.Done || outcome.Reply == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Events arrive newest first, so the first assistant text seen is the latest.

@@ -42,13 +42,6 @@ func assertOnlyTypedSpoken(t *testing.T, f *voiceFixture, j *targetJournal) {
 	}
 }
 
-func TestAPeerHeldDelegationWhoseJournalWrapsThePromptStaysSilent(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}, turnID: "peer-message"}
-	f := heldTarget(t, target)
-	heldTurn(target.journal, "held-turn", sessionstream.Event{Role: "peer", MessageID: "peer-message", Body: "[from Voice] Run the tests (reply with agenthail send)"})
-	assertOnlyTypedSpoken(t, f, target.journal)
-}
-
 func TestAHeldDelegationWithNoPlaceableIDHasItsTurnTakenAsTyped(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
 	f := heldTarget(t, target)
@@ -62,25 +55,30 @@ func TestAHeldDelegationWithNoPlaceableIDHasItsTurnTakenAsTyped(t *testing.T) {
 	}
 }
 
-func TestAHeldDelegationThatLandsInAnotherSessionStaysSilentThere(t *testing.T) {
+func movedTarget(t *testing.T) (*voiceFixture, *targetFixture) {
+	t.Helper()
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "moved-turn", movesTo: "target-b"}
 	f := heldTarget(t, target)
 	testkit.Eventually(t, "the follower for the session the request reached", 5*time.Second, func() bool {
 		prepared, _ := target.journal.subscriptions()
 		return prepared == 2
 	})
+	return f, target
+}
+
+func TestAHeldDelegationThatLandsInAnotherSessionStaysSilentThere(t *testing.T) {
+	f, target := movedTarget(t)
 	heldTurn(target.journal, "moved-turn", sessionstream.Event{Role: "user", Body: "<context>\nRun the tests\n</context>"})
 	assertOnlyTypedSpoken(t, f, target.journal)
 }
 
 func TestAHeldDelegationStaysSilentAfterTheJournalIsFollowedAgain(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}, turnID: "peer-message"}
-	f := heldTarget(t, target)
+	f, target := movedTarget(t)
 	target.journal.emit(sessionstream.Event{Kind: "source-error", Reason: "upstream stopped"})
 	testkit.Eventually(t, "the journal to be followed again", 5*time.Second, func() bool {
 		prepared, _ := target.journal.subscriptions()
-		return prepared == 2
+		return prepared == 3
 	})
-	heldTurn(target.journal, "held-turn", sessionstream.Event{Role: "peer", MessageID: "peer-message", Body: "Run the tests, from Voice"})
+	heldTurn(target.journal, "moved-turn", sessionstream.Event{Role: "user", Body: "<context>\nRun the tests\n</context>"})
 	assertOnlyTypedSpoken(t, f, target.journal)
 }

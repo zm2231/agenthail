@@ -124,8 +124,13 @@ func (f *targetFixture) Send(ctx context.Context, session *surface.Session, mess
 		session.ID = f.movesTo
 	}
 	if f.quiet {
+		uuid := f.turnID
+		if f.perTurn {
+			f.turns++
+			uuid = fmt.Sprintf("frame-%d", f.turns)
+		}
 		f.mu.Unlock()
-		return &surface.SendResult{UUID: f.turnID, Accepted: true}, nil
+		return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 	}
 	if f.perTurn {
 		f.turns++
@@ -929,7 +934,7 @@ func TestADirectTurnRefusedByTheAPIFailsTheDelegationWithTheRefusal(t *testing.T
 }
 
 func TestDelegationToClaudePeerDeliversAndSaysItCannotFollowTheReply(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}}
+	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}, quiet: true}
 	f := targetSelected(t, target)
 	state, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"})
 	if err != nil || !reflect.DeepEqual(target.sent, []string{"Do work"}) {

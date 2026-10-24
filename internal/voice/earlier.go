@@ -34,9 +34,16 @@ func (s *Service) catchUp(ctx context.Context, f *follower) bool {
 		outcomes, _ = briefer.TurnOutcomes(ctx, &f.target, turns)
 	}
 	var ended []requestRecord
+	resolved := map[string]TurnOutcome{}
 	s.mu.Lock()
 	for _, r := range earlier {
-		if outcomes[r.TurnID].Done {
+		outcome := outcomes[r.TurnID]
+		if outcome.TurnID != "" && outcome.TurnID != r.TurnID {
+			s.retargetRequests(r.TurnID, outcome.TurnID)
+			r.TurnID = outcome.TurnID
+		}
+		resolved[r.TurnID] = outcome
+		if outcome.Done {
 			f.retired[r.TurnID] = true
 			ended = append(ended, r)
 			continue
@@ -45,7 +52,7 @@ func (s *Service) catchUp(ctx context.Context, f *follower) bool {
 	}
 	s.unlock()
 	for _, r := range ended {
-		if s.tellEnded(ctx, f, r, outcomes[r.TurnID]) {
+		if s.tellEnded(ctx, f, r, resolved[r.TurnID]) {
 			s.mu.Lock()
 			s.requestDone(r.TurnID)
 			_ = s.commit()
