@@ -40,6 +40,8 @@ struct UsageStripTest {
         check(both.count == mine.count + 1, "a host two paired computers both report appears once: \(both.map(\.host))")
         check(both.last?.host == "laptop" && both.last?.local == false, "only the first paired computer's own accounts count as this computer's")
         check(UsageStrip.make(both, now: now).others.map(\.title) == ["team", "me · laptop"], "the second computer's account shows compact with its name")
+        let firstFailed = UsageStrip.make(UsageStrip.merged([nil, [laptop]]), now: now)
+        check(firstFailed.meters.isEmpty && firstFailed.others.map(\.title) == ["me · laptop"], "when the first computer fails, the second stays compact, never in use")
         print("ok")
     }
 

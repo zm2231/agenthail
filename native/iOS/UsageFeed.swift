@@ -12,7 +12,7 @@ final class UsageFeed: ObservableObject {
                 }
                 var ordered = [[UsageReport.Set]?](repeating: nil, count: readers.count)
                 for await (index, answer) in group { ordered[index] = answer }
-                return ordered.compactMap { $0 }
+                return ordered
             }
             if Task.isCancelled { return }
             sets = UsageStrip.merged(answers)

@@ -36,11 +36,11 @@ struct UsageStrip: Equatable {
         return strip
     }
 
-    static func merged(_ answers: [[UsageReport.Set]]) -> [UsageReport.Set] {
+    static func merged(_ answers: [[UsageReport.Set]?]) -> [UsageReport.Set] {
         var seen = Swift.Set<String>()
         var sets: [UsageReport.Set] = []
         for (index, answer) in answers.enumerated() {
-            for var set in answer where seen.insert(set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? "")).inserted {
+            for var set in answer ?? [] where seen.insert(set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? "")).inserted {
                 if index > 0 { set.local = false }
                 sets.append(set)
             }
