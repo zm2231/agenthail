@@ -107,19 +107,17 @@ private struct UsageLimits: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(spoken)
                 }
-                if bars {
-                    ForEach(strip.others) { other in
-                        HStack(spacing: 4) {
-                            Text(other.title)
-                            Text(UsageMeterText.percent(other.percent))
-                                .monospacedDigit()
-                                .foregroundStyle(other.critical ? DesktopPalette.failed : DesktopPalette.muted)
-                        }
-                        .foregroundStyle(DesktopPalette.muted)
-                        .help(other.spoken)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(other.spoken)
+                ForEach(strip.others(compact: !bars)) { other in
+                    HStack(spacing: 4) {
+                        Text(other.title)
+                        Text(UsageMeterText.percent(other.percent))
+                            .monospacedDigit()
+                            .foregroundStyle(other.critical ? DesktopPalette.failed : DesktopPalette.muted)
                     }
+                    .foregroundStyle(DesktopPalette.muted)
+                    .help(other.spoken)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(other.spoken)
                 }
             }
         }

@@ -237,7 +237,8 @@ its own peers in turn, and waits at most a few seconds for each. A host that
 runs an older Agenthail, does not answer in time or fails is one set with no
 provider and a `problem` that names it. The Mac status strip and the web
 dashboard's top bar show this machine's primary account and Codex in full and
-every other account or host by name and its highest limit. The iPhone shows
+every other account or host by name and its highest limit. When the Mac strip
+narrows, it keeps only the other accounts near their limit. The iPhone shows
 the same line under the session filters; it asks each computer it is paired
 with, counts only the first one's own accounts as in use, and lists a host two
 computers both report once. A computer that does not answer keeps its place,

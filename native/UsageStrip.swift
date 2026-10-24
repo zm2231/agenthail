@@ -48,6 +48,10 @@ struct UsageStrip: Equatable {
         return sets
     }
 
+    func others(compact: Bool) -> [Other] {
+        compact ? others.filter(\.critical) : others
+    }
+
     static func inUse(_ set: UsageReport.Set) -> Bool {
         set.local == true && (set.primary == true || set.provider == "codex")
     }

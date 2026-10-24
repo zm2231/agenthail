@@ -25,6 +25,12 @@ struct UsageStripTest {
         check(strip.others.first?.percent == 91 && strip.others.first?.critical == true, "a compact account shows its highest limit and flags it")
         check(strip.others.first?.spoken.hasPrefix("team@example.com: Claude usage 12 percent") == true, "the compact account reads out every limit: \(strip.others.first?.spoken ?? "")")
         check(strip.problem == nil, "a problem stays quiet while there are meters")
+        let mixed = UsageStrip(others: [
+            .init(id: "a", title: "team", percent: 91, critical: true, spoken: ""),
+            .init(id: "b", title: "ops", percent: 12, critical: false, spoken: ""),
+        ])
+        check(mixed.others(compact: true).map(\.title) == ["team"], "a narrow strip keeps only the accounts near their limit")
+        check(mixed.others(compact: false).map(\.title) == ["team", "ops"], "a wide strip keeps every account")
 
         let remote = UsageReport.Set(host: "vps", hostId: "h2", local: false, provider: "claude", account: "ops@example.com", meters: report.sets?[0].meters)
         check(UsageStrip.make([remote], now: now).others.map(\.title) == ["ops · vps"], "another host's account names the host")
