@@ -438,6 +438,7 @@ func (s *Store) gitAs(author string, args ...string) (string, error) {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_TERMINAL_PROMPT=0",
+		"GIT_OPTIONAL_LOCKS=0",
 		"GIT_AUTHOR_NAME="+author, "GIT_AUTHOR_EMAIL=ui@agenthail.invalid",
 		"GIT_COMMITTER_NAME="+author, "GIT_COMMITTER_EMAIL=ui@agenthail.invalid",
 	)

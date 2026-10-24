@@ -583,8 +583,7 @@ func catalogProjectName(root string) string {
 }
 
 func catalogGit(ctx context.Context, dir string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	command.Env = append(os.Environ(), "LC_ALL=C")
+	command := gitCommand(ctx, dir, args...)
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	output, err := command.Output()
