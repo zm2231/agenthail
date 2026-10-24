@@ -309,7 +309,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	}
 	if receipt.Evidence == surface.EvidenceQueued || receipt.Status == string(registry.DeliveryIntentSubmitted) {
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(receipt)
+			return emit(receipt)
 		}
 		if receipt.Evidence == surface.EvidenceQueued {
 			fmt.Printf("queued for %s: %s\n", remote.label(), receipt.Detail)
@@ -328,7 +328,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 		}
 		receipt.Evidence = surface.EvidenceReplyObserved
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"delivery": receipt, "reply": reply})
+			return emit(map[string]any{"delivery": receipt, "reply": reply})
 		}
 		if reply != nil && reply.Text != "" {
 			fmt.Println(reply.Text)
@@ -336,7 +336,7 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 		return nil
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(receipt)
+		return emit(receipt)
 	}
 	fmt.Printf("sent to %s (turn %s)\n", remote.label(), receipt.TurnID)
 	return nil
@@ -368,7 +368,7 @@ func (a *App) steerRemote(ctx context.Context, remote *remoteTarget, message str
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(receipt)
+		return emit(receipt)
 	}
 	printSteerReceipt(receipt, remote.label())
 	return nil
@@ -437,7 +437,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		return emitThreadFailure(request, output, errors.New(output.Error))
 	}
 	if request.jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(output)
+		return emit(output)
 	}
 	if output.Session == nil {
 		return fmt.Errorf("host %s created no session", hostText)

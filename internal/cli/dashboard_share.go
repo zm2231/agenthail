@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -64,7 +63,7 @@ func openDashboardShare(result dashboardShareResult) error {
 
 func printDashboardRemote(result dashboardShareResult, asJSON, copied bool) error {
 	if asJSON {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"url": result.URL, "expiresAt": result.ExpiresAt, "qrPath": result.QRPath, "dnsName": result.DNSName, "port": result.Port, "copied": copied})
+		return emit(map[string]any{"url": result.URL, "expiresAt": result.ExpiresAt, "qrPath": result.QRPath, "dnsName": result.DNSName, "port": result.Port, "copied": copied})
 	}
 	fmt.Println("remote dashboard access enabled through Tailscale")
 	fmt.Printf("phone sign-in link (%s): %s\n", dashboardLoginLink{ExpiresAt: result.ExpiresAt}.validity(), result.URL)
@@ -150,7 +149,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 			return err
 		}
 		if asJSON {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": false, "port": daemon.DefaultRemoteAccessPort})
+			return emit(map[string]any{"enabled": false, "port": daemon.DefaultRemoteAccessPort})
 		}
 		if removed {
 			fmt.Println("remote dashboard access disabled")
@@ -177,7 +176,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		}
 		enabled := dashboardRemoteEnabled(config, status, node.Self.DNSName, target, httpsReady)
 		if asJSON {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": daemon.DefaultRemoteAccessPort, "proxy": status.Proxy(node.Self.DNSName, daemon.DefaultRemoteAccessPort)})
+			return emit(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": daemon.DefaultRemoteAccessPort, "proxy": status.Proxy(node.Self.DNSName, daemon.DefaultRemoteAccessPort)})
 		}
 		if !enabled {
 			fmt.Println("remote dashboard access: off")

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -179,7 +178,7 @@ func (a *App) cmdSend(args []string) error {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(receipt)
+			return emit(receipt)
 		} else {
 			if receipt.WaitingOn != nil {
 				fmt.Printf("queued #%d for %s, which is waiting on you; it delivers after you answer\n", receipt.QueueID, a.resolveDisplay(sess.ID))
@@ -195,7 +194,7 @@ func (a *App) cmdSend(args []string) error {
 	}
 	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(receipt)
+			return emit(receipt)
 		}
 		if receipt.DeliveryID != 0 {
 			fmt.Printf("delivery submitted (id %d); %s\n", receipt.DeliveryID, receipt.Detail)
@@ -248,7 +247,7 @@ func (a *App) cmdSend(args []string) error {
 			_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"delivery": receipt, "reply": reply})
+			return emit(map[string]any{"delivery": receipt, "reply": reply})
 		}
 		if reply != nil && reply.Text != "" {
 			fmt.Println(reply.Text)
@@ -256,7 +255,7 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(receipt)
+		return emit(receipt)
 	} else if receipt.Evidence == surface.EvidenceTransportAccepted {
 		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
 	} else {

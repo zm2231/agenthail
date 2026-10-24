@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -60,7 +59,7 @@ func (a *App) cmdReply(args []string) error {
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed, "turn": replyTurn(read.Exchanges, reply)})
+		return emit(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "done": reply.Done, "report": parsed, "turn": replyTurn(read.Exchanges, reply)})
 	}
 	text, cut := capBytes(reply.Text, mode.maxBytes)
 	if hasFlag(args, "--json") {
@@ -68,7 +67,7 @@ func (a *App) cmdReply(args []string) error {
 		if cut {
 			document["truncated"], document["textBytes"] = true, len(reply.Text)
 		}
-		return json.NewEncoder(os.Stdout).Encode(document)
+		return emit(document)
 	} else {
 		printSessionReadWarning(read)
 		if read.Source != "" {
@@ -146,7 +145,7 @@ func (a *App) cmdLast(args []string) error {
 		capped[i] = capExchange(exchange, mode.maxBytes)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": capped})
+		return emit(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": capped})
 	}
 	printSessionReadWarning(read)
 	if len(exchanges) == 0 {

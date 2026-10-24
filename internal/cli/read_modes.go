@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -95,7 +93,7 @@ func printExchangeReports(session *surface.Session, read *surface.SessionReadRes
 	for i, exchange := range exchanges {
 		reports[i], newest = readExchangeReport(exchange)
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": session.Surface, "session": session.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": reports}); err != nil {
+	if err := emit(map[string]any{"surface": session.Surface, "session": session.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": reports}); err != nil {
 		return err
 	}
 	if newest != nil && len(exchanges) > 0 {

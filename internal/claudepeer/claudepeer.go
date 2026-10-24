@@ -493,13 +493,7 @@ func normalizeConfig(c Config) (Config, error) {
 }
 
 func status(s surface.Session) string {
-	if s.Status == surface.StatusBusy {
-		return "busy"
-	}
-	if s.Status == surface.StatusIdle {
-		return "idle"
-	}
-	return "waiting"
+	return string(surface.NormalizeStatus(string(s.Status)))
 }
 
 func listenOwned(path string) (net.Listener, error) {

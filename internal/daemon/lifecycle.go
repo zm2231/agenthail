@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/poll"
 )
 
 func LockFilePath() string {
@@ -60,12 +63,12 @@ func processIsDaemon(pid int) bool {
 }
 
 func waitForStopped(pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		if err := syscall.Kill(pid, 0); err != nil {
-			return true
+			return true, nil
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return false
+		return false, nil
+	}) == nil
 }

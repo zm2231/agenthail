@@ -3,6 +3,7 @@ package cli
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/poll"
 )
 
 var archiveLayout = map[string]bool{"agenthail": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
@@ -55,10 +57,11 @@ func waitForDaemonAPI(timeout time.Duration) error {
 		token = strings.TrimSpace(string(data))
 	}
 	client := &http.Client{Timeout: time.Second}
-	deadline := time.Now().Add(timeout)
 	var stableSince time.Time
 	lastErr := errors.New("daemon is not running")
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
 		if _, running := daemon.IsRunning(); !running {
 			stableSince = time.Time{}
 			lastErr = errors.New("daemon is not running")
@@ -66,7 +69,7 @@ func waitForDaemonAPI(timeout time.Duration) error {
 			if stableSince.IsZero() {
 				stableSince = time.Now()
 			} else if time.Since(stableSince) >= 2*time.Second {
-				return nil
+				return true, nil
 			}
 		} else {
 			request, _ := http.NewRequest(http.MethodGet, "http://"+config.Listen+"/api/v1/version", nil)
@@ -75,14 +78,16 @@ func waitForDaemonAPI(timeout time.Duration) error {
 			if err == nil {
 				response.Body.Close()
 				if response.StatusCode == http.StatusOK {
-					return nil
+					return true, nil
 				}
 				lastErr = fmt.Errorf("daemon API returned %s", response.Status)
 			} else {
 				lastErr = err
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		return false, nil
+	}); err == nil {
+		return nil
 	}
 	return fmt.Errorf("daemon did not answer on its API within %s: %w", timeout, lastErr)
 }

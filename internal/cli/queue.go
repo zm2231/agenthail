@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -41,7 +40,7 @@ func (a *App) cmdQueue(args []string) error {
 			return err
 		}
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"messages": rows})
+			return emit(map[string]any{"messages": rows})
 		}
 		if len(rows) == 0 {
 			fmt.Println("(queue empty)")

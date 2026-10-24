@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -178,7 +176,7 @@ func (a *App) cmdModel(args []string) error {
 
 func printModelChange(sessionID string, change surface.ModelChange, args []string) error {
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(struct {
+		return emit(struct {
 			SessionID string `json:"sessionId"`
 			surface.ModelChange
 		}{sessionID, change})
@@ -229,7 +227,7 @@ func (a *App) printControlResult(sess *surface.Session, result *surface.ControlR
 	}
 	(delivery.Dispatcher{Registry: a.registry()}).RecordControl(result, controlErr)
 	if hasFlag(args, "--json") {
-		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+		if err := emit(result); err != nil {
 			return err
 		}
 		return controlErr
@@ -333,7 +331,7 @@ func (a *App) cmdSteer(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(receipt)
+		return emit(receipt)
 	}
 	printSteerReceipt(*receipt, a.resolveDisplay(sess.ID))
 	return nil

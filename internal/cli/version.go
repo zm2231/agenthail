@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -16,7 +14,7 @@ func (a *App) cmdVersion(args []string) error {
 	}
 	build := a.build()
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(struct {
+		return emit(struct {
 			buildinfo.Identity
 			SchemaVersion int `json:"schemaVersion"`
 		}{build, registry.SchemaVersion()})

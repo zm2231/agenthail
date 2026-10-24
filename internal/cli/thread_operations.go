@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +14,7 @@ import (
 func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	defer func() {
 		if operationErr != nil && hasFlag(args, "--json") {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(operationErr), "error": operationErr.Error()})
+			_ = emit(map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(operationErr), "error": operationErr.Error()})
 		}
 	}()
 	if err := validateThreadOperationArgs(args); err != nil {
@@ -128,7 +126,7 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	if a.registry() != nil && operation != "status" && operation != "logs" && !(operation == "queue" && len(positional) > 2 && positional[2] == "list") {
 		_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: strings.Join(positional[:min(3, len(positional))], " ")})
 	}
-	return json.NewEncoder(os.Stdout).Encode(output)
+	return emit(output)
 }
 
 func validateThreadOperationArgs(args []string) error {

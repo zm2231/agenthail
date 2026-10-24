@@ -28,7 +28,7 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 	answered := false
 	defer func() {
 		if moveErr != nil && jsonOut && !answered {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "error": moveErr.Error()})
+			_ = emit(map[string]any{"ok": false, "error": moveErr.Error()})
 		}
 	}()
 	host := flagVal(args, "--to")
@@ -148,7 +148,7 @@ func (a *App) cmdMoveList(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(listed)
+		return emit(listed)
 	}
 	if len(listed.Moves) == 0 {
 		fmt.Println("no moves")

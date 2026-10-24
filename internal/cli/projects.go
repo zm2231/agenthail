@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -145,7 +144,7 @@ func (a *App) cmdProject(args []string) error {
 			projects = visible
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"projects": projects})
+			return emit(map[string]any{"projects": projects})
 		}
 		if len(projects) == 0 {
 			fmt.Println("no projects found")
@@ -185,7 +184,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(answer)
+			return emit(answer)
 		}
 		if !answer.Created {
 			fmt.Printf("%s is already project %s\n", answer.Project.RootPath, answer.Project.DisplayName)
@@ -210,7 +209,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(answer)
+			return emit(answer)
 		}
 		fmt.Printf("removed project %s on %s\n", checkout.RootPath, checkout.Host.Name)
 		return nil
@@ -231,7 +230,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(answer)
+			return emit(answer)
 		}
 		fmt.Printf("renamed project %s to %s\n", project.DisplayName, strings.TrimSpace(positional[2]))
 		return nil
@@ -256,7 +255,7 @@ func (a *App) cmdProject(args []string) error {
 			return err
 		}
 		if jsonOut {
-			return json.NewEncoder(os.Stdout).Encode(answer)
+			return emit(answer)
 		}
 		fmt.Printf("%sd project %s\n", positional[0], project.DisplayName)
 		return nil
@@ -343,7 +342,7 @@ func (a *App) cmdThreadArchive(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(answer)
+		return emit(answer)
 	}
 	fmt.Printf("%sd %s\n", positional[0], positional[1])
 	return nil

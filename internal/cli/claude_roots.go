@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,7 +20,7 @@ func (a *App) cmdRoots(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"claude": roots})
+		return emit(map[string]any{"claude": roots})
 	}
 	now := time.Now()
 	for _, root := range roots {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/poll"
 )
 
 type daemonService interface {
@@ -99,15 +101,18 @@ func startUnsupervisedDaemon() error {
 	pid := cmd.Process.Pid
 	cmd.Process.Release()
 	logFile.Close()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		if runningPID, ok := daemon.IsRunning(); ok && runningPID == pid {
-			fmt.Printf("daemon started (pid %d)\n", pid)
-			fmt.Printf("log: %s\n", logPath)
-			fmt.Printf("stop: agenthail daemon stop\n")
-			return nil
+			return true, nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		return false, nil
+	}); err == nil {
+		fmt.Printf("daemon started (pid %d)\n", pid)
+		fmt.Printf("log: %s\n", logPath)
+		fmt.Printf("stop: agenthail daemon stop\n")
+		return nil
 	}
 	data, _ := os.ReadFile(logPath)
 	return fmt.Errorf("daemon failed readiness check: %s", string(data))
@@ -136,14 +141,17 @@ func restartUnsupervisedDaemon() error {
 }
 
 func waitForDaemonPID(previous int, timeout time.Duration) (int, bool) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if pid, running := daemon.IsRunning(); running && pid != previous {
-			return pid, true
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	pid := 0
+	_ = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
+		if runningPID, running := daemon.IsRunning(); running && runningPID != previous {
+			pid = runningPID
+			return true, nil
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return 0, false
+		return false, nil
+	})
+	return pid, pid != 0
 }
 
 func rotateLogFile(path string, maxBytes int64) error {

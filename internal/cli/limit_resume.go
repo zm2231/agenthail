@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -94,7 +92,7 @@ func (a *App) listLimitResumes(asJSON bool) error {
 		for _, resume := range resumes {
 			rows = append(rows, row{SessionID: resume.SessionID, Name: a.resolveDisplay(resume.SessionID), Account: resume.AccountKey, State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt})
 		}
-		return json.NewEncoder(os.Stdout).Encode(rows)
+		return emit(rows)
 	}
 	if len(resumes) == 0 {
 		fmt.Println("no session is stopped by a usage limit")

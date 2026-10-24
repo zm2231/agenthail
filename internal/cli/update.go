@@ -378,7 +378,7 @@ func numericVersion(version string) ([3]int, bool) {
 
 func printUpdateStatus(status updateStatus, jsonOutput bool) error {
 	if jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
+		return emit(status)
 	}
 	if status.Latest == "" {
 		fmt.Printf("Agenthail updated with %s\n", status.InstallMethod)

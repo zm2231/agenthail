@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +23,7 @@ func (a *App) cmdWhoami(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(card)
+		return emit(card)
 	}
 	if !card.Resolved {
 		fmt.Printf("unresolved: %s\n", card.Reason)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -196,17 +198,20 @@ func (a *App) restartDaemonForDashboard() error {
 }
 
 func waitForDashboard(listen string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
 		response, err := client.Get("http://" + listen + "/")
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusOK || response.StatusCode == http.StatusFound {
-				return nil
+				return true, nil
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		return false, nil
+	}); err == nil {
+		return nil
 	}
 	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemonStatusLogPath())
 }

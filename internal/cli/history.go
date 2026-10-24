@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -56,7 +54,7 @@ func (a *App) cmdHistory(args []string) error {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"history": entries})
+		return emit(map[string]any{"history": entries})
 	}
 	if len(entries) == 0 {
 		fmt.Println("(no delivery history)")

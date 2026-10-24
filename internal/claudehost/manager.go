@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/poll"
 )
 
 // retireProtocol is the first protocol whose hosts retire when drained:
@@ -73,38 +75,40 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	var ready Client
+	err = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, stop := context.WithTimeout(ctx, time.Second)
 		hello, err := client.Hello(attempt)
 		stop()
 		if err == nil {
 			if current(hello, launch) {
-				return client, nil
+				ready = client
+				return true, nil
 			}
 			if err := retire(ctx, client, hello); err != nil {
-				return Client{}, err
+				return false, err
 			}
-			continue
+			return false, nil
 		}
 		if !errors.Is(err, ErrNotRunning) {
-			return Client{}, err
+			return false, err
 		}
 		lock, err := m.lock()
 		if err == nil {
-			return m.start(ctx, client, launch, lock)
+			started, err := m.start(ctx, client, launch, lock)
+			ready = started
+			return err == nil, err
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			return Client{}, err
+			return false, err
 		}
 		lockTaken()
-		select {
-		case <-ctx.Done():
-			return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", ctx.Err())
-		case <-ticker.C:
-		}
+		return false, nil
+	})
+	if errors.Is(err, context.DeadlineExceeded) {
+		return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", err)
 	}
+	return ready, err
 }
 
 // lockTaken runs each time Ensure finds the host lock held by another
@@ -146,21 +150,19 @@ func retire(ctx context.Context, client Client, hello Hello) error {
 	if err := syscall.Kill(hello.PID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("stop the Claude host %s (pid %d): %w", hello.HostVersion, hello.PID, err)
 	}
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, stop := context.WithTimeout(ctx, time.Second)
 		again, err := client.Hello(attempt)
 		stop()
 		if errors.Is(err, ErrNotRunning) || err == nil && again.PID != hello.PID {
-			return nil
+			return true, nil
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("the Claude host %s (pid %d) did not stop: %w", hello.HostVersion, hello.PID, ctx.Err())
-		case <-ticker.C:
-		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("the Claude host %s (pid %d) did not stop: %w", hello.HostVersion, hello.PID, err)
 	}
+	return nil
 }
 
 func (m *Manager) lock() (*os.File, error) {
@@ -214,23 +216,23 @@ func (m *Manager) spawn(launch Launch, lock *os.File) (<-chan error, error) {
 func (m *Manager) awaitHello(ctx context.Context, client Client, exited <-chan error) (Hello, error) {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	var hello Hello
+	err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, stop := context.WithTimeout(ctx, time.Second)
-		hello, err := client.Hello(attempt)
+		observed, err := client.Hello(attempt)
 		stop()
 		if err == nil {
-			return hello, nil
+			hello = observed
+			return true, nil
 		}
 		select {
 		case err := <-exited:
-			return Hello{}, fmt.Errorf("the host exited: %v", err)
-		case <-ctx.Done():
-			return Hello{}, ctx.Err()
-		case <-ticker.C:
+			return false, fmt.Errorf("the host exited: %v", err)
+		default:
 		}
-	}
+		return false, nil
+	})
+	return hello, err
 }
 
 func (m *Manager) logTail() string {

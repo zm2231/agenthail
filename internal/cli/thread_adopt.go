@@ -2,10 +2,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -19,7 +17,7 @@ func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
 	jsonOut := hasFlag(args, "--json")
 	defer func() {
 		if adoptErr != nil && jsonOut {
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(adoptErr), "error": adoptErr.Error()})
+			_ = emit(map[string]any{"ok": false, "unknown": surface.IsDeliveryOutcomeUnknown(adoptErr), "error": adoptErr.Error()})
 		}
 	}()
 	if err := validateThreadAdoptArgs(args); err != nil {
@@ -69,7 +67,7 @@ func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
 		_ = a.registry().RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "adopt"})
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "result": result})
+		return emit(map[string]any{"ok": true, "result": result})
 	}
 	label := session.ID
 	if session.Name != "" {

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -62,7 +61,7 @@ func (a *App) cmdSearch(args []string) error {
 		}
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"results": results, "remoteError": remoteError})
+		return emit(map[string]any{"results": results, "remoteError": remoteError})
 	}
 	if remoteError != "" {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", remoteError)

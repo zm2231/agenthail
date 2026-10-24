@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/poll"
 	"howett.net/plist"
 )
 
@@ -177,9 +179,11 @@ func (launchdService) Install() error {
 	// bootout returning does not mean launchd has released the label yet. Wait
 	// for that state before replacing the plist; otherwise an upgrade can race
 	// bootstrap and fail with a transient EIO.
-	for deadline := time.Now().Add(3 * time.Second); launchdLabelLoaded(daemonLaunchdLabel) && time.Now().Before(deadline); {
-		time.Sleep(100 * time.Millisecond)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
+		return !launchdLabelLoaded(daemonLaunchdLabel), nil
+	})
 	if _, running := daemon.IsRunning(); running {
 		if err := daemon.Stop(); err != nil {
 			return fmt.Errorf("stop existing daemon: %w", err)
@@ -266,17 +270,20 @@ func daemonServiceLoaded() bool {
 // runs for label: the pid in the daemon's pid file must be the service's pid,
 // so a daemon running outside launchd never counts as started.
 func waitForSupervisedDaemon(label string, previous int, timeout time.Duration) (int, bool) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		pid, running := daemon.IsRunning()
-		if running && pid != previous {
-			if job, loaded := launchdServiceJob(label); loaded && job.pid == pid {
-				return pid, true
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	pid := 0
+	_ = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
+		runningPID, running := daemon.IsRunning()
+		if running && runningPID != previous {
+			if job, loaded := launchdServiceJob(label); loaded && job.pid == runningPID {
+				pid = runningPID
+				return true, nil
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return 0, false
+		return false, nil
+	})
+	return pid, pid != 0
 }
 
 // launchdJob is a job loaded in this user's launchd domain. Labels are per

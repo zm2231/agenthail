@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"os"
@@ -273,7 +272,7 @@ func (a *App) cmdRelay(args []string) error {
 		defer cancel()
 		remote, remoteErr := a.pairedHostRelays(ctx)
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes, "hosts": remote})
+			return emit(map[string]any{"relays": routes, "hosts": remote})
 		}
 		printRelay := func(prefix string, r registry.RouteRow) {
 			lastFired := "never"
