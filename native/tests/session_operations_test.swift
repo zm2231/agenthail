@@ -177,7 +177,7 @@ struct SessionOperationsTest {
         let queue = StubProtocol.bodies.first?["nativeQueue"] as? [String: Any]
         check(StubProtocol.bodies.first?["action"] as? String == "native-queue" && queue?["queueAction"] as? String == "list" && queue?.count == 1, "list sends only its action")
 
-        reset([(502, #"{"ok":false,"unknown":false,"error":"session is not a Claude background agent"}"#), (502, #"{"ok":false,"unknown":true,"error":"Claude stop: exit 1"}"#)])
+        reset([(502, #"{"error":{"code":"session_operation_failed","message":"session is not a Claude background agent"}}"#), (502, #"{"error":{"code":"session_operation_unknown","message":"Claude stop: exit 1"}}"#)])
         do {
             _ = try await api.sessionLifecycle(sessionID: "C", action: "status", keys: keys)
             check(false, "a failed operation throws")
@@ -257,7 +257,7 @@ struct SessionOperationsTest {
         check(controller.status == nil && controller.logs == nil && !controller.resumeUnchanged, "switching sessions clears background state")
     }
 
-    static let unknownReply = (502, #"{"ok":false,"unknown":true,"error":"timed out"}"#)
+    static let unknownReply = (502, #"{"error":{"code":"session_operation_unknown","message":"timed out"}}"#)
     static let lostReply = (Int(URLError.networkConnectionLost.rawValue), "")
     static let refusedReply = (Int(URLError.cannotConnectToHost.rawValue), "")
     static let submittedReply = (202, #"{"ok":true,"status":"submitted"}"#)
@@ -271,7 +271,7 @@ struct SessionOperationsTest {
         guard let pane = model.mainPane else { return check(false, "the model has a main pane") }
         let source = codexSession("S")
 
-        reset([(502, #"{"ok":false,"unknown":false,"error":"thread not found"}"#), forkedReply])
+        reset([(502, #"{"error":{"code":"session_operation_failed","message":"thread not found"}}"#), forkedReply])
         await pane.forkNow(source)
         check(model.operationError == "thread not found" && model.pendingForks.isEmpty && !pane.forking, "a definite failure shows its error")
         await pane.forkNow(source)

@@ -312,7 +312,6 @@ struct SessionCreationReceipt: Decodable {
     let ok: Bool?
     let status: String?
     let accepted: Bool?
-    let retryable: Bool?
     let warning: String?
     let session: RawSession?
     let sessionId: String?
