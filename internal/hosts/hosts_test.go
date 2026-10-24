@@ -38,13 +38,13 @@ func TestQualifyAndSplit(t *testing.T) {
 }
 
 func TestQualifyJSONRewritesOnlySessionReferences(t *testing.T) {
-	raw := []byte(`{"ok":true,"result":{"sessionId":"s1","turnId":"t1","queueId":4},"session":{"id":"s1","surface":"codex","forkedFrom":"s8","subagent":{"parentId":"p1","rootId":"p1"}},"attachment":{"id":"a1"},"items":[{"sessionId":"s2"}],"runs":[{"jobId":"j1","sessionId":"s3","resumeSessionId":"s4"}],"subagents":[{"parentSessionId":"s5","agentId":"agent-1","toolUseId":"tool-1"}],"relay":{"fromSession":"s6","toSession":"s7"},"count":12345678901234567890}`)
+	raw := []byte(`{"ok":true,"result":{"sessionId":"s1","turnId":"t1","queueId":4},"session":{"id":"s1","surface":"codex","forkedFrom":"s8","subagent":{"parentId":"p1","rootId":"p1"},"checkout":{"id":"checkout:c1","path":"/srv/app"}},"mirrored":{"checkout":{"id":"hpeer0000000::checkout:c2"}},"attachment":{"id":"a1"},"items":[{"sessionId":"s2"}],"runs":[{"jobId":"j1","sessionId":"s3","resumeSessionId":"s4"}],"subagents":[{"parentSessionId":"s5","agentId":"agent-1","toolUseId":"tool-1"}],"relay":{"fromSession":"s6","toSession":"s7"},"count":12345678901234567890}`)
 	got, err := QualifyJSON("h0123456789ab", raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(got)
-	for _, want := range []string{`"sessionId":"h0123456789ab::s1"`, `"id":"h0123456789ab::s1"`, `"parentId":"h0123456789ab::p1"`, `"sessionId":"h0123456789ab::s2"`, `"resumeSessionId":"h0123456789ab::s4"`, `"parentSessionId":"h0123456789ab::s5"`, `"fromSession":"h0123456789ab::s6"`, `"toSession":"h0123456789ab::s7"`, `"forkedFrom":"h0123456789ab::s8"`, `"id":"a1"`, `"turnId":"t1"`, `"jobId":"j1"`, `"agentId":"agent-1"`, `"toolUseId":"tool-1"`, `"queueId":4`, `12345678901234567890`} {
+	for _, want := range []string{`"sessionId":"h0123456789ab::s1"`, `"id":"h0123456789ab::s1"`, `"parentId":"h0123456789ab::p1"`, `"sessionId":"h0123456789ab::s2"`, `"resumeSessionId":"h0123456789ab::s4"`, `"parentSessionId":"h0123456789ab::s5"`, `"fromSession":"h0123456789ab::s6"`, `"toSession":"h0123456789ab::s7"`, `"forkedFrom":"h0123456789ab::s8"`, `"id":"h0123456789ab::checkout:c1"`, `"path":"/srv/app"`, `"id":"hpeer0000000::checkout:c2"`, `"id":"a1"`, `"turnId":"t1"`, `"jobId":"j1"`, `"agentId":"agent-1"`, `"toolUseId":"tool-1"`, `"queueId":4`, `12345678901234567890`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %s in %s", want, text)
 		}

@@ -88,6 +88,12 @@ Each paired host has one mirror loop:
   project without a key, and every project's `localId`, is qualified with the
   host. A `repo:` id is never host-qualified, even though a key for a folder
   inside a repository contains `::`.
+- A mirrored row's checkout `id` is always qualified with the host, since a
+  checkout id is derived from the path alone. The same path on two hosts is
+  then two checkouts of one project; a project header names every other host
+  with a checkout, and the Mac's checkout rows name their host. The iPhone qualifies the checkout of each computer's own
+  rows the same way, and a proxied answer's `checkout.id` is re-qualified with
+  the session references.
 
 A conversation moved between machines keeps its id, so a local row and a
 host's row can name the same session. Whichever registered first keeps it. A

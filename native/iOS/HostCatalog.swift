@@ -141,6 +141,9 @@ struct HostCatalog {
         if let project = row.project {
             row.project = ProjectIdentity(id: qualify(host, project.id), displayName: project.displayName, rootPath: project.rootPath, kind: project.kind, archived: project.archived)
         }
+        if let checkout = row.checkout, let id = checkout.id {
+            row.checkout = CheckoutIdentity(id: qualify(host, id), path: checkout.path, branch: checkout.branch, detachedHead: checkout.detachedHead, isMain: checkout.isMain, dirty: checkout.dirty)
+        }
         return row
     }
 }

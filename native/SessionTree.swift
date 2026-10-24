@@ -63,8 +63,6 @@ struct SessionTree: Equatable {
         let name: String
         /// The daemon's project, or nil for the group of sessions without one.
         let identity: ProjectIdentity?
-        /// The short name of the host that owns the project, nil on this host.
-        let host: String?
         var checkouts: [Checkout]
         /// Families that are working, queued or need attention. Collapsing a
         /// project never hides them.
@@ -75,6 +73,14 @@ struct SessionTree: Equatable {
         var listedSessionCount: Int { checkouts.reduce(0) { $0 + $1.families.reduce(0) { $0 + $1.sessions.count } } }
         var sessionCountLabel: String { SessionTree.sessionCountLabel(listedSessionCount) }
         var archived: Bool { identity?.archived == true }
+        /// The other hosts with a checkout, in list order.
+        var hosts: [String] { HostNames.ordered(checkouts.compactMap(\.host)) }
+        var hostLabel: String? { hosts.isEmpty ? nil : hosts.joined(separator: ", ") }
+        var spansHosts: Bool { Set(checkouts.map(\.host?.id)).count > 1 }
+
+        func hostLabel(of checkout: Checkout) -> String? {
+            checkout.host.flatMap { HostNames.labels(checkouts.compactMap(\.host))[$0.id] }
+        }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {
             let ordered = SessionTree.newestFirst(checkouts.flatMap(\.families), by: SessionTree.activity)
@@ -98,6 +104,8 @@ struct SessionTree: Equatable {
 
     struct Checkout: Identifiable, Equatable {
         let id: String
+        /// The host the checkout is on, nil on this host.
+        let host: SessionHost?
         let label: String
         let branchLabel: String?
         let isMain: Bool
@@ -126,15 +134,15 @@ struct SessionTree: Equatable {
             let session = family.root
             let projectID = session.project?.id ?? noProjectID + (session.remoteHostName.map { "@" + $0 } ?? "")
             if !projects.contains(where: { $0.id == projectID }) {
-                projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, host: session.shortRemoteHostName, checkouts: []))
+                projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, checkouts: []))
             }
             let projectIndex = projects.firstIndex { $0.id == projectID }!
             if family.isWorking || family.sessions.contains(where: { $0.queueCount > 0 || attention[$0.id] != nil }) {
                 projects[projectIndex].pinned.insert(family.id)
             }
-            let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID
+            let checkoutID = session.checkout?.id ?? (session.checkout?.path ?? session.cwd ?? projectID) + (session.remoteHostID.map { "@" + $0 } ?? "")
             if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
-                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
+                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, host: session.remoteHostName == nil ? nil : session.host, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
             }
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].families.append(family)

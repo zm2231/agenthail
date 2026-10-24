@@ -45,6 +45,7 @@ targets:
       - path: ComposerCompletion.swift
       - path: SessionSelection.swift
       - path: ProjectActions.swift
+      - path: HostNames.swift
       - path: SessionTree.swift
       - path: UsageMeterText.swift
       - path: UsageStrip.swift

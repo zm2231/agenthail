@@ -116,9 +116,33 @@ struct SessionTreeTest {
         var remoteLoose = SessionState(id: "h1::loose", surface: "codex", name: "remote loose", alias: nil, status: "idle", lastActive: "2026-10-04T11:57:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/home/demo")
         remoteLoose.host = remote.host
         let hosted = SessionTree.build(sessions + [remote, loose, remoteLoose], filter: .all, attention: [:])
-        expect(hosted.projects.first { $0.id == "h1::agenthail" }?.host == "vps", "a remote project names its host without the domain")
-        expect(hosted.projects.first { $0.id == "agenthail" }?.host == nil, "a project on this host carries no host")
-        expect(Set(hosted.projects.suffix(2).map(\.host)) == [nil, "vps"] && hosted.projects.suffix(2).allSatisfy { $0.identity == nil }, "sessions without a project group per host, last: \(hosted.projects.map(\.id))")
+        expect(hosted.projects.first { $0.id == "h1::agenthail" }?.hosts == ["vps"], "a remote project names its host without the domain")
+        expect(hosted.projects.first { $0.id == "agenthail" }?.hosts == [], "a project on this host carries no host")
+        expect(Set(hosted.projects.suffix(2).map(\.hostLabel)) == [nil, "vps"] && hosted.projects.suffix(2).allSatisfy { $0.identity == nil }, "sessions without a project group per host, last: \(hosted.projects.map(\.id))")
+
+        func onHost(_ id: String, _ host: SessionHost?, checkout: String?) -> SessionState {
+            var row = session(id, status: "idle", lastActive: "2026-10-04T11:5\(id.count % 10):00Z", project: "repo:github.com/example/widget", checkout: "main", branch: "main")
+            row.checkout = CheckoutIdentity(id: checkout, path: "/srv/widget", branch: "main", detachedHead: nil, isMain: true, dirty: false)
+            row.host = host
+            return row
+        }
+        let vps = SessionHost(id: "h1", name: "vps.example.ts.net", state: "connected")
+        let laptop = SessionHost(id: "h2", name: "laptop.example.ts.net", state: "connected")
+        let spread = SessionTree.build([onHost("here", nil, checkout: "checkout-1"), onHost("h1::there", vps, checkout: "h1::checkout-1"), onHost("h2::elsewhere", laptop, checkout: "h2::checkout-1")], filter: .all, attention: [:]).projects
+        expect(spread.count == 1 && spread[0].checkouts.count == 3, "one repository on three hosts is one project with a checkout per host: \(spread.map { $0.checkouts.map(\.id) })")
+        expect(Set(spread[0].hosts) == ["vps", "laptop"] && spread[0].spansHosts, "the project header names every other host: \(spread[0].hosts)")
+        expect(Set(spread[0].checkouts.map { spread[0].hostLabel(of: $0) }) == [nil, "vps", "laptop"], "each checkout names its own host")
+        let home = SessionHost(id: "h3", name: "build.home", state: "connected")
+        let office = SessionHost(id: "h4", name: "build.office", state: "connected")
+        let twins = SessionTree.build([onHost("h3::a", home, checkout: "h3::checkout-1"), onHost("h4::b", office, checkout: "h4::checkout-1")], filter: .all, attention: [:]).projects
+        expect(Set(twins.first?.hosts ?? []) == ["build.home", "build.office"] && twins.first?.spansHosts == true, "hosts that share a short name keep their full names: \(twins.first?.hosts ?? [])")
+        let namesakes = SessionTree.build([onHost("h5::a", SessionHost(id: "h5", name: "build", state: "connected"), checkout: "h5::checkout-1"), onHost("h6::b", SessionHost(id: "h6", name: "build", state: "connected"), checkout: "h6::checkout-1")], filter: .all, attention: [:]).projects
+        expect(Set(namesakes.first?.hosts ?? []) == ["build (h5)", "build (h6)"], "hosts that share a full name add their id: \(namesakes.first?.hosts ?? [])")
+        expect(Set(namesakes.first.map { project in project.checkouts.map { project.hostLabel(of: $0) } } ?? []) == ["build (h5)", "build (h6)"], "each namesake checkout names its own host")
+        let unnamed = SessionTree.build([onHost("here", nil, checkout: nil), onHost("h1::there", vps, checkout: nil)], filter: .all, attention: [:]).projects
+        expect(unnamed.first?.checkouts.count == 2, "the same path on two hosts stays two checkouts without a checkout id")
+        let remoteOnly = SessionTree.build([onHost("h1::there", vps, checkout: "h1::checkout-1")], filter: .all, attention: [:]).projects
+        expect(remoteOnly.first?.spansHosts == false && remoteOnly.first?.hostLabel == "vps", "a project on one other host does not span hosts")
 
         var queued = session("queued", status: "idle", lastActive: "2026-09-01T00:00:00Z", project: "agenthail", checkout: "main", branch: "main")
         queued.queueCount = 1

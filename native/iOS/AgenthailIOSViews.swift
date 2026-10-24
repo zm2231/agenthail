@@ -275,7 +275,7 @@ struct ConversationListView: View {
                             Text(project.name)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
-                            if let host = project.host, model.showsHostNames {
+                            if let host = project.hostLabel, model.showsHostNames {
                                 IOSHostBadge(name: host)
                             }
                             Spacer(minLength: 0)
@@ -302,7 +302,7 @@ struct ConversationListView: View {
                             }
                         }
                     }
-                    .accessibilityLabel(project.host.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
+                    .accessibilityLabel(project.hostLabel.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
                     .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
                     .accessibilityIdentifier("project-" + project.id)
                 }

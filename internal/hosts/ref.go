@@ -37,9 +37,9 @@ func sessionReferenceKey(key string) bool {
 
 // QualifyJSON rewrites a remote host's response for this daemon's clients:
 // session reference fields (sessionId, any key ending in SessionId, parentId,
-// rootId, fromSession, toSession) and the id of session-shaped objects
-// (objects that also carry "surface") become host-qualified. Every other
-// value passes through unchanged.
+// rootId, fromSession, toSession), the id of session-shaped objects
+// (objects that also carry "surface") and the id of a "checkout" object
+// become host-qualified. Every other value passes through unchanged.
 func QualifyJSON(hostID string, raw []byte) ([]byte, error) {
 	var value any
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
@@ -58,6 +58,11 @@ func qualifyValue(hostID string, value any) any {
 			if text, ok := item.(string); ok && (sessionReferenceKey(key) || (key == "id" && sessionShaped)) {
 				typed[key] = Qualify(hostID, text)
 				continue
+			}
+			if checkout, ok := item.(map[string]any); ok && key == "checkout" {
+				if id, ok := checkout["id"].(string); ok {
+					checkout["id"] = Qualify(hostID, id)
+				}
 			}
 			typed[key] = qualifyValue(hostID, item)
 		}
