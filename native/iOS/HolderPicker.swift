@@ -31,7 +31,7 @@ struct IOSHolderPicker: View {
                 Image(systemName: "terminal")
             }
             .font(.footnote)
-            .foregroundStyle(picked == nil ? AnyShapeStyle(Color.orange) : AnyShapeStyle(PhonePalette.accentText))
+            .foregroundStyle(picked == nil ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.accentText))
             .padding(.horizontal, 8)
             .frame(minHeight: 44, alignment: .leading)
         }

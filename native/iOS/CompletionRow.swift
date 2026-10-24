@@ -17,7 +17,7 @@ struct CompletionRow: View {
                             .accessibilityHint(suggestion.detail)
                     }
                     if let notice {
-                        Text(notice).font(.footnote).foregroundStyle(.secondary)
+                        Text(notice).font(.footnote).foregroundStyle(PhonePalette.muted)
                             .lineLimit(2)
                             .frame(maxWidth: 260, minHeight: 44, alignment: .leading)
                     }
@@ -32,7 +32,7 @@ struct CompletionRow: View {
                 }
             }
             Button(action: dismiss) {
-                Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                Image(systemName: "xmark").font(.footnote.weight(.semibold)).foregroundStyle(PhonePalette.muted)
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
@@ -48,7 +48,7 @@ struct CompletionRow: View {
             Text(suggestion.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 .lineLimit(1).truncationMode(.middle)
             if !suggestion.detail.isEmpty {
-                Text(suggestion.detail).font(.caption).foregroundStyle(.secondary)
+                Text(suggestion.detail).font(.caption).foregroundStyle(PhonePalette.muted)
                     .lineLimit(1).truncationMode(.tail)
             }
         }

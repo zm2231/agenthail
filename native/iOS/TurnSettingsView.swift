@@ -21,11 +21,11 @@ struct TurnSettingsView: View {
             if !enabled {
                 Text("Turn settings apply to the next normal message. Steering uses the active turn.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PhonePalette.muted)
             } else if efforts.isEmpty {
                 Text("This runtime did not report selectable effort values.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PhonePalette.muted)
             }
         }
         .disabled(!enabled)

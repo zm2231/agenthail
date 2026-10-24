@@ -54,7 +54,7 @@ private struct DiffLine: View {
     var body: some View {
         let style: DesktopStyle? = switch line.kind {
         case .added: DesktopPalette.done
-        case .removed: .role(.diffRemoved)
+        case .removed: DesktopPalette.diffRemoved
         case .same: nil
         }
         let color = style?.resolve(in: environment)

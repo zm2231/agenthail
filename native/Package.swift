@@ -32,6 +32,7 @@ let package = Package(
                 "PaletteTokens.swift",
                 "TextColors.swift",
                 "RoleStyle.swift",
+                "RoleInlineStyle.swift",
                 "Backdrop.swift",
                 "ScrimField.swift",
                 "GlassSolve.swift",

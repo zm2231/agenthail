@@ -43,7 +43,7 @@ struct SessionAvatar: View {
             Circle().fill(.quaternary)
             Image(systemName: Self.glyph(surface))
                 .font(.system(size: size * 0.4, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
             ringView.padding(-3.5)
         }
         .frame(width: size, height: size)

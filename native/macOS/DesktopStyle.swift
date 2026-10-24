@@ -25,9 +25,10 @@ struct DesktopStyle: ShapeStyle {
     }
 
     private static func accent(_ use: Accent, in environment: EnvironmentValues) -> Color {
-        let dark = environment.colorScheme == .dark
-        let increased = environment.colorSchemeContrast == .increased
-        let colors = environment.textColors
+        accent(use, colors: environment.textColors, dark: environment.colorScheme == .dark, increased: environment.colorSchemeContrast == .increased)
+    }
+
+    static func accent(_ use: Accent, colors: TextColors, dark: Bool, increased: Bool) -> Color {
         guard let choice = colors.accentChoice.map(AccentContrast.RGB.init(hex:)) else {
             return system(use, colors: colors, increased: increased)
         }

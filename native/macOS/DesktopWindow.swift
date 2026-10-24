@@ -1369,12 +1369,12 @@ struct PeerMessage: View {
             HStack(spacing: DesktopSpace.s) {
                 Text(sender)
                     .font(.system(size: DesktopType.meta, weight: .semibold))
-                    .foregroundStyle(DesktopPalette.working)
+                    .foregroundStyle(DesktopPalette.peer)
                 let status = [time, note].compactMap { $0 }.joined(separator: " · ")
                 if !status.isEmpty {
                     Text(status)
                         .font(.system(size: DesktopType.caption))
-                        .foregroundStyle(DesktopPalette.muted)
+                        .foregroundStyle(DesktopPalette.meta)
                 }
                 MessageActions(text: text, revealed: hovering)
             }
@@ -1388,7 +1388,7 @@ struct PeerMessage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, DesktopSpace.m)
-        .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.working).frame(width: 2) }
+        .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.peer).frame(width: 2) }
         .onHover { hovering = $0 }
     }
 }
@@ -1453,6 +1453,7 @@ struct AssistantReply: View {
                 .font(.system(size: DesktopType.prose))
                 .lineSpacing(DesktopType.proseLineSpacing)
                 .foregroundStyle(DesktopPalette.text)
+                .desktopInlineStyle()
                 .textual.textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             if note != nil || footer != nil {
@@ -1461,7 +1462,7 @@ struct AssistantReply: View {
                     if !status.isEmpty {
                         Text(status)
                             .font(.system(size: DesktopType.caption))
-                            .foregroundStyle(DesktopPalette.muted)
+                            .foregroundStyle(DesktopPalette.meta)
                     }
                     MessageActions(text: text, revealed: hovering)
                 }

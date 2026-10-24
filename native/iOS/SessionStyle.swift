@@ -31,7 +31,7 @@ struct SessionMarkdown: View {
     var body: some View {
         StructuredText(markdown: text)
             .font(.system(.body, design: readingStyle ? .serif : .default))
-            .textual.inlineStyle(.default.code(.monospaced, .fontScale(0.85)))
+            .phoneInlineStyle()
             .textual.headingStyle(TranscriptHeadingStyle())
             .textual.paragraphStyle(TranscriptParagraphStyle())
             .textual.structuredTextStyle(.gitHub)
@@ -80,7 +80,7 @@ struct SessionTimestamp: View {
         if let value, let date = ISO8601DateFormatter.sessionDate(value) {
             Text(date, format: Calendar.current.isDateInToday(date) ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day().hour().minute())
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
                 .accessibilityLabel(date.formatted(date: .abbreviated, time: .shortened))
         }
     }

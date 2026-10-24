@@ -59,7 +59,7 @@ struct PairingForm: View {
                 VStack(spacing: 8) {
                     Text(adding ? "Add a computer" : "Connect to your agents").font(.largeTitle.bold()).multilineTextAlignment(.center)
                     Text("On a computer running Agenthail, run agenthail devices pair, or open Settings in its web dashboard or Mac app, and show a pairing code.")
-                        .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .foregroundStyle(PhonePalette.muted).multilineTextAlignment(.center)
                 }
                 .padding(.horizontal)
                 Button {
@@ -82,7 +82,7 @@ struct PairingForm: View {
                 if model.pairing { ProgressView("Pairing securely") }
                 Spacer()
                 Text("Your conversations stay between this phone and your computer over Tailscale.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 30)
+                    .font(.footnote).foregroundStyle(PhonePalette.muted).multilineTextAlignment(.center).padding(.horizontal, 30)
             }
             .padding(.vertical)
             .frame(maxWidth: 560)
@@ -236,10 +236,10 @@ struct ConversationListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             if let error = model.connectionError {
-                Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.secondary)
+                Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))
             } else if model.reconnecting {
-                Label("Reconnecting to your computer", systemImage: "desktopcomputer").font(.footnote).foregroundStyle(.secondary)
+                Label("Reconnecting to your computer", systemImage: "desktopcomputer").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))
             }
             if !tree.needsYou.isEmpty {
@@ -276,7 +276,7 @@ struct ConversationListView: View {
                             Spacer(minLength: 0)
                             Text("\(project.listedSessionCount)")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(PhonePalette.muted)
                             Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
@@ -328,7 +328,7 @@ struct ConversationListView: View {
             if search.count >= 3 {
                 Section("From saved history") {
                     if model.searching { ProgressView("Searching") }
-                    if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
                     ForEach(model.searchResults.filter { result in !families.contains(where: { $0.contains(result.id) }) }) { result in
                         sessionButton(result.session, snippet: result.snippet)
                     }
@@ -382,7 +382,7 @@ struct ConversationListView: View {
                 Label(expanded ? "Hide subagents" : "Show \(family.members.count == 1 ? "1 subagent" : "\(family.members.count) subagents")",
                       systemImage: expanded ? "chevron.down" : "chevron.right")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(PhonePalette.muted)
                     .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                     .contentShape(Rectangle())
             }
@@ -414,7 +414,7 @@ struct ConversationListView: View {
                         Text(reason).font(.subheadline).foregroundStyle(PhonePalette.attention).lineLimit(2)
                     }
                     if let snippet, !snippet.isEmpty {
-                        Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        Text(snippet).font(.subheadline).foregroundStyle(PhonePalette.muted).lineLimit(2)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -470,9 +470,9 @@ struct SessionScreen: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     let connection = model.connectionState(for: session.id)
                     if let error = connection.error {
-                        Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
+                        Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(PhonePalette.muted)
                     } else if connection.reconnecting {
-                        Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(.secondary)
+                        Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(PhonePalette.muted)
                     }
                     if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
                     if let error = model.sessionError {
@@ -484,7 +484,7 @@ struct SessionScreen: View {
                     }
                     if let detail {
                         if let warning = detail.transcriptWarning {
-                            Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(.secondary)
+                            Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
                         if let timeline = detail.timeline,
                            Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
@@ -494,10 +494,10 @@ struct SessionScreen: View {
                                     else { Label("Load older activity", systemImage: "arrow.up") }
                                 }.disabled(model.loadingOlderActivity).frame(minHeight: 44)
                             }
-                            if let error = model.olderActivityError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                            if let error = model.olderActivityError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
                             if timeline.truncated {
                                 Label("Showing recent activity. Older activity or long output has been shortened.", systemImage: "text.badge.ellipsis")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                             if activityOnly {
                                 ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
@@ -509,12 +509,12 @@ struct SessionScreen: View {
                             if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
                         } else {
                             if let reason = detail.timeline?.unavailableReason {
-                                Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+                                Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(PhonePalette.muted)
                             } else {
-                                Text("Message history. Detailed activity is not available for this session.").font(.footnote).foregroundStyle(.secondary)
+                                Text("Message history. Detailed activity is not available for this session.").font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                             if detail.transcriptTruncated == true {
-                                Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(.secondary)
+                                Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                             ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
                                 if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, timestamp: exchange.timestamp) }
@@ -603,14 +603,14 @@ struct SessionScreen: View {
                     if let detail {
                         if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
                             Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
-                                .font(.footnote).foregroundStyle(.secondary)
+                                .font(.footnote).foregroundStyle(PhonePalette.muted)
                                 .padding(.horizontal, 14).padding(.vertical, 10)
                                 .floatingGlass(in: Capsule())
                                 .padding()
                         } else {
                             if !liveSession.composerTurnNotice.isEmpty {
                                 Label(liveSession.composerTurnNotice, systemImage: "terminal")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.footnote).foregroundStyle(PhonePalette.muted)
                                     .padding(.horizontal, 12).padding(.vertical, 7)
                                     .floatingGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                                     .padding(.horizontal).padding(.top, 6)
@@ -629,7 +629,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.host?.name ?? "computer")).font(.caption2).foregroundStyle(PhonePalette.muted).lineLimit(1)
                         }
                     }
                 }
@@ -728,7 +728,7 @@ struct IOSComposer: View {
                 NavigationLink {
                     QueueListView(model: model, sessionID: session.id)
                 } label: {
-                    Text("Latest instruction: " + status).font(.footnote).foregroundStyle(.secondary)
+                    Text("Latest instruction: " + status).font(.footnote).foregroundStyle(PhonePalette.muted)
                         .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)
                 }.accessibilityHint("Open this session’s delivery inbox")
                     .accessibilityIdentifier("latest-instruction")
@@ -738,7 +738,7 @@ struct IOSComposer: View {
                     ComposerAttachmentStrip(model: model)
                 }
                 if let problem = model.attachmentProblem {
-                    Text(problem).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
+                    Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed).padding(.horizontal, 8)
                         .accessibilityIdentifier("attachment-problem")
                 }
                 if !session.sharedHolders.isEmpty {
@@ -748,7 +748,7 @@ struct IOSComposer: View {
                     let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
                     Button { model.toggleStash() } label: {
                         Label(empty ? "Bring back stashed draft" : "Draft stashed · returns after you send", systemImage: "tray.and.arrow.down")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PhonePalette.muted)
                             .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)
                     }
                     .buttonStyle(.plain)
@@ -835,7 +835,7 @@ struct IOSComposer: View {
                             else { Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(canSend ? .white : .secondary)
+                        .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(PhonePalette.muted))
                         .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.primary.opacity(0.08)), in: Circle())
                         .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
                         .disabled(!canSend)
@@ -979,7 +979,7 @@ struct IOSMessage: View {
                         .frame(minHeight: 44)
                 }
             } else if peer {
-                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(.blue)
+                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(PhonePalette.peer)
                 SessionMarkdown(text: text, readingStyle: true)
             } else {
                 SessionMarkdown(text: text, readingStyle: true)
@@ -989,7 +989,7 @@ struct IOSMessage: View {
         .padding(isUser ? 14 : 0)
         .padding(.leading, peer ? 12 : 0)
         .overlay(alignment: .leading) {
-            if peer { Rectangle().fill(.blue).frame(width: 2) }
+            if peer { Rectangle().fill(PhonePalette.peer).frame(width: 2) }
         }
         .background(isUser ? SessionStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 16))
         .padding(.leading, isUser && !dynamicTypeSize.isAccessibilitySize ? 16 : 0)
@@ -1016,7 +1016,7 @@ struct IOSMessage: View {
             HStack(spacing: 6) {
                 Text("✦").font(.caption).foregroundStyle(PhonePalette.accentText).accessibilityHidden(true)
                 if let finished {
-                    Text(TurnClock.footer(duration: finished, at: timestamp)).font(.caption).foregroundStyle(.secondary)
+                    Text(TurnClock.footer(duration: finished, at: timestamp)).font(.caption).foregroundStyle(PhonePalette.muted)
                 } else {
                     SessionTimestamp(value: timestamp)
                 }
@@ -1038,14 +1038,14 @@ struct AttachedFileChip: View {
             copied = true
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "doc").foregroundStyle(.secondary)
+                Image(systemName: "doc").foregroundStyle(PhonePalette.muted)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.name).font(.subheadline.weight(.medium)).lineLimit(1)
                     Text(copied ? "Path copied" : file.sizeLabel ?? "File")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(PhonePalette.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.footnote).foregroundStyle(.secondary)
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             .padding(.horizontal, 12)
             .frame(minHeight: 44)
@@ -1092,7 +1092,7 @@ struct IOSTimelineRow: View {
         } else if TimelineGroup.isTurnDuration(item) {
             Text(TurnClock.footer(duration: item.text, at: item.timestamp))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
                 .padding(.vertical, 4)
         } else if item.kind == "event" {
             TranscriptDivider(text: [eventLabel, TurnClock.time(item.timestamp)].compactMap { $0 }.joined(separator: " · "))
@@ -1125,7 +1125,7 @@ struct IOSTimelineRow: View {
 				} else if let retainedBody {
                     SessionMarkdown(text: retainedBody.text, readingStyle: item.kind == "reasoning")
                     if let error = retainedBody.error {
-                        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary)
+                        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(PhonePalette.muted)
                     }
                 }
             }
@@ -1181,7 +1181,7 @@ struct AttachmentRow: View {
             if let data, let image = Self.downsampledImage(data) {
                 Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(.secondary)
+                Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(PhonePalette.muted)
                 if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
             }
             SessionTimestamp(value: item.timestamp)
@@ -1227,7 +1227,7 @@ struct SessionSummary: View {
                 }
             }
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PhonePalette.muted)
             .frame(maxWidth: SessionStyle.readingWidth)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
@@ -1247,7 +1247,7 @@ struct SessionSummary: View {
         Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
               systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
         .font(.subheadline)
-        .foregroundStyle(detail.session.status == "busy" ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(.secondary))
+        .foregroundStyle(detail.session.status == "busy" ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
@@ -1258,7 +1258,7 @@ struct SessionSummary: View {
 					Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
 				}
 			}
-			.foregroundStyle(context.level == .full ? Color.red : context.level == .high ? Color.orange : Color.secondary)
+			.foregroundStyle(context.level == .full ? PhonePalette.failed : context.level == .high ? PhonePalette.attention : PhonePalette.muted)
 			.accessibilityLabel(context.spokenLabel)
         }
     }
@@ -1291,7 +1291,7 @@ struct SessionInspector: View {
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
                     if let value = detail.session.transport { LabeledContent("Connection", value: value) }
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
-                    if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
+                    if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(PhonePalette.muted) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
                 } header: {
                     Text("Session").accessibilityIdentifier("session-inspector-anchor")
@@ -1300,9 +1300,9 @@ struct SessionInspector: View {
                     Section("Background work") {
                         Text(background.summary)
                         ForEach(background.tasks ?? []) { task in
-                            Text(task.line).foregroundStyle(task.ambient == true ? .secondary : .primary)
+                            Text(task.line).foregroundStyle(task.ambient == true ? AnyShapeStyle(PhonePalette.muted) : AnyShapeStyle(.primary))
                         }
-                        if let note = background.sourceNote { Text(note).font(.footnote).foregroundStyle(.secondary) }
+                        if let note = background.sourceNote { Text(note).font(.footnote).foregroundStyle(PhonePalette.muted) }
                     }
                 }
                 Section("Context") {
@@ -1317,7 +1317,7 @@ struct SessionInspector: View {
                         LabeledContent("Compactions", value: context.compactionCount.formatted())
                         if let value = context.reclaimedTokens { LabeledContent("Tokens reclaimed", value: value.formatted()) }
                         if context.compacting { Label("Compacting context", systemImage: "arrow.down.right.and.arrow.up.left") }
-                    } else { Text("This agent has not reported context usage.").foregroundStyle(.secondary) }
+                    } else { Text("This agent has not reported context usage.").foregroundStyle(PhonePalette.muted) }
                 }
                 SessionEditingControls(model: model, detail: detail)
                 Section {
@@ -1332,7 +1332,7 @@ struct SessionInspector: View {
                     Section("Goal") {
                         if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
                         LabeledContent("Status", value: goal.displayStatus)
-                            .foregroundStyle(goal.needsAttention ? .orange : .primary)
+                            .foregroundStyle(goal.needsAttention ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(.primary))
                         if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatGoalDuration(value)) }
                         if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
@@ -1349,7 +1349,7 @@ struct SessionInspector: View {
                                 if let state = run.providerState, !state.isEmpty { LabeledContent("Provider state", value: state) }
                                 if let type = run.runType, !type.isEmpty { LabeledContent("Run type", value: type) }
                                 if let updated = run.updatedAt, !updated.isEmpty { LabeledContent("Updated", value: updated) }
-                                if !run.recordPath.isEmpty { Text(run.recordPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                                if !run.recordPath.isEmpty { Text(run.recordPath).font(.footnote.monospaced()).foregroundStyle(PhonePalette.muted).textSelection(.enabled) }
                             }
                         }
                     }
@@ -1360,7 +1360,7 @@ struct SessionInspector: View {
                 if !children.isEmpty || subagentsLoading || subagentsError != nil {
                     Section("Subagents") {
                         if subagentsLoading || subagentsError != nil {
-                            Text(subagentsError ?? "Loading subagents").foregroundStyle(.secondary)
+                            Text(subagentsError ?? "Loading subagents").foregroundStyle(PhonePalette.muted)
                         }
                         ForEach(children) { child in
                             Button {
@@ -1388,10 +1388,10 @@ struct SessionInspector: View {
                                     if link.working == true {
                                         Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText)
                                     } else if let value = link.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
-                                        Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                                        Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                                     }
                                 }
-                                if let kind = link.kindLabel { Text(kind).font(.caption).foregroundStyle(.secondary) }
+                                if let kind = link.kindLabel { Text(kind).font(.caption).foregroundStyle(PhonePalette.muted) }
                             }
                             .accessibilityElement(children: .combine)
                         }
@@ -1518,7 +1518,7 @@ struct IOSSessionRow: View {
 
     @ViewBuilder
     private func meta(spaced: Bool) -> some View {
-        Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.muted)
             .lineLimit(1).fixedSize()
         if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
             IOSHostBadge(name: host, unavailable: session.isUnavailable)
@@ -1546,7 +1546,7 @@ struct IOSSessionRow: View {
                 Text(limit)
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PhonePalette.muted)
             .lineLimit(1)
             .fixedSize()
         } else if session.isWorking {
@@ -1575,7 +1575,7 @@ struct IOSSessionRow: View {
                 Text(plan.badge)
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PhonePalette.muted)
             .lineLimit(1)
             .fixedSize()
             .accessibilityElement(children: .ignore)
@@ -1590,7 +1590,7 @@ struct IOSSessionRow: View {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) {
-                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
+                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()
                 }
             }
@@ -1604,11 +1604,11 @@ struct IOSSessionRow: View {
                 }
             }
             if session.isUnavailable, let reason = session.unavailableReason {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
+                Text(reason).font(.caption).foregroundStyle(PhonePalette.muted)
             } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
                 TimelineView(.everyMinute) { context in
                     if let note = activity.quietNote(now: context.date) {
-                        Text(note).font(.caption).foregroundStyle(.secondary)
+                        Text(note).font(.caption).foregroundStyle(PhonePalette.muted)
                     }
                 }
             }
@@ -1622,7 +1622,7 @@ struct IOSSessionRow: View {
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if !session.sharedHolders.isEmpty { Label("\(session.sharedHolders.count) terminals", systemImage: "terminal").font(.caption) }
                     if session.isReadOnly { Label("Read only", systemImage: "lock").font(.caption) }
-                }.foregroundStyle(.secondary)
+                }.foregroundStyle(PhonePalette.muted)
             }
         }
         .padding(.vertical, 8)
@@ -1642,7 +1642,7 @@ struct IOSHostBadge: View {
             Text(name).lineLimit(1).truncationMode(.tail)
         }
         .font(.caption)
-        .foregroundStyle(unavailable ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(Color.secondary))
+        .foregroundStyle(unavailable ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(PhonePalette.muted))
         .frame(maxWidth: 110, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(-1)
@@ -1660,7 +1660,7 @@ struct SettingsView: View {
                 ForEach(model.hosts) { host in
                     Section {
                         Label(connectionLabel(host), systemImage: connectionIcon(host))
-                        if let error = host.error { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                        if let error = host.error { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
                         if let build = host.build {
                             LabeledContent("Agenthail", value: build.label).font(.footnote).textSelection(.enabled)
                         }
@@ -1669,10 +1669,10 @@ struct SettingsView: View {
                                 LabeledContent(surface.name.capitalized, value: surface.connected ? "Needs attention" : "Unavailable")
                                 DisclosureGroup("Details") {
                                     if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
-                                        Text(detail).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text(detail).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
                                     }
                                     ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
-                                        Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text(line).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
                                     }
                                 }
                                 .font(.footnote)
@@ -1683,10 +1683,10 @@ struct SettingsView: View {
                                 Text("Browser sign-in: \(consumer.label)").font(.headline)
                                 Text(consumer.resolvedLabel).font(.footnote)
                                 if let problem = consumer.problem {
-                                    Text(problem).font(.footnote).foregroundStyle(.orange).textSelection(.enabled)
+                                    Text(problem).font(.footnote).foregroundStyle(PhonePalette.attention).textSelection(.enabled)
                                 }
                                 if let unavailable = consumer.unavailable {
-                                    Text(unavailable).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                    Text(unavailable).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
                                 }
                             }
                         }
@@ -1694,13 +1694,13 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 LabeledContent(peer.name, value: peer.stateLabel)
                                 if let build = peer.build {
-                                    Text(build.label).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                                    Text(build.label).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
                                 }
                                 if let detail = peer.detail, !detail.isEmpty {
-                                    Text(detail).font(.footnote).foregroundStyle(.secondary)
+                                    Text(detail).font(.footnote).foregroundStyle(PhonePalette.muted)
                                 }
                                 if let notice = peer.notice, !notice.isEmpty {
-                                    Text(notice).font(.footnote).foregroundStyle(.orange).lineLimit(3)
+                                    Text(notice).font(.footnote).foregroundStyle(PhonePalette.attention).lineLimit(3)
                                 }
                             }
                         }
@@ -1708,7 +1708,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 LabeledContent("Your name", value: person.name)
                                 Text(person.set ? "Set in Settings on \(host.name) or with agenthail person name." : "\(host.name)'s account name. Set yours in Settings on \(host.name) or with agenthail person name.")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }
                         if model.hosts.count > 1 { LabeledContent("Notifications", value: host.notifications) }
@@ -1746,7 +1746,7 @@ struct SettingsView: View {
                     } else {
                         Button("Enable notifications") { model.requestNotifications() }
                     }
-                    Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
             }
             .listRowBackground(GlassRowBackground(selected: false))
@@ -1787,7 +1787,7 @@ struct IOSAdoptSessionSheet: View {
                 Section {
                     Text("Agenthail stops the process that runs the conversation once it is idle and continues it in its own host, in the same config folder.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PhonePalette.muted)
                 }
                 switch controller.phase {
                 case .ready, .adopting:
@@ -1801,7 +1801,7 @@ struct IOSAdoptSessionSheet: View {
                 case .done(let summary):
                     Section { Text(summary) }
                 case .failed(let message):
-                    Section { Text(message).foregroundStyle(.red) }
+                    Section { Text(message).foregroundStyle(PhonePalette.failed) }
                 }
             }
             .navigationTitle("Open in Agenthail")
@@ -1850,9 +1850,9 @@ struct RecentPromptsSheet: View {
                     Text("All sessions").tag(true)
                 }
                 .pickerStyle(.segmented)
-                ForEach(problems, id: \.self) { Text($0).font(.footnote).foregroundStyle(.red) }
+                ForEach(problems, id: \.self) { Text($0).font(.footnote).foregroundStyle(PhonePalette.failed) }
                 if prompts.isEmpty && !loading {
-                    Text(query.isEmpty ? "Nothing sent yet." : "No sent prompt matches.").foregroundStyle(.secondary)
+                    Text(query.isEmpty ? "Nothing sent yet." : "No sent prompt matches.").foregroundStyle(PhonePalette.muted)
                 }
                 ForEach(prompts) { prompt in
                     Button {
@@ -1862,7 +1862,7 @@ struct RecentPromptsSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(prompt.text).lineLimit(3).foregroundStyle(.primary)
                             if allSessions, let title = model.snapshot?.sessions.first(where: { $0.id == prompt.sessionId })?.title {
-                                Text(title).font(.footnote).foregroundStyle(.secondary)
+                                Text(title).font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }
                     }

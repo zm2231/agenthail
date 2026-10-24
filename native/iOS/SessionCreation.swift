@@ -33,7 +33,7 @@ struct NewSessionSheet: View {
         NavigationStack {
             Form {
                 if loading { ProgressView("Loading session options") }
-                if let error = hosts.loadError ?? error { Section { Text(error).foregroundStyle(.red); Button("Reload options") { Task { await load() } } } }
+                if let error = hosts.loadError ?? error { Section { Text(error).foregroundStyle(PhonePalette.failed); Button("Reload options") { Task { await load() } } } }
                 if let options {
                     if options.surfaces.isEmpty {
                         ContentUnavailableView("No agent can start sessions", systemImage: "bubble.left", description: Text("Configure a supported runtime on \(hostName), then reload."))
@@ -42,7 +42,7 @@ struct NewSessionSheet: View {
                             Picker("Run with", selection: $selectedSurface) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
-                            Text(selectedSurface != "claude" ? "Uses the runtime configured on \(hostName)." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on \(hostName)." : "Starts a Claude session on \(hostName), run by Agenthail.").font(.footnote).foregroundStyle(.secondary)
+                            Text(selectedSurface != "claude" ? "Uses the runtime configured on \(hostName)." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on \(hostName)." : "Starts a Claude session on \(hostName), run by Agenthail.").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
                         let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {
@@ -57,7 +57,7 @@ struct NewSessionSheet: View {
                                 }
                                 ForEach(launchers.filter { !$0.available }) { launcher in
                                     if let detail = launcher.detail, !detail.isEmpty {
-                                        Text("\(launcher.label): \(detail)").font(.footnote).foregroundStyle(.secondary)
+                                        Text("\(launcher.label): \(detail)").font(.footnote).foregroundStyle(PhonePalette.muted)
                                     }
                                 }
                             }
@@ -73,7 +73,7 @@ struct NewSessionSheet: View {
                                     .accessibilityIdentifier("creation-project-picker")
                                 }
                                 TextField("~/projects/my-project", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                Text("Pick a project or type a folder. Leave blank to use the home folder on \(hostName). The folder must already exist.").font(.footnote).foregroundStyle(.secondary)
+                                Text("Pick a project or type a folder. Leave blank to use the home folder on \(hostName). The folder must already exist.").font(.footnote).foregroundStyle(PhonePalette.muted)
                             }
                         }
                         Section("Model") {
@@ -82,8 +82,8 @@ struct NewSessionSheet: View {
                                     .contentShape(Rectangle())
                             }
                             .accessibilityIdentifier("creation-model-picker")
-                            if let modelError { Text(modelError).font(.footnote).foregroundStyle(.secondary) }
-                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(.secondary)
+                            if let modelError { Text(modelError).font(.footnote).foregroundStyle(PhonePalette.muted) }
+                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
                         if selectedSurface == "codex" {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
@@ -119,14 +119,14 @@ struct NewSessionSheet: View {
                                         Text("Bypass permissions").tag("bypassPermissions")
                                         Text("Plan only").tag("plan")
                                     }
-                                    Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
+                                    Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(PhonePalette.muted)
                                 }
                             }.disabled(selectedLauncher?.isTerminal == true)
                         }
                     }
                 }
-                if let error = model.creationError { Section { Text(error).foregroundStyle(.red) } }
-                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(.orange) } }
+                if let error = model.creationError { Section { Text(error).foregroundStyle(PhonePalette.failed) } }
+                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(PhonePalette.attention) } }
             }
             .disabled(model.creatingSession)
             .navigationTitle("New session")

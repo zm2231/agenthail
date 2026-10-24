@@ -33,6 +33,7 @@ targets:
       - path: PaletteTokens.swift
       - path: TextColors.swift
       - path: RoleStyle.swift
+      - path: RoleInlineStyle.swift
       - path: Backdrop.swift
       - path: ScrimField.swift
       - path: GlassSolve.swift

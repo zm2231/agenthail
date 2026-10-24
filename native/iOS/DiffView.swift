@@ -48,16 +48,18 @@ struct DiffView: View {
 
 private struct DiffLine: View {
     let line: TextDiff.Line
+    @Environment(\.self) private var environment
 
     var body: some View {
-        let color: Color? = switch line.kind {
-        case .added: .green
-        case .removed: .red
+        let style: RoleStyle? = switch line.kind {
+        case .added: PhonePalette.done
+        case .removed: PhonePalette.diffRemoved
         case .same: nil
         }
+        let color = style?.resolve(in: environment)
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(line.kind.sign)
-                .foregroundStyle(color ?? .secondary)
+                .foregroundStyle(style ?? PhonePalette.muted)
                 .accessibilityHidden(true)
             Text(line.attributed(marking: color?.opacity(0.3)))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -75,7 +77,7 @@ private struct DiffNote: View {
 
     var body: some View {
         Text(text)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PhonePalette.muted)
             .padding(.horizontal, 26)
             .padding(.vertical, 2)
     }

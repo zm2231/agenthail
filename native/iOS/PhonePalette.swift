@@ -2,10 +2,13 @@ import SwiftUI
 import UIKit
 
 enum PhonePalette {
+    static let muted = RoleStyle(.muted)
+    static let peer = RoleStyle(.peer)
     static let attention = RoleStyle(.needsYou)
     static let working = RoleStyle(.working)
     static let done = RoleStyle(.done)
     static let failed = RoleStyle(.error)
+    static let diffRemoved = RoleStyle(.diffRemoved)
     static let accent = PhoneAccentStyle(use: .fill)
     static let accentText = PhoneAccentStyle(use: .text)
     static let ground = Color(uiColor: UIColor { traits in

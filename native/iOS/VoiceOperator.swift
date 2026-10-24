@@ -39,11 +39,11 @@ struct AgenthailVoiceOperatorSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
+                if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(PhonePalette.muted) }
 #if DEBUG && targetEnvironment(simulator)
                 if VoiceEvaluation.enabled {
                     HStack {
-                        Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
+                        Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(PhonePalette.muted)
                         Spacer()
                         Button("Speak next request") { VoiceEvaluation.device.speakNext() }
                             .font(.caption).disabled(!model.audioConnected)
@@ -52,44 +52,44 @@ struct AgenthailVoiceOperatorSheet: View {
 #endif
                 HStack(spacing: 12) {
                     Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
-                        .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)
+                        .font(.title2).foregroundStyle(model.audioConnected ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
                         .frame(width: 44, height: 44).background(.quaternary, in: Circle())
                     VStack(alignment: .leading, spacing: 4) {
                         Text(model.connectionTitle).font(.headline)
-                        Text(model.committedRoute).font(.subheadline).foregroundStyle(.secondary)
+                        Text(model.committedRoute).font(.subheadline).foregroundStyle(PhonePalette.muted)
                     }
                     Spacer(minLength: 0)
                     if model.working || model.dialing { ProgressView() }
                 }.padding(.vertical, 12)
-                if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(.orange) }
-                if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
+                if let error = model.error { Text(error).foregroundStyle(PhonePalette.failed).textSelection(.enabled) }
+                if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(PhonePalette.attention) }
+                if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(PhonePalette.attention).textSelection(.enabled) }
                 if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
                 if let state = model.state, !state.transcripts.isEmpty {
                     ForEach(state.transcripts) { item in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                            Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(PhonePalette.muted)
                             Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
                         }
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 20) {
                         Text("What would you like to work on?").font(.title2.weight(.semibold))
-                        Text("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.").font(.body).foregroundStyle(.secondary)
+                        Text("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.").font(.body).foregroundStyle(PhonePalette.muted)
                         VStack(alignment: .leading, spacing: 14) {
                             Label("What are you working on?", systemImage: "bubble.left")
                             Label("Review the failing tests.", systemImage: "bubble.left")
-                        }.font(.subheadline).foregroundStyle(.secondary)
+                        }.font(.subheadline).foregroundStyle(PhonePalette.muted)
                     }.padding(.vertical, 16)
                 }
-                if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
-                if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
+                if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(PhonePalette.muted) }
+                if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(PhonePalette.attention) }
                 if let detail = model.detail {
                     DisclosureGroup(isExpanded: $showActivity) {
                         VStack(alignment: .leading, spacing: 12) {
-                            if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
+                            if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(PhonePalette.attention) }
                             if let timeline = detail.timeline {
-                                if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
+                                if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(PhonePalette.muted) }
                                 ForEach(TimelineGroup.make(timeline.items)) { group in
                                     CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
                                 }
@@ -218,7 +218,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 callEntry
             } else if model.hostHangupUnconfirmed {
                 callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
-                if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
+                if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(PhonePalette.muted) }
             } else if model.state?.hasCall == true || model.audioConnected || model.dialing {
                 if model.audioConnected && model.state?.occupied != true {
                     VStack(alignment: .leading, spacing: 8) {
@@ -245,7 +245,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     callControl(model.muted ? "Unmute" : "Mute", icon: model.muted ? "mic.slash.fill" : "mic.fill", disabled: !model.audioConnected, action: model.toggleMute)
                     callControl("Hang up", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
                 }
-                if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
+                if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(PhonePalette.muted) }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     TextField("Session ID or alias (optional)", text: $model.targetID)
@@ -253,7 +253,7 @@ struct AgenthailVoiceOperatorSheet: View {
                         .autocorrectionDisabled()
                         .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
                     Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Voice starts with the normal Agenthail orchestrator workflow." : "Voice uses Codex realtime for audio and sends work only to this exact existing session.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(PhonePalette.muted)
                 }
                 callEntry
             }
@@ -273,7 +273,7 @@ struct AgenthailVoiceOperatorSheet: View {
             .disabled(!model.canCall)
             if !dynamicTypeSize.isAccessibilitySize {
                 Text(model.hostHangupPending ? "Audio ended locally. Confirming host hangup…" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session."))
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .font(.caption).foregroundStyle(PhonePalette.muted).multilineTextAlignment(.center)
                     .frame(minHeight: 32)
             }
         }
@@ -328,7 +328,7 @@ struct AgenthailVoiceOperatorSheet: View {
                             LabeledContent(name, value: String(format: "%.2fs", seconds)).font(.caption.monospaced())
                         }
                         if let failure = model.diagnostics?.persistenceError {
-                            Text("Call diagnostics could not be saved: \(failure)").foregroundStyle(.red)
+                            Text("Call diagnostics could not be saved: \(failure)").foregroundStyle(PhonePalette.failed)
                         }
                     }
                 }

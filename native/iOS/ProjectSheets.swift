@@ -86,7 +86,7 @@ private struct IOSAddProjectForm: View {
             Section("Name") {
                 TextField("Optional", text: $title)
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .navigationTitle("Add project").navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -131,7 +131,7 @@ private struct IOSRenameProjectForm: View {
             } footer: {
                 Text("The name applies on every computer where this project was added.")
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .navigationTitle("Rename \(project.state.displayName)").navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -184,7 +184,7 @@ private struct IOSProjectLeadForm: View {
                 Text(project.state.leads.isEmpty ? "Starts a lead conversation. Its first message starts it." : "Starts a new lead in place of \(project.state.leads.map { "@\($0.name)" }.joined(separator: " and ")). To make an existing conversation the lead, use Make project lead in its details.")
             }
             if let message = error ?? (usable.isEmpty ? "No computer with this project is connected." : nil) {
-                Text(message).font(.footnote).foregroundStyle(.red)
+                Text(message).font(.footnote).foregroundStyle(PhonePalette.failed)
             }
         }
         .navigationTitle("Lead of \(project.state.displayName)").navigationBarTitleDisplayMode(.inline)

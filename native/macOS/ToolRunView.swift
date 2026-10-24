@@ -226,6 +226,7 @@ struct ReasoningLine: View {
                     StructuredText(markdown: item.text)
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
+                        .desktopInlineStyle()
                         .textual.textSelection(.enabled)
                     ShortenedNote(item: item)
                 }
@@ -317,7 +318,7 @@ struct ToolOutputBlock: View {
                     }
                 }
                 .font(.system(size: DesktopType.meta, design: .monospaced))
-                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
+                .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.code)
                 .textSelection(.enabled)
                 .padding(DesktopSpace.s)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
@@ -376,7 +377,7 @@ struct FileChips: View {
                                 Text("+\(change.added)").foregroundStyle(DesktopPalette.done)
                             }
                             if change.removed > 0 {
-                                Text("−\(change.removed)").foregroundStyle(DesktopPalette.failed)
+                                Text("−\(change.removed)").foregroundStyle(DesktopPalette.diffRemoved)
                             }
                         }
                         .font(.system(size: DesktopType.meta, design: .monospaced))
@@ -422,7 +423,7 @@ struct CodeBlock: View {
     var body: some View {
         Text(text)
             .font(.system(size: DesktopType.meta, design: .monospaced))
-            .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
+            .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.code)
             .textSelection(.enabled)
             .lineLimit(lineLimit)
             .padding(DesktopSpace.s)
