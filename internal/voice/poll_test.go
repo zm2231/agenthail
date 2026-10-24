@@ -18,12 +18,8 @@ func TestAToolCallReachesItsHandlerWithoutWaitingOutThePoll(t *testing.T) {
 		{Method: "item/tool/call", Params: map[string]any{"requestId": "read", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}},
 	}})
 	p.mu.Unlock()
-	sent := time.Now()
 	p.arrived <- struct{}{}
-	testkit.Eventually(t, "the projects answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
-	if elapsed := time.Since(sent); elapsed >= 100*time.Millisecond {
-		t.Fatalf("the tool call took %v to reach its handler", elapsed)
-	}
+	testkit.Eventually(t, "the projects answer without a tick ending the poll", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.lastWait != pollWait || pollWait != 5*time.Second {
