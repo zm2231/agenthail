@@ -117,6 +117,7 @@ SOURCES=(
   macOS/WindowImage.swift
   macOS/WindowRectReader.swift
   macOS/WindowButtons.swift
+  macOS/WindowButtonBand.swift
 )
 
 rm -rf "$OUT"

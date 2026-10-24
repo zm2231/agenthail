@@ -42,6 +42,7 @@ final class WindowButtonBandView: NSView {
         }
         // AppKit moves the buttons back on its own titlebar layout passes, which post nothing else.
         for button in WindowButtons.kinds.compactMap(window.standardWindowButton) {
+            button.postsFrameChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: button, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.queue() }
             })

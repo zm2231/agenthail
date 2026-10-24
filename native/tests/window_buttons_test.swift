@@ -36,6 +36,17 @@ struct WindowButtonsTest {
             }
         }
 
+        let band = WindowButtonBandView(frame: CGRect(x: 0, y: height - WindowButtons.bandHeight, width: 300, height: WindowButtons.bandHeight))
+        window.contentView!.addSubview(band)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        if let close = window.standardWindowButton(.closeButton), let container = close.superview {
+            let placed = close.frame.origin
+            close.setFrameOrigin(.zero)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            check(close.frame.origin == placed, "a button AppKit moves goes back to the band, got \(close.frame.origin) for \(placed)")
+            check(abs(container.convert(close.frame, to: nil).midY - (height - WindowButtons.bandHeight / 2)) < 0.5, "the band view centres the buttons on itself")
+        }
+
         if failures > 0 { exit(1) }
         print("window buttons: centred in the title band at its leading inset, wherever the band sits")
     }
