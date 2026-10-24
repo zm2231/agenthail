@@ -244,7 +244,7 @@ func TestATurnVoiceCannotPlaceWhileADelegationIsUnsettledIsTakenAsTypedAfterItsB
 	case <-time.After(5 * time.Second):
 		t.Fatal("the unplaced turn was not logged")
 	}
-	within(t, "a heartbeat while the log is slow", 100*time.Millisecond, func() { _, _ = f.Apply(Action{Action: "heartbeat", AttemptID: "call-a"}) })
+	whileHeld(t, f.gate, "a heartbeat while the log is slow", func() { _, _ = f.Apply(Action{Action: "heartbeat", AttemptID: "call-a"}) })
 	close(release)
 	f.gate.release("Send")
 	if err := <-sent; err != nil {
