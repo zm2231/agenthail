@@ -276,6 +276,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
+        case "/api/v1/usage": body = UsagePreview.json()
         case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
         case "/api/v1/session":
             let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? "demo"

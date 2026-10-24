@@ -25,6 +25,7 @@ private struct BelowWindowChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .paneFrame(.top)
             .padding(.top, top)
             .ignoresSafeArea(.container, edges: top > 0 ? .top : [])
     }
@@ -113,7 +114,7 @@ struct TitleBarStrip: View {
         .padding(.leading, Self.buttonsWidth)
         .padding(.trailing, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane(.chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side, edge: .bottom)
         .background {
             Button("") { pane.stepTab(1) }.keyboardShortcut(.tab, modifiers: .control).hidden()
             Button("") { pane.stepTab(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift]).hidden()
@@ -165,6 +166,7 @@ struct ArchivedTabNotice: View {
         .frame(minHeight: 36)
         .frame(maxWidth: 480)
         .floatingGlass(DesktopPalette.raised, in: Capsule())
+        .floatingEdge(Capsule())
         .task(id: "\(session.id)/\(pane.archivedTabError ?? "")") {
             guard pane.archivedTabError == nil else { return }
             try? await Task.sleep(for: .seconds(10))
@@ -311,46 +313,10 @@ struct StatusStrip: View {
         .foregroundStyle(DesktopPalette.text2)
         .padding(.horizontal, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane(.chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side, edge: .top)
         .task(id: model.isConnected) {
             guard items.contains("usage"), model.isConnected else { return }
             await usage.run(model)
-        }
-    }
-}
-
-@MainActor
-final class UsageMonitor: ObservableObject {
-    @Published private(set) var claude: ProviderUsage?
-    @Published private(set) var codex: ProviderUsage?
-    @Published private(set) var problem: String?
-
-    func run(_ model: AgenthailModel) async {
-        while !Task.isCancelled {
-            await load(model)
-            try? await Task.sleep(for: .seconds(120))
-        }
-    }
-
-    private func load(_ model: AgenthailModel) async {
-        guard let api = model.api else { return }
-        if model.snapshot?.surfaces.contains(where: { $0.name == "codex" && $0.connected }) == true {
-            codex = try? await api.codexUsage().usage
-        } else {
-            codex = nil
-        }
-        do {
-            let options = try await api.sessionOptions()
-            guard let root = options.claudeConfigRoots?.first(where: \.primary) ?? options.claudeConfigRoots?.first else {
-                claude = nil
-                return
-            }
-            let fresh = try await api.claudeRootUsage(root: root.root)
-            claude = fresh.usage ?? root.usage
-            problem = fresh.usageProblem
-        } catch {
-            if error.isCancellation { return }
-            problem = AgenthailAPIError.userMessage(error)
         }
     }
 }

@@ -30,11 +30,13 @@ targets:
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: UIConfig.swift
+      - path: SurfaceMode.swift
       - path: PaletteTokens.swift
       - path: TextColors.swift
       - path: RoleStyle.swift
       - path: RoleInlineStyle.swift
       - path: Backdrop.swift
+      - path: BackdropLayers.swift
       - path: ScrimField.swift
       - path: GlassSolve.swift
       - path: HolderPins.swift
@@ -44,6 +46,8 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: SessionTree.swift
+      - path: UsageMeterText.swift
+      - path: UsageStrip.swift
       - path: MetadataOverlay.swift
       - path: ClaudeSubagentList.swift
       - path: SessionStore.swift

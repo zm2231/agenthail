@@ -12,10 +12,12 @@ struct SessionWindow: View {
     }
 
     var body: some View {
-        ConversationPane(model: model, pane: pane, headerInset: 84)
+        ConversationPane(model: model, pane: pane, headerInset: 84, gaps: pane.inspectorVisible ? .trailing : [])
+            .paneFrame(pane.inspectorVisible ? [.leading, .vertical] : .all)
             .ignoresSafeArea(.container, edges: .top)
             .inspector(isPresented: $pane.inspectorVisible) {
                 SessionInspector(model: model, pane: pane)
+                    .paneFrame([.trailing, .vertical])
                     .ignoresSafeArea(.container, edges: .top)
                     .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
             }

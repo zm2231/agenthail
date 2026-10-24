@@ -18,15 +18,10 @@ struct NewSessionView: View {
                     ChipFlow(spacing: DesktopSpace.xs) { options }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button(action: draft.start) {
-                        Image(systemName: draft.starting ? "ellipsis" : "arrow.up")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(DesktopPalette.onAccent)
-                            .frame(width: 32, height: 32)
-                            .background(DesktopPalette.accent, in: Circle())
+                        SendButtonFace(symbol: draft.starting ? "ellipsis" : "arrow.up", enabled: draft.canStart)
                     }
                     .buttonStyle(.plain)
                     .disabled(!draft.canStart)
-                    .opacity(draft.canStart ? 1 : 0.45)
                     .keyboardShortcut(shortcuts.keyboardShortcut(.send))
                     .accessibilityLabel(draft.starting ? "Starting" : "Start session")
                     .help(shortcuts.help("Start the session", .send))
@@ -36,8 +31,7 @@ struct NewSessionView: View {
             }
             .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
             .scrimSurface(radius: DesktopRadius.sheet)
-            .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(DesktopPalette.line))
-            .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+            .floatingEdge(RoundedRectangle(cornerRadius: DesktopRadius.sheet))
             .disabled(draft.starting || draft.submitted != nil)
             status
         }
@@ -207,6 +201,7 @@ struct NewSessionView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
             .scrimSurface(radius: DesktopRadius.card)
+            .floatingEdge(RoundedRectangle(cornerRadius: DesktopRadius.card))
         }
     }
 

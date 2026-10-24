@@ -118,7 +118,7 @@ textarea:focus-visible {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 36px;
   height: 76px;
@@ -175,7 +175,9 @@ textarea:focus-visible {
 .topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 14px;
+  min-width: 0;
 }
 .daemon-presence {
   display: flex;
@@ -197,6 +199,69 @@ textarea:focus-visible {
 .daemon-presence.offline i {
   background: var(--bad);
   box-shadow: none;
+}
+.usage-slot {
+  container-type: inline-size;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.usage-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  column-gap: 14px;
+  height: 20px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.usage-line[hidden] {
+  display: none;
+}
+.usage-meter,
+.usage-other {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.usage-meter meter {
+  width: 44px;
+  height: 6px;
+}
+.usage-value {
+  font-variant-numeric: tabular-nums;
+}
+.usage-other {
+  color: var(--quiet);
+}
+.usage-line .critical .usage-value,
+.usage-problem {
+  color: var(--bad);
+}
+.usage-problem {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.usage-line > [hidden] {
+  display: none;
+}
+@container (max-width: 900px) {
+  .usage-meter meter {
+    display: none;
+  }
+}
+@container (max-width: 700px) {
+  .usage-detail {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .usage-slot {
+    display: none;
+  }
 }
 .sync {
   color: var(--quiet);

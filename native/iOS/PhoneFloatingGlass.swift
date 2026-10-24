@@ -23,10 +23,10 @@ struct FloatingGlass<S: Shape>: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemBackground), in: shape)
-        } else if let appearance {
+        if let appearance {
             FloatingGlassBody(content: content, shape: shape, interactive: interactive, appearance: appearance)
+        } else if reduceTransparency {
+            content.solidFloating(in: shape)
         } else {
             FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: UIConfig.defaults.composerOpacity)
         }
@@ -41,6 +41,7 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     @Environment(\.backdropKey) private var backdropKey
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var key: PhoneAppearance.Key {
         backdropKey ?? PhoneAppearance.Key(surface: .pane, size: .zero, scale: 1, dark: colorScheme == .dark, solid: false,
@@ -49,7 +50,11 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     }
 
     var body: some View {
-        FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: appearance.floatingOpacity(key))
+        if appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency) {
+            content.solidFloating(in: shape)
+        } else {
+            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: appearance.floatingOpacity(key))
+        }
     }
 }
 

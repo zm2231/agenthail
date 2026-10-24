@@ -1,18 +1,15 @@
 import CryptoKit
-import ImageIO
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 @MainActor
 final class PhoneAppearance: ObservableObject {
-    /// A list shows the background as it is and its cards show the same
-    /// background as a pane; a session, Settings and the Inbox read on one
-    /// pane that covers the screen.
+    /// A transcript's pane scrims only around its rows; Settings and the Inbox scrim the whole pane.
     enum Surface: Hashable {
         case list
         case cards
         case pane
+        case transcript
     }
 
     struct Key: Hashable {
@@ -39,6 +36,7 @@ final class PhoneAppearance: ObservableObject {
     @Published private(set) var config = UIConfig.defaults
     @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
     @Published private(set) var rendered: [Key: BackdropImage] = [:]
+    @Published private(set) var layered: [Key: BackdropLayers] = [:]
     @Published private(set) var extremes: [Key: Float] = [:]
     @Published private(set) var problem: String?
     private var pending: Set<Key> = []
@@ -49,6 +47,7 @@ final class PhoneAppearance: ObservableObject {
 
     init(cache: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("appearance", isDirectory: true)) {
         self.cache = cache
+        if let cache { RenderStamp.prune(cache) }
         if let cache, let data = try? Data(contentsOf: cache.appendingPathComponent("ui.json")),
            let saved = try? JSONDecoder().decode(UIConfig.self, from: data) {
             config = saved
@@ -125,6 +124,7 @@ final class PhoneAppearance: ObservableObject {
 
     private func forgetRenders() {
         rendered = [:]
+        layered = [:]
         extremes = [:]
         recent = []
         pending = []
@@ -137,7 +137,7 @@ final class PhoneAppearance: ObservableObject {
         let kept = Set(config.imagePaths.map(Self.wallpaperFile))
         for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
             let name = file.lastPathComponent
-            if file.pathExtension == "png" || (name.hasPrefix("wallpaper") && !kept.contains(name)) {
+            if file.pathExtension == "png" || name.hasSuffix(".facts.json") || (name.hasPrefix("wallpaper") && !kept.contains(name)) {
                 try? files.removeItem(at: file)
             }
         }
@@ -161,15 +161,19 @@ final class PhoneAppearance: ObservableObject {
     }
 
     func file(_ key: Key) -> URL? {
-        let name = [config.rev, wallpaperID(dark: key.dark), "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
+        let name = [RenderStamp.current, config.rev, wallpaperID(dark: key.dark), "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
                     key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)", key.readable ? "readable" : "plain"].joined(separator: "-")
         let safe = name.map { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "@" ? $0 : "_" }
         return cache?.appendingPathComponent(String(safe) + ".png")
     }
 
     func request(_ key: Key) {
-        guard active, rendered[key] == nil, !pending.contains(key), key.size.width > 0, key.size.height > 0 else { return }
-        if let file = file(key), let saved = Self.read(file, size: key.size) {
+        guard active, rendered[key] == nil, layered[key] == nil, !pending.contains(key), key.size.width > 0, key.size.height > 0 else { return }
+        if key.surface == .transcript {
+            requestLayers(key)
+            return
+        }
+        if let file = file(key), let saved = PhoneRenderCache.read(file, size: key.size) {
             keep(saved, for: key)
             return
         }
@@ -183,41 +187,64 @@ final class PhoneAppearance: ObservableObject {
             pending.remove(key)
             guard let result else { return }
             keep(result, for: key)
-            if let target { Task.detached(priority: .utility) { Self.write(result, to: target) } }
+            if let target { Task.detached(priority: .utility) { PhoneRenderCache.write(result, to: target) } }
+        }
+    }
+
+    private func requestLayers(_ key: Key) {
+        if let file = file(key), let saved = PhoneRenderCache.readLayers(file, polarity: key.dark ? .dark : .light), saved.size == key.size {
+            keep(saved, for: key)
+            return
+        }
+        pending.insert(key)
+        let target = file(key)
+        let shown = spec(key)
+        let style = BackdropSpec.PaneStyle(minimum: key.solid ? 1 : Float(config.contentOpacity), strength: shown.strength)
+        let config = config
+        Task {
+            let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.layers(shown, panes: [.content: style]) }.value
+            guard config == self.config else { return }
+            pending.remove(key)
+            guard let result else { return }
+            keep(result, for: key)
+            if let target { Task.detached(priority: .utility) { PhoneRenderCache.write(result, to: target) } }
         }
     }
 
     private func keep(_ image: BackdropImage, for key: Key) {
         rendered[key] = image
+        remember(key)
+        let polarity: ScrimField.Polarity = key.dark ? .dark : .light
+        measure(key, current: { $0.rendered[key]?.image === image.image }) { GlassSolve.extreme(image, polarity: polarity) }
+    }
+
+    private func keep(_ layers: BackdropLayers, for key: Key) {
+        layered[key] = layers
+        remember(key)
+        guard let pane = layers.panes[.content] else { return }
+        let polarity: ScrimField.Polarity = key.dark ? .dark : .light
+        measure(key, current: { $0.layered[key]?.panes[.content]?.base === pane.base }) {
+            GlassSolve.extreme(pane, tint: layers.paneTint, size: layers.size, polarity: polarity)
+        }
+    }
+
+    private func remember(_ key: Key) {
         recent.removeAll { $0 == key }
         recent.append(key)
         while recent.count > Self.keptRenders {
             let dropped = recent.removeFirst()
             rendered.removeValue(forKey: dropped)
+            layered.removeValue(forKey: dropped)
             extremes.removeValue(forKey: dropped)
         }
-        measure(image, for: key)
     }
 
-    private func measure(_ image: BackdropImage, for key: Key) {
-        let polarity: ScrimField.Polarity = key.dark ? .dark : .light
+    private func measure(_ key: Key, current: @escaping (PhoneAppearance) -> Bool, _ extreme: @escaping @Sendable () -> Float?) {
         Task {
-            let extreme = await Task.detached(priority: .utility) { GlassSolve.extreme(image, polarity: polarity) }.value
-            guard rendered[key]?.image === image.image else { return }
-            extremes[key] = extreme
+            let value = await Task.detached(priority: .utility) { extreme() }.value
+            guard current(self) else { return }
+            extremes[key] = value
         }
-    }
-
-    nonisolated private static func write(_ rendered: BackdropImage, to url: URL) {
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else { return }
-        CGImageDestinationAddImage(destination, rendered.image, nil)
-        CGImageDestinationFinalize(destination)
-    }
-
-    private static func read(_ url: URL, size: CGSize) -> BackdropImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        return BackdropImage(image: image, size: size)
     }
 
     static let increasedTarget: Float = 7
@@ -243,11 +270,11 @@ final class PhoneAppearance: ObservableObject {
         default: scrimTint = UIConfig.RGBColor(hex: config.scrimTint).map { .color(Float($0.red), Float($0.green), Float($0.blue)) } ?? .auto
         }
         let full = CGRect(origin: .zero, size: key.size)
-        let strength = Float(key.surface == .pane ? config.backgroundSessionOpacity : config.backgroundOpacity)
+        let strength = Float(key.surface == .pane || key.surface == .transcript ? config.backgroundSessionOpacity : config.backgroundOpacity)
         var panes: [BackdropSpec.Pane] = []
         var texts: [CGRect] = []
         switch key.surface {
-        case .pane:
+        case .pane, .transcript:
             panes = [BackdropSpec.Pane(id: "session", rect: full, radius: 0, minimum: Float(config.contentOpacity), strength: strength)]
         case .cards:
             panes = [BackdropSpec.Pane(id: "cards", rect: full, radius: 0, minimum: Float(config.sidebarOpacity), strength: strength)]
@@ -382,9 +409,11 @@ private struct PhoneBackdropBody<Content: View>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var frame: CGRect = .zero
+    @State private var scrim = TranscriptScrim()
 
     private func key(_ surface: PhoneAppearance.Surface) -> PhoneAppearance.Key {
-        PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark, solid: reduceTransparency,
+        PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark,
+                            solid: appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency),
                             target: PhoneAppearance.contrastTarget(appearance.config, increased: contrast == .increased),
                             readable: appearance.config.readability || contrast == .increased)
     }
@@ -399,25 +428,30 @@ private struct PhoneBackdropBody<Content: View>: View {
 
     var body: some View {
         let rendered = appearance.active ? appearance.rendered[key(surface)] : nil
+        let layered = appearance.active && surface == .transcript ? appearance.layered[key(surface)] : nil
         let cards = appearance.active && surface == .list ? CardBackdrop(image: appearance.rendered[key(.cards)], frame: frame) : nil
         content
             .environment(\.cardBackdrop, cards)
             .environment(\.backdropKey, key(surface))
+            .environment(\.transcriptScrim, surface == .transcript ? scrim : nil)
             .scrollContentBackground(appearance.active ? .hidden : .automatic)
             .background {
-                BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame)
+                BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame) {
+                    if let layered { TranscriptBackdropLayer(layers: layered, scrim: scrim).transition(.opacity) }
+                }
             }
-            .animation(.easeOut(duration: 0.25), value: rendered == nil)
+            .animation(.easeOut(duration: 0.25), value: rendered == nil && layered == nil)
             .task(id: keys) { request() }
             .onChange(of: appearance.config) { request() }
             .onChange(of: appearance.wallpapers) { request() }
     }
 }
 
-private struct BackdropLayer: View {
+private struct BackdropLayer<Layered: View>: View {
     let image: CGImage?
     let grouped: Bool
     @Binding var frame: CGRect
+    @ViewBuilder let layered: Layered
 
     var body: some View {
         GeometryReader { proxy in
@@ -429,6 +463,7 @@ private struct BackdropLayer: View {
                         .resizable()
                         .transition(.opacity)
                 }
+                layered
             }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         }
@@ -437,7 +472,6 @@ private struct BackdropLayer: View {
         .accessibilityHidden(true)
     }
 }
-
 
 struct AppearanceScope<Content: View>: View {
     @ObservedObject var appearance: PhoneAppearance

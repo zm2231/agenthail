@@ -25,6 +25,7 @@ final class WindowBackdrop: ObservableObject {
     @Published private(set) var composerOpacity: Double = 0.5
     @Published private(set) var feather: CGFloat = 240
     @Published private(set) var tints: [PaneRole: CGFloat] = [:]
+    @Published private(set) var solid = false
 
     private var windowSize: CGSize = .zero
     private var scale: CGFloat = 2
@@ -73,20 +74,23 @@ final class WindowBackdrop: ObservableObject {
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
         let workspace = NSWorkspace.shared
-        let floating = DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast)
+        let solid = config.solidSurfaces(dark: dark, reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency)
+        if self.solid != solid { self.solid = solid }
+        let floating = solid ? 1 : DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast)
         if composerOpacity != floating { composerOpacity = floating }
         let feather = CGFloat(config.scrimFeather)
         if self.feather != feather { self.feather = feather }
-        let solid = !config.glass || workspace.accessibilityDisplayShouldReduceTransparency
         let tints: [PaneRole: CGFloat] = [
             .sidebar: solid ? 1 : CGFloat(config.sidebarOpacity),
             .content: solid ? 1 : CGFloat(config.contentOpacity),
-            .chrome: CGFloat(config.chromeOpacity),
+            .chrome: solid ? 1 : CGFloat(config.chromeOpacity),
         ]
         if self.tints != tints { self.tints = tints }
-        if !wanted { layers = nil; rendered = nil }
+        if !wanted || layers.map({ $0.layers.polarity != polarity }) == true { layers = nil; rendered = nil }
         schedule()
     }
+
+    private var polarity: ScrimField.Polarity { dark ? .dark : .light }
 
     func windowChanged(_ window: NSWindow) {
         self.window = window
@@ -191,8 +195,8 @@ final class WindowBackdrop: ObservableObject {
             roles: roles.map(Self.rgb),
             size: windowSize,
             scale: scale,
-            solidPanes: !config.glass || workspace.accessibilityDisplayShouldReduceTransparency,
-            readability: config.readability || workspace.accessibilityDisplayShouldIncreaseContrast
+            solidPanes: solid,
+            readability: !solid && (config.readability || workspace.accessibilityDisplayShouldIncreaseContrast)
         )
     }
 

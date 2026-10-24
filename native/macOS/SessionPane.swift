@@ -355,7 +355,7 @@ final class SessionPane: ObservableObject, Identifiable {
         olderItems = warm?.older ?? []
         olderCursor = warm?.olderCursor
         olderError = nil
-        requestError = nil
+        if requestError != nil { requestError = nil }
         streamedRows = []
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
@@ -781,14 +781,14 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func syncRequests(for session: SessionState) async {
         guard session.capabilities.respond, !session.isReadOnly else {
-            requests = nil
+            if requests != nil { requests = nil }
             requestsKey = nil
-            requestError = nil
+            if requestError != nil { requestError = nil }
             return
         }
         let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
         guard requestsKey != key else { return }
-        if requestsKey?.hasPrefix(session.id + "|") != true { requests = nil }
+        if requestsKey?.hasPrefix(session.id + "|") != true, requests != nil { requests = nil }
         requestsKey = key
         await fetchRequests(session.id, key: key)
     }
@@ -800,8 +800,8 @@ final class SessionPane: ObservableObject, Identifiable {
         do {
             let loaded = try await api.requests(sessionID: id)
             guard requestGeneration == generation, selectedSessionID == id, requestsKey == key, removedSession == nil else { return }
-            requests = loaded
-            requestError = nil
+            if requests != loaded { requests = loaded }
+            if requestError != nil { requestError = nil }
         } catch {
             guard requestGeneration == generation, selectedSessionID == id, removedSession == nil else { return }
             requestsKey = nil
@@ -815,7 +815,7 @@ final class SessionPane: ObservableObject, Identifiable {
         defer { answeringRequest = nil }
         do {
             _ = try await api.respond(sessionID: id, requestID: request.id, decision: decision)
-            requestError = nil
+            if requestError != nil { requestError = nil }
         } catch AgenthailAPIError.requestStale {
             requests = requests?.removing(request.id)
             requestError = "That request was already answered or has expired."
@@ -830,7 +830,7 @@ final class SessionPane: ObservableObject, Identifiable {
         guard let api = model.api, let id = selectedSessionID else { return }
         do {
             try await api.setPermissionMode(sessionID: id, mode: mode)
-            requestError = nil
+            if requestError != nil { requestError = nil }
         } catch {
             requestError = error.localizedDescription
         }

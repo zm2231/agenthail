@@ -73,7 +73,7 @@ private struct SplitDividerProbe: NSViewRepresentable {
 
         func apply() {
             for split in splits.compactMap(\.split) {
-                for divider in split.subviews where String(describing: type(of: divider)).hasSuffix("SplitDividerView") {
+                for divider in split.subviews where ["SplitDividerView", "SplitViewShadowView"].contains(where: String(describing: type(of: divider)).hasSuffix) {
                     let alpha: CGFloat = hidden ? 0 : 1
                     if divider.alphaValue != alpha { divider.alphaValue = alpha }
                 }

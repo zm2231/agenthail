@@ -24,6 +24,14 @@ enum GlassSolve {
         return extreme(pooled, polarity: polarity)
     }
 
+    static func extreme(_ pane: BackdropLayers.Pane, tint: BackdropRGB, size: CGSize, polarity: ScrimField.Polarity) -> Float? {
+        let pw = Int(size.width.rounded()), ph = Int(size.height.rounded())
+        guard pw > 0, ph > 0, let base = pane.base, let pooled = BackdropRenderer.pool(base, to: pw, ph, polarity: polarity) else { return nil }
+        let flat = ScrimField.Raster(width: pw, height: ph, fill: (tint.x, tint.y, tint.z))
+        let shown = ScrimField.composite(pooled, tint: flat, alpha: [Float](repeating: pane.minimum, count: pw * ph))
+        return extreme(shown, polarity: polarity)
+    }
+
     static func extreme(_ raster: ScrimField.Raster, polarity: ScrimField.Polarity) -> Float {
         var worst: Float = polarity == .dark ? 0 : 1
         for i in stride(from: 0, to: raster.rgb.count, by: 3) {

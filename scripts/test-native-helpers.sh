@@ -45,6 +45,7 @@ SOURCES=(
   TimelineMetadata.swift
   TurnSettings.swift
   UIConfig.swift
+  SurfaceMode.swift
   PaletteTokens.swift
   TextColors.swift
   RoleStyle.swift
@@ -61,9 +62,10 @@ SOURCES=(
   macOS/DesktopPalette.swift
   macOS/InterfaceStore.swift
   Backdrop.swift
-  macOS/BackdropLayers.swift
+  BackdropLayers.swift
   macOS/BoundedDock.swift
-  macOS/UsageMeters.swift
+  UsageMeterText.swift
+  UsageStrip.swift
   macOS/ContextRingGauge.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
@@ -101,6 +103,8 @@ SOURCES=(
   macOS/BackdropSurface.swift
   macOS/FloatingGlass.swift
   macOS/GlassPane.swift
+  macOS/PaneFrame.swift
+  macOS/GlassColumnMask.swift
   macOS/ScrimAnchor.swift
   macOS/ScrimMask.swift
   macOS/ScrimRegion.swift

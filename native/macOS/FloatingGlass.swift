@@ -28,7 +28,7 @@ private struct FloatingGlassBody<Content: View, S: InsettableShape>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        if !backdrop.active || reduceTransparency {
+        if !backdrop.active || reduceTransparency || backdrop.solid {
             content.background(fallback, in: shape)
         } else if #available(macOS 26, *) {
             content

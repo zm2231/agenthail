@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import Combine
 import Foundation
 
 final class StaleRequestStub: URLProtocol, @unchecked Sendable {
@@ -50,6 +51,30 @@ struct StaleRequestCardTest {
         let state = SessionRequests(permissionMode: "acceptEdits", requests: [dead])
         check(state.removing("dead").requests.isEmpty && state.removing("dead").permissionMode == "acceptEdits", "removing keeps the permission mode")
         check(state.removing("other") == state, "removing another id changes nothing")
+
+        let quiet = SessionState(id: "S", surface: "claude", name: "s", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        await pane.syncRequests(for: quiet)
+        check(pane.requests == nil, "a session that can't answer requests clears the cards")
+        var published = 0
+        let watch = pane.objectWillChange.sink { published += 1 }
+        await pane.syncRequests(for: quiet)
+        watch.cancel()
+        check(published == 0, "resyncing a session that can't answer requests publishes nothing: \(published)")
+
+        StaleRequestStub.requestsReply = (200, #"{"permissionMode":"","requests":[]}"#)
+        var sets: [SessionRequests?] = []
+        var errorSets = 0
+        let requestWatch = pane.$requests.dropFirst().sink { sets.append($0) }
+        let errorWatch = pane.$requestError.dropFirst().sink { _ in errorSets += 1 }
+        await pane.syncRequests(for: session)
+        check(sets.count == 1 && sets[0]?.requests.isEmpty == true, "reopening sets the loaded requests once: \(sets)")
+        var waiting = session
+        waiting.waitingOn = WaitingState(kind: "question", id: "q")
+        await pane.syncRequests(for: waiting)
+        requestWatch.cancel()
+        errorWatch.cancel()
+        check(sets.count == 1, "rereading the same requests sets nothing: \(sets.count)")
+        check(errorSets == 0, "a request read with no error to clear sets nothing: \(errorSets)")
         print("stale request card tests passed")
     }
 
