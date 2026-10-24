@@ -92,7 +92,7 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
     roles: texts.map(luminance),
     target,
     readable,
-    gutter: number("glass.gutter", 8),
+    gutter: number("glass.gutter", 12),
     glass: {
       on: theme === "dark" && values.glass !== "off" && !reducedTransparency,
       tint: readable ? readableSurface(tint, texts, ground, target + MARGIN) : tint,
