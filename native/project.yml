@@ -36,6 +36,7 @@ targets:
       - path: RoleStyle.swift
       - path: RoleInlineStyle.swift
       - path: Backdrop.swift
+      - path: BackdropLayers.swift
       - path: ScrimField.swift
       - path: GlassSolve.swift
       - path: HolderPins.swift

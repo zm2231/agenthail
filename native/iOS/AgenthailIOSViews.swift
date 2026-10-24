@@ -470,67 +470,71 @@ struct SessionScreen: View {
         timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
     }
 
+    @ViewBuilder private var transcriptRows: some View {
+        let connection = model.connectionState(for: session.id)
+        if let error = connection.error {
+            Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(PhonePalette.muted)
+        } else if connection.reconnecting {
+            Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(PhonePalette.muted)
+        }
+        if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
+        if let error = model.sessionError {
+            ContentUnavailableView {
+                Label("Could not refresh conversation", systemImage: "exclamationmark.bubble")
+            } description: { Text(error) } actions: {
+                Button("Retry") { Task { await model.loadSession(session.id) } }
+            }
+        }
+        if let detail {
+            if let warning = detail.transcriptWarning {
+                Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(PhonePalette.muted)
+            }
+            if let timeline = detail.timeline,
+               Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
+                if (model.activityCursor ?? 0) > 0 {
+                    Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
+                        if model.loadingOlderActivity { ProgressView("Loading older activity") }
+                        else { Label("Load older activity", systemImage: "arrow.up") }
+                    }.disabled(model.loadingOlderActivity).frame(minHeight: 44)
+                }
+                if let error = model.olderActivityError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
+                if timeline.truncated {
+                    Label("Showing recent activity. Older activity or long output has been shortened.", systemImage: "text.badge.ellipsis")
+                        .font(.footnote).foregroundStyle(PhonePalette.muted)
+                }
+                if activityOnly {
+                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
+                } else {
+                    ForEach(TimelineGroup.make(items)) { group in
+                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
+                    }
+                }
+                if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
+            } else {
+                if let reason = detail.timeline?.unavailableReason {
+                    Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(PhonePalette.muted)
+                } else {
+                    Text("Message history. Detailed activity is not available for this session.").font(.footnote).foregroundStyle(PhonePalette.muted)
+                }
+                if detail.transcriptTruncated == true {
+                    Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(PhonePalette.muted)
+                }
+                ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
+                    if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, timestamp: exchange.timestamp) }
+                    if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, timestamp: exchange.timestamp) }
+                }
+                if detail.exchanges.isEmpty {
+                    ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
+                }
+            }
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    let connection = model.connectionState(for: session.id)
-                    if let error = connection.error {
-                        Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(PhonePalette.muted)
-                    } else if connection.reconnecting {
-                        Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(PhonePalette.muted)
-                    }
-                    if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
-                    if let error = model.sessionError {
-                        ContentUnavailableView {
-                            Label("Could not refresh conversation", systemImage: "exclamationmark.bubble")
-                        } description: { Text(error) } actions: {
-                            Button("Retry") { Task { await model.loadSession(session.id) } }
-                        }
-                    }
-                    if let detail {
-                        if let warning = detail.transcriptWarning {
-                            Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(PhonePalette.muted)
-                        }
-                        if let timeline = detail.timeline,
-                           Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
-                            if (model.activityCursor ?? 0) > 0 {
-                                Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
-                                    if model.loadingOlderActivity { ProgressView("Loading older activity") }
-                                    else { Label("Load older activity", systemImage: "arrow.up") }
-                                }.disabled(model.loadingOlderActivity).frame(minHeight: 44)
-                            }
-                            if let error = model.olderActivityError { Text(error).font(.footnote).foregroundStyle(PhonePalette.muted) }
-                            if timeline.truncated {
-                                Label("Showing recent activity. Older activity or long output has been shortened.", systemImage: "text.badge.ellipsis")
-                                    .font(.footnote).foregroundStyle(PhonePalette.muted)
-                            }
-                            if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
-                            } else {
-                                ForEach(TimelineGroup.make(items)) { group in
-                                    CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
-                                }
-                            }
-                            if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
-                        } else {
-                            if let reason = detail.timeline?.unavailableReason {
-                                Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(PhonePalette.muted)
-                            } else {
-                                Text("Message history. Detailed activity is not available for this session.").font(.footnote).foregroundStyle(PhonePalette.muted)
-                            }
-                            if detail.transcriptTruncated == true {
-                                Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(PhonePalette.muted)
-                            }
-                            ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
-                                if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, timestamp: exchange.timestamp) }
-                                if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, timestamp: exchange.timestamp) }
-                            }
-                            if detail.exchanges.isEmpty {
-                                ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
-                            }
-                        }
-                    }
+                    Group { transcriptRows }.transcriptScrimRow()
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
@@ -542,10 +546,11 @@ struct SessionScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
                 .coordinateSpace(.named(TranscriptRows.contentSpace))
+                .transcriptScrimContent()
             }
             .scrollPosition($position)
             .accessibilityIdentifier("session-timeline")
-            .phoneBackdrop(.pane)
+            .phoneBackdrop(.transcript)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
             .defaultScrollAnchor(.top, for: .alignment)
