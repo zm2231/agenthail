@@ -275,9 +275,11 @@ func TestThePromptHookLeavesThePromptToClaudeAtOnceWhenNoDaemonServiceCouldResta
 
 func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testing.T) {
 	client := stoppedDaemonClient(t)
-	previousRetry, previousLimit := claudePromptHookRetry, claudePromptHookUnheldLimit
-	claudePromptHookRetry, claudePromptHookUnheldLimit = 10*time.Millisecond, 200*time.Millisecond
-	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookUnheldLimit = previousRetry, previousLimit })
+	previousRetry, previousHeld, previousLimit := claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit
+	claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit = 10*time.Millisecond, time.Hour, 200*time.Millisecond
+	t.Cleanup(func() {
+		claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit = previousRetry, previousHeld, previousLimit
+	})
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
 	decided := make(chan *surfaces.ClaudePromptDecision, 1)
 	var checks atomic.Int32
@@ -302,9 +304,11 @@ func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testi
 }
 
 func TestThePromptHookKeepsHoldingWhileADaemonHoldsItsPromptBetweenRestarts(t *testing.T) {
-	previousRetry, previousLimit := claudePromptHookRetry, claudePromptHookUnheldLimit
-	claudePromptHookRetry, claudePromptHookUnheldLimit = 10*time.Millisecond, 100*time.Millisecond
-	t.Cleanup(func() { claudePromptHookRetry, claudePromptHookUnheldLimit = previousRetry, previousLimit })
+	previousRetry, previousHeld, previousLimit := claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit
+	claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit = 10*time.Millisecond, 10*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() {
+		claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit = previousRetry, previousHeld, previousLimit
+	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * claudePromptHookUnheldLimit)
 		panic(http.ErrAbortHandler)
