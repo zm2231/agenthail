@@ -121,7 +121,7 @@ function browserColour(document) {
   probe.style.display = "none";
   document.body.append(probe);
   const resolve = (value) => {
-    probe.style.color = value;
+    probe.style.setProperty("color", value, "important");
     return getComputedStyle(probe).color;
   };
   return (value, under) => {
@@ -135,7 +135,8 @@ function browserColour(document) {
     }
     context.fillStyle = resolved;
     context.fillRect(0, 0, 1, 1);
-    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+    const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+    if (a === 0) return null;
     return [r / 255, g / 255, b / 255];
   };
 }
