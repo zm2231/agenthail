@@ -216,6 +216,7 @@ type Service struct {
 	rewait     bool
 	lastSpeech time.Time
 	listening  bool
+	connected  chan struct{}
 }
 
 // snapshot is the state as of the last release of s.mu, so View never waits
@@ -562,6 +563,10 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 			return errors.New("no matching negotiated call")
 		}
 		v.Phase = "connected"
+		if s.connected != nil {
+			close(s.connected)
+			s.connected = nil
+		}
 		return s.commit()
 	case "stop":
 		return s.hangup(ctx, a.AttemptID)
@@ -685,6 +690,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	*v.Session = session
 	s.endCall()
 	s.call, s.cancelCall = context.WithCancel(s.background)
+	s.connected = make(chan struct{})
 	s.cursor = cursor
 	s.wakePoll()
 	s.boundAttempt, s.eventGap, s.disconnectedAt = "", false, time.Time{}
@@ -726,8 +732,7 @@ func (s *Service) start(ctx context.Context, owner string, a Action) error {
 	}
 	if v.Phase != "ended" {
 		s.observe()
-		s.followTarget(v.Target)
-		s.followEarlier(v.Target, outcomes)
+		s.followTarget(v.Target, s.reported(v.Target, outcomes))
 	}
 	if saveErr := s.commit(); saveErr != nil {
 		return saveErr
@@ -944,15 +949,14 @@ func (s *Service) selectTarget(ctx context.Context, requested string, change tar
 		v.Message = "Voice is with the Agenthail orchestrator."
 		s.stopFollowing()
 		if transfer {
-			s.followEarlier(nil, nil)
+			s.reported(nil, nil)
 		}
 		return "", s.commit()
 	}
 	v.Target = target.Session
 	if transfer {
 		v.Brief = briefInfo
-		s.followTarget(target.Session)
-		s.followEarlier(target.Session, outcomes)
+		s.followTarget(target.Session, s.reported(target.Session, outcomes))
 	}
 	v.CodingProvider = string(target.Adapter.Name())
 	if transfer {

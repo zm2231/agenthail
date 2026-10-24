@@ -145,14 +145,19 @@ being handed to the call.
 
 A request whose turn voice follows is kept, in the voice state file, until
 voice has its outcome. One whose turn ends during the call is spoken then and
-forgotten. One still open when the call ends is reported once in the brief of
-the next call to the same session, read from the session's journal: its reply's
-opening sentences, how it failed, or that it is still working. A request still
-working is followed by the new call, which speaks its reply as the request's
-own when it comes. A request is never sent again. Moving voice to another
-session or to the orchestrator, or calling one of them, forgets the requests
-kept for the previous session. Up to 16 are kept, and a brief reports up to 6;
-a request whose outcome could not be read is named as such and kept.
+forgotten. One still open when the call ends, or whose follower failed before
+its turn ended, is reported once in the brief of the next call to the same
+session, read from the session's journal: its reply's opening sentences, how it
+failed, or that it is still working. A request still working is followed by the
+new call. Once the call connects, its follower reads those turns again after it
+subscribes, so a turn that ended between the brief and the subscription is
+spoken then, as the request's own; later replies are spoken as they come. A
+request is never sent again. Moving voice to another session or to the
+orchestrator, or calling one of them, forgets the requests kept for the previous
+session. Up to 16 are kept, and dropping the oldest past that is recorded as a
+`voice/request/dropped` event. A brief reports the oldest 6 and counts the rest,
+which stay kept for a later call; a request whose outcome could not be read is
+named as such and kept.
 
 After each turn the host reads the session's brief again. When the session's
 compaction count rose since the brief voice holds, voice is told the session

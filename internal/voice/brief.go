@@ -94,7 +94,7 @@ func RenderBrief(src BriefSource) (string, BriefInfo) {
 		fmt.Fprintf(&head, "Context compactions so far: %d. Details from before the latest one may no longer be in the session's memory.\n", *src.Compactions)
 	}
 	if left := writeEarlier(&head, src.Earlier); left > 0 {
-		omitted = append(omitted, fmt.Sprintf("%d older earlier request(s) left out for length", left))
+		omitted = append(omitted, fmt.Sprintf("%d more earlier request(s) kept for a later call", left))
 	}
 
 	var shown []string

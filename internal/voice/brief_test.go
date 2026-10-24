@@ -23,8 +23,15 @@ func (b fixedBriefer) BriefSource(_ context.Context, session *surface.Session) B
 	return src
 }
 
-func (b fixedBriefer) TurnOutcomes(context.Context, *surface.Session, []string) (map[string]TurnOutcome, error) {
-	return b.outcomes, b.err
+func (b fixedBriefer) TurnOutcomes(_ context.Context, _ *surface.Session, turnIDs []string) (map[string]TurnOutcome, error) {
+	if b.err != nil || b.outcomes == nil {
+		return nil, b.err
+	}
+	outcomes := map[string]TurnOutcome{}
+	for _, id := range turnIDs {
+		outcomes[id] = b.outcomes[id]
+	}
+	return outcomes, nil
 }
 
 func briefTime(minute int) time.Time { return time.Date(2026, 10, 23, 12, minute, 0, 0, time.UTC) }

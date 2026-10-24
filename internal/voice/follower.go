@@ -23,16 +23,17 @@ type follower struct {
 	unplaced []string
 	typed    map[string]*typedTurn
 	retired  map[string]bool
+	earlier  []requestRecord
 }
 
 // followTarget replaces the current follower with one for target. The caller holds s.mu.
-func (s *Service) followTarget(target *surface.Session) {
+func (s *Service) followTarget(target *surface.Session, earlier []requestRecord) {
 	s.stopFollowing()
 	if target == nil || s.stream == nil || !s.active() {
 		return
 	}
 	ctx, cancel := s.callContext(s.background)
-	f := &follower{attemptID: s.state.State.AttemptID, target: *target, ctx: ctx, cancel: cancel, ready: make(chan struct{}), voice: map[string][]string{}, settled: make(chan struct{}), typed: map[string]*typedTurn{}, retired: map[string]bool{}}
+	f := &follower{attemptID: s.state.State.AttemptID, target: *target, ctx: ctx, cancel: cancel, ready: make(chan struct{}), voice: map[string][]string{}, settled: make(chan struct{}), typed: map[string]*typedTurn{}, retired: map[string]bool{}, earlier: earlier}
 	if !s.spawn(func() { s.runFollower(ctx, f) }) {
 		cancel()
 		return
@@ -56,6 +57,9 @@ func (s *Service) runFollower(ctx context.Context, f *follower) {
 		return
 	}
 	defer subscription.Cancel()
+	if !s.catchUp(ctx, f) {
+		return
+	}
 	lastBody := map[string]string{}
 	seenVersion := map[string]uint64{}
 	for {
@@ -147,7 +151,7 @@ func (s *Service) followVoiceTurn(ctx context.Context, f *follower, messages []s
 	}
 }
 
-// A voice turn followed to its end gave voice its outcome, so its requests are done.
+// A voice turn followed to its end was reported, so its requests are done.
 func (s *Service) endTurn(f *follower, turnID string, voiceTurn bool) {
 	s.mu.Lock()
 	delete(f.voice, turnID)
@@ -169,7 +173,7 @@ func (s *Service) refollow(f *follower, reason string) {
 		return
 	}
 	replies := s.replies
-	s.followTarget(&f.target)
+	s.followTarget(&f.target, nil)
 	if next := s.follow; next != nil {
 		next.retired = f.retired
 		for i := range replies {
@@ -189,11 +193,8 @@ func (s *Service) followerFailed(f *follower, err error) {
 		messages = append(messages, ids...)
 		delete(f.voice, turnID)
 		f.retired[turnID] = true
-		s.requestDone(turnID)
 	}
-	s.stage()
 	s.unlock()
-	_ = s.flush()
 	for _, messageID := range messages {
 		s.recordDelegationFailure(f.attemptID, messageID, f.target.ID, err)
 	}

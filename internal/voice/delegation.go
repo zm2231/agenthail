@@ -88,7 +88,7 @@ func (s *Service) delegate(ctx context.Context, a Action, spoken bool) error {
 	}
 	if target.Session.ID != addressed.ID {
 		v.Target = target.Session
-		s.followTarget(target.Session)
+		s.followTarget(target.Session, nil)
 	}
 	if err != nil {
 		s.unlock()
@@ -162,12 +162,12 @@ func (s *Service) delegationAllowed(a Action, spoken bool) error {
 }
 
 // ctx is the follower's, so a target change cancels an update not yet handed over.
-func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
+func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID, text, stage string) bool {
 	s.mu.Lock()
 	v := &s.state.State
 	if v.AttemptID != attemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID || v.Session == nil {
 		s.unlock()
-		return
+		return false
 	}
 	session := *v.Session
 	s.unlock()
@@ -177,7 +177,7 @@ func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID stri
 	s.mu.Lock()
 	if !s.sameCall(attemptID, session.ID, target.ID) {
 		s.unlock()
-		return
+		return false
 	}
 	if err != nil {
 		v.Message = "Correlated " + stage + " update could not be handed to realtime audio: " + err.Error()
@@ -186,6 +186,7 @@ func (s *Service) speakDelegation(ctx context.Context, attemptID, messageID stri
 		s.appendDelegationEvent(messageID, target, &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: target.ID, TurnID: turnID}, stage)
 	}
 	_ = s.commit()
+	return err == nil
 }
 
 func (s *Service) recordDelegationFailure(attemptID, messageID, targetID string, err error) {

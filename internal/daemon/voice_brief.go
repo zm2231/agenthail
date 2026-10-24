@@ -67,7 +67,7 @@ func (b voiceBriefs) BriefSource(ctx context.Context, session *surface.Session) 
 	return src
 }
 
-// The registry's reads take no context, so a late read finishes in the background and is dropped.
+// Registry reads take no context; a late one finishes in the background.
 func within[T any](ctx context.Context, read func() (T, error)) (T, error) {
 	type result struct {
 		value T

@@ -40,10 +40,7 @@ func writeEarlier(b *strings.Builder, earlier []EarlierRequest) (left int) {
 	if len(earlier) == 0 {
 		return 0
 	}
-	shown := earlier
-	if len(shown) > briefRequestsMax {
-		shown = shown[len(shown)-briefRequestsMax:]
-	}
+	shown := earlier[:min(len(earlier), briefRequestsMax)]
 	b.WriteString("Requests the person made by voice in an earlier call, not reported to them yet:\n")
 	for _, request := range shown {
 		fmt.Fprintf(b, "- %q: %s\n", clip(request.Prompt, requestPromptBytes), earlierOutcome(request))
@@ -80,29 +77,14 @@ func (s *Service) briefFor(ctx context.Context, briefer Briefer, session *surfac
 	return buildBrief(ctx, briefer, session, requests)
 }
 
-// Runs once voice is with target and has its brief. The caller holds s.mu.
-func (s *Service) followEarlier(target *surface.Session, outcomes map[string]TurnOutcome) {
-	targetID := ""
-	if target != nil {
-		targetID = target.ID
-	}
-	open := s.reported(targetID, outcomes)
-	if s.follow == nil {
-		return
-	}
-	for _, r := range open {
-		if r.TargetID == s.follow.target.ID {
-			s.follow.voice[r.TurnID] = append(s.follow.voice[r.TurnID], r.MessageID)
-		}
-	}
-}
-
 // The caller holds s.mu.
 func (s *Service) keepRequest(r requestRecord) {
 	r.Prompt = clip(r.Prompt, requestPromptBytes)
 	s.state.Requests = append(s.state.Requests, r)
 	if len(s.state.Requests) > requestsMax {
-		s.state.Requests = s.state.Requests[len(s.state.Requests)-requestsMax:]
+		dropped := s.state.Requests[0]
+		s.appendEvent(Event{Method: "voice/request/dropped", Params: map[string]any{"messageId": dropped.MessageID, "targetId": dropped.TargetID, "turnId": dropped.TurnID}})
+		s.state.Requests = s.state.Requests[1:]
 	}
 }
 
@@ -128,19 +110,22 @@ func (s *Service) requestDone(turnID string) {
 	s.state.Requests = kept
 }
 
-// A nil outcomes means they could not be read, so the requests are kept. The caller holds s.mu.
-func (s *Service) reported(targetID string, outcomes map[string]TurnOutcome) []requestRecord {
+// reported drops what the brief told and returns the requests to follow. The caller holds s.mu.
+func (s *Service) reported(target *surface.Session, outcomes map[string]TurnOutcome) []requestRecord {
 	var open []requestRecord
 	kept := s.state.Requests[:0]
 	for _, r := range s.state.Requests {
-		if targetID == "" || r.TargetID != targetID {
+		if target == nil || r.TargetID != target.ID {
 			continue
 		}
-		if outcome, read := outcomes[r.TurnID]; outcomes != nil && (!read || !outcome.Found || outcome.Done) {
+		outcome, told := outcomes[r.TurnID]
+		if told && (!outcome.Found || outcome.Done) {
 			continue
 		}
 		kept = append(kept, r)
-		open = append(open, r)
+		if told || outcomes == nil {
+			open = append(open, r)
+		}
 	}
 	s.state.Requests = kept
 	return open
@@ -150,8 +135,8 @@ func earlierOutcomes(ctx context.Context, briefer Briefer, session *surface.Sess
 	if len(requests) == 0 {
 		return nil
 	}
-	turns := make([]string, 0, len(requests))
-	for _, r := range requests {
+	turns := make([]string, 0, briefRequestsMax)
+	for _, r := range requests[:min(len(requests), briefRequestsMax)] {
 		turns = append(turns, r.TurnID)
 	}
 	outcomes, err := briefer.TurnOutcomes(ctx, session, turns)
