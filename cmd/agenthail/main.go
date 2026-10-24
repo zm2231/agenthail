@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/cli"
@@ -45,7 +44,7 @@ func main() {
 	app := &cli.App{
 		OpenRegistry:        func() (*registry.Registry, error) { return registry.OpenDefault(mayUpgradeRegistry(version)) },
 		OpenCurrentRegistry: func() (*registry.Registry, error) { return registry.OpenCurrent("") },
-		DefaultTimeout:      2 * time.Minute,
+		DefaultTimeout:      cli.DefaultCommandTimeout,
 		Version:             version,
 		Revision:            revision,
 		BuiltAt:             builtAt,
