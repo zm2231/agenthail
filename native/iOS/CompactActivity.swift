@@ -156,29 +156,29 @@ struct ToolLineLabel: View {
                 .font(.subheadline)
                 .fixedSize()
                 .scaleEffect(0.6)
-                .foregroundStyle(failed ? .red : .secondary)
+                .foregroundStyle(failed ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(PhonePalette.muted))
                 .frame(width: markWidth, alignment: .leading)
                 .accessibilityHidden(true)
             Text(verb)
                 .font(.subheadline)
-                .foregroundStyle(failed ? .red : .primary)
+                .foregroundStyle(failed ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(.primary))
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 .layoutPriority(1)
             if !object.isEmpty {
                 Text(object)
                     .font(isCode ? .footnote.monospaced() : .subheadline)
-                    .foregroundStyle(failed ? .red : .secondary)
+                    .foregroundStyle(failed ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(PhonePalette.muted))
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                     .truncationMode(.tail)
             }
             if failed {
-                Text("failed").font(.caption).foregroundStyle(.red)
+                Text("failed").font(.caption).foregroundStyle(PhonePalette.failed)
             } else if failures > 0 {
-                Text("\(failures) failed").font(.caption).foregroundStyle(.red)
+                Text("\(failures) failed").font(.caption).foregroundStyle(PhonePalette.failed)
             }
             Spacer(minLength: 0)
             if let trailing {
-                Image(systemName: trailing).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                Image(systemName: trailing).font(.caption2.weight(.semibold)).foregroundStyle(PhonePalette.muted)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -228,7 +228,7 @@ struct ToolActivityRow: View {
                         if call.truncated { ShortenedNote() }
                     }
                     if results.isEmpty && !standaloneRecord {
-                        Text(states[call.id].label).font(.footnote).foregroundStyle(.secondary)
+                        Text(states[call.id].label).font(.footnote).foregroundStyle(PhonePalette.muted)
                     }
                     ForEach(results) { result in
                         if result.kind == "attachment" {
@@ -277,7 +277,7 @@ struct ToolOutput: View {
                 Spacer()
                 SessionTimestamp(value: result.timestamp)
             }
-            .foregroundStyle(failed ? .red : .secondary)
+            .foregroundStyle(failed ? AnyShapeStyle(PhonePalette.failed) : AnyShapeStyle(PhonePalette.muted))
             if result.text.isEmpty {
                 TranscriptCode(text: "The tool returned an empty result.")
             } else if shown == 0 {
@@ -339,8 +339,8 @@ struct FileChips: View {
                         } label: {
                             HStack(spacing: 5) {
                                 Text(change.name).foregroundStyle(.primary)
-                                if change.added > 0 { Text("+\(change.added)").foregroundStyle(.green) }
-                                if change.removed > 0 { Text("−\(change.removed)").foregroundStyle(.red) }
+                                if change.added > 0 { Text("+\(change.added)").foregroundStyle(PhonePalette.done) }
+                                if change.removed > 0 { Text("−\(change.removed)").foregroundStyle(PhonePalette.diffRemoved) }
                             }
                             .font(.caption.monospaced())
                             .lineLimit(1)
@@ -366,7 +366,7 @@ struct FileChips: View {
             ForEach(diffs.filter { isOpen($0.path) }, id: \.path) { file in
                 VStack(alignment: .leading, spacing: 4) {
                     if diffs.count > 1 {
-                        Text(file.change.name).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(file.change.name).font(.caption.monospaced()).foregroundStyle(PhonePalette.muted)
                     }
                     DiffView(id: key(file.path), hunks: file.hunks)
                 }
@@ -388,7 +388,7 @@ struct TranscriptDivider: View {
             Rectangle().fill(.separator).frame(minWidth: 16, maxHeight: 0.5)
             Text(text)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
                 .multilineTextAlignment(.center)
                 .layoutPriority(1)
                 .textSelection(.enabled)
@@ -401,6 +401,6 @@ struct TranscriptDivider: View {
 
 struct ShortenedNote: View {
     var body: some View {
-        Text(TimelineMetadata.shortened).font(.caption).foregroundStyle(.secondary)
+        Text(TimelineMetadata.shortened).font(.caption).foregroundStyle(PhonePalette.muted)
     }
 }

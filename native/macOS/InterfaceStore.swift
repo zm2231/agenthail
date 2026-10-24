@@ -96,7 +96,6 @@ final class InterfaceStore: ObservableObject {
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
         default: NSApp.appearance = nil
         }
-        DesktopPalette.choose(accent: next.accent.map { AccentContrast.RGB(r: $0.red, g: $0.green, b: $0.blue) })
         if next != config { config = next }
     }
 }

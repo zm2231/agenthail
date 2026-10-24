@@ -74,6 +74,7 @@ struct UIConfig: Codable, Equatable {
     /// The device line, mac or device:<name>, that each overridden key comes from.
     var overrides: [String: String] = [:]
     var problems: [Problem] = []
+    var colors: [String: ServedColor]?
 
     static let defaults = UIConfig()
 

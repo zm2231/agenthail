@@ -43,7 +43,7 @@ struct SessionAvatar: View {
             Circle().fill(.quaternary)
             Image(systemName: Self.glyph(surface))
                 .font(.system(size: size * 0.4, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
             ringView.padding(-3.5)
         }
         .frame(width: size, height: size)
@@ -108,7 +108,7 @@ struct SessionScopeChips: View {
                 if filter == .running, runningCount > 0 {
                     Text("\(runningCount)")
                         .monospacedDigit()
-                        .foregroundStyle(selected ? Color.white : PhonePalette.working)
+                        .foregroundStyle(selected ? AnyShapeStyle(Color.white) : AnyShapeStyle(PhonePalette.working))
                 }
             }
             .font(.subheadline.weight(.semibold))
@@ -116,7 +116,7 @@ struct SessionScopeChips: View {
             .padding(.horizontal, 14)
             .frame(minHeight: 44)
             .background {
-                if selected { Capsule().fill(SessionStyle.accent) }
+                if selected { Capsule().fill(PhonePalette.accent) }
             }
             .floatingGlass(in: Capsule(), interactive: true)
             .contentShape(Capsule())
@@ -143,7 +143,7 @@ struct VoiceToolbarButton: View {
             presented = true
         } label: {
             Image(systemName: live ? "phone.fill" : "waveform")
-                .foregroundStyle(live ? PhonePalette.done : Color.primary)
+                .foregroundStyle(live ? AnyShapeStyle(PhonePalette.done) : AnyShapeStyle(Color.primary))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }

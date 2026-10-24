@@ -35,6 +35,7 @@ struct AuditEventRow: View {
                 StructuredText(markdown: AuditFacts.content(entry))
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(failed ? DesktopPalette.failed : DesktopPalette.text)
+                    .desktopInlineStyle()
                     .textual.textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, DesktopSpace.xs)

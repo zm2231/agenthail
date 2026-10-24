@@ -57,7 +57,7 @@ struct SearchableModelSelectionSheet: View {
                 if let selectedIDMissingFromCatalog {
                     Section("Current selection") {
                         Label(selectedIDMissingFromCatalog, systemImage: "questionmark.circle")
-                        Text("The runtime did not return this ID in the latest catalog.").font(.footnote).foregroundStyle(.secondary)
+                        Text("The runtime did not return this ID in the latest catalog.").font(.footnote).foregroundStyle(PhonePalette.muted)
                     }
                 }
                 if isReloading && !hasLoaded {
@@ -65,7 +65,7 @@ struct SearchableModelSelectionSheet: View {
                 } else {
                     if let reloadError {
                         Section {
-                            Label(reloadError, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
+                            Label(reloadError, systemImage: "exclamationmark.triangle").foregroundStyle(PhonePalette.muted)
                         }
                     }
                     if filteredOptions.isEmpty && reloadError == nil {
@@ -120,7 +120,7 @@ struct SearchableModelSelectionSheet: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(title)
-                    if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                    if let detail { Text(detail).font(.footnote).foregroundStyle(PhonePalette.muted) }
                 }
                 Spacer()
                 if pendingSelection == id { Image(systemName: "checkmark") }

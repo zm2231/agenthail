@@ -52,6 +52,10 @@ var claudeSessionContextExpired = func() <-chan time.Time { return time.After(cl
 // no daemon answers, as while one restarts for an update.
 var claudePromptHookRetry = 2 * time.Second
 
+// claudePromptHookHeld is how long a failed post must have lasted for a daemon
+// to have held the prompt; one that failed sooner was refused outright.
+var claudePromptHookHeld = 2 * time.Second
+
 // claudePromptHookUnheldLimit is how long the hook keeps posting while no
 // daemon holds its prompt even though the daemon's service is loaded, as when
 // the service crash-loops or runs a missing binary. A restart takes seconds.
@@ -119,7 +123,7 @@ func (a *App) cmdHook(args []string) error {
 // decision; returning none leaves the prompt to Claude's own dialog. Only a
 // loaded daemon service brings a daemon back, so only then is a failed
 // connection posted again, until no daemon has held the prompt for
-// claudePromptHookUnheldLimit. A call that failed within claudePromptHookRetry
+// claudePromptHookUnheldLimit. A call that failed within claudePromptHookHeld
 // never counts as held, so a daemon that crashes as it starts cannot extend it.
 func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int, serviceLoaded func() bool) *surfaces.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
@@ -142,7 +146,7 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 			return nil
 		}
 		now := time.Now()
-		if unheldSince.IsZero() || now.Sub(asked) > claudePromptHookRetry {
+		if unheldSince.IsZero() || now.Sub(asked) > claudePromptHookHeld {
 			if !serviceLoaded() {
 				return nil
 			}

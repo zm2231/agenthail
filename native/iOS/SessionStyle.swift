@@ -2,11 +2,7 @@ import SwiftUI
 import Textual
 
 enum SessionStyle {
-    static let accent = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 1, green: 0.37, blue: 0.16, alpha: 1)
-            : UIColor(red: 0.72, green: 0.20, blue: 0.06, alpha: 1)
-    })
+    static let accentHex: PaletteTokens.Pair = (0xB8330F, 0xFF5E29)
     static let readingWidth: CGFloat = 600
     static let surface = Color(uiColor: .secondarySystemBackground)
 
@@ -35,7 +31,7 @@ struct SessionMarkdown: View {
     var body: some View {
         StructuredText(markdown: text)
             .font(.system(.body, design: readingStyle ? .serif : .default))
-            .textual.inlineStyle(.default.code(.monospaced, .fontScale(0.85)))
+            .phoneInlineStyle()
             .textual.headingStyle(TranscriptHeadingStyle())
             .textual.paragraphStyle(TranscriptParagraphStyle())
             .textual.structuredTextStyle(.gitHub)
@@ -84,7 +80,7 @@ struct SessionTimestamp: View {
         if let value, let date = ISO8601DateFormatter.sessionDate(value) {
             Text(date, format: Calendar.current.isDateInToday(date) ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day().hour().minute())
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(PhonePalette.muted)
                 .accessibilityLabel(date.formatted(date: .abbreviated, time: .shortened))
         }
     }

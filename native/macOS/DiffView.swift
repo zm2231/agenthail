@@ -49,16 +49,18 @@ struct DiffView: View {
 
 private struct DiffLine: View {
     let line: TextDiff.Line
+    @Environment(\.self) private var environment
 
     var body: some View {
-        let color: Color? = switch line.kind {
+        let style: DesktopStyle? = switch line.kind {
         case .added: DesktopPalette.done
-        case .removed: DesktopPalette.failed
+        case .removed: DesktopPalette.diffRemoved
         case .same: nil
         }
+        let color = style?.resolve(in: environment)
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(line.kind.sign)
-                .foregroundStyle(color ?? DesktopPalette.muted)
+                .foregroundStyle(style ?? DesktopPalette.muted)
                 .accessibilityHidden(true)
             Text(line.attributed(marking: color?.opacity(0.32)))
                 .foregroundStyle(DesktopPalette.text)

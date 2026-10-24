@@ -4,51 +4,6 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-enum PhonePalette {
-    private static let groundHex = PaletteTokens.window
-    private static let textHex = PaletteTokens.text
-    private static let text2Hex = PaletteTokens.text2
-    private static let mutedHex = PaletteTokens.muted
-    private static let attentionHex = PaletteTokens.attention
-    private static let workingHex = PaletteTokens.working
-    private static let doneHex = PaletteTokens.done
-    private static let failedHex = PaletteTokens.failed
-
-    static let text = dynamic(textHex)
-    static let text2 = dynamic(text2Hex)
-    static let muted = dynamic(mutedHex)
-    static let attention = dynamic(attentionHex)
-    static let working = dynamic(workingHex)
-    static let done = dynamic(doneHex)
-    static let failed = dynamic(failedHex)
-    static let ground = dynamic(groundHex)
-    static let hairline = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.10) : UIColor(white: 0, alpha: 0.08) })
-
-    static func textRoles(dark: Bool) -> [BackdropRGB] {
-        PaletteTokens.textRoles.map { rgb(dark ? $0.dark : $0.light) }
-    }
-
-    static func ground(dark: Bool) -> BackdropRGB { rgb(dark ? groundHex.dark : groundHex.light) }
-
-    static func status(_ session: SessionState) -> Color? {
-        if session.isWaitingOnYou { return attention }
-        if session.isUnavailable { return failed }
-        if session.isWorking || session.isWaitingOnBackground { return working }
-        return nil
-    }
-
-    private static func rgb(_ hex: UInt32) -> BackdropRGB {
-        BackdropRGB(Float((hex >> 16) & 0xFF) / 255, Float((hex >> 8) & 0xFF) / 255, Float(hex & 0xFF) / 255)
-    }
-
-    private static func dynamic(_ pair: (light: UInt32, dark: UInt32)) -> Color {
-        Color(uiColor: UIColor { traits in
-            let hex = traits.userInterfaceStyle == .dark ? pair.dark : pair.light
-            return UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-        })
-    }
-}
-
 @MainActor
 final class PhoneAppearance: ObservableObject {
     /// A list shows the background as it is and its cards show the same
@@ -84,6 +39,7 @@ final class PhoneAppearance: ObservableObject {
     @Published private(set) var config = UIConfig.defaults
     @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
     @Published private(set) var rendered: [Key: BackdropImage] = [:]
+    @Published private(set) var extremes: [Key: Float] = [:]
     @Published private(set) var problem: String?
     private var pending: Set<Key> = []
     private var recent: [Key] = []
@@ -123,11 +79,6 @@ final class PhoneAppearance: ObservableObject {
         }
     }
 
-    var accent: Color {
-        guard let accent = config.accent else { return SessionStyle.accent }
-        return Color(red: accent.red, green: accent.green, blue: accent.blue)
-    }
-
     func load(from api: AgenthailAPI) {
         loadTask?.cancel()
         loadTask = Task {
@@ -155,9 +106,7 @@ final class PhoneAppearance: ObservableObject {
                 if loaded != config || wallpapers != self.wallpapers {
                     config = loaded
                     self.wallpapers = wallpapers
-                    rendered = [:]
-                    recent = []
-                    pending = []
+                    forgetRenders()
                     save(loaded, wallpapers: fetched)
                 }
                 problem = nil
@@ -171,7 +120,12 @@ final class PhoneAppearance: ObservableObject {
     func preview(_ config: UIConfig, wallpapers: [WallpaperImage] = []) {
         self.config = config
         self.wallpapers = Dictionary(wallpapers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        forgetRenders()
+    }
+
+    private func forgetRenders() {
         rendered = [:]
+        extremes = [:]
         recent = []
         pending = []
     }
@@ -237,7 +191,21 @@ final class PhoneAppearance: ObservableObject {
         rendered[key] = image
         recent.removeAll { $0 == key }
         recent.append(key)
-        while recent.count > Self.keptRenders { rendered.removeValue(forKey: recent.removeFirst()) }
+        while recent.count > Self.keptRenders {
+            let dropped = recent.removeFirst()
+            rendered.removeValue(forKey: dropped)
+            extremes.removeValue(forKey: dropped)
+        }
+        measure(image, for: key)
+    }
+
+    private func measure(_ image: BackdropImage, for key: Key) {
+        let polarity: ScrimField.Polarity = key.dark ? .dark : .light
+        Task {
+            let extreme = await Task.detached(priority: .utility) { GlassSolve.extreme(image, polarity: polarity) }.value
+            guard rendered[key]?.image === image.image else { return }
+            extremes[key] = extreme
+        }
     }
 
     nonisolated private static func write(_ rendered: BackdropImage, to url: URL) {
@@ -252,14 +220,16 @@ final class PhoneAppearance: ObservableObject {
         return BackdropImage(image: image, size: size)
     }
 
+    static let increasedTarget: Float = 7
+
     static func contrastTarget(_ config: UIConfig, increased: Bool) -> Float {
-        increased ? 7 : Float(config.contrastTarget)
+        increased ? increasedTarget : Float(config.contrastTarget)
     }
 
     func spec(_ key: Key) -> BackdropSpec {
         let dark = key.dark
         let ground = PhonePalette.ground(dark: dark)
-        let roles = PhonePalette.textRoles(dark: dark)
+        let roles = PhonePalette.textRoles(TextColors(config), dark: dark, increased: key.target >= Self.increasedTarget)
         let paneTint: BackdropRGB
         switch config.glassTint {
         case "ground": paneTint = ground
@@ -432,6 +402,7 @@ private struct PhoneBackdropBody<Content: View>: View {
         let cards = appearance.active && surface == .list ? CardBackdrop(image: appearance.rendered[key(.cards)], frame: frame) : nil
         content
             .environment(\.cardBackdrop, cards)
+            .environment(\.backdropKey, key(surface))
             .scrollContentBackground(appearance.active ? .hidden : .automatic)
             .background {
                 BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame)
@@ -467,23 +438,6 @@ private struct BackdropLayer: View {
     }
 }
 
-private struct FloatingGlass<S: Shape>: ViewModifier {
-    let shape: S
-    let interactive: Bool
-    @Environment(\.phoneAppearance) private var appearance
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    func body(content: Content) -> some View {
-        let tint = PhonePalette.ground.opacity(appearance?.config.composerOpacity ?? 0.5)
-        if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemBackground), in: shape)
-        } else if #available(iOS 26, *) {
-            content.glassEffect(interactive ? .regular.tint(tint).interactive() : .regular.tint(tint), in: shape)
-        } else {
-            content.background(tint, in: shape).background(.regularMaterial, in: shape)
-        }
-    }
-}
 
 struct AppearanceScope<Content: View>: View {
     @ObservedObject var appearance: PhoneAppearance
@@ -492,7 +446,8 @@ struct AppearanceScope<Content: View>: View {
     var body: some View {
         content
             .environment(\.phoneAppearance, appearance)
-            .tint(appearance.accent)
+            .environment(\.textColors, TextColors(appearance.config))
+            .tint(PhonePalette.accentText)
             .preferredColorScheme(appearance.colorScheme)
     }
 }

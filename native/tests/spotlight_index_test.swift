@@ -51,6 +51,15 @@ struct SpotlightIndexTest {
         let entry = SpotlightEntry(builder)
         check(entry.title == "@builder" && entry.detail == "Codex · agenthail", "an entry shows the handle, agent, and folder")
         check(SpotlightEntry(plain).detail == "Codex", "an entry without a folder shows only the agent")
+        let folders = ["/work/agenthail/": "agenthail", "/": "/", "": "/", "//": "/", "/a//b": "b", ".": "/", "relative/dir": "dir", "/a b/c d": "c d"]
+        for (path, name) in folders { check(SpotlightEntry.folderName(path) == name, "folder of \(path.debugDescription) is \(SpotlightEntry.folderName(path).debugDescription), not \(name.debugDescription)") }
+        check(SpotlightEntry(session("c", cwd: "/work/agenthail/")).detail == "Codex · agenthail", "a trailing slash still names the folder")
+        check(SpotlightEntry(session("d", cwd: "/")).detail == "Codex · /", "the root folder shows as a slash")
+        check(SpotlightEntry(session("e", cwd: "")).detail == "Codex · /", "an empty folder resolves to the root, as it does in the app")
+        let missing = "/nonexistent-\(UUID().uuidString)/agenthail"
+        check(SpotlightEntry.folderName(missing) == "agenthail", "a folder that does not exist is still named")
+        FileManager.default.changeCurrentDirectoryPath(NSTemporaryDirectory())
+        check(SpotlightEntry.folderName("") == "/" && SpotlightEntry.folderName(".") == "/", "the working directory does not change a folder name")
 
         let first = SpotlightEntry.changes(from: [:], to: [builder, plain, builder])
         check(first.upserts.map(\.id) == ["a", "b"] && first.removals.isEmpty, "new sessions are indexed once each")

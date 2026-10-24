@@ -20,7 +20,7 @@ struct ContextRecordRow: View {
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold))
             }
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(PhonePalette.muted)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -46,7 +46,7 @@ struct TranscriptDocument: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if truncated {
                         Label("Content shortened by the host", systemImage: "text.badge.ellipsis")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(PhonePalette.muted)
                     }
                     if markdown { SessionMarkdown(text: text) }
                     else { Text(text).font(.body).lineSpacing(4).textSelection(.enabled) }

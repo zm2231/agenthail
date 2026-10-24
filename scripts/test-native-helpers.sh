@@ -46,11 +46,14 @@ SOURCES=(
   TurnSettings.swift
   UIConfig.swift
   PaletteTokens.swift
+  TextColors.swift
+  RoleStyle.swift
   VoiceAPI.swift
   VoiceAudioBridge.swift
   VoiceCallDiagnostics.swift
   VoiceOperatorModel.swift
   macOS/AccentContrast.swift
+  macOS/DesktopStyle.swift
   macOS/AppearanceDraft.swift
   macOS/AgenthailLink.swift
   macOS/AgenthailProcess.swift
@@ -71,6 +74,8 @@ SOURCES=(
   macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
   ScrimField.swift
+  GlassSolve.swift
+  macOS/DesktopGlass.swift
   macOS/SessionFacts.swift
   macOS/SessionHandle.swift
   macOS/SessionLaunch.swift

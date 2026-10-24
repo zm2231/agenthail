@@ -30,7 +30,7 @@ struct SessionEditingControls: View {
                     }
                 }
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))
         .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) {
@@ -45,7 +45,7 @@ struct SessionEditingControls: View {
                             .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
                     }
                     if editingName { Text("Use 1–80 characters without spaces, /, or #.").font(.footnote) }
-                    if let error { Text(error).foregroundStyle(.red) }
+                    if let error { Text(error).foregroundStyle(PhonePalette.failed) }
                 }
                 .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
                 .toolbar {
@@ -85,8 +85,8 @@ struct QueueListView: View {
                     Text("Current").tag(false)
                     Text("History").tag(true)
                 }.pickerStyle(.segmented).listRowSeparator(.hidden)
-                if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote) }
-                if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.secondary).font(.footnote) }
+                if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(PhonePalette.failed).font(.footnote) }
+                if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(PhonePalette.muted).font(.footnote) }
                 let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
                 if !problems.isEmpty {
                     Section("Delivery problems") {
@@ -143,16 +143,16 @@ struct QueueListView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(item.outcomeLabel)
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? PhonePalette.attention : PhonePalette.muted)
                 Spacer()
                 if let date = item.queuedDate {
-                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(.secondary)
+                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(PhonePalette.muted)
                 } else {
-                    Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(item.queuedAt).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1).truncationMode(.middle)
                 }
             }
             if item.status == "pending" {
-                Text(item.holdLabel).font(.footnote).foregroundStyle(.secondary)
+                Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             Button {
                 if let onOpenSession { onOpenSession(item.sessionId) }
@@ -166,7 +166,7 @@ struct QueueListView: View {
             }.buttonStyle(.plain).accessibilityIdentifier("inbox-session-\(item.id)")
             Text(item.message).font(.body).lineLimit(4).textSelection(.enabled)
             if let reason = item.lastError, !reason.isEmpty {
-                Text(reason).font(.footnote).foregroundStyle(.secondary)
+                Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             DisclosureGroup("Instruction details") {
                 Text(item.message).textSelection(.enabled)
@@ -216,10 +216,10 @@ struct QueueListView: View {
                 Text(problem.status?.capitalized ?? "Delivery problem")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(problem.at).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(problem.at).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1).truncationMode(.middle)
             }
             Text(problem.message).font(.body).textSelection(.enabled)
-            Text(problem.reason).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(problem.reason).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
             Button("Dismiss", role: .destructive) {
                 Task {
                     error = nil

@@ -45,7 +45,7 @@ struct ElsewhereWaitCardTest {
         }
         _ = NSApplication.shared
         func height(at width: CGFloat) -> CGFloat {
-            let card = ElsewhereWaitCard(waiting: WaitingState(kind: "question", id: "q"), place: .elsewhere, surface: "claude", hostName: "cmux", accent: .accentColor, open: {})
+            let card = ElsewhereWaitCard(waiting: WaitingState(kind: "question", id: "q"), place: .elsewhere, surface: "claude", hostName: "cmux", accent: AnyShapeStyle(Color.accentColor), open: {})
             return NSHostingView(rootView: card.frame(width: width)).fittingSize.height
         }
         let narrow = height(at: 300), wide = height(at: 900)

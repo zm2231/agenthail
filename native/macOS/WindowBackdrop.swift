@@ -33,31 +33,28 @@ final class WindowBackdrop: ObservableObject {
     private var renderTask: Task<Void, Never>?
     private(set) var rendering = false
     private var pending = false
-    private var generation = 0
+    private(set) var generation = 0
     private var rendered: BackdropSpec?
     private weak var window: NSWindow?
-    nonisolated(unsafe) private var accessibilityObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
     init() {
-        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        let watched = [
+            (NSWorkspace.shared.notificationCenter, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification),
+            (NotificationCenter.default, NSColor.systemColorsDidChangeNotification),
+        ]
+        observers = watched.map { center, name in
+            (center, center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            })
         }
     }
 
     deinit {
-        if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) }
+        for (center, observer) in observers { center.removeObserver(observer) }
     }
 
     var paneRadius: CGFloat { gutter > 0 ? DesktopRadius.sheet : 0 }
-
-    /// Floating glass lifts what is under it, and only the window colour laid
-    /// over it brings text back. Measured on every built-in background, 0.2
-    /// keeps secondary text above 4.5:1; a higher target needs more.
-    static func floatingOpacity(_ config: UIConfig, increaseContrast: Bool) -> Double {
-        guard config.readability || increaseContrast else { return config.composerOpacity }
-        let target = increaseContrast ? 7 : config.contrastTarget
-        return max(config.composerOpacity, min(1, 0.2 + (target - 4.5) * 0.32))
-    }
 
     func configure(_ config: UIConfig, wallpapers: [String: WallpaperImage]) {
         self.config = config
@@ -74,7 +71,7 @@ final class WindowBackdrop: ObservableObject {
         let gutter = wanted ? CGFloat(config.gutter) : 0
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
-        let floating = Self.floatingOpacity(config, increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        let floating = DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         if composerOpacity != floating { composerOpacity = floating }
         if !wanted { image = nil; rendered = nil }
         schedule()
@@ -170,11 +167,12 @@ final class WindowBackdrop: ObservableObject {
         guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let ground = DesktopPalette.ground(dark: dark)
-        let roles = DesktopPalette.textRoles(dark: dark) + [DesktopPalette.readableAccent(in: appearance)]
+        let colors = TextColors(config)
+        let roles = DesktopGlass.roles(config, dark: dark, increased: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         let paneTint: AccentContrast.RGB
         switch config.glassTint {
         case "ground": paneTint = ground
-        case "accent": paneTint = DesktopPalette.accentRGB(in: appearance)
+        case "accent": paneTint = DesktopPalette.accentRGB(colors, in: appearance)
         default: paneTint = UIConfig.RGBColor(hex: config.glassTint).map { AccentContrast.RGB(r: $0.red, g: $0.green, b: $0.blue) } ?? ground
         }
         let scrimTint: ScrimField.Tint

@@ -151,7 +151,7 @@ private struct SurfaceCard: View {
         openWindow(id: "main")
     }
 
-    private var color: Color {
+    private var color: DesktopStyle {
         switch overview.health {
         case .healthy: return DesktopPalette.done
         case .degraded: return DesktopPalette.failed

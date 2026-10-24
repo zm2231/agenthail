@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 import XCTest
 @testable import Agenthail
@@ -17,8 +18,8 @@ final class PhoneAppearanceTests: XCTestCase {
         super.tearDown()
     }
 
-    private func config(_ values: [String: Any], rev: String = "r1") throws -> UIConfig {
-        let data = try JSONSerialization.data(withJSONObject: ["rev": rev, "values": values, "chosen": [String: String](), "overrides": [String: String](), "problems": []])
+    private func config(_ values: [String: Any], colors: [String: Any] = [:], rev: String = "r1") throws -> UIConfig {
+        let data = try JSONSerialization.data(withJSONObject: ["rev": rev, "values": values, "colors": colors, "chosen": [String: String](), "overrides": [String: String](), "problems": []])
         return try JSONDecoder().decode(UIConfig.self, from: data)
     }
 
@@ -226,14 +227,15 @@ final class PhoneAppearanceTests: XCTestCase {
             "glass.sidebar.opacity": 0.3,
         ]))
         let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: dark, solid: false, target: target)
-        let image = try XCTUnwrap(BackdropRenderer.render(appearance.spec(small))).image
+        let spec = appearance.spec(small)
+        let image = try XCTUnwrap(BackdropRenderer.render(spec)).image
         let width = image.width, height = image.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let context = try XCTUnwrap(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
                                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        let roles = PhonePalette.textRoles(dark: dark).map { ScrimField.luminance($0.x, $0.y, $0.z) }
+        let roles = spec.roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }
         var worst = Float.infinity
         var shown: [Float] = []
         for i in stride(from: 0, to: pixels.count, by: 4) {
@@ -246,9 +248,42 @@ final class PhoneAppearanceTests: XCTestCase {
         return (worst, (shown.max() ?? 0) - (shown.min() ?? 0))
     }
 
-    func testStatusColoursAreTheMacsTokens() {
-        XCTAssertEqual(PaletteTokens.attention.dark, 0xFFB224)
-        XCTAssertEqual(PhonePalette.textRoles(dark: true).count, PaletteTokens.textRoles.count)
+    func testServedColoursAndAccentReachTheSolver() throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["theme.accent": "#3366ff"], colors: [
+            "needs-you": ["dark": "#123456", "light": "#654321", "increased": ["dark": "#abcdef", "light": "#fedcba"]],
+            "accent": ["dark": "#5577ff", "light": "#2244cc"],
+        ]))
+        let normal = appearance.spec(key(.cards)).roles
+        XCTAssertTrue(normal.contains(PhonePalette.rgb(0x123456)))
+        XCTAssertTrue(normal.contains(PhonePalette.rgb(0x5577FF)))
+        XCTAssertTrue(normal.contains(PhonePalette.rgb(PaletteTokens.roles[.body]!.dark)))
+        XCTAssertTrue(appearance.spec(key(.cards, target: 7)).roles.contains(PhonePalette.rgb(0xABCDEF)))
+
+        var environment = EnvironmentValues()
+        environment.textColors = TextColors(appearance.config)
+        environment.colorScheme = .dark
+        XCTAssertEqual(PhonePalette.accentText.resolve(in: environment), Color(hex: 0x5577FF), "accent text draws the served accent the glass solves for")
+        XCTAssertEqual(PhonePalette.accent.resolve(in: environment), Color(hex: 0x3366FF), "accent fills use the chosen accent")
+    }
+
+    func testFloatingGlassRisesOverBrightArtOnItsSurface() async throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["background": "mesh: 2x2, #ffffff, #ffffff, #ffffff, #ffffff", "glass.composer.opacity": 0]))
+        let list = PhoneAppearance.Key(surface: .list, size: CGSize(width: 200, height: 400), scale: 1, dark: true, solid: false, target: 4.5)
+        let unseen = PhoneAppearance.Key(surface: .pane, size: CGSize(width: 1, height: 1), scale: 1, dark: true, solid: false, target: 4.5)
+        let quiet = appearance.floatingOpacity(unseen)
+        XCTAssertEqual(quiet, Double(GlassSolve.measuredFloor), accuracy: 0.0001, "before a render, floating glass uses the calibrated glass level")
+        appearance.request(list)
+        for _ in 0..<400 where appearance.extremes[list] == nil { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNotNil(appearance.extremes[list])
+        XCTAssertGreaterThan(appearance.floatingOpacity(list), 0.9, "white art under the list makes its floating glass nearly solid")
+    }
+
+    func testTheDefaultAccentIsSolvedFor() throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config([:]))
+        XCTAssertTrue(appearance.spec(key(.cards)).roles.contains(PhonePalette.rgb(SessionStyle.accentHex.dark)))
     }
 }
 

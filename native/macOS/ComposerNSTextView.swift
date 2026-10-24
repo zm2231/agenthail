@@ -195,15 +195,16 @@ final class ComposerNSTextView: NSTextView {
         setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
     }
 
-    /// A text role the backdrop keeps at contrast.target; the system
-    /// placeholder colour is too faint over glass.
-    static let placeholderColor = NSColor(DesktopPalette.text2)
+    // A text role the backdrop keeps at contrast.target; the system placeholder colour is too faint over glass.
+    var placeholderColor = NSColor.secondaryLabelColor {
+        didSet { if placeholderColor != oldValue { needsDisplay = true } }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard string.isEmpty, !hasMarkedText(), !placeholder.isEmpty else { return }
         let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0), y: textContainerInset.height)
-        NSAttributedString(string: placeholder, attributes: [.font: font ?? Self.font, .foregroundColor: Self.placeholderColor])
+        NSAttributedString(string: placeholder, attributes: [.font: font ?? Self.font, .foregroundColor: placeholderColor])
             .draw(at: origin)
     }
 }

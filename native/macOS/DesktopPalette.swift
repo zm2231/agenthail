@@ -1,5 +1,4 @@
 import AppKit
-import os
 import SwiftUI
 
 enum DesktopPalette {
@@ -12,70 +11,53 @@ enum DesktopPalette {
     static let raised = dynamic(raisedHex)
     static let line = dynamic(light: 0xE3E3E6, dark: 0x2E2F33)
     static let line2 = dynamic(light: 0xECECEE, dark: 0x26272A)
-    private static let textHex = PaletteTokens.text
-    private static let text2Hex = PaletteTokens.text2
-    private static let mutedHex = PaletteTokens.muted
-    private static let attentionHex = PaletteTokens.attention
-    private static let workingHex = PaletteTokens.working
-    private static let doneHex = PaletteTokens.done
-    private static let failedHex = PaletteTokens.failed
 
-    static let text = dynamic(textHex)
-    static let text2 = dynamic(text2Hex)
-    static let muted = dynamic(mutedHex)
-    static let bubble = dynamic(light: 0xF1F1F3, dark: 0x26272A)
-    static let fill = dynamic(light: 0xE9E9EC, dark: 0x2A2B2F)
+    static let text = DesktopStyle.role(.body)
+    static let text2 = DesktopStyle.role(.muted)
+    static let muted = DesktopStyle.role(.faint)
+    static let meta = DesktopStyle.role(.meta)
+    static let peer = DesktopStyle.role(.peer)
+    static let code = DesktopStyle.role(.code)
+    static let diffRemoved = DesktopStyle.role(.diffRemoved)
+    static let bubble = dynamic(PaletteTokens.bubble)
+    static let fill = dynamic(PaletteTokens.fill)
     static let dock = dynamic(light: 0xF7F7F8, dark: 0x1B1C1F)
     static let stop = dynamic(light: 0x3D3E42, dark: 0x48494D)
 
-    /// The accent ui.conf chose; nil follows the system accent. AppKit
-    /// resolves colours on whichever thread draws, so this sits behind a lock.
-    private static let accentChoice = OSAllocatedUnfairLock<AccentContrast.RGB?>(initialState: nil)
+    static let accent = DesktopStyle.accent(.fill)
+    static let accentText = DesktopStyle.accent(.text)
+    static let onAccent = DesktopStyle.accent(.onAccent)
+    static let selection = DesktopStyle.accent(.selection)
 
-    static func choose(accent: AccentContrast.RGB?) {
-        accentChoice.withLock { $0 = accent }
+    static func accentRGB(_ colors: TextColors, in appearance: NSAppearance) -> AccentContrast.RGB {
+        colors.accentChoice.map(AccentContrast.RGB.init(hex:)) ?? AccentContrast.rgb(.controlAccentColor, in: appearance)
     }
 
-    static let accent = Color(nsColor: NSColor(name: nil) { accentRGB(in: $0).nsColor })
-    static let accentText = Color(nsColor: NSColor(name: nil) { appearance in
-        readableAccent(in: appearance).nsColor
-    })
-    static let onAccent = Color(nsColor: NSColor(name: nil) { appearance in
-        AccentContrast.foreground(on: accentRGB(in: appearance)).nsColor
-    })
-    static let selection = Color(nsColor: NSColor(name: nil) { appearance in
-        accentRGB(in: appearance).nsColor.withAlphaComponent(0.18)
-    })
-
-    static func accentRGB(in appearance: NSAppearance) -> AccentContrast.RGB {
-        accentChoice.withLock { $0 } ?? AccentContrast.rgb(.controlAccentColor, in: appearance)
-    }
-
-    static func readableAccent(in appearance: NSAppearance) -> AccentContrast.RGB {
-        let dark = isDark(appearance)
+    static func readable(_ accent: AccentContrast.RGB, dark: Bool, target: Double) -> AccentContrast.RGB {
         let surfaces = [windowHex, sideHex, raisedHex].map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
-        return AccentContrast.readable(accentRGB(in: appearance), on: surfaces, dark: dark)
+        return AccentContrast.readable(accent, on: surfaces, dark: dark, target: target)
     }
 
-    /// Every colour text is drawn in, which a scrim must keep readable.
-    static func textRoles(dark: Bool) -> [AccentContrast.RGB] {
-        PaletteTokens.textRoles.map { AccentContrast.RGB(hex: dark ? $0.dark : $0.light) }
+    static func readableAccent(_ colors: TextColors, in appearance: NSAppearance, increased: Bool) -> AccentContrast.RGB {
+        let dark = isDark(appearance)
+        if let served = colors.accentText(dark: dark, increased: increased) { return AccentContrast.RGB(hex: served) }
+        return readable(accentRGB(colors, in: appearance), dark: dark, target: DesktopStyle.target(colors, increased: increased))
     }
 
     static func ground(dark: Bool) -> AccentContrast.RGB {
         AccentContrast.RGB(hex: dark ? windowHex.dark : windowHex.light)
     }
 
-    static let attention = dynamic(attentionHex)
+    static let attention = DesktopStyle.role(.needsYou)
     static let attentionBackground = dynamic(light: 0xFFF5E0, dark: 0x2E2414)
     static let attentionLine = dynamic(light: 0xF2D9A6, dark: 0x5C4415)
-    static let working = dynamic(workingHex)
-    static let done = dynamic(doneHex)
-    static let failed = dynamic(failedHex)
+    static let working = DesktopStyle.role(.working)
+    static let done = DesktopStyle.role(.done)
+    static let failed = DesktopStyle.role(.error)
     static let failedBackground = dynamic(light: 0xFDEDEC, dark: 0x2E1A19)
     static let failedLine = dynamic(light: 0xF5C9C5, dark: 0x5A2B28)
 
-    static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> Color {
+    static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> DesktopStyle {
         if needsYou { return attention }
         if session.isWorking { return working }
         if finishedUnseen { return done }

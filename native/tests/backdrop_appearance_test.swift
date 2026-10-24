@@ -61,15 +61,28 @@ struct BackdropAppearanceTest {
         backdrop.windowChanged(window)
         check(!backdrop.active, "a dark window whose picture has not loaded shows no backdrop rather than the light one")
 
+        let before = backdrop.generation
+        NotificationCenter.default.post(name: NSColor.systemColorsDidChangeNotification, object: nil)
+        wait { backdrop.generation > before }
+        check(backdrop.generation > before, "a system colour change, such as a new accent, solves the backdrop again")
+
         var glass = UIConfig()
         glass.values["glass.composer.opacity"] = .number(0)
-        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0.2, "readable floating glass never drops below the measured floor")
-        glass.values["glass.composer.opacity"] = .number(0.6)
-        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0.6, "a stronger setting is kept")
-        glass.values["glass.composer.opacity"] = .number(0)
-        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: true) > 0.9, "Increase Contrast raises floating glass for its higher target")
-        glass.values["glass.readability"] = .text("off")
-        check(WindowBackdrop.floatingOpacity(glass, increaseContrast: false) == 0, "readability off uses the setting exactly")
+        for dark in [true, false] {
+            glass.values["glass.composer.opacity"] = .number(0)
+            glass.values["glass.readability"] = .text("auto")
+            let base = DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false)
+            check(base >= Double(GlassSolve.measuredFloor) - 0.0001, "readable floating glass never drops below the measured floor (dark \(dark)), got \(base)")
+            glass.colors = ["muted": ServedColor(dark: "#77777c", light: "#85858b")]
+            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) > base, "a fainter served role raises floating glass (dark \(dark))")
+            glass.colors = nil
+            glass.values["glass.composer.opacity"] = .number(0.99)
+            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) == 0.99, "a stronger setting is kept (dark \(dark))")
+            glass.values["glass.composer.opacity"] = .number(0)
+            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: true) > base, "Increase Contrast raises floating glass for its higher target (dark \(dark))")
+            glass.values["glass.readability"] = .text("off")
+            check(DesktopGlass.floatingOpacity(glass, dark: dark, increaseContrast: false) == 0, "readability off uses the setting exactly (dark \(dark))")
+        }
 
         if failures > 0 { exit(1) }
         print("backdrop appearance: dark and light windows draw their own background")

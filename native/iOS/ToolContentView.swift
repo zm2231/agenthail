@@ -18,7 +18,7 @@ struct ToolContentView: View {
                     Label {
                         VStack(alignment: .leading) {
                             Text(step.0)
-                            Text(step.1.replacingOccurrences(of: "_", with: " ")).font(.caption).foregroundStyle(.secondary)
+                            Text(step.1.replacingOccurrences(of: "_", with: " ")).font(.caption).foregroundStyle(PhonePalette.muted)
                         }
                     } icon: { Image(systemName: step.1 == "completed" ? "checkmark.circle" : step.1 == "in_progress" ? "circle.lefthalf.filled" : "circle") }
                 }

@@ -3,7 +3,7 @@ import SwiftUI
 struct RequestCard: View {
     let request: SessionRequest
     let answering: Bool
-    let accent: Color
+    let accent: AnyShapeStyle
     let respond: (RequestDecision) -> Void
     @State private var picks: [Int: Set<String>] = [:]
     @State private var typed: [Int: String] = [:]
@@ -37,7 +37,7 @@ struct RequestCard: View {
                 } else {
                     Text(request.summary).font(.body.weight(.medium))
                     if let description = request.description, !description.isEmpty {
-                        Text(description).font(.footnote).foregroundStyle(.secondary)
+                        Text(description).font(.footnote).foregroundStyle(RoleStyle(.muted))
                     }
                     if let input = request.input, !input.isEmpty, input != "{}" {
                         Text(input).font(.caption.monospaced()).lineLimit(6).textSelection(.enabled)
@@ -45,7 +45,7 @@ struct RequestCard: View {
                             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
                     }
                     if let path = request.blockedPath, !path.isEmpty {
-                        Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(path).font(.caption.monospaced()).foregroundStyle(RoleStyle(.muted))
                     }
                     HStack {
                         Button("Allow") { send(.allow) }
@@ -110,7 +110,7 @@ struct RequestCard: View {
         let label = field.label + (field.required ? " *" : "")
         VStack(alignment: .leading, spacing: 4) {
             if field.multiSelect {
-                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(label).font(.caption).foregroundStyle(RoleStyle(.muted))
                 ForEach(field.options ?? [], id: \.value) { option in
                     Toggle(option.label, isOn: Binding(get: { form.picked(field).contains(option.value) }, set: { form.pick(option.value, in: field, $0) }))
                 }
@@ -126,7 +126,7 @@ struct RequestCard: View {
                     .textFieldStyle(.roundedBorder)
             }
             if !field.description.isEmpty {
-                Text(field.description).font(.caption).foregroundStyle(.secondary)
+                Text(field.description).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
         }
         .disabled(answering)
@@ -136,7 +136,7 @@ struct RequestCard: View {
     private func questionView(_ index: Int, _ question: SessionRequest.Question) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if !question.header.isEmpty {
-                Text(question.header).font(.caption).foregroundStyle(.secondary)
+                Text(question.header).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             Text(question.question).font(.body.weight(.medium))
             ForEach(question.options, id: \.label) { option in
@@ -148,7 +148,7 @@ struct RequestCard: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(option.label)
                             if !option.description.isEmpty {
-                                Text(option.description).font(.caption).foregroundStyle(.secondary)
+                                Text(option.description).font(.caption).foregroundStyle(RoleStyle(.muted))
                             }
                         }
                         Spacer(minLength: 0)
@@ -276,7 +276,7 @@ struct ElsewhereWaitCard: View {
     let place: WaitingPlace
     let surface: String
     let hostName: String?
-    let accent: Color
+    let accent: AnyShapeStyle
     let open: (() -> Void)?
     var restart: (() -> Void)? = nil
 
@@ -317,7 +317,7 @@ struct ElsewhereWaitCard: View {
                 .foregroundStyle(accent)
             Text(Self.detail(place: place, hostName: hostName))
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(RoleStyle(.muted))
             HStack {
                 if place == .restart, let restart {
                     Button("Stop and resume", systemImage: "arrow.clockwise", action: restart)

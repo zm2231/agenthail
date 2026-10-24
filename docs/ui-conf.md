@@ -51,7 +51,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `glass.opacity` | `0.18` | 0 to 1. Tint of the content pane. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
 | `glass.sidebar.opacity` | `0.45` | 0 to 1. Tint of the sidebar. |
 | `glass.chrome.opacity` | `0` | 0 to 1. Tint of the title bar and status strip. |
-| `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. With `glass.readability = auto` it is at least 0.2, the least that keeps their text readable over glass, and more when `contrast.target` is higher. |
+| `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. With `glass.readability = auto` it rises to the least that keeps every text colour readable over the glass and the background under it: about 0.2 with the default colours and target, and more for fainter `color.*` values or a higher `contrast.target`. On the iPhone it also rises over bright art under it. |
 | `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
 | `glass.gutter` | `8` | 0 to 16. Points between floating panes; 0 joins them edge to edge. |
