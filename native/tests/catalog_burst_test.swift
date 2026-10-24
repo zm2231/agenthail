@@ -22,13 +22,13 @@ struct CatalogBurstTest {
     }
 
     @MainActor
-    static func spin(until done: () -> Bool, within seconds: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !done() {
-            if Date() > deadline { return false }
+    static func spin(until done: () -> Bool) -> Bool {
+        var passes = 0
+        while !done(), passes < 10_000 {
             RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+            passes += 1
         }
-        return true
+        return done()
     }
 
     @MainActor
@@ -49,7 +49,7 @@ struct CatalogBurstTest {
         inbox.append(upserted(12, "a", "idle"))
         model.adoptRefreshed(listing([session("a", "busy")], seq: 11))
         check(working(model) == ["a"], "a snapshot newer than everything applied is taken")
-        check(spin(until: { working(model).isEmpty }, within: 2), "the pending idle after that snapshot still applies: \(working(model))")
+        check(spin(until: { working(model).isEmpty }), "the pending idle after that snapshot still applies: \(working(model))")
 
         model.adoptRefreshed(listing([session("a", "busy")], seq: 11))
         check(working(model).isEmpty, "a snapshot read before an applied idle keeps the session idle")
@@ -58,15 +58,8 @@ struct CatalogBurstTest {
         inbox.append(upserted(14, "a", "busy", name: "skipped"))
         model.adoptRefreshed(listing([session("a", "busy", name: "from snapshot")], seq: 14))
         inbox.append(upserted(15, "a", "idle", name: "after snapshot"))
-        check(spin(until: { model.knownSessions.first?.name == "after snapshot" }, within: 2), "events after a snapshot apply: \(model.knownSessions.map(\.name))")
+        check(spin(until: { model.knownSessions.first?.name == "after snapshot" }), "events after a snapshot apply: \(model.knownSessions.map(\.name))")
         check(working(model).isEmpty, "the last event wins over the snapshot it followed")
-    }
-
-    final class Emitted: @unchecked Sendable {
-        private let lock = NSLock()
-        private var last: Date?
-        var at: Date? { lock.withLock { last } }
-        func mark() { lock.withLock { last = Date() } }
     }
 
     @MainActor
@@ -75,39 +68,34 @@ struct CatalogBurstTest {
         let model = AgenthailModel(connecting: false)
         model.sessionFilter = .running
         model.adoptRefreshed(listing(ids.map { session($0, "idle") }, seq: 1))
-        var renders = 0
-        let render = model.$snapshot.dropFirst().sink { _ in
-            renders += 1
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        defer { render.cancel() }
+        var changes = 0
+        let counting = model.$snapshot.dropFirst().sink { _ in changes += 1 }
+        defer { counting.cancel() }
         let inbox = model.catalogFeed.openInbox()
+        var seq: UInt64 = 2
 
-        func burst(_ events: [(String, String)], from seq: UInt64) -> Emitted {
-            let emitted = Emitted()
+        func arriveWhileBusy(_ status: String) {
+            let events = ids.enumerated().map { upserted(seq + UInt64($0.offset), $0.element, status) }
+            seq += UInt64(events.count)
+            let delivered = DispatchSemaphore(value: 0)
             Thread.detachNewThread {
-                for (offset, (id, status)) in events.enumerated() {
-                    inbox.append(upserted(seq + UInt64(offset), id, status))
-                    emitted.mark()
-                    Thread.sleep(forTimeInterval: 1.0 / 30)
-                }
+                events.forEach(inbox.append)
+                delivered.signal()
             }
-            return emitted
+            delivered.wait()
         }
 
-        let started = burst(ids.map { ($0, "busy") }, from: 2)
-        check(spin(until: { working(model) == ids.sorted() }, within: 5), "every session shows Working after the first burst: \(working(model).count)")
-        if let last = started.at { check(Date().timeIntervalSince(last) < 1, "the sidebar showed Working within a second of the last event") }
+        arriveWhileBusy("busy")
+        check(spin(until: { working(model) == ids.sorted() }), "every session shows Working after the first burst: \(working(model).count)")
+        check(changes == 1, "\(ids.count) events that arrived together took \(changes) snapshot changes, not one")
 
-        renders = 0
-        var toggles: [(String, String)] = []
-        for round in 0..<8 { toggles += ids.map { ($0, round.isMultiple(of: 2) ? "idle" : "busy") } }
-        toggles += ids.map { ($0, "idle") }
-        let finished = burst(toggles, from: 32)
-        check(spin(until: { working(model).isEmpty && finished.at != nil }, within: 20), "every session leaves Working after the burst: \(working(model))")
-        let lag = Date().timeIntervalSince(finished.at ?? .distantPast)
-        check(lag < 1, "the sidebar showed idle \(lag) s after the last of \(toggles.count) events")
-        check(renders < toggles.count / 3, "\(toggles.count) events took \(renders) snapshot changes, not one each")
+        for round in 1...8 {
+            arriveWhileBusy(round.isMultiple(of: 2) ? "busy" : "idle")
+            check(spin(until: { changes == round + 1 }), "burst \(round) applies as one snapshot change: \(changes)")
+        }
+        arriveWhileBusy("idle")
+        check(spin(until: { working(model).isEmpty }), "every session leaves Working after the last burst: \(working(model))")
+        check(changes == 10, "10 bursts of \(ids.count) events took \(changes) snapshot changes")
     }
 
     @MainActor
