@@ -71,6 +71,13 @@ jobs:
           node scripts/test-dashboard-config-roots.mjs
           node scripts/test-dashboard-devices.mjs
           node scripts/test-session-controls.mjs
+      - name: Dashboard readability guard
+        env:
+          AGENTHAIL_BROWSER_GUARD: "1"
+          AGENTHAIL_BROWSER_CACHE: ${{ runner.tool_cache }}/agenthail-cache/chrome-for-testing
+        run: |
+          npm ci --prefix scripts/dashboard-guard --ignore-scripts --no-audit --no-fund
+          go test ./internal/daemon -run '^TestDashboardTextIsReadableOverEveryBackground$' -count=1 -v
       - name: Public copy check
         run: |
           scripts/test-check-public-copy.sh

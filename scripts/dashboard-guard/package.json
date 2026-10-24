@@ -1,0 +1,10 @@
+{
+  "name": "agenthail-dashboard-guard",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@puppeteer/browsers": "3.2.6",
+    "pngjs": "7.0.0",
+    "puppeteer-core": "25.16.0"
+  }
+}
