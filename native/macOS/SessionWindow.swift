@@ -12,7 +12,7 @@ struct SessionWindow: View {
     }
 
     var body: some View {
-        ConversationPane(model: model, pane: pane, headerInset: 84, gaps: pane.inspectorVisible ? .trailing : [])
+        ConversationPane(model: model, pane: pane, gaps: pane.inspectorVisible ? .trailing : [], holdsWindowButtons: true)
             .paneFrame(pane.inspectorVisible ? [.leading, .vertical] : .all)
             .ignoresSafeArea(.container, edges: .top)
             .inspector(isPresented: $pane.inspectorVisible) {

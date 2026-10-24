@@ -68,8 +68,9 @@ struct DesktopWindow: View {
         NavigationSplitView {
             Group {
                 if pane.sidebarDocks {
-                    SessionSidebar(model: model, pane: pane)
+                    SessionSidebar(model: model, pane: pane, holdsWindowButtons: true)
                         .belowWindowChrome()
+                        .ignoresSafeArea(.container, edges: .top)
                 } else {
                     Color.clear
                 }
@@ -77,7 +78,7 @@ struct DesktopWindow: View {
             .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
-            ConversationPane(model: model, pane: pane, gaps: contentGaps)
+            ConversationPane(model: model, pane: pane, gaps: contentGaps, holdsWindowButtons: !pane.sidebarDocks, showsSidebarToggle: !pane.sidebarDocks)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .hidesSplitDividers()
                 .belowWindowChrome()
@@ -106,7 +107,9 @@ struct DesktopWindow: View {
                     Color.black.opacity(0.001)
                         .onTapGesture { pane.closeSidebarOverlay() }
                     SessionSidebar(model: model, pane: pane)
+                        .padding(.top, pane.tabsEnabled ? 0 : WindowButtons.bandHeight)
                         .belowWindowChrome()
+                        .ignoresSafeArea(.container, edges: .top)
                         .frame(width: DesktopColumns.sidebar.ideal)
                         .shadow(color: .black.opacity(0.18), radius: 16, x: 4)
                         .transition(.move(edge: .leading))
@@ -136,14 +139,6 @@ private struct WindowChromeLayout<Content: View>: View {
                             .ignoresSafeArea(.container, edges: .top)
                     }
                 }
-                .overlay(alignment: .topLeading) {
-                    if !tabs && !pane.sidebarDocks {
-                        SidebarToggle(pane: pane)
-                            .frame(height: ConversationHeader.height)
-                            .padding(.leading, TitleBarStrip.buttonsWidth)
-                            .ignoresSafeArea(.container, edges: .top)
-                    }
-                }
                 .overlay(alignment: .bottom) {
                     if let session = pane.archivedTab {
                         ArchivedTabNotice(pane: pane, session: session, label: interface.config.tabLabel)
@@ -153,14 +148,15 @@ private struct WindowChromeLayout<Content: View>: View {
                 }
             StatusStrip(model: model, pane: pane, interface: interface)
         }
-        .background { if tabs { WindowRectReader { _, window in TitleBarStrip.placeWindowButtons(in: window) } } }
     }
 }
 
 struct SessionSidebar: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    var holdsWindowButtons = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.windowChromeTop) private var chromeTop
     @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -168,6 +164,11 @@ struct SessionSidebar: View {
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
+            if holdsWindowButtons && chromeTop == 0 {
+                Color.clear
+                    .frame(height: WindowButtons.bandHeight)
+                    .windowButtonBand(leading: WindowButtons.paneInset)
+            }
             SessionSidebarHeader(
                 model: model,
                 counts: tree.counts,
@@ -658,16 +659,20 @@ struct ConversationPane: View {
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     var gaps: Edge.Set = []
+    var holdsWindowButtons = false
+    var showsSidebarToggle = false
     @EnvironmentObject private var voice: VoiceController
     @Environment(\.windowChromeTop) private var chromeTop
     @Environment(\.openWindow) private var openWindow
+
+    private var band: Bool { holdsWindowButtons && chromeTop == 0 }
 
     var body: some View {
         if let session = pane.displayedSession {
             TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: pane.sidebarDocks || chromeTop > 0 ? headerInset : TitleBarStrip.buttonsWidth + 32, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -708,10 +713,12 @@ struct ConversationPane: View {
                         }
                     }
                 }
+            .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
             .glassPane(.content, fallback: DesktopPalette.window, gaps: gaps)
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
+                .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
                 .solidContentPane(gaps: gaps)
         } else {
             ContentUnavailableView {
@@ -739,6 +746,7 @@ struct ConversationPane: View {
             .scrimText()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .backdropSurface(DesktopPalette.window)
+            .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
             .solidContentPane(gaps: gaps)
         }
     }
@@ -785,7 +793,7 @@ struct ConversationHeader: View {
     var onFocusTerminal: () -> Void = {}
     var onCall: (() -> Void)?
 
-    static let height: CGFloat = 36
+    static let height = WindowButtons.bandHeight
     static let underTabsHeight: CGFloat = 32
 
     var body: some View {
