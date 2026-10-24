@@ -218,6 +218,24 @@ session's host. Choosing a host reloads the form from that host's catalog.
 The form's project picker lists that host's projects by name and starts the
 session in the chosen project's root; a typed folder is still accepted.
 
+## Usage limits
+
+`GET /api/v1/usage` is every account's limits on this machine and on every
+connected paired host, as `sets[{host, hostId, local, provider, account, root,
+primary, meters, problem}]`. Each machine lists its primary Claude account
+first, then Codex while it is healthy, then its other Claude accounts. A Claude
+account is named by the email it is signed in with, or by its root's name.
+Each meter has a `label`, `percent`, `severity`, `resetsAt`, `asOf`, `aged`
+and `until`; a client hides a meter once `until` passes and shows the reading's
+age instead of its reset when `aged` is true.
+
+The daemon asks each connected host with `scope=local`, so a host never asks
+its own peers in turn, and waits at most a few seconds for each. A host that
+runs an older Agenthail, does not answer in time or fails is one set with no
+provider and a `problem` that names it. The Mac status strip and the web
+dashboard's top bar show this machine's primary account and Codex in full and
+every other account or host by name and its highest limit.
+
 ## Unreachable hosts and delivery
 
 A host that stops answering keeps its rows. They are re-rendered unavailable

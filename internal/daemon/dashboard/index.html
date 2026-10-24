@@ -31,6 +31,9 @@
           ><a href="#operations" data-view="operations">Operations</a>
         </nav>
         <div class="topbar-actions">
+          <div class="usage-slot">
+            <span class="usage-line" id="usage-line" aria-label="Usage limits" hidden></span>
+          </div>
           <button class="button" id="voice-orchestrator" type="button">
             Talk to orchestrator
           </button>
@@ -599,5 +602,6 @@
     <div class="toast" id="toast" role="status" hidden></div>
     <script src="/app.js?v=23"></script>
     <script type="module" src="/js/ui.js"></script>
+    <script type="module" src="/js/usage.js"></script>
   </body>
 </html>
