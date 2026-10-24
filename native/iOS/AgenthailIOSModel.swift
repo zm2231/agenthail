@@ -183,7 +183,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
-    var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter { $0.reachable && !$0.isPreview }.map(\.api) }
+    var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
     init(autoConnect: Bool = true, session: URLSession = .shared) {
         networkSession = session

@@ -240,7 +240,9 @@ dashboard's top bar show this machine's primary account and Codex in full and
 every other account or host by name and its highest limit. The iPhone shows
 the same line under the session filters; it asks each computer it is paired
 with, counts only the first one's own accounts as in use, and lists a host two
-computers both report once.
+computers both report once. A computer that does not answer keeps its place,
+so a later one is never taken for the first. When the line is too wide for the
+phone, the other accounts move to a second line before any of them is dropped.
 
 ## Unreachable hosts and delivery
 

@@ -18,6 +18,7 @@
 		14444A5A7280E6DCE1836F46 /* SessionScopeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E544A356E8BB25131FFEBB /* SessionScopeUITests.swift */; };
 		1848D31E51AC4C2EC9A08CE5 /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863060175315DE04E5E368FE /* DiffView.swift */; };
 		22A02EFF109AE82C6E6D5609 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 6B5A93EB2293BEFB3BF96AB5 /* Textual */; };
+		26D24C93105FDAE09D6C4643 /* UsagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7434EA1A39BCF717A5712C36 /* UsagePreview.swift */; };
 		2A9003DD1539FA7670FCC4DF /* PaletteTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E80B314FC553489CC8B6E80 /* PaletteTokens.swift */; };
 		2B2ED3EB9F3FEE34E7A57088 /* AgenthailIOSNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4A86FCF8D61DE4EBC5275EEF /* AgenthailIOSNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2C1CA18BDC7839B5C14E016C /* ComposerTextSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40DC2DE9D610F9A650F9EA3 /* ComposerTextSync.swift */; };
@@ -126,6 +127,7 @@
 		F1BB42C765B9C41D0CC15FF3 /* VoiceOperatorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFAA5C70E0A307C25243752B /* VoiceOperatorModel.swift */; };
 		F512EE7502D385FBF7F1B8C5 /* TurnClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = E663B73B2C53323662E76E4B /* TurnClock.swift */; };
 		F68975A0D32C1EA3BB0A658C /* AgenthailAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB73667A631B4855B108997 /* AgenthailAPI.swift */; };
+		F813E80232F62234288B5F8B /* UsageMetersUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66AFA0C1285AF89FECDA0777 /* UsageMetersUITests.swift */; };
 		FA9155E997577CAC5815DA96 /* TranscriptContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41DF0D6EBD30C6D301B896D2 /* TranscriptContext.swift */; };
 		FB17EBE63942E214E1183E98 /* TextDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9110800F97A7ED841FDCED47 /* TextDiff.swift */; };
 		FCB4639F067D8EC20FB942CC /* TimelineMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F21ADA618DF4770F00C79A8 /* TimelineMetadata.swift */; };
@@ -217,10 +219,12 @@
 		5EB73667A631B4855B108997 /* AgenthailAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailAPI.swift; sourceTree = "<group>"; };
 		5F7C98CCED8E9A6D4C20F491 /* HostConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostConnection.swift; sourceTree = "<group>"; };
 		62E544A356E8BB25131FFEBB /* SessionScopeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionScopeUITests.swift; sourceTree = "<group>"; };
+		66AFA0C1285AF89FECDA0777 /* UsageMetersUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMetersUITests.swift; sourceTree = "<group>"; };
 		7039428BDACFBDD5CA67BBBB /* AgenthailIOSTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSTests.swift; sourceTree = "<group>"; };
 		70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAPI.swift; sourceTree = "<group>"; };
 		71ABFF321D6A090191C0C9C1 /* SessionListChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListChrome.swift; sourceTree = "<group>"; };
 		72CFB9B3A032677BE34153EF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		7434EA1A39BCF717A5712C36 /* UsagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePreview.swift; sourceTree = "<group>"; };
 		74D671F0DB0275E3CDC13160 /* SessionListChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListChromeTests.swift; sourceTree = "<group>"; };
 		755ACDEEAE225AD8953528AF /* ComposerCompletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerCompletion.swift; sourceTree = "<group>"; };
 		76A055FF778B7F609D27D5DD /* AgenthailIOSUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgenthailIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -357,6 +361,7 @@
 				ABDB2B82FC46DF06F8EE66BA /* TurnSettingsView.swift */,
 				3483A9A37B55E2DDEF1E18C9 /* UsageFeed.swift */,
 				E5DD225A93AE1A2026E7B5A2 /* UsageMetersLine.swift */,
+				7434EA1A39BCF717A5712C36 /* UsagePreview.swift */,
 				91A23D43BE6185EB08D3D29A /* VoiceCallCoordinator.swift */,
 				9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */,
 				BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */,
@@ -381,6 +386,7 @@
 				EDE9B5CB52773C3043A3F2D0 /* TabHitAreaUITests.swift */,
 				0B076C97F3E9777192BE7445 /* TapWhenReady.swift */,
 				A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */,
+				66AFA0C1285AF89FECDA0777 /* UsageMetersUITests.swift */,
 				023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */,
 			);
 			path = iOSUITests;
@@ -697,6 +703,7 @@
 				9D93737D860A0418DFC1BF72 /* UsageFeed.swift in Sources */,
 				D9ABCA6991BC57D15D71A64A /* UsageMeterText.swift in Sources */,
 				843ADC1E668251BE4B62E0A9 /* UsageMetersLine.swift in Sources */,
+				26D24C93105FDAE09D6C4643 /* UsagePreview.swift in Sources */,
 				0B87112C9CF2D431B9EE5F1B /* UsageStrip.swift in Sources */,
 				2F390DCA359AD2E249947755 /* VoiceAPI.swift in Sources */,
 				CF8F58BBB065D68EA89FDB74 /* VoiceAudioBridge.swift in Sources */,
@@ -725,6 +732,7 @@
 				DA8474323814D1302D2A1FAD /* TabHitAreaUITests.swift in Sources */,
 				84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */,
 				4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */,
+				F813E80232F62234288B5F8B /* UsageMetersUITests.swift in Sources */,
 				3F469EFA3A39C2186C2C4C1D /* VoiceOperatorUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

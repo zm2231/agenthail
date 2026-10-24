@@ -4,14 +4,14 @@ struct UsageMetersRow: View {
     @ObservedObject var feed: UsageFeed
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            let strip = UsageStrip.make(feed.sets, now: context.date)
-            if !strip.meters.isEmpty || !strip.others.isEmpty {
-                UsageMetersLine(strip: strip, now: context.date)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+        let shown = UsageStrip.make(feed.sets, now: Date())
+        if !shown.meters.isEmpty || !shown.others.isEmpty {
+            TimelineView(.everyMinute) { context in
+                UsageMetersLine(strip: UsageStrip.make(feed.sets, now: context.date), now: context.date)
             }
+            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
     }
 }
@@ -24,6 +24,10 @@ struct UsageMetersLine: View {
         ViewThatFits(in: .horizontal) {
             row(details: true, others: true)
             row(details: false, others: true)
+            VStack(alignment: .leading, spacing: 4) {
+                row(details: false, others: false)
+                if !strip.others.isEmpty { row(meters: false, details: false, others: true) }
+            }
             row(details: false, others: false)
             row(details: false, others: false, first: true)
         }
@@ -31,11 +35,12 @@ struct UsageMetersLine: View {
         .lineLimit(1)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Usage limits")
+        .accessibilityIdentifier("usage-limits")
     }
 
-    private func row(details: Bool, others: Bool, first: Bool = false) -> some View {
+    private func row(meters: Bool = true, details: Bool, others: Bool, first: Bool = false) -> some View {
         HStack(spacing: 12) {
-            ForEach(first ? Array(strip.meters.prefix(1)) : strip.meters, id: \.self) { meter in
+            ForEach(meters ? (first ? Array(strip.meters.prefix(1)) : strip.meters) : [], id: \.self) { meter in
                 let spoken = UsageMeterText.spokenLabel(meter, now: now)
                 HStack(spacing: 4) {
                     Text(meter.label).foregroundStyle(PhonePalette.muted)
