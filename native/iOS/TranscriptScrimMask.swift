@@ -9,7 +9,7 @@ struct TranscriptScrimMask: Equatable {
     var layers: [CGRect]
 
     init(rows: [CGRect]) {
-        var cores = rows.filter { $0.width > 0 && $0.height > 0 }
+        var cores = Self.merged(rows.filter { $0.width > 0 && $0.height > 0 })
         if let top = cores.map(\.minY).min(), let bottom = cores.map(\.maxY).max(),
            let left = cores.map(\.minX).min(), let right = cores.map(\.maxX).max() {
             // Rows laid out mid-scroll land under scrim before they report.
@@ -19,6 +19,18 @@ struct TranscriptScrimMask: Equatable {
             cores = [CGRect(x: -Self.far, y: -Self.far, width: Self.far * 2, height: Self.far * 2)]
         }
         layers = cores.map { $0.insetBy(dx: -Self.reach, dy: -Self.reach) }
+    }
+
+    static func merged(_ rows: [CGRect]) -> [CGRect] {
+        var out: [CGRect] = []
+        for row in rows.sorted(by: { $0.minY < $1.minY }) {
+            if let last = out.last, row.minY - last.maxY < reach * 2 {
+                out[out.count - 1] = last.union(row)
+            } else {
+                out.append(row)
+            }
+        }
+        return out
     }
 
     static func falloff(_ d: CGFloat) -> CGFloat {

@@ -24,6 +24,9 @@ final class TranscriptScrimTests: XCTestCase {
         XCTAssertEqual(below.minY, 320, "the column below the last laid-out row is covered")
         XCTAssertEqual(above.minX, 0)
         XCTAssertEqual(above.maxX, 300, "the margins beside the column keep the art")
+        let close = TranscriptScrimMask(rows: [CGRect(x: 0, y: 100, width: 300, height: 40), CGRect(x: 0, y: 152, width: 120, height: 20)])
+        XCTAssertEqual(close.layers.count, 3, "rows 12pt apart share one layer, so no seam shows between them")
+        XCTAssertEqual(close.layers[0], CGRect(x: 0, y: 100, width: 300, height: 72).insetBy(dx: -reach, dy: -reach))
         let empty = TranscriptScrimMask(rows: [])
         XCTAssertTrue(empty.layers[0].contains(CGRect(x: 0, y: 0, width: 10_000, height: 10_000)), "with no rows yet the whole scrim shows")
     }
@@ -73,7 +76,7 @@ final class TranscriptScrimTests: XCTestCase {
 
         let view = host()
         view.show(layers)
-        let rows = [CGRect(x: 0, y: 2400, width: 362, height: 44), CGRect(x: 0, y: 2556, width: 240, height: 120)]
+        let rows = [CGRect(x: 0, y: 2400, width: 362, height: 44), CGRect(x: 0, y: 2456, width: 362, height: 30), CGRect(x: 0, y: 2556, width: 240, height: 120)]
         let scrim = TranscriptScrim()
         scrim.attach(view)
         scrim.report(rows)
@@ -92,7 +95,12 @@ final class TranscriptScrimTests: XCTestCase {
                 }
             }
         }
-        let gap = shot[Int(2500 + origin.y) * Int(size.width) + 200]
+        let above = Int(2443 + origin.y), middle = Int(2450 + origin.y)
+        for x in 20..<382 {
+            let row = shot[above * Int(size.width) + x], seam = shot[middle * Int(size.width) + x]
+            XCTAssertEqual(seam, row, accuracy: 0.01, "no lighter seam in the 12pt gap at x \(x)")
+        }
+        let gap = shot[Int(2521 + origin.y) * Int(size.width) + 200]
         XCTAssertFalse(ScrimField.passes(gap, boundary: boundary, polarity: .dark), "the art between rows is not scrimmed (\(gap))")
         let beside = shot[Int(2600 + origin.y) * Int(size.width) + 340]
         XCTAssertFalse(ScrimField.passes(beside, boundary: boundary, polarity: .dark), "the art beside a short row is not scrimmed (\(beside))")
