@@ -17,6 +17,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.buttons["session-computer::codex-demo"].waitForExistence(timeout: 5))
         app.buttons["voice-entry"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample conversation"].exists, "the preview voice entry must not dial a paired host")
         app.buttons["Done"].tapWhenReady()
         for tab in ["Sessions", "Inbox", "Settings"] {
             XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")

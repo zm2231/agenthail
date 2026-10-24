@@ -67,7 +67,7 @@ extension Notification.Name {
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
     @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
-    @StateObject private var voiceCalls = VoiceCallCoordinator()
+    @StateObject private var voiceCalls = VoiceCallCoordinator(makeModel: sessionPreviewEnabled ? { VoiceOperatorModel(preview: true) } : { VoiceOperatorModel.paired() })
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
 
