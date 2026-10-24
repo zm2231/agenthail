@@ -10,12 +10,16 @@ final class RoleInlineStyleTests: XCTestCase {
     func testServedLinkAndCodeColoursAreUsed() {
         let colors = TextColors(served: [
             "link": ServedColor(dark: "#123456", light: "#654321", increased: .init(dark: "#abcdef", light: "#fedcba")),
-            "code": ServedColor(dark: "#00ff00", light: "#007700"),
+            "code": ServedColor(dark: "#00ff00", light: "#007700", increased: .init(dark: "#11ff11", light: "#005500")),
         ])
         XCTAssertEqual(color(.link, colors), Color(hex: 0x123456))
         XCTAssertEqual(color(.link, colors, dark: false), Color(hex: 0x654321))
         XCTAssertEqual(color(.link, colors, increased: true), Color(hex: 0xABCDEF))
+        XCTAssertEqual(color(.link, colors, dark: false, increased: true), Color(hex: 0xFEDCBA))
         XCTAssertEqual(color(.code, colors), Color(hex: 0x00FF00))
+        XCTAssertEqual(color(.code, colors, dark: false), Color(hex: 0x007700))
+        XCTAssertEqual(color(.code, colors, increased: true), Color(hex: 0x11FF11))
+        XCTAssertEqual(color(.code, colors, dark: false, increased: true), Color(hex: 0x005500))
     }
 
     func testLinksFollowTheAccentWhenNotSetApart() {
