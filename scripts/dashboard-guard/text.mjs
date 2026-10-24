@@ -1,9 +1,12 @@
 export function collectText() {
+  const paint = new OffscreenCanvas(1, 1).getContext("2d", { willReadFrequently: true });
   const parseColour = (value) => {
-    const match = /rgba?\(([^)]+)\)/.exec(value);
-    if (!match) return null;
-    const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
-    return [parts[0] / 255, parts[1] / 255, parts[2] / 255, parts.length > 3 ? parts[3] : 1];
+    paint.clearRect(0, 0, 1, 1);
+    paint.fillStyle = "#000";
+    paint.fillStyle = value;
+    paint.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = paint.getImageData(0, 0, 1, 1).data;
+    return a ? [r / 255, g / 255, b / 255, a / 255] : [0, 0, 0, 0];
   };
   const opacity = (element) => {
     let total = 1;
@@ -29,29 +32,60 @@ export function collectText() {
     return clip;
   };
   const CELL = 12;
+  const panes = [...document.querySelectorAll("[data-pane], [data-readable]")].map((element) => {
+    const box = element.getBoundingClientRect();
+    return { element, box: [box.left, box.top, box.right, box.bottom] };
+  });
+  const overlap = (a, b) => [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+  const empty = (r) => r[2] - r[0] < 0.5 || r[3] - r[1] < 0.5;
+  const occluders = new Map();
+  const above = (pane) => {
+    if (occluders.has(pane)) return occluders.get(pane);
+    const own = panes.find((entry) => entry.element === pane);
+    const out = [];
+    for (const other of panes) {
+      if (other.element === pane || other.element.contains(pane)) continue;
+      const shared = overlap(own.box, other.box);
+      if (empty(shared)) continue;
+      const hits = document.elementsFromPoint((shared[0] + shared[2]) / 2, (shared[1] + shared[3]) / 2);
+      const mine = hits.findIndex((hit) => hit.closest("[data-pane], [data-readable]") === pane);
+      const theirs = hits.findIndex((hit) => other.element.contains(hit));
+      if (theirs !== -1 && (mine === -1 || theirs < mine)) out.push(shared);
+    }
+    occluders.set(pane, out);
+    return out;
+  };
+  const subtract = (pieces, cut) =>
+    pieces.flatMap((r) => {
+      const shared = overlap(r, cut);
+      if (empty(shared)) return [r];
+      return [
+        [r[0], r[1], r[2], shared[1]],
+        [r[0], shared[3], r[2], r[3]],
+        [r[0], shared[1], shared[0], shared[3]],
+        [shared[2], shared[1], r[2], shared[3]],
+      ].filter((part) => !empty(part));
+    });
   const cellsOf = (rect, clip, pane) => {
-    const left = Math.max(rect.left, clip[0]);
-    const top = Math.max(rect.top, clip[1]);
-    const right = Math.min(rect.right, clip[2]);
-    const bottom = Math.min(rect.bottom, clip[3]);
+    let pieces = [overlap([rect.left, rect.top, rect.right, rect.bottom], clip)].filter((part) => !empty(part));
+    if (pane) for (const cut of above(pane)) pieces = subtract(pieces, cut);
     const cells = [];
-    for (let y = top; y < bottom; y += CELL) {
-      for (let x = left; x < right; x += CELL) {
-        const w = Math.min(CELL, right - x);
-        const h = Math.min(CELL, bottom - y);
-        const topmost = document.elementsFromPoint(x + w / 2, y + h / 2).find((hit) => hit.matches("[data-pane], [data-readable]"));
-        if (!pane || topmost === pane) cells.push([x, y, w, h]);
+    for (const [left, top, right, bottom] of pieces) {
+      for (let y = top; y < bottom; y += CELL) {
+        for (let x = left; x < right; x += CELL) cells.push([x, y, Math.min(CELL, right - x), Math.min(CELL, bottom - y)]);
       }
     }
     return cells;
   };
   const out = [];
+  const modal = document.querySelector(":modal");
   const range = document.createRange();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent.trim();
     const element = node.parentElement;
     if (!text || !element || element.closest(".ui-backdrop, script, style, template, noscript")) continue;
+    if (modal && !modal.contains(element)) continue;
     if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) continue;
     range.selectNodeContents(node);
     const clip = clipFor(element);

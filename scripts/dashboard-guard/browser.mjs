@@ -16,6 +16,7 @@ export async function launch() {
     executablePath,
     userDataDir: profile,
     headless: "shell",
+    protocolTimeout: 30_000,
     args: ["--no-first-run", "--no-default-browser-check", "--disable-gpu-compositing", "--force-color-profile=srgb", "--font-render-hinting=none"],
   });
   return {

@@ -8,10 +8,11 @@ export function decode(buffer) {
   return { width: png.width, height: png.height, data: png.data };
 }
 
-export function meanLuminance({ width, height, data }) {
-  let total = 0;
-  for (let i = 0; i < width * height * 4; i += 4) total += luminance([data[i] / 255, data[i + 1] / 255, data[i + 2] / 255]);
-  return total / (width * height);
+export function brightLuminance({ width, height, data }, share = 0.01) {
+  const values = new Float64Array(width * height);
+  for (let i = 0; i < values.length; i++) values[i] = luminance([data[i * 4] / 255, data[i * 4 + 1] / 255, data[i * 4 + 2] / 255]);
+  values.sort();
+  return values[Math.floor((values.length - 1) * (1 - share))];
 }
 
 export function worstContrast(entry, ground, scale) {
@@ -19,6 +20,7 @@ export function worstContrast(entry, ground, scale) {
   const alpha = a * entry.opacity;
   let worst = Infinity;
   let at = null;
+  let over = null;
   for (const [x, y, w, h] of entry.rects) {
     const left = Math.max(Math.floor(x * scale), 0);
     const top = Math.max(Math.floor(y * scale), 0);
@@ -33,9 +35,10 @@ export function worstContrast(entry, ground, scale) {
         if (value < worst) {
           worst = value;
           at = [column, row];
+          over = `#${[ground.data[i], ground.data[i + 1], ground.data[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
         }
       }
     }
   }
-  return { worst, at };
+  return { worst, at, over };
 }

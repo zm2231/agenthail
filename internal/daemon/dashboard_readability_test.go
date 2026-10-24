@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -25,9 +26,14 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 		t.Skip("set AGENTHAIL_BROWSER_GUARD=1 and AGENTHAIL_BROWSER_CACHE to run the browser guard")
 	}
 	t.Setenv("HOME", t.TempDir())
-	full := serveReadabilityDashboard(t, seedReadabilityFixture)
-	empty := serveReadabilityDashboard(t, func(*testing.T, *registry.Registry, *daemonSurface) {})
-	dashboards, err := json.Marshal(map[string]readabilityDashboard{"full": full, "empty": empty})
+	themes := map[string]map[string]readabilityDashboard{}
+	for _, theme := range []string{"dark", "light"} {
+		themes[theme] = map[string]readabilityDashboard{
+			"full":  serveReadabilityDashboard(t, seedReadabilityFixture),
+			"empty": serveReadabilityDashboard(t, func(*testing.T, *registry.Registry, *daemonSurface) {}),
+		}
+	}
+	dashboards, err := json.Marshal(themes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +46,16 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	}
 }
 
+type followingSurface struct{ *daemonSurface }
+
+func (f followingSurface) Stream(ctx context.Context, session *surface.Session, cursor string, onEvent func(surface.StreamEvent), idle time.Duration) error {
+	if err := f.daemonSurface.Stream(ctx, session, cursor, onEvent, idle); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Registry, *daemonSurface)) readabilityDashboard {
 	t.Helper()
 	store, err := registry.Open(registrytest.Path(t))
@@ -49,7 +65,17 @@ func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Reg
 	t.Cleanup(func() { store.Close() })
 	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	seed(t, store, fake)
-	d := newTestDaemon(t, store, []surface.Surface{fake})
+	d := newTestDaemon(t, store, []surface.Surface{followingSurface{fake}})
+	d.discoverCatalog(t.Context())
+	paired, err := store.ListHosts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range paired {
+		if err := d.attachHost(host); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cookie, err := signInBrowser(store)
 	if err != nil {
 		t.Fatal(err)
@@ -62,9 +88,21 @@ func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Reg
 func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *daemonSurface) {
 	t.Helper()
 	now := time.Now()
+	dialog := &surface.Waiting{Kind: surface.WaitingDialog, ID: "dialog-1", Since: now}
+	fake.observations["review"] = &surface.TurnObservation{Status: surface.StatusBusy, WaitingOn: dialog}
 	sessions := []surface.Session{
 		{ID: "research", Name: "research", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop", Cwd: "/work/agenthail", LastActive: now},
-		{ID: "review", Name: "review", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: "/work/agenthail", LastActive: now.Add(-time.Hour)},
+		{
+			ID: "review", Name: "review", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop", Cwd: "/work/agenthail", LastActive: now.Add(-time.Hour),
+			WaitingOn:       dialog,
+			BackgroundTasks: &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Since: now, Tasks: []surface.BackgroundTask{{ID: "shell-1", Kind: "shell", Description: "go test ./internal/daemon", Since: now}}},
+		},
+	}
+	if err := store.AddProject(registry.ProjectRecord{ID: "p-agenthail", WorkspaceRoot: "/work/agenthail", Title: "agenthail", Added: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "build-server", Endpoint: "https://build-server.invalid:7412", Address: "100.64.0.2", Token: "ahd_fixture"}); err != nil {
+		t.Fatal(err)
 	}
 	for _, session := range sessions {
 		if err := store.RegisterSession(session); err != nil {
