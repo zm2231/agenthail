@@ -38,7 +38,7 @@ struct StatusTail: View {
                     Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ReadableButtonStyle())
             .disabled(needsYou.isEmpty)
         case "hosts":
             StatusLabel(title: short ? nil : hosts, spoken: hosts) { Image(systemName: "desktopcomputer") }
@@ -47,7 +47,7 @@ struct StatusTail: View {
             Button { if let session { model.focusInTerminal(session) } } label: {
                 StatusLabel(title: short ? nil : "Terminal", spoken: "Terminal") { Image(systemName: "terminal") }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ReadableButtonStyle())
             .disabled(session?.runtime?.focusable != true)
             .help("Show this session's terminal")
         default:

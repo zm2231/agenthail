@@ -45,11 +45,16 @@ struct BackdropAppearanceTest {
         backdrop.windowChanged(window)
         wait { hue(backdrop.layers) == "blue" }
         check(hue(backdrop.layers) == "blue", "a dark window draws the dark background, got \(hue(backdrop.layers))")
+        check(!backdrop.solid && backdrop.tints[.chrome] ?? 1 < 1, "a dark window keeps translucent glass")
 
         window.appearance = NSAppearance(named: .aqua)
         backdrop.windowChanged(window)
+        check(backdrop.layers == nil, "the dark layers are dropped as soon as the window turns light, so dark scrims never sit under dark text")
         wait { hue(backdrop.layers) == "red" }
         check(hue(backdrop.layers) == "red", "switching the window to light draws the light background, got \(hue(backdrop.layers))")
+        check(backdrop.solid && [.sidebar, .content, .chrome].allSatisfy { backdrop.tints[$0] == 1 } && backdrop.composerOpacity == 1,
+              "a light window draws every pane, strip and floating surface solid, got \(backdrop.tints) floating \(backdrop.composerOpacity)")
+        check(backdrop.layers?.layers.scrim == nil && backdrop.layers?.layers.panes.values.allSatisfy({ $0.scrim == nil }) == true, "solid light surfaces need no scrim")
 
         var pictures = UIConfig()
         pictures.values["background"] = .text("image: art/a-dark.jpg")

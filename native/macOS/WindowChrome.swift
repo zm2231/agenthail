@@ -25,6 +25,7 @@ private struct BelowWindowChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .paneFrame(.top)
             .padding(.top, top)
             .ignoresSafeArea(.container, edges: top > 0 ? .top : [])
     }
@@ -113,7 +114,7 @@ struct TitleBarStrip: View {
         .padding(.leading, Self.buttonsWidth)
         .padding(.trailing, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane(.chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side, edge: .bottom)
         .background {
             Button("") { pane.stepTab(1) }.keyboardShortcut(.tab, modifiers: .control).hidden()
             Button("") { pane.stepTab(-1) }.keyboardShortcut(.tab, modifiers: [.control, .shift]).hidden()
@@ -165,6 +166,7 @@ struct ArchivedTabNotice: View {
         .frame(minHeight: 36)
         .frame(maxWidth: 480)
         .floatingGlass(DesktopPalette.raised, in: Capsule())
+        .floatingEdge(Capsule())
         .task(id: "\(session.id)/\(pane.archivedTabError ?? "")") {
             guard pane.archivedTabError == nil else { return }
             try? await Task.sleep(for: .seconds(10))
@@ -311,7 +313,7 @@ struct StatusStrip: View {
         .foregroundStyle(DesktopPalette.text2)
         .padding(.horizontal, DesktopSpace.l)
         .frame(height: Self.height)
-        .glassPane(.chrome, fallback: DesktopPalette.side)
+        .glassPane(.chrome, fallback: DesktopPalette.side, edge: .top)
         .task(id: model.isConnected) {
             guard items.contains("usage"), model.isConnected else { return }
             await usage.run(model)

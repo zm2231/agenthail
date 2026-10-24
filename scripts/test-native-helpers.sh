@@ -45,6 +45,7 @@ SOURCES=(
   TimelineMetadata.swift
   TurnSettings.swift
   UIConfig.swift
+  SurfaceMode.swift
   PaletteTokens.swift
   TextColors.swift
   RoleStyle.swift

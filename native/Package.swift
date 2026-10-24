@@ -29,6 +29,7 @@ let package = Package(
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
                 "UIConfig.swift",
+                "SurfaceMode.swift",
                 "PaletteTokens.swift",
                 "TextColors.swift",
                 "RoleStyle.swift",

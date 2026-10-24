@@ -70,7 +70,7 @@ var Keys = []Key{
 	number("background.opacity", "1", "Background strength over the ground colour on New Session and empty views.", 0, 1),
 	number("background.session-opacity", "1", "Background strength inside a session.", 0, 1),
 
-	choice("glass", "on", "Translucent panes over the background; off uses solid surfaces.", "on", "off"),
+	choice("glass", "on", "Translucent panes over the background in dark mode; light mode and off use solid surfaces with the background around them.", "on", "off"),
 	number("glass.blur", "30", "Blur radius in points of the background behind panes.", 0, 64),
 	color("glass.tint", "ground", "Tint of panes.", "ground", "accent"),
 	number("glass.opacity", "0.18", "Tint opacity of the content pane. A minimum: raised where text needs it.", 0, 1),
@@ -79,7 +79,7 @@ var Keys = []Key{
 	number("glass.composer.opacity", "0.5", "Tint opacity of floating glass: composer, tab plates, popovers. With glass.readability auto it rises as far as the text colours over it need.", 0, 1),
 	choice("glass.readability", "auto", "auto raises pane tint and adds a scrim where text needs it to reach contrast.target; off uses the glass opacities exactly, so text may be harder to read. Increase Contrast always uses auto.", "auto", "off"),
 	number("glass.border", "0.08", "Opacity of pane hairlines.", 0, 0.3),
-	number("glass.gutter", "8", "Points between floating panes; 0 joins them edge to edge.", 0, 16),
+	number("glass.gutter", "8", "Points between panes and around them; 0 joins them edge to edge.", 0, 16),
 
 	choice("texture", "none", "Texture over the background, never over panes or text.", "none", "scanlines", "grain"),
 	number("texture.strength", "0.2", "How strongly the texture darkens.", 0, 0.6),

@@ -45,7 +45,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
 | `background.opacity` | `1` | 0 to 1. Background strength on New Session and empty views. |
 | `background.session-opacity` | `1` | 0 to 1. Background strength inside a session. |
-| `glass` | `on` | `on` shows translucent panes over the background; `off` uses solid surfaces. |
+| `glass` | `on` | `on` shows translucent panes over the background in dark mode; light mode and `off` use solid surfaces, with the background showing only around them. |
 | `glass.blur` | `30` | 0 to 64. Blur radius in points behind panes. |
 | `glass.tint` | `ground` | Tint of panes: `ground`, `accent` or `#rrggbb`. |
 | `glass.opacity` | `0.18` | 0 to 1. Tint of the content pane. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
@@ -54,7 +54,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. With `glass.readability = auto` it rises to the least that keeps every text colour readable over the glass and the background under it: about 0.2 with the default colours and target, and more for fainter `color.*` values or a higher `contrast.target`. On the iPhone it also rises over bright art under it. |
 | `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
-| `glass.gutter` | `8` | 0 to 16. Points between floating panes; 0 joins them edge to edge. |
+| `glass.gutter` | `8` | 0 to 16. Points between panes and around them; 0 joins them edge to edge. |
 | `texture` | `none` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
 | `texture.strength` | `0.2` | 0 to 0.6. How strongly the texture darkens. |
 | `texture.spacing` | `3` | 2 to 8. Points between scanlines. |

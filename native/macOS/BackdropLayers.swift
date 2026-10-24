@@ -15,6 +15,7 @@ struct BackdropLayers: @unchecked Sendable {
     }
 
     let size: CGSize
+    let polarity: ScrimField.Polarity
     let base: CGImage?
     let scrim: CGImage?
     let scrimPeak: Float
@@ -71,7 +72,7 @@ extension BackdropRenderer {
             }
             panes[role] = BackdropLayers.Pane(base: behind, minimum: style.minimum, scrim: above?.image, scrimPeak: above?.peak ?? 0)
         }
-        return BackdropLayers(size: spec.size, base: sharp, scrim: scrim?.image, scrimPeak: scrim?.peak ?? 0, scrimColor: mean(scrimTint),
+        return BackdropLayers(size: spec.size, polarity: spec.polarity, base: sharp, scrim: scrim?.image, scrimPeak: scrim?.peak ?? 0, scrimColor: mean(scrimTint),
                               paneTint: BackdropRGB(paneTint.0, paneTint.1, paneTint.2), panes: panes)
     }
 

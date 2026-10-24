@@ -30,6 +30,7 @@ targets:
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: UIConfig.swift
+      - path: SurfaceMode.swift
       - path: PaletteTokens.swift
       - path: TextColors.swift
       - path: RoleStyle.swift

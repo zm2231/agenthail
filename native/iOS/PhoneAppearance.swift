@@ -49,6 +49,7 @@ final class PhoneAppearance: ObservableObject {
 
     init(cache: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("appearance", isDirectory: true)) {
         self.cache = cache
+        if let cache { RenderStamp.prune(cache) }
         if let cache, let data = try? Data(contentsOf: cache.appendingPathComponent("ui.json")),
            let saved = try? JSONDecoder().decode(UIConfig.self, from: data) {
             config = saved
@@ -161,7 +162,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     func file(_ key: Key) -> URL? {
-        let name = [config.rev, wallpaperID(dark: key.dark), "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
+        let name = [RenderStamp.current, config.rev, wallpaperID(dark: key.dark), "\(key.surface)", "\(Int(key.size.width))x\(Int(key.size.height))@\(renderScale(key))",
                     key.dark ? "dark" : "light", key.solid ? "solid" : "glass", "\(key.target)", key.readable ? "readable" : "plain"].joined(separator: "-")
         let safe = name.map { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "@" ? $0 : "_" }
         return cache?.appendingPathComponent(String(safe) + ".png")
@@ -384,7 +385,8 @@ private struct PhoneBackdropBody<Content: View>: View {
     @State private var frame: CGRect = .zero
 
     private func key(_ surface: PhoneAppearance.Surface) -> PhoneAppearance.Key {
-        PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark, solid: reduceTransparency,
+        PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark,
+                            solid: appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency),
                             target: PhoneAppearance.contrastTarget(appearance.config, increased: contrast == .increased),
                             readable: appearance.config.readability || contrast == .increased)
     }
@@ -437,7 +439,6 @@ private struct BackdropLayer: View {
         .accessibilityHidden(true)
     }
 }
-
 
 struct AppearanceScope<Content: View>: View {
     @ObservedObject var appearance: PhoneAppearance

@@ -114,12 +114,15 @@ struct MainTabs: View {
     var body: some View {
         TabView(selection: $selection) {
             ConversationFlow(model: model)
+                .solidTabBar()
                 .tabItem { Label("Sessions", systemImage: "bubble.left.and.bubble.right") }
                 .tag(0)
             NavigationStack { QueueListView(model: model) }
+                .solidTabBar()
                 .tabItem { Label("Inbox", systemImage: "tray") }
                 .tag(1)
             NavigationStack { SettingsView(model: model) }
+                .solidTabBar()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(2)
         }
@@ -839,7 +842,8 @@ struct IOSComposer: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(canSend ? AnyShapeStyle(.white) : AnyShapeStyle(PhonePalette.muted))
-                        .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.primary.opacity(0.08)), in: Circle())
+                        .background(canSend ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(Color.clear), in: Circle())
+                        .overlay(Circle().strokeBorder(canSend ? AnyShapeStyle(Color.clear) : AnyShapeStyle(PhonePalette.muted), lineWidth: 1))
                         .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
                         .disabled(!canSend)
                         .contextMenu { composerMenu }

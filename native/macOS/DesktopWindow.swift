@@ -17,7 +17,7 @@ struct DesktopWindow: View {
 
     var body: some View {
         WindowChromeLayout(model: model, pane: pane, interface: model.interface) {
-            splitView
+            splitView.paneFrame([.horizontal, .bottom])
         }
         .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
         .disabled(model.paletteVisible)
@@ -707,6 +707,7 @@ struct ConversationPane: View {
             .environmentObject(pane)
         } else if let draft = pane.newSession {
             NewSessionView(model: model, draft: draft)
+                .solidContentPane()
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -733,6 +734,7 @@ struct ConversationPane: View {
             .scrimText()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .backdropSurface(DesktopPalette.window)
+            .solidContentPane()
         }
     }
 }
@@ -1554,15 +1556,10 @@ struct ComposerView: View {
                         }
                         .frame(height: 28)
                         Button(action: primaryAction) {
-                            Image(systemName: primarySymbol)
-                                .font(.system(size: primaryIsStop ? 10 : 14, weight: .semibold))
-                                .foregroundStyle(DesktopPalette.onAccent)
-                                .frame(width: 28, height: 28)
-                                .background(primaryIsStop ? AnyShapeStyle(DesktopPalette.stop) : AnyShapeStyle(DesktopPalette.accent), in: Circle())
+                            SendButtonFace(symbol: primarySymbol, size: primaryIsStop ? 10 : 14, diameter: 28, fill: primaryIsStop ? AnyShapeStyle(DesktopPalette.stop) : AnyShapeStyle(DesktopPalette.accent), enabled: session.isWorking || hasText)
                         }
                         .buttonStyle(.plain)
                         .disabled(!session.isWorking && !hasText)
-                        .opacity(!session.isWorking && !hasText ? 0.45 : 1)
                         .accessibilityLabel(primaryLabel)
                         .help(primaryHelp)
                         .keyboardShortcut(shortcuts.keyboardShortcut(.send))
@@ -1582,8 +1579,7 @@ struct ComposerView: View {
                 }
                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.sheet))
                 .scrimSurface(radius: DesktopRadius.sheet)
-                .overlay(RoundedRectangle(cornerRadius: DesktopRadius.sheet).strokeBorder(dropTargeted ? AnyShapeStyle(DesktopPalette.accent) : AnyShapeStyle(DesktopPalette.line), lineWidth: dropTargeted ? 2 : 1))
-                .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+                .floatingEdge(RoundedRectangle(cornerRadius: DesktopRadius.sheet), highlight: dropTargeted ? AnyShapeStyle(DesktopPalette.accent) : nil)
                 .onDrop(of: [.fileURL, .image], isTargeted: Binding(get: { dropTargeted }, set: { dropTargeted = $0 && session.capabilities.attach })) { providers in
                     guard session.capabilities.attach else { return false }
                     Task {

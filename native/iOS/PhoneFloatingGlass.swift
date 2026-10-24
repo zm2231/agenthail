@@ -49,7 +49,11 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     }
 
     var body: some View {
-        FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: appearance.floatingOpacity(key))
+        if appearance.active && appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: false) {
+            content.solidFloating(in: shape)
+        } else {
+            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: appearance.floatingOpacity(key))
+        }
     }
 }
 
