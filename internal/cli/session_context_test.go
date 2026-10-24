@@ -48,7 +48,14 @@ func rootHooks(t *testing.T, store *registry.Registry, fake *cliSurface, roots i
 	}
 }
 
+func withoutSessionContextLimit(t *testing.T) {
+	previous := claudeSessionContextExpired
+	claudeSessionContextExpired = func() <-chan time.Time { return nil }
+	t.Cleanup(func() { claudeSessionContextExpired = previous })
+}
+
 func TestAClaudeSessionIsToldItsCardOncePerStartAndOncePerChange(t *testing.T) {
+	withoutSessionContextLimit(t)
 	fake := &cliSurface{kind: surface.KindClaude}
 	app, store := cliFixture(t, fake)
 	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
@@ -123,6 +130,7 @@ func TestAClaudeSessionFirstSeenAtAPromptGetsItsCardAndAnUnknownOneNothing(t *te
 }
 
 func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(t *testing.T) {
+	withoutSessionContextLimit(t)
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"unknown-thread": {ID: "unknown-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}}}
 	app, store := cliFixture(t, fake)
 	if err := store.RegisterSession(surface.Session{ID: "known-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
@@ -162,7 +170,33 @@ func TestTheCodexContextHookTellsARegisteredThreadWhoItIsAndLeavesAnyOtherAlone(
 	}
 }
 
+func TestTheSessionContextHookPrintsNothingOnceItsLimitPasses(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindClaude}
+	app, store := cliFixture(t, fake)
+	if err := store.RegisterSession(surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	expired := make(chan time.Time)
+	close(expired)
+	previous := claudeSessionContextExpired
+	claudeSessionContextExpired = func() <-chan time.Time { return expired }
+	t.Cleanup(func() { claudeSessionContextExpired = previous })
+	stalled, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { writer.Close(); stalled.Close() })
+	previousStdin := os.Stdin
+	os.Stdin = stalled
+	output, err := captureStdout(t, func() error { return app.Run([]string{"hook", "session-context", "--claude-pid", "4242"}) })
+	os.Stdin = previousStdin
+	if err != nil || output != "" {
+		t.Fatalf("a hook past its limit printed %q err=%v", output, err)
+	}
+}
+
 func TestTheSessionContextHookNeverMigratesTheRegistry(t *testing.T) {
+	withoutSessionContextLimit(t)
 	for _, offset := range []int{-1, 0, 1} {
 		path := filepath.Join(t.TempDir(), "registry.db")
 		store, err := registry.Open(path)
