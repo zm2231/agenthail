@@ -128,6 +128,32 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testRequestStateIsSetOnlyWhenItChanges() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        await model.refresh()
+        await model.loadSession("computer::demo")
+        var capabilities = Capabilities()
+        capabilities.respond = true
+        var session = SessionState(id: "computer::demo", surface: "claude", name: "demo", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: capabilities, readOnly: false, readOnlyReason: nil)
+        var sets: [SessionRequests?] = []
+        let watch = model.$sessionRequests.dropFirst().sink { sets.append($0) }
+        defer { watch.cancel() }
+
+        await model.syncRequests(for: session)
+        XCTAssertEqual(sets.map { $0?.permissionMode }, ["default"])
+        session.waitingOn = WaitingState(kind: "question", id: "q")
+        await model.syncRequests(for: session)
+        XCTAssertEqual(sets.count, 1, "rereading the same requests sets nothing")
+
+        await model.loadSession("computer::other")
+        XCTAssertEqual(sets.count, 2)
+        XCTAssertNil(model.sessionRequests)
+        await model.loadSession("computer::demo")
+        XCTAssertEqual(sets.count, 2, "opening a session with no request state sets nothing")
+    }
+
+    @MainActor
     func testASessionWhoseSourceResetWhileShownReadsAPageWhenReopened() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         SessionRefreshProtocol.state.set(journalSeq: 10)
@@ -527,6 +553,8 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-metadata":
             Self.state.metadataRequested(request.url)
             body = Self.metadata
+        case "/api/v1/requests":
+            body = #"{"permissionMode":"default","requests":[]}"#
         case "/api/v1/session-stream":
             Self.state.streamRequested(request.url)
             if Self.state.streamUnsupported {

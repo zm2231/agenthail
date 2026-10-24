@@ -60,6 +60,21 @@ struct StaleRequestCardTest {
         await pane.syncRequests(for: quiet)
         watch.cancel()
         check(published == 0, "resyncing a session that can't answer requests publishes nothing: \(published)")
+
+        StaleRequestStub.requestsReply = (200, #"{"permissionMode":"","requests":[]}"#)
+        var sets: [SessionRequests?] = []
+        var errorSets = 0
+        let requestWatch = pane.$requests.dropFirst().sink { sets.append($0) }
+        let errorWatch = pane.$requestError.dropFirst().sink { _ in errorSets += 1 }
+        await pane.syncRequests(for: session)
+        check(sets.count == 1 && sets[0]?.requests.isEmpty == true, "reopening sets the loaded requests once: \(sets)")
+        var waiting = session
+        waiting.waitingOn = WaitingState(kind: "question", id: "q")
+        await pane.syncRequests(for: waiting)
+        requestWatch.cancel()
+        errorWatch.cancel()
+        check(sets.count == 1, "rereading the same requests sets nothing: \(sets.count)")
+        check(errorSets == 0, "a request read with no error to clear sets nothing: \(errorSets)")
         print("stale request card tests passed")
     }
 

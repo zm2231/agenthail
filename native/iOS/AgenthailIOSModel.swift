@@ -300,7 +300,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         store.rereadCommands(id)
         sessionStreamCursor = 0
         sessionStreamUnsupported = false
-        sessionRequests = nil
+        if sessionRequests != nil { sessionRequests = nil }
         sessionRequestsKey = nil
         olderActivity = []
         activityCursor = nil
@@ -967,7 +967,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             sessionMetadata = MetadataOverlay(allClaudeSubagents: warm?.allClaudeSubagents ?? false)
             let live = snapshot?.sessions.first { $0.id == id }
             selectedDetail = warm.map { SessionStore.live($0.detail, live) }
-            sessionRequests = nil
+            if sessionRequests != nil { sessionRequests = nil }
             sessionRequestsKey = nil
             olderActivity = warm?.older ?? []
             activityCursor = warm?.olderCursor
@@ -1125,7 +1125,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let (connection, route) = try resolveServer(id)
             let requests = try await connection.api.requests(sessionID: route.sessionID)
             guard selectedSessionID == id, sessionRequestsKey == key, server(for: id) === connection else { return }
-            sessionRequests = requests
+            if sessionRequests != requests { sessionRequests = requests }
         } catch {
             guard selectedSessionID == id, server(for: id) === requestServer else { return }
             sessionRequestsKey = nil
