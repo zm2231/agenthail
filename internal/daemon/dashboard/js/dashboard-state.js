@@ -34,7 +34,7 @@ export function renderAll() {
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-export async function load(fresh = false) {
+export async function load(fresh = false, selectDefault = true) {
   if (app.loading) return;
   app.loading = true;
   const slowTimer = setTimeout(() => {
@@ -47,8 +47,10 @@ export async function load(fresh = false) {
     }
   }, 2000);
   try {
-    await loadTools();
-    const response = await fetch(`/api/state${fresh ? "?fresh=1" : ""}`);
+    const [, response] = await Promise.all([
+      loadTools(),
+      fetch(`/api/state${fresh ? "?fresh=1" : ""}`),
+    ]);
     if (!response.ok) throw await responseError(response);
     const state = await response.json();
     app.state = {
@@ -85,7 +87,7 @@ export async function load(fresh = false) {
     if (followSelection) await selectSession(followSelection);
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
-    if (!app.selected && location.hash === "#conversations" && !mobileConversationView()) {
+    if (selectDefault && !app.selected && location.hash === "#conversations" && !mobileConversationView()) {
       const first = scopedSessions()[0] || app.state.sessions[0];
       if (first) selectSession(first.id);
     }
