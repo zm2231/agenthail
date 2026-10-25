@@ -1055,14 +1055,7 @@ func isCodexTimeout(err error) bool {
 }
 
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
-	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: max(1, limit)})
-	if err != nil {
-		return nil, err
-	}
-	if read.Reply == nil {
-		return &surface.ReplyResult{Done: false, Source: read.Source}, nil
-	}
-	return read.Reply, nil
+	return readSessionReply(ctx, c, sess, limit)
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
