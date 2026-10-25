@@ -28,6 +28,9 @@ func TestParseOutgoingSendReadsAgenthailSend(t *testing.T) {
 		{"plain heredoc", "agenthail send @collab - <<EOF\nLine one\nEOF", OutgoingSend{Target: "@collab", Summary: "Line one", Body: "Line one"}},
 		{"here string", `agenthail send @collab - <<< "short"`, OutgoingSend{Target: "@collab", Summary: "short", Body: "short"}},
 		{"absolute binary path", `/usr/local/bin/agenthail send 0a35a199 "hey"`, OutgoingSend{Target: "0a35a199", Summary: "hey", Body: "hey"}},
+		{"value flags", `agenthail send @peer "done" --model gpt-5 --effort high --mode plan --service-tier flex --output-schema /tmp/s.json --timeout 30s --from "$ME"`, OutgoingSend{Target: "@peer", Summary: "done", Body: "done"}},
+		{"bool flags", `agenthail send @peer "done" --no-queue --stream`, OutgoingSend{Target: "@peer", Summary: "done", Body: "done"}},
+		{"words after -- are the message", `agenthail send @peer -- --no-queue is a flag`, OutgoingSend{Target: "@peer", Summary: "--no-queue is a flag", Body: "--no-queue is a flag"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -54,6 +57,10 @@ func TestParseOutgoingSendLeavesOtherCommandsAlone(t *testing.T) {
 		`agenthail send @collab "ok" &`,
 		`for x in a b; do agenthail send @collab "$x"; done`,
 		`agenthail send @collab --unknown "ok"`,
+		`agenthail send @collab "ok" --json --json`,
+		`agenthail send @collab "ok" --model`,
+		`agenthail send @collab "ok" --model --json`,
+		`agenthail send @collab "ok" --model "--json"`,
 		`agenthail send @collab`,
 		`agenthail send @collab "unterminated`,
 		`agenthail send @c* "ok"`,

@@ -23,10 +23,7 @@ func ParsePeerEnvelope(text string) (PeerEnvelope, bool) {
 		return PeerEnvelope{}, false
 	}
 	label, body, ok := strings.Cut(rest, "] ")
-	if !ok {
-		label, ok = strings.CutSuffix(rest, "]")
-	}
-	if !ok || strings.TrimSpace(label) == "" || strings.ContainsAny(label, "\n]") {
+	if !ok ||strings.TrimSpace(label) == "" || strings.ContainsAny(label, "\n]") {
 		return PeerEnvelope{}, false
 	}
 	envelope := PeerEnvelope{Sender: label, Body: body}

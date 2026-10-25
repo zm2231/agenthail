@@ -17,9 +17,9 @@ type OutgoingSend struct {
 
 var shellToolNames = map[string]bool{"Bash": true, "exec_command": true, "functions.exec_command": true, "shell": true, "local_shell": true}
 
-var sendValueFlags = map[string]bool{"--from": true, "--timeout": true}
+var SendValueFlags = map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}
 
-var sendBoolFlags = map[string]bool{"--stream": true, "--reply": true, "--json": true}
+var SendBoolFlags = map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}
 
 func ParseOutgoingSend(tool, input string) (OutgoingSend, bool) {
 	var fields map[string]any
@@ -132,20 +132,33 @@ func isSetupCall(stmt *syntax.Stmt, call *syntax.CallExpr) bool {
 func sendStatement(stmt *syntax.Stmt) (OutgoingSend, bool) {
 	call := stmt.Cmd.(*syntax.CallExpr)
 	var positional []string
+	seen := map[string]bool{}
+	positionalOnly := false
 	for index := 2; index < len(call.Args); index++ {
 		word, ok := literalWord(call.Args[index])
 		if !ok {
 			return OutgoingSend{}, false
 		}
 		switch {
-		case sendValueFlags[word]:
-			index++
-		case sendBoolFlags[word]:
-		case word == "--":
-		case strings.HasPrefix(word, "--"):
-			return OutgoingSend{}, false
-		default:
+		case positionalOnly || !strings.HasPrefix(word, "--"):
 			positional = append(positional, word)
+		case word == "--":
+			positionalOnly = true
+		case seen[word]:
+			return OutgoingSend{}, false
+		case SendValueFlags[word]:
+			seen[word] = true
+			index++
+			if index >= len(call.Args) {
+				return OutgoingSend{}, false
+			}
+			if value, literal := literalWord(call.Args[index]); literal && strings.HasPrefix(value, "--") {
+				return OutgoingSend{}, false
+			}
+		case SendBoolFlags[word]:
+			seen[word] = true
+		default:
+			return OutgoingSend{}, false
 		}
 	}
 	if len(positional) < 2 {

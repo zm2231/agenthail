@@ -35,6 +35,10 @@ func TestPresentTimelineItemMarksAgentMessages(t *testing.T) {
 			item: TimelineItem{Kind: "message", Role: "user", Title: "user", Text: "fix the build"},
 		},
 		{
+			name: "person's prompt shaped like a bare label",
+			item: TimelineItem{Kind: "message", Role: "user", Title: "user", Text: "[from reviewer]"},
+		},
+		{
 			name: "person's words relayed to claude keep their origin",
 			item: TimelineItem{Kind: "message", Role: "user", Origin: OriginPerson, Title: "user", Text: "[from reviewer] quoted"},
 		},
