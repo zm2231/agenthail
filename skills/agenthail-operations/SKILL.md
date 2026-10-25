@@ -174,7 +174,7 @@ target has no writable transport.
 
 ## Find And Resolve Targets
 
-With the daemon running, `list` shows the daemon's current scope: open Claude
+`list` needs the daemon and shows its current scope by default: open Claude
 sessions, busy or loaded Codex sessions active within the configured recent
 window (five hours by default), and busy or recently active Notion threads.
 `--recent` adds anything active in the last 24 hours, `--running` keeps
