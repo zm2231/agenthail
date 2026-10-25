@@ -1,8 +1,7 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../internal/daemon/dashboard/app.js', import.meta.url), 'utf8');
 const options = ['session-fork', 'native-list', 'native-add', 'native-update', 'native-delete', 'native-reorder', 'native-start', 'session-lifecycle-status', 'session-lifecycle-logs', 'session-lifecycle-stop', 'session-lifecycle-resume'].map(value => ({value}));
 const operation = {value: 'native-add', options, addEventListener() {}};
 Object.defineProperty(operation, 'selectedOptions', {get: () => options.filter(x => x.value === operation.value)});
@@ -27,7 +26,8 @@ const context = vm.createContext({
   action: async (action, payload) => {calls.push({action,payload}); if (fail) throw Error('outcome unknown'); return {result:{data:[]}};},
   load: async () => {}, toast: () => {}, friendlyError: x => x.message,
 });
-vm.runInContext(source.slice(source.indexOf('function selectedTurnOptions()')), context);
+await dashboardModules(["composer", "session-operations"], context);
+context.bindSessionOperationEvents();
 const initialID = elements.clientId.value;
 assert.ok(initialID);
 elements.message.value = 'First input';

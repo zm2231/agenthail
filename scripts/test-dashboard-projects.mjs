@@ -1,11 +1,7 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("function sessionIsCurrent(");
-const end = source.indexOf("function renderSessions()", start);
-assert(start >= 0 && end > start);
 const widget = { id: "project-widget", displayName: "widget", rootPath: "/work/widget", kind: "git" };
 const vps = { id: "h1::project-widget", displayName: "widget", rootPath: "/private/example/secret", kind: "git", host: { id: "h1", name: "vps.example.ts.net", state: "connected" } };
 const notes = { id: "project-notes", displayName: "notes", rootPath: "/work/notes", kind: "folder", archived: true };
@@ -28,7 +24,7 @@ const context = {
   displayName: (session) => session.name, rawDisplayName: (session) => session.name,
   presenceTone: () => "idle", presenceLabel: () => "Ready", livePlan: () => null,
 };
-vm.runInNewContext(source.slice(start, end), context);
+await dashboardModules(["session-scope", "projects", "holders", "session-row", "project-model", "hosts"], context);
 const ids = (list) => list.map((session) => session.id).join(",");
 assert.equal(ids(vm.runInContext("scopedSessions()", context)), "w0,busy,far,loose", "Current hides archived sessions");
 context.app.inboxMode = "all";
@@ -64,9 +60,7 @@ const conflict = leads([{ host: local, name: "a<b", surface: "claude", sessionId
 assert.match(conflict, /<span class="lead-chip conflict" title="Several hosts each have a coordinator: @a&lt;b, vps::@vps-lead\.[^"]*">2 leads<\/span>/, "a conflict names every coordinator and opens none");
 assert.doesNotMatch(conflict, /lead-chip"[^>]*data-session/, "a conflict chip is not a button");
 assert.doesNotMatch(leads([]), /lead-chip/, "a project without a coordinator shows no chip");
-const pickerStart = source.indexOf("function renderStartProjects(");
-const pickerEnd = source.indexOf("function syncStartForm()", pickerStart);
-assert(pickerStart >= 0 && pickerEnd > pickerStart);
+
 const folder = { value: "~" };
 const select = { innerHTML: "", value: "" };
 const picker = {
@@ -74,7 +68,7 @@ const picker = {
   escape: context.escape,
   $: (selector) => (selector === "#new-conversation-project" ? select : { querySelector: () => folder }),
 };
-vm.runInNewContext(source.slice(pickerStart, pickerEnd), picker);
+await dashboardModules(["start-form"], picker);
 vm.runInContext("renderStartProjects()", picker);
 assert.equal(folder.value, "/work/api", "the most recent project fills an untouched folder");
 assert.equal(select.value, "/work/api");
@@ -90,11 +84,8 @@ assert.equal(select.value, "");
 assert.equal(folder.value, "~", "a host without projects keeps the home folder");
 console.log("dashboard projects view tests passed");
 
-const metaStart = source.indexOf("function conversationMeta(");
-const metaEnd = source.indexOf("function surfaceIcon(", metaStart);
-assert(metaStart >= 0 && metaEnd > metaStart);
 const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, workingLabel: () => "Working", timeAgo: () => "now" };
-vm.runInNewContext(source.slice(metaStart, metaEnd), metaContext);
+await dashboardModules(["session-labels"], metaContext);
 const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
 assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includes("config folder work · currently signed in as work@example.com"), "a session's config folder shows its current login");
 assert(meta({ name: "default", root: "/d", signedInAs: "me@example.com" }).includes("config folder default · currently signed in as me@example.com"), "the primary folder shows its login too");
@@ -134,9 +125,6 @@ const lead = (checkout, values, replace) => vm.runInContext(`leadRequest(${JSON.
 assert.deepEqual({ ...lead(shared.checkouts[1], { surface: "codex", name: "  " }, false) }, { surface: "codex", cwd: "/srv/widget", host: "h1" }, "a lead on a paired host names that host and leaves the name to it");
 assert.deepEqual({ ...lead(shared.checkouts[0], { surface: "claude", name: " widget-lead " }, true) }, { surface: "claude", cwd: "/work/widget", name: "widget-lead", replace: true }, "a lead on this machine names no host");
 
-const actionStart = source.indexOf("async function action(");
-const actionEnd = source.indexOf("function deliveryStatusLabel(", actionStart);
-assert(actionStart >= 0 && actionEnd > actionStart);
 const sent = [];
 let reply;
 const actions = {
@@ -148,20 +136,17 @@ const actions = {
     return reply;
   },
 };
-vm.runInNewContext(source.slice(actionStart, actionEnd), actions);
+await dashboardModules(["actions"], actions);
 reply = { ok: false, status: 409, text: async () => '{"error":{"code":"coordinator_exists","message":"the project already has coordinator @widget-lead; replace it to take over"}}' };
 await assert.rejects(vm.runInContext('action("coordinator-new", { surface: "claude", cwd: "/work/widget" }, "key", "")', actions), (error) => error.code === "coordinator_exists" && error.message === "the project already has coordinator @widget-lead; replace it to take over", "a typed refusal keeps its code and shows its message");
 reply = { ok: false, status: 400, text: async () => "plain refusal" };
 await assert.rejects(vm.runInContext('action("project-rename", { projectId: "p", title: "x" }, "key", "")', actions), (error) => !error.code && error.message === "plain refusal");
 assert.equal(sent.length, 2, "project and lead actions run with no conversation selected");
 
-const leadStart = source.indexOf("async function changeLead(");
-const leadEnd = source.indexOf("const projectDialogFields", leadStart);
-assert(leadStart >= 0 && leadEnd > leadStart);
 const asked = [];
 let answer = true;
 const leadContext = { window: { confirm: (question) => { asked.push(question); return answer; } } };
-vm.runInNewContext(source.slice(leadStart, leadEnd), leadContext);
+await dashboardModules(["project-dialog"], leadContext);
 const refusal = Object.assign(Error("the project already has coordinator @widget-lead; replace it to take over"), { code: "coordinator_exists" });
 const attempts = [];
 const send = async (replace) => { attempts.push(replace); if (!replace) throw refusal; return { coordinator: { name: "new-lead" } }; };

@@ -1,13 +1,8 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("function signinOffHint(");
-const end = source.indexOf("async function signinRequest", start);
-assert(start >= 0 && end > start);
 const context = {};
-vm.runInNewContext(source.slice(start, end) + "\nthis.signinOffHint = signinOffHint; this.signinResolved = signinResolved;", context);
+await dashboardModules(["signin", "http"], context);
 const notion = context.signinOffHint("Notion: browser sign-in is turned off; to turn it back on, run `agenthail signin use notion auto` or open Settings > Browser Sign-in");
 assert.match(notion, /^Browser sign-in is off, so Notion reads no cookies\./);
 assert(notion.includes("Settings > Browser Sign-in"));

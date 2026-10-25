@@ -20,7 +20,7 @@ mkdir -p "$REPO"
 (
   cd "$REPO"
   git init -q
-  for file in README.md SECURITY.md docs/native-apps.md internal/daemon/dashboard/index.html internal/daemon/dashboard/app.js \
+  for file in README.md SECURITY.md docs/native-apps.md internal/daemon/dashboard/index.html internal/daemon/dashboard/js/main.js \
     native/AgenthailApp.swift native/macOS/DesktopWindow.swift native/macOS/DesktopSettings.swift native/macOS/CommandPalette.swift \
     native/macOS/NewSession.swift native/iOS/AgenthailIOSViews.swift native/AgenthailAPI.swift native/project.yml \
     native/Agenthail.xcodeproj/project.pbxproj .github/workflows/ci.yml push-relay/wrangler.toml skills/x/SKILL.md ci/x scripts/x.sh; do

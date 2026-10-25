@@ -86,7 +86,6 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	dashboard.devices = d.Registry
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
-	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
 	mux.Handle("/js/", dashboardModuleHandler())
 	mux.Handle("/css/", dashboardStylesHandler())
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))

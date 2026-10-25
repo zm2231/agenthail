@@ -78,7 +78,7 @@ env -u CODEX_THREAD_ID -u CLAUDE_CODE_SESSION_ID -u AGENTHAIL_SESSION_ID \
 go vet ./...
 go build ./...
 go mod verify
-node --check internal/daemon/dashboard/app.js
+for module in internal/daemon/dashboard/js/*.js; do node --check "$module"; done
 bash scripts/check-public-copy.sh
 git diff --check
 ```

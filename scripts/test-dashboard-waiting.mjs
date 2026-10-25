@@ -1,27 +1,13 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
-const slice = (from, to) => {
-  const start = source.indexOf(from);
-  const end = source.indexOf(to, start);
-  assert(start >= 0 && end > start, `${from} boundary missing`);
-  return source.slice(start, end);
-};
 const context = {
   escape: (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`),
   displayName: (session) => session.name,
   backgroundWaiting: () => false,
   statusLabel: (status) => status,
 };
-vm.runInNewContext(
-  `${slice("function waitingPlace", "function presenceTone")}\n${slice("function renderElsewhereWait", "function renderRequestCard")}\nglobalThis.presenceLabel = presenceLabel;\nglobalThis.renderElsewhereWait = renderElsewhereWait;`,
-  context,
-);
+await dashboardModules(["presence", "requests"], context);
 
 const restartable = { lifecycle: { stop: true, resume: true } };
 const session = (runtimeKind, waitingOn, capabilities = {}) => ({ name: "builder", runtimeKind, waitingOn, capabilities });

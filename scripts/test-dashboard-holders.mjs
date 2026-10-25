@@ -1,17 +1,5 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import vm from "node:vm";
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
-const holdersStart = source.indexOf("function sharedHolders");
-const holdersEnd = source.indexOf("function projectSection", holdersStart);
-const actionStart = source.indexOf("function isNetworkFailure");
-const actionEnd = source.indexOf("async function voiceRequest", actionStart);
-assert(holdersStart >= 0 && holdersEnd > holdersStart, "holder picker boundary missing");
-assert(actionStart >= 0 && actionEnd > actionStart, "action boundary missing");
 
 const select = { innerHTML: "", value: "", dataset: {} };
 const elements = {
@@ -36,8 +24,8 @@ const context = {
     return { ok: true, json: async () => ({ ok: true }) };
   },
 };
-vm.runInNewContext(source.slice(source.indexOf("function livePlan"), source.indexOf("function presenceLabel")), context);
-vm.runInNewContext(`${source.slice(holdersStart, holdersEnd)}\n${source.slice(actionStart, actionEnd)}\nglobalThis.renderHolderPicker = renderHolderPicker;\nglobalThis.sessionButton = sessionButton;\nglobalThis.runAction = action;\nglobalThis.runLogicalAction = logicalAction;`, context);
+await dashboardModules(["presence"], context);
+await dashboardModules(["holders", "session-row", "actions", "delivery-labels"], context);
 
 const shared = {
   id: "shared",
@@ -51,7 +39,7 @@ const shared = {
 context.app.selected = { id: "single", surface: "claude", holders: [] };
 context.renderHolderPicker();
 assert.equal(elements["#holder-picker"].hidden, true, "a conversation in one terminal shows no picker");
-await context.runAction("send", { message: "one" }, "k", "single");
+await context.action("send", { message: "one" }, "k", "single");
 assert.equal(calls.at(-1).body.pid, undefined, "a conversation in one terminal sends without a pin");
 
 context.app.selected = shared;
@@ -62,29 +50,29 @@ assert.match(select.innerHTML, /pid 4102, ttys002, busy/);
 assert.match(context.sessionButton(shared), />2 terminals</, "the row names how many terminals hold it");
 assert.match(context.sessionButton({ ...shared, open: true, status: "busy", plan: { done: 3, total: 5, current: "Running gates" } }), /title="3 of 5 tasks done · Running gates"><span aria-hidden="true">3\/5<\/span><span class="sr-only">3 of 5 tasks done · Running gates<\/span>/, "an open row part way through its tasks shows the count and names the step");
 assert.doesNotMatch(context.sessionButton({ ...shared, open: false, status: "idle", plan: { done: 3, total: 5 } }), /tasks done/, "a closed row keeps no badge");
-await context.runAction("send", { message: "unpicked" }, "k", "shared");
+await context.action("send", { message: "unpicked" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "no terminal picked sends no pin, so the daemon refuses it");
 
 select.value = "4102";
 context.renderHolderPicker();
 assert.equal(select.value, "4102", "a refresh keeps the picked terminal");
-await context.runAction("steer", { message: "picked" }, "k", "shared");
+await context.action("steer", { message: "picked" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, 4102, "a write carries the picked terminal");
 assert.equal(calls.at(-1).body.pidStartedAt, Date.parse("2026-10-21T01:02:03.456Z"), "a write carries the picked terminal's start, so a reused pid is refused");
-await context.runAction("queue-cancel", { queueId: 4 }, "k", "shared");
+await context.action("queue-cancel", { queueId: 4 }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "an action that is not a write to the session carries no pin");
 
-await context.runLogicalAction("send", "send", { message: "logical" });
+await context.logicalAction("send", "send", { message: "logical" });
 const pinned = calls.at(-1);
 select.value = "4101";
-await context.runLogicalAction("send", "send", { message: "logical" });
+await context.logicalAction("send", "send", { message: "logical" });
 assert.equal(calls.at(-1).body.pid, 4101);
 assert.notEqual(calls.at(-1).key, pinned.key, "a different terminal is a different request");
 
 context.app.selected = { ...shared, holders: [shared.holders[1]] };
 context.renderHolderPicker();
 assert.equal(elements["#holder-picker"].hidden, true, "back to one terminal hides the picker");
-await context.runAction("send", { message: "after" }, "k", "shared");
+await context.action("send", { message: "after" }, "k", "shared");
 assert.equal(calls.at(-1).body.pid, undefined, "back to one terminal sends without a pin");
 
 console.log("dashboard holder picker checks passed");

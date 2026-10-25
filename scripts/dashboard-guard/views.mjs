@@ -27,7 +27,7 @@ const opened = (trigger, shown) => async (page) => {
 
 export const VIEWS = [
   { name: "slash menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await openSession(page), await page.type("#message", "/")), "#slash-menu") },
-  { name: "toast", dashboard: "full", hash: "overview", ready: "#recent-activity > *", act: opened((page) => page.evaluate(() => toast("Sent to review. Its reply appears in Conversations.")), "#toast") },
+  { name: "toast", dashboard: "full", hash: "overview", ready: "#recent-activity > *", act: opened((page) => page.evaluate(async () => { const { toast } = await import("/js/feedback.js"); toast("Sent to review. Its reply appears in Conversations."); }), "#toast") },
   { name: "voice dialog", dashboard: "full", hash: "overview", act: opened((page) => press(page, "#voice-orchestrator"), "#voice-dialog[open]") },
   { name: "project dialog", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, "[data-project-new]")), "#project-dialog[open]") },
   { name: "project menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, ".project-menu summary")), ".project-menu[open] .project-menu-items") },

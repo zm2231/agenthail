@@ -1,11 +1,5 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import vm from "node:vm";
-
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("function renderStartConfigRoots(");
-const end = source.indexOf("function renderStartLaunchers(", start);
-assert(start >= 0 && end > start);
 
 const select = { closest: () => ({ dataset: {} }) };
 const pending = [];
@@ -28,7 +22,7 @@ Object.defineProperty(select, "value", {
   get() { return this._value ?? ""; },
   set(next) { this._value = this.innerHTML.includes(`value="${next}"`) ? next : firstOption(this.innerHTML); },
 });
-vm.runInNewContext(source.slice(start, end), context);
+await dashboardModules(["start-roots"], context);
 
 const roots = () => [
   { name: "default", root: "/home/me/.claude", primary: true, signedInAs: { email: "me@example.com" } },

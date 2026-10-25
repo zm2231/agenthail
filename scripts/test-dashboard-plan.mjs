@@ -1,20 +1,9 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
-const slice = (from, to) => {
-  const start = source.indexOf(from);
-  const end = source.indexOf(to, start);
-  assert(start >= 0 && end > start, `${from} boundary missing`);
-  return source.slice(start, end);
-};
 const context = {};
-vm.runInNewContext(`${slice("function livePlan", "function presenceLabel")}\nglobalThis.livePlan = livePlan; globalThis.planDetail = planDetail;`, context);
+await dashboardModules(["presence"], context);
 
 const session = (fields) => ({ id: "s", status: "busy", open: true, plan: { done: 3, total: 5, current: "Running gates" }, ...fields });
 assert.deepEqual({ ...context.livePlan(session({})) }, { done: 3, total: 5, current: "Running gates" }, "an open session part way through shows its progress");

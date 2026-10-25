@@ -1,14 +1,6 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const slice = (from, to) => {
-  const start = source.indexOf(from);
-  const end = source.indexOf(to, start);
-  assert(start >= 0 && end > start, `${from} boundary missing`);
-  return source.slice(start, end);
-};
 const input = { value: "session_old" };
 const requests = [];
 const context = {
@@ -20,7 +12,7 @@ const context = {
   crypto: { randomUUID: () => "attempt" },
   toast: (message) => { throw new Error(message); },
 };
-vm.runInNewContext(slice("function currentSessionID", "async function openVoice") + slice("async function startVoice", "async function interruptVoiceTarget"), context);
+await dashboardModules(["rekeys", "voice"], context);
 
 context.applyRekeys({ session_old: "conversation-a" });
 assert.equal(context.app.drafts.get("conversation-a"), "unsent");
