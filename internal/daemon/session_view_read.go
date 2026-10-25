@@ -73,7 +73,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			row.Display = &display
 			if !row.Archived && display.Kind != "unavailable" {
 				if n := read.Outgoing[record.ID]; n > 0 {
-					row.Attention = &SessionAttention{Kind: "outgoing", Reason: fmt.Sprintf("%d messages not delivered", n)}
+					row.Attention = &SessionAttention{Kind: "outgoing", Reason: CountText(n, "message") + " not delivered"}
 				}
 				if display.Kind == "limited" && row.Attention == nil {
 					row.Attention = &SessionAttention{Kind: "usageLimit", Reason: display.Detail}
@@ -103,7 +103,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			Seq   uint64
 			View  SessionView
 			Rows  []dashboardSession
-		}{read.HostEpoch + ":" + d.presentation.epoch, read.CatalogSeq, semantic, rows})
+		}{read.HostEpoch + ":" + d.presentation.epoch, read.CatalogSeq, semantic, revisionRows(rows)})
 		if err != nil {
 			return nil, err
 		}

@@ -15,7 +15,7 @@ import (
 func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
 	count := state.View.Counts[state.View.Scope]
 	var buffer bytes.Buffer
-	fmt.Fprintf(&buffer, "%s: %d conversations, %d sessions\n", state.View.Scope, count.Families, count.Sessions)
+	fmt.Fprintf(&buffer, "%s: %s, %s\n", state.View.Scope, daemon.CountText(count.Families, "conversation"), daemon.CountText(count.Sessions, "session"))
 	writer := tabwriter.NewWriter(&buffer, 0, 4, 2, ' ', 0)
 	heading := "PROJECT"
 	if wide {
@@ -23,11 +23,13 @@ func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
 	}
 	fmt.Fprintf(writer, "HOST\tSURFACE\tSESSION\t%s\tSTATUS\tQUEUED\tWORKING CHILDREN\tTERMINALS\tDETAIL\n", heading)
 	depth := map[string]int{}
+	contextOnly := map[string]bool{}
 	working := map[string]int{}
 	for _, family := range state.View.Families {
 		working[family.RootID] = family.WorkingSubagents
 		for _, member := range family.Members {
 			depth[member.ID] = member.Depth
+			contextOnly[member.ID] = member.ContextOnly
 		}
 	}
 	for _, row := range state.Sessions {
@@ -53,6 +55,9 @@ func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
 		detail, err := renderDisplayDetail(*row.Display)
 		if err != nil {
 			return err
+		}
+		if contextOnly[row.ID] {
+			detail = strings.Trim("Parent of a match · "+detail, " ·")
 		}
 		if wide && row.ClaudeConfigRoot != nil {
 			detail += " · " + row.ClaudeConfigRoot.Name

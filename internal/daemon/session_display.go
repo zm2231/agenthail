@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -40,7 +39,7 @@ func sessionDisplay(row dashboardSession, now time.Time) SessionDisplay {
 }
 
 func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
-	if row.Host != nil && row.Host.State == "unreachable" || row.Status == surface.StatusUnknown || row.Status == "notLoaded" {
+	if mirroredHostDown(row) || row.Status == surface.StatusUnknown || row.Status == "notLoaded" {
 		return SessionDisplay{Kind: "unavailable", Label: "Unavailable", Detail: row.UnavailableReason}
 	}
 	if wait := row.WaitingOn; wait != nil {
@@ -65,12 +64,11 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 				last = activity.BusySince
 			}
 			if !last.IsZero() && now.Sub(last) >= 10*time.Minute {
-				display.Detail = "No activity since"
 				display.QuietSince = displayInstant(last)
 				if activity.NoProcess {
-					display.Detail += " · No Claude process"
+					display.Detail = "No Claude process"
 				} else if tool := activity.Tool; tool != nil {
-					display.Detail += " · Running " + tool.Name
+					display.Detail = "Running " + tool.Name
 					display.ToolStartedAt = displayInstant(tool.StartedAt)
 				}
 			}
@@ -104,7 +102,7 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		return SessionDisplay{Kind: "finishing", Label: "Finishing", Detail: "Waiting on background work"}
 	}
 	if row.QueueCount > 0 {
-		return SessionDisplay{Kind: "queued", Label: "Queued", Detail: fmt.Sprintf("%d messages waiting", row.QueueCount)}
+		return SessionDisplay{Kind: "queued", Label: "Queued", Detail: CountText(row.QueueCount, "message") + " waiting"}
 	}
 	if row.Status == surface.StatusOffline {
 		return SessionDisplay{Kind: "offline", Label: "Offline"}

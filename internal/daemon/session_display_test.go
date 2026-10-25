@@ -27,6 +27,8 @@ func TestSessionDisplayPrecedence(t *testing.T) {
 		{"offline", dashboardSession{Status: surface.StatusOffline}, "offline", "Offline"},
 		{"unknown", dashboardSession{Status: surface.StatusUnknown, WaitingOn: &surface.Waiting{}}, "unavailable", "Unavailable"},
 		{"remote down", dashboardSession{Host: &dashboardHost{State: "unreachable"}, Status: surface.StatusBusy}, "unavailable", "Unavailable"},
+		{"remote revoked", dashboardSession{Host: &dashboardHost{State: "unauthorized"}, Status: surface.StatusBusy}, "unavailable", "Unavailable"},
+		{"remote incompatible", dashboardSession{Host: &dashboardHost{State: "incompatible"}, QueueCount: 1}, "unavailable", "Unavailable"},
 		{"remote diagnostic", dashboardSession{Host: &dashboardHost{State: "connected"}, UnavailableReason: "path missing", Status: surface.StatusBusy}, "working", "Working"},
 		{"local diagnostic", dashboardSession{Host: &dashboardHost{State: "local"}, UnavailableReason: "path missing", Open: true}, "idle", "Ready"},
 		{"expired limit", dashboardSession{UsageLimit: &surface.UsageLimit{ResetsAt: now}}, "idle", "Closed"},

@@ -44,7 +44,7 @@ func (a *App) cmdList(args []string) error {
 		}
 		query.Set("projectId", id)
 	}
-	state, err := readListView(ctx, client, query)
+	state, err := readListViewConsistent(ctx, client, query)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func readListView(ctx context.Context, client *daemonAPIClient, query url.Values
 			result = page
 		} else {
 			if result.View.Revision != page.View.Revision {
-				return result, fmt.Errorf("catalog changed while listing; retry the command")
+				return result, errListViewChanged
 			}
 			result.View.Families = append(result.View.Families, page.View.Families...)
 			result.Sessions = append(result.Sessions, page.Sessions...)
@@ -118,7 +118,7 @@ func readListView(ctx context.Context, client *daemonAPIClient, query url.Values
 			return result, err
 		}
 		if page.View == nil || page.View.Revision != result.View.Revision {
-			return result, fmt.Errorf("catalog changed while reading members")
+			return result, errListViewChanged
 		}
 		for _, row := range page.Sessions {
 			if row.Display == nil || row.Display.Label == "" {
