@@ -133,71 +133,6 @@ func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint6
 	return status, uint64(seq), identity, nil
 }
 
-func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
-	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
-		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
-	}
-	tx, err := r.read.Begin()
-	if err != nil {
-		return SessionJournalPage{}, err
-	}
-	defer tx.Rollback()
-	var earliest, latest, latestSeq sql.NullInt64
-	if err := tx.QueryRow(`SELECT MIN(position),MAX(position),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest, &latestSeq); err != nil {
-		return SessionJournalPage{}, err
-	}
-	var prunedBefore, historyBefore sql.NullInt64
-	if err := tx.QueryRow(`SELECT pruned_before,history_before FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&prunedBefore, &historyBefore); err != nil && err != sql.ErrNoRows {
-		return SessionJournalPage{}, err
-	}
-	if before > 0 {
-		historyUnknown := !historyBefore.Valid || historyBefore.Int64 < 0
-		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) || (historyUnknown && before <= uint64(earliest.Int64)) {
-			var earliestPosition, latestPosition uint64
-			if earliest.Valid {
-				earliestPosition = uint64(earliest.Int64)
-			}
-			if latest.Valid {
-				latestPosition = uint64(latest.Int64)
-			}
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
-		}
-		earliestPosition, latestPosition := uint64(earliest.Int64), uint64(latest.Int64)
-		if before < earliestPosition-1 {
-			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
-		}
-	}
-	rows, err := tx.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT ?`, sessionID, before, before, limit+1)
-	if err != nil {
-		return SessionJournalPage{}, err
-	}
-	entries, err := appendRows(make([]SessionJournalEntry, 0, limit+1), rows, scanSessionJournalEntry)
-	if err != nil {
-		return SessionJournalPage{}, err
-	}
-	var next uint64
-	if len(entries) > limit {
-		entries = entries[:limit]
-		next = entries[len(entries)-1].Position
-	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Position == uint64(earliest.Int64) {
-		next = entries[len(entries)-1].Position
-	}
-	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
-		entries[left], entries[right] = entries[right], entries[left]
-	}
-	if err := rows.Close(); err != nil {
-		return SessionJournalPage{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return SessionJournalPage{}, err
-	}
-	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latestSeq.Int64)}
-	if next == 0 && (!prunedBefore.Valid || prunedBefore.Int64 == 0) && historyBefore.Valid && historyBefore.Int64 > 0 {
-		page.HistoryBefore = historyBefore.Int64
-	}
-	return page, nil
-}
-
 func (r *Registry) RecordSessionJournalHistoryBoundary(sessionID string, before int64) error {
 	if strings.TrimSpace(sessionID) == "" || before < 0 {
 		return fmt.Errorf("invalid session journal history boundary")
@@ -338,44 +273,6 @@ func sessionJournalBody(q interface{ QueryRow(string, ...any) *sql.Row }, entry 
 		return nil, false, err
 	}
 	return body, true, nil
-}
-
-func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int) (SessionJournalWindow, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		return SessionJournalWindow{}, fmt.Errorf("session id is required")
-	}
-	if limit < 1 {
-		return SessionJournalWindow{Entries: []SessionJournalEntry{}}, nil
-	}
-	// A trim drops the oldest places, whose seqs need not be the lowest: an
-	// upserted row keeps its place under a newer seq. pruned_seq is the
-	// highest seq any trim dropped, so a cursor below it missed a row.
-	var earliest, latest sql.NullInt64
-	var prunedSeq, nextSeq uint64
-	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0),COALESCE((SELECT next_seq FROM session_journal_state WHERE session_id=?),0) FROM session_journal WHERE session_id=?`, sessionID, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq, &nextSeq); err != nil {
-		return SessionJournalWindow{}, err
-	}
-	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
-	if !earliest.Valid || !latest.Valid {
-		window.Gap = after > 0 && (after < prunedSeq || after > nextSeq)
-		return window, nil
-	}
-	window.EarliestSeq = uint64(earliest.Int64)
-	window.LatestSeq = uint64(latest.Int64)
-	window.Gap = after > 0 && (after < prunedSeq || after > window.LatestSeq)
-	if window.Gap {
-		return window, nil
-	}
-	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
-	if err != nil {
-		return SessionJournalWindow{}, err
-	}
-	entries, err := appendRows(window.Entries, rows, scanSessionJournalEntry)
-	if err != nil {
-		return SessionJournalWindow{}, err
-	}
-	window.Entries = entries
-	return window, nil
 }
 
 func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey string) (SessionJournalEntry, bool, error) {
