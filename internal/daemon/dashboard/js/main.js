@@ -65,14 +65,14 @@ const pushedSession = new URLSearchParams(location.search).get("session");
 
 if (pushedSession) {
   history.replaceState(null, "", "/#conversations");
-  load().then(() => selectSession(pushedSession, true));
+  load(false, false).then(() => selectSession(pushedSession, true));
 } else {
   load();
 }
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data?.type === "open-session" && event.data.sessionId) load().then(() => selectSession(event.data.sessionId, true));
+    if (event.data?.type === "open-session" && event.data.sessionId) load(false, false).then(() => selectSession(event.data.sessionId, true));
   });
   navigator.serviceWorker.startMessages();
 }
