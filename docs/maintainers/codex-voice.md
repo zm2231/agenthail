@@ -345,9 +345,14 @@ Read these units in order:
    an operator Desktop has open: a tool answer is `mcp-response` with
    `threadId` and `response`, and the hook reinstalls whenever its source
    changes.
-2. `internal/voice/service.go`: persistent identity, lease, call state, duplicate
-   protection, and native request parameters. `skills/operations.go` embeds the
-   distributed Operations skill.
+2. `internal/voice/service.go`: service construction and background-work lifetime.
+   `types.go` defines the provider and call contracts; `state.go` publishes views
+   and `persistence.go` saves state. `actions.go` dispatches phone actions,
+   `call.go` starts and ends audio, and `targets.go` selects or interrupts a
+   coding session. `poll.go` applies provider events, `spoken.go` delivers spoken
+   requests, and `tool_calls.go` answers dynamic tools. `operator.go` creates the
+   persistent operator and builds its instructions and native request parameters.
+   `skills/operations.go` embeds the distributed Operations skill.
 3. `internal/surface/surfaces/codex_voice.go`: operator creation and the route
    choice: Desktop only while Desktop has the operator open, otherwise Codex's
    app-server. No approval-policy override.
