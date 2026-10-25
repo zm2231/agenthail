@@ -19,12 +19,7 @@ func TestAgentSendToAConversationOpenInTwoTerminalsNamesThePinsAndAPinReachesOne
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
 	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
 
-	listed, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
-	if err != nil || !strings.Contains(listed, fmt.Sprintf("2 terminals: %d", first.PID)) || !strings.Contains(listed, strconv.Itoa(later.PID)) {
-		t.Fatalf("list=%q err=%v, want both terminals named", listed, err)
-	}
-
-	err = app.Run([]string{"send", conversation, "which terminal?"})
+	err := app.Run([]string{"send", conversation, "which terminal?"})
 	if err == nil {
 		t.Fatal("a send to a conversation open in two terminals was not refused")
 	}

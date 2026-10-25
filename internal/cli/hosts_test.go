@@ -364,27 +364,6 @@ func TestThreadCreateOnHostKeepsRemoteCwd(t *testing.T) {
 	}
 }
 
-func TestListShowsRemoteRowsWithHostAndUnavailableState(t *testing.T) {
-	app, _, _, _ := federatedCLIFixture(t, true)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
-	if err != nil || !strings.Contains(output, "HOST") || !strings.Contains(output, "vps") || !strings.Contains(output, "down") || !strings.Contains(output, "@builder") {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-	output, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		Sessions []listSessionView `json:"sessions"`
-	}
-	if err := json.Unmarshal([]byte(output), &document); err != nil {
-		t.Fatalf("decode %q: %v", output, err)
-	}
-	if len(document.Sessions) != 1 || document.Sessions[0].ID != vpsBuilder.ID || document.Sessions[0].Host == nil || document.Sessions[0].Host.Name != "vps" || document.Sessions[0].UnavailableReason == "" {
-		t.Fatalf("sessions=%+v", document.Sessions)
-	}
-}
-
 func TestHostsAddPassesAddressAndName(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	link := "agenthail://pair?endpoint=https%3A%2F%2Fvps.example.ts.net%3A7498&secret=synthetic"

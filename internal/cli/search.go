@@ -92,41 +92,6 @@ func mergeSearchResults(left, right []surface.SessionSearchResult) []surface.Ses
 	return output
 }
 
-func sessStat(s surface.Session, queued int) string {
-	busy := s.Status == surface.StatusBusy || s.Status == "running" || s.Status == "active"
-	if busy && s.WaitingOn != nil {
-		if queued > 0 {
-			return "wait+q"
-		}
-		return "wait"
-	}
-	if busy {
-		if queued > 0 {
-			return "run+q"
-		}
-		return "run"
-	}
-	if surface.BackgroundRunning(s.BackgroundTasks) {
-		if queued > 0 {
-			return "bg+q"
-		}
-		return "bg"
-	}
-	if queued > 0 {
-		return "queue"
-	}
-	if s.Status == surface.StatusOffline {
-		return "off"
-	}
-	if s.Status == "idle" || s.Status == "shell" || s.Status == "notLoaded" || s.Status == surface.StatusIdle {
-		return "idle"
-	}
-	if s.Status == "" || s.Status == surface.StatusUnknown {
-		return "?"
-	}
-	return "idle"
-}
-
 func queuedTime(value string) time.Time {
 	t, err := time.ParseInLocation(time.DateTime, value, time.UTC)
 	if err != nil {

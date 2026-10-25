@@ -161,6 +161,8 @@ agenthail history @writer 25
 agenthail search codex "quarterly planning"
 ```
 
+`agenthail list` requires the daemon and shows its Current catalog, including mirrors. `--recent` adds activity from the last 24 hours; `--running`, `--all`, and `--archived` select the other daemon scopes. All covers catalog history, not every saved registry record; use `search` for provider history. The output names conversation and session totals separately and renders the daemon's status text. `--json` includes the canonical view, counts, ordering, and display instants. [Scope and display contract](docs/maintainers/session-presentation-design.md).
+
 When an agent is already working, Agenthail queues the next message by default. Set
 the daemon/dashboard `busyDelivery` setting to `steer` to steer busy targets that
 advertise that capability; unsupported targets remain queued. An agent's message to
