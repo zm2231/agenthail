@@ -448,6 +448,7 @@ struct SessionScreen: View {
     @State private var showingInfo = false
     @State private var showingVoice = false
     @State private var activityOnly = false
+    @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
@@ -505,7 +506,7 @@ struct SessionScreen: View {
                 if activityOnly {
                     ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
                 } else {
-                    ForEach(TimelineGroup.make(items)) { group in
+                    ForEach(TimelineGroup.make(items, foldAgents: !expandAgents)) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
                     }
                 }
@@ -539,6 +540,7 @@ struct SessionScreen: View {
             .environment(\.revealRow) { position.scrollTo(y: $0) }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
+            .environment(\.expandAgentMessages, expandAgents)
             .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
@@ -649,6 +651,7 @@ struct SessionScreen: View {
                         Text("Chat").tag(false)
                         Text("All events").tag(true)
                     }
+                    Toggle("Expand agent messages", systemImage: "text.bubble", isOn: $expandAgents)
                     if model.canCallByVoice(session) {
                         Button("Call this session", systemImage: "phone.fill") {
                             voiceCalls.open(targetID: model.voiceTargetID(for: session))
@@ -970,7 +973,6 @@ struct IOSMessage: View {
     let text: String
     var timestamp: String? = nil
     var files: [AttachedFile] = []
-    var peer = false
     /// How long the turn this reply ended took, from the host.
     var finished: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -998,19 +1000,12 @@ struct IOSMessage: View {
                         .font(.subheadline.weight(.medium))
                         .frame(minHeight: 44)
                 }
-            } else if peer {
-                Text(label).font(.footnote.weight(.semibold)).foregroundStyle(PhonePalette.peer)
-                SessionMarkdown(text: text, readingStyle: true)
             } else {
                 SessionMarkdown(text: text, readingStyle: true)
             }
             footer
         }
         .padding(isUser ? 14 : 0)
-        .padding(.leading, peer ? 12 : 0)
-        .overlay(alignment: .leading) {
-            if peer { Rectangle().fill(PhonePalette.peer).frame(width: 2) }
-        }
         .background(isUser ? SessionStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 16))
         .padding(.leading, isUser && !dynamicTypeSize.isAccessibilitySize ? 16 : 0)
         .padding(.vertical, 4)
@@ -1027,7 +1022,7 @@ struct IOSMessage: View {
     }
 
     @ViewBuilder private var footer: some View {
-        if isUser || peer {
+        if isUser {
             HStack {
                 Spacer(minLength: 0)
                 SessionTimestamp(value: timestamp)
@@ -1098,12 +1093,16 @@ struct IOSTimelineRow: View {
     var body: some View {
         if item.kind == "done" {
             EmptyView()
+        } else if let agent = item.agent, agent.isIncoming {
+            IOSAgentMessageRow(item: item, agent: agent)
+        } else if let agent = item.agent, agent.isSend, compactContext {
+            IOSAgentSendRow(call: item, agent: agent)
         } else if compactContext, let title = TranscriptContext.title(for: item) {
             ContextRecordRow(title: title, item: item)
         } else if item.kind == "notice" {
             TranscriptDivider(text: "\(item.title): \(item.noticeText)")
         } else if item.isSaid {
-            IOSMessage(label: messageLabel, text: item.text, timestamp: item.timestamp, files: item.files ?? [], peer: item.isPeerMessage, finished: finished)
+            IOSMessage(label: messageLabel, text: item.text, timestamp: item.timestamp, files: item.files ?? [], finished: finished)
             if item.truncated { ShortenedNote() }
         } else if item.kind == "attachment" {
             AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
@@ -1166,7 +1165,6 @@ struct IOSTimelineRow: View {
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
-        if item.isPeerMessage { return item.peerLabel }
         if item.isInstructions { return "Instructions" }
         if item.title.contains("commentary") { return "Update" }
         if item.title.contains("analysis") { return "Reasoning" }

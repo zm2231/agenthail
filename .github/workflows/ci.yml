@@ -63,6 +63,7 @@ jobs:
           node scripts/test-dashboard-ui.mjs
           node scripts/test-dashboard-usage.mjs
           node scripts/test-dashboard-tool-activity.mjs
+          node scripts/test-dashboard-agent-messages.mjs
           node scripts/test-dashboard-relays.mjs
           node scripts/test-dashboard-audit.mjs
           node scripts/test-dashboard-rekeys.mjs

@@ -16,16 +16,17 @@ struct TranscriptBlockView: View, @MainActor Equatable {
     var body: some View {
         switch block.kind {
         case .user(let text, let files):
-            let envelope = PeerEnvelope(text)
-            if let sender = envelope.sender {
-                PeerMessage(sender: sender, text: envelope.body, time: TurnClock.time(block.timestamp), note: note)
-            } else {
-                UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit.closure, row: block.id)
-            }
+            UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit.closure, row: block.id)
         case .assistant(let text):
             AssistantReply(text: text, note: note, footer: block.finished.map { TurnClock.footer(duration: $0, at: block.timestamp) })
-        case .peer(let sender, let text):
-            PeerMessage(sender: sender, text: text, time: TurnClock.time(block.timestamp), note: note)
+        case .agent(let entry):
+            if entry.agent.isSend {
+                AgentSendRow(id: block.id, entry: entry)
+            } else {
+                AgentMessageRow(id: block.id, entry: entry)
+            }
+        case .agentFold(let entry):
+            AgentFoldRow(id: block.id, entry: entry)
         case .tools(let items):
             ToolRunView(id: block.id, items: items)
                 .padding(.trailing, -overhang)
@@ -50,7 +51,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
 
     @ViewBuilder private var record: some View {
         switch block.kind {
-        case .user, .assistant, .peer, .tools:
+        case .user, .assistant, .agent, .agentFold, .tools:
             EmptyView()
         case .annotation(let text):
             Text(text)

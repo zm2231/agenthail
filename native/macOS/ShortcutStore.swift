@@ -28,6 +28,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case showArchived
     case toggleInspector
     case jumpToLatest
+    case expandAgentMessages
     case send
     case sendAlternate
     case stop
@@ -64,6 +65,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showArchived: "Show Archived"
         case .toggleInspector: "Show or hide inspector"
         case .jumpToLatest: "Jump to latest"
+        case .expandAgentMessages: "Expand agent messages"
         case .send: "Send"
         case .sendAlternate: "Send the other way (queue or steer)"
         case .stop: "Stop"
@@ -100,6 +102,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .showArchived: StoredShortcut(kVK_ANSI_4, cmdKey)
         case .toggleInspector: StoredShortcut(kVK_ANSI_I, cmdKey | optionKey)
         case .jumpToLatest: StoredShortcut(kVK_ANSI_L, cmdKey)
+        case .expandAgentMessages: StoredShortcut(kVK_ANSI_E, cmdKey | optionKey)
         case .send: StoredShortcut(kVK_Return, cmdKey)
         case .sendAlternate: StoredShortcut(kVK_Return, cmdKey | optionKey)
         case .stop: StoredShortcut(kVK_ANSI_Period, cmdKey)

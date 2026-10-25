@@ -118,6 +118,7 @@ func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadR
 	if result.Exchanges == nil {
 		result.Exchanges = []Exchange{}
 	}
+	result.Exchanges = PresentExchanges(result.Exchanges)
 	for index := range result.Exchanges {
 		if result.Exchanges[index].Source == "" {
 			result.Exchanges[index].Source = result.Source

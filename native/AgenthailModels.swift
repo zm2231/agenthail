@@ -1313,7 +1313,7 @@ struct ExchangeState: Decodable, Identifiable {
 
     var promptLabel: String {
         switch origin ?? "" {
-        case "": return "You"
+        case "", "person": return "You"
         case "peer": return sender.map { "From \($0)" } ?? "From an agent"
         case "task-notification": return "Task notification"
         case "auto-continuation": return "Continued"
@@ -1959,15 +1959,13 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     var files: [AttachedFile]? = nil
     var resetsAt: String? = nil
     var turnId: String? = nil
+    var agent: AgentMessage? = nil
 
-    var isPeerMessage: Bool { kind == "message" && role == "peer" }
     /// Model input a provider injected, such as project instructions or hook
     /// context, rather than conversation.
     var isInstructions: Bool {
         kind == "instructions" || ((kind == "message" || kind == "text") && (role == "developer" || role == "system"))
     }
-    var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
-    var peerLabel: String { "From \(peerSender)" }
 
     /// A notice's text with the time its usage limit resets, when it reports one.
     var noticeText: String {

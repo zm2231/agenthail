@@ -1,0 +1,120 @@
+.agent-message,
+.agent-fold,
+.agent-send {
+  margin: 6px 0 10px;
+}
+.agent-message > summary,
+.agent-fold > summary,
+.agent-send > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.agent-message > summary::-webkit-details-marker,
+.agent-fold > summary::-webkit-details-marker,
+.agent-send > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-message > summary,
+.agent-fold > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.agent-mark {
+  flex: 0 0 auto;
+  width: 8px;
+  color: var(--quiet);
+  transition: transform 0.12s ease;
+}
+details[open] > summary > .agent-mark {
+  transform: rotate(90deg);
+}
+.agent-preview {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.agent-chip,
+.agent-fold-label {
+  color: var(--focus);
+  font-weight: 600;
+}
+.agent-summary {
+  color: var(--muted);
+}
+.agent-files {
+  color: var(--quiet);
+}
+.agent-more {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-more::after {
+  content: "Show more";
+}
+.agent-message[open] .agent-more::after {
+  content: "Show less";
+}
+.agent-message[data-fits]:not([open]) > summary,
+.agent-message[data-locked] > summary,
+.agent-send[data-locked] > summary {
+  cursor: default;
+}
+.agent-message[data-fits]:not([open]) .agent-more,
+.agent-message[data-locked] .agent-more {
+  display: none;
+}
+.agent-message[open] .agent-summary,
+.agent-message[open] .agent-files {
+  display: none;
+}
+.agent-message[open] .agent-preview {
+  -webkit-line-clamp: unset;
+}
+.agent-body,
+.agent-fold-members {
+  padding: 4px 0 0 16px;
+}
+.agent-fold-senders {
+  overflow: hidden;
+  color: var(--quiet);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-send {
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.agent-send > summary,
+p.agent-send {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.agent-send-mark {
+  flex: 0 0 auto;
+  color: var(--quiet);
+}
+.agent-send-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-send-line strong {
+  font-weight: 600;
+}
+.agent-send-body {
+  padding: 4px 0 0 18px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}

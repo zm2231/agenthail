@@ -1,6 +1,6 @@
 import { clockTime, escape, labels, turnFooter } from "./format.js";
 import { markdown } from "./markdown.js";
-import { handoffMessage, renderMessage } from "./messages.js";
+import { renderMessage, userLabel } from "./messages.js";
 import { toolKinds } from "./tool-view.js";
 import { renderToolRun } from "./tool-runs.js";
 
@@ -44,15 +44,11 @@ export function renderTimelineItem(item, session, turnEnd = null) {
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
     return `<details class="timeline-item timeline-instructions timeline-collapsible" ${attributes}><summary>Instructions</summary>${metadata}<div class="turn-content">${body}</div></details>`;
   }
-  if (kind === "message" && item.role === "peer") {
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`, [], clockTime(item.timestamp))}${metadata}</section>`;
-  }
   if (["text", "message", "assistant"].includes(kind)) {
     const user = item.role === "user";
-    const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
-    const kindName = !user ? "agent" : content.label.startsWith("From ") ? "peer" : "user";
+    const label = user ? userLabel : labels[session.surface] || session.surface;
     const footer = user ? clockTime(item.timestamp) : turnEnd ? turnFooter(turnEnd.text, turnEnd.timestamp || item.timestamp) : "";
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, kindName, content.label, `${session.id}:${item.id}`, user ? item.files : [], footer)}${metadata}</section>`;
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, user ? "user" : "agent", label, `${session.id}:${item.id}`, user ? item.files : [], footer)}${metadata}</section>`;
   }
   if (kind === "event") {
     const text = [item.title, item.status].filter(Boolean).join(" · ") + (item.text ? `: ${item.text}` : "");

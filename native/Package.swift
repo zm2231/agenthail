@@ -60,6 +60,8 @@ let package = Package(
                 "DiffPresentation.swift",
                 "ToolRunSummary.swift",
                 "TranscriptRows.swift",
+                "AgentMessage.swift",
+                "ClampedText.swift",
                 "TurnClock.swift",
                 "TimelineMetadata.swift",
                 "OperationsRefreshPolicy.swift",

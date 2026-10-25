@@ -1,30 +1,21 @@
 import { escape } from "./format.js";
 import { markdown } from "./markdown.js";
 
-export function handoffMessage(value) {
-  let text = String(value || "");
-  let label = "Conversation input";
-  let match;
-  while ((match = text.match(/^\[from\s+([^\]]+)\]\s*/i))) {
-    label = `From ${match[1]}`;
-    text = text.slice(match[0].length);
-  }
-  return { label, text };
-}
+export const userLabel = "Conversation input";
 
 export function exchangePrompt(exchange) {
-  const message = handoffMessage(exchange.user);
-  if (exchange.origin === "peer") return { ...message, label: exchange.sender ? `From ${exchange.sender}` : "From an agent" };
-  if (exchange.origin === "task-notification") return { ...message, label: "Task notification" };
-  if (exchange.origin === "auto-continuation") return { ...message, label: "Continued" };
-  if (exchange.origin === "agenthail-notice") return { ...message, label: "Agenthail" };
-  if (exchange.origin) return { ...message, label: exchange.origin };
-  return message;
+  const text = String(exchange.user || "");
+  if (exchange.origin === "peer") return { text, label: exchange.sender ? `From ${exchange.sender}` : "From an agent" };
+  if (exchange.origin === "task-notification") return { text, label: "Task notification" };
+  if (exchange.origin === "auto-continuation") return { text, label: "Continued" };
+  if (exchange.origin === "agenthail-notice") return { text, label: "Agenthail" };
+  if (exchange.origin && exchange.origin !== "person") return { text, label: exchange.origin };
+  return { text, label: userLabel };
 }
 
 export function renderMessage(text, kind, label, turnKey, files = [], footer = "") {
   const safeText = String(text || "");
-  const editable = kind === "user" && label === "Conversation input";
+  const editable = kind === "user" && label === userLabel;
   const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
   const content = safeText ? `<div class="turn-content">${markdown(safeText)}</div>` : "";
   const actions = safeText ? `<span class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</span>` : "";

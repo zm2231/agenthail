@@ -6,6 +6,7 @@ struct SessionCommands: Commands {
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @FocusedObject private var pane: SessionPane?
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
 
     private var session: SessionState? { pane?.displayedSession }
     private var tabs: Bool { pane?.tabsEnabled == true }
@@ -89,6 +90,8 @@ struct SessionCommands: Commands {
             Button(pane?.inspectorShown == true ? "Hide Inspector" : "Show Inspector") { pane?.toggleInspector() }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))
                 .disabled(pane == nil)
+            Toggle("Expand Agent Messages", isOn: $expandAgents)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.expandAgentMessages))
             Button("Refresh") { model.refreshNow(pane) }
                 .keyboardShortcut(shortcuts.keyboardShortcut(.refresh))
                 .disabled(model.api == nil)

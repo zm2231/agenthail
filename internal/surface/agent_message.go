@@ -52,6 +52,18 @@ func PresentTimelineItem(item TimelineItem) TimelineItem {
 	return item
 }
 
+func PresentExchanges(exchanges []Exchange) []Exchange {
+	for index := range exchanges {
+		if exchanges[index].Origin != "" || exchanges[index].Command {
+			continue
+		}
+		if envelope, ok := ParsePeerEnvelope(exchanges[index].User); ok {
+			exchanges[index].Origin, exchanges[index].Sender, exchanges[index].User = AgentKindPeer, envelope.Sender, envelope.Body
+		}
+	}
+	return exchanges
+}
+
 func PresentTimelineItems(items []TimelineItem) []TimelineItem {
 	for index := range items {
 		items[index] = PresentTimelineItem(items[index])

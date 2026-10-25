@@ -77,6 +77,24 @@ func TestPresentTimelineItemMarksAgentMessages(t *testing.T) {
 	}
 }
 
+func TestPresentExchangesReadsEnvelopes(t *testing.T) {
+	got := PresentExchanges([]Exchange{
+		{User: "[from reviewer] Please rebase"},
+		{User: "[from reviewer] already marked", Origin: "task-notification"},
+		{User: "[from x] printed", Command: true},
+		{User: "fix it"},
+	})
+	want := []Exchange{
+		{User: "Please rebase", Origin: AgentKindPeer, Sender: "reviewer"},
+		{User: "[from reviewer] already marked", Origin: "task-notification"},
+		{User: "[from x] printed", Command: true},
+		{User: "fix it"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PresentExchanges = %+v", got)
+	}
+}
+
 func TestAgentSummaryCollapsesAndCaps(t *testing.T) {
 	if got := AgentSummary("  a\n\tb  "); got != "a b" {
 		t.Fatalf("collapsed summary = %q", got)

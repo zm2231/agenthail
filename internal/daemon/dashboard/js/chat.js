@@ -15,6 +15,7 @@ import { renderClaudeMetadata } from "./claude-metadata.js";
 import { renderTimeline, timelineSignature } from "./timeline.js";
 import { exchangePrompt, renderMessage } from "./messages.js";
 import { alignTranscriptTop } from "./transcript-scroll.js";
+import { expandAgentsPreference, markClampedAgentRows } from "./agent-messages.js";
 
 export function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, claudeSubagentsTotal } = app.history || {};
@@ -37,6 +38,8 @@ export function renderChat() {
     if (session.limitResume.state === "waiting")
       controls.push('<button data-action="limit-resume-cancel" type="button">Don\'t resume</button>');
   }
+  const expandAgents = expandAgentsPreference();
+  controls.push(`<button data-expand-agents aria-pressed="${expandAgents}" type="button">${expandAgents ? "Collapse agent messages" : "Expand agent messages"}</button>`);
   controls.push(`<button data-archive-action="${session.archived ? "session-unarchive" : "session-archive"}" type="button">${session.archived ? "Unarchive" : "Archive"}</button>`);
   if (session.cwd && !(session.project?.added && session.project.rootPath === session.cwd))
     controls.push(`<button data-project-add="${escape(session.cwd)}" data-project-host="${escape(checkoutHost(session))}" type="button">Add folder as project</button>`);
@@ -87,14 +90,14 @@ export function renderChat() {
   ];
   if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents));
   const timeline = app.history?.timeline?.items || [];
-  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents);
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents, expandAgents);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
   const wasPinned =
     chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
   const messages = timeline.length
-    ? renderTimeline(timeline, session)
+    ? renderTimeline(timeline, session, expandAgents)
     : exchanges
     .flatMap((exchange, index) => {
       const user = exchangePrompt(exchange);
@@ -121,6 +124,7 @@ export function renderChat() {
     .join("");
   chatBody.innerHTML =
     `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${renderGoalAttention(goal)}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
+  markClampedAgentRows(chatBody);
   renderLiveTurn();
   app.transcriptSignature = signature;
   if (app.pendingEntryScroll) {

@@ -17,10 +17,19 @@ import { changeLead, openProjectDialog, projectChange } from "./project-dialog.j
 import { toggleNewConversationForm } from "./start-form.js";
 import { checkoutHost } from "./project-model.js";
 import { loadSessionMetadata } from "./session-metadata.js";
+import { expandAgentsPreference, holdAgentRow, setExpandAgentsPreference } from "./agent-messages.js";
+import { renderChat } from "./chat.js";
 import { renderContextUsage } from "./context-usage.js";
 
 export function bindConversationEvents() {
   document.addEventListener("click", async (event) => {
+    holdAgentRow(event);
+    if (event.target.closest("[data-expand-agents]")) {
+      setExpandAgentsPreference(!expandAgentsPreference());
+      app.transcriptSignature = null;
+      if (app.selected && app.history) renderChat();
+      return;
+    }
     const chip = event.target.closest("[data-chip]");
     if (chip) return toggleFileChip(chip);
     const diffShow = event.target.closest("[data-diff-show]");

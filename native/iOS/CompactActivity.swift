@@ -8,9 +8,12 @@ extension TimelineItem {
 struct TimelineGroup: Identifiable {
     let id: String
     var items: [TimelineItem]
+    var foldLabel: String? = nil
+    var foldSenders = ""
     var callCount: Int { items.filter { $0.kind == "toolCall" }.count }
     var errorCount: Int { items.filter(ToolRunSummary.isFailure).count }
-    var isActivity: Bool { items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
+    var isSend: Bool { items.first?.agent?.isSend == true }
+    var isActivity: Bool { foldLabel == nil && !isSend && items.allSatisfy { ["toolCall", "toolResult", "reasoning"].contains($0.kind) } }
     var folds: Bool { callCount > ToolRunSummary.foldAfter }
 
     /// An agent's reply, with the duration of the turn it ended when the host recorded one.
@@ -31,15 +34,25 @@ struct TimelineGroup: Identifiable {
         })
     }
 
-    static func make(_ items: [TimelineItem]) -> [TimelineGroup] {
+    static func make(_ items: [TimelineItem], foldAgents: Bool = true) -> [TimelineGroup] {
         var groups: [TimelineGroup] = []
+        var sends: [String: Int] = [:]
         for item in items {
+            if item.agent?.isSend == true {
+                if let call = item.callId { sends[call] = groups.count }
+                groups.append(TimelineGroup(id: item.id, items: [item]))
+                continue
+            }
+            if item.kind == "toolResult", let call = item.callId, let index = sends[call] {
+                groups[index].items.append(item)
+                continue
+            }
             let activity = ["toolCall", "toolResult", "reasoning"].contains(item.kind)
             if activity, groups.last?.isActivity == true { groups[groups.count - 1].items.append(item) }
             else if isTurnDuration(item), let last = groups.last, last.isReply, last.items.count == 1 { groups[groups.count - 1].items.append(item) }
             else { groups.append(TimelineGroup(id: item.id, items: [item])) }
         }
-        return groups
+        return foldAgents ? AgentFoldGroups.folded(groups) : groups
     }
 
     var invocations: [TimelineGroup] {
@@ -70,7 +83,11 @@ struct CompactActivityGroup: View {
     @Environment(\.revealRow) private var revealRow
 
     var body: some View {
-        if group.isActivity {
+        if group.foldLabel != nil {
+            IOSAgentFoldRow(group: group)
+        } else if group.isSend, let call = group.items.first, let agent = call.agent {
+            IOSAgentSendRow(call: call, agent: agent, result: group.items.dropFirst().first)
+        } else if group.isActivity {
             let open = !group.folds || (rows.current(opened) ?? rows.isOpen(group.id) ?? false)
             let diffs = group.diffs
             VStack(alignment: .leading, spacing: 0) {
