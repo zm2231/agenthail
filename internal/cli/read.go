@@ -197,7 +197,7 @@ func (a *App) cmdLast(args []string) error {
 
 func promptLabel(exchange surface.Exchange) string {
 	switch exchange.Origin {
-	case "":
+	case "", surface.OriginPerson:
 		return "you "
 	case "peer":
 		if exchange.Sender != "" {

@@ -84,6 +84,13 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		if body == "" {
 			body = strings.TrimSpace(text)
 		}
+		if words, ok := claudePersonWords(text, body); ok {
+			item := surface.TimelineItem{Kind: "message", Role: "user", Origin: surface.OriginPerson, Title: "user", Text: words}
+			if id := str(origin, "msg_id"); id != "" {
+				item.ID = "peer:" + id
+			}
+			return item
+		}
 		item := surface.TimelineItem{Kind: "message", Role: "peer", Origin: kind, Sender: sender, Title: sender, Text: body}
 		if item.Title == "" {
 			item.Title = "Agent message"

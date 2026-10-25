@@ -32,6 +32,7 @@ type TimelineItem struct {
 	Attachment       *Attachment    `json:"attachment,omitempty"`
 	Files            []AttachedFile `json:"files,omitempty"`
 	Turn             *TurnMetadata  `json:"turn,omitempty"`
+	Agent            *AgentMessage  `json:"agent,omitempty"`
 }
 
 // AttachedFile is a file a person sent with a message that the agent received

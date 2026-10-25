@@ -62,7 +62,7 @@ func peerContent(session surface.Session, target, socket, fromMode, message stri
 	}, PeerName(session.Surface, name)))
 	switch session.ID {
 	case surface.PersonSessionID:
-		message = session.Name + " wrote this in Agenthail. They read your reply here in this session; answer in your reply, not with SendMessage.\n\n" + message
+		message = session.Name + surface.PersonPeerPreamble + message
 	case surface.CLISessionID:
 		message = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n" + message
 	}
