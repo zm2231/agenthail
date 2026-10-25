@@ -72,6 +72,9 @@ details[open] > summary > .agent-mark {
 .agent-message[data-locked] .agent-more {
   display: none;
 }
+.agent-message[data-fits]:not([open]) .agent-mark {
+  visibility: hidden;
+}
 .agent-message[open] .agent-summary,
 .agent-message[open] .agent-files {
   display: none;
