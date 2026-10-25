@@ -3,49 +3,22 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 
 const widget = { id: "project-widget", displayName: "widget", rootPath: "/work/widget", kind: "git" };
-const vps = { id: "h1::project-widget", displayName: "widget", rootPath: "/private/example/secret", kind: "git", host: { id: "h1", name: "vps.example.ts.net", state: "connected" } };
-const notes = { id: "project-notes", displayName: "notes", rootPath: "/work/notes", kind: "folder", archived: true };
-const at = (hours) => new Date(Date.UTC(2026, 9, 4, 12) - hours * 3600e3).toISOString();
-const sessions = [
-  ...Array.from({ length: 7 }, (_, index) => ({ id: `w${index}`, name: `w${index}`, surface: "codex", status: "idle", lastActive: at(index), project: widget, current: index === 0 })),
-  { id: "busy", name: "busy", surface: "codex", status: "busy", lastActive: at(30), project: widget, current: true },
-  { id: "queued", name: "queued", surface: "codex", status: "idle", lastActive: at(31), project: widget, queueCount: 1 },
-  { id: "flagged", name: "flagged", surface: "codex", status: "idle", lastActive: at(32), project: widget },
-  { id: "lead", name: "lead", surface: "claude", status: "idle", lastActive: at(33), project: widget, subagents: { count: 2, working: 1 } },
-  { id: "far", name: "far", surface: "codex", status: "idle", lastActive: at(1), project: vps, host: { id: "h1", name: "vps.example.ts.net", state: "connected" }, current: true },
-  { id: "hidden", name: "hidden", surface: "codex", status: "idle", lastActive: at(1), project: widget, current: true, archived: true },
-  { id: "kept", name: "kept", surface: "claude", status: "idle", lastActive: at(40), project: notes, archived: true },
-  { id: "loose", name: "loose", surface: "claude", status: "idle", lastActive: at(2), current: true },
-];
+const sessions = Array.from({length:9}, (_, index) => ({id:`w${index}`, name:`w${index}`, surface:"codex", status:"idle", display:{kind:"idle",label:`Sent ${index}`,detail:""}}));
+const group = {id:widget.id, name:widget.displayName, counts:{families:9,sessions:9}, collapsedFamilyIds:["w8","w6","w0","w2","w3","w4","w5"]};
 const context = {
-  app: { state: { sessions, projects: [widget, vps, notes], attention: [{ sessionId: "flagged" }] }, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
-  labels: { codex: "Codex", claude: "Claude Code" },
-  escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"),
-  displayName: (session) => session.name, rawDisplayName: (session) => session.name,
-  presenceTone: () => "idle", presenceLabel: () => "Ready", livePlan: () => null,
+  app: { state: { sessions, projects: [widget] }, sessionView: {sessions, view:{projects:[group], families:["w8","w6","w0","w2","w3","w4","w5","w1","w7"].map(id=>({id,projectId:widget.id,members:[{id}]}))}}, expandedProjects:new Set(), selected:null },
 };
-await dashboardModules(["session-scope", "projects", "holders", "session-row", "project-model", "hosts"], context);
-const ids = (list) => list.map((session) => session.id).join(",");
-assert.equal(ids(vm.runInContext("scopedSessions()", context)), "w0,busy,far,loose", "Current hides archived sessions");
-context.app.inboxMode = "all";
-assert(!ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "All hides archived sessions by default");
-context.app.showArchived = true;
-assert(ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "Show archived lists them");
-const { html, count } = vm.runInContext('renderProjects("")', context);
-assert.equal(count, 2);
-const widgetSection = html.slice(0, html.indexOf("</section>"));
-assert.match(widgetSection, /<span class="project-name">widget<\/span><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header counts its sessions");
-for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
-assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");
+await dashboardModules(["projects", "holders", "session-row", "project-model", "hosts"], context);
+const {html} = context.renderProjects();
+assert.match(html, /title="9 conversations">9<\/span>/);
+const widgetSection = html.slice(0,html.indexOf("</section>"));
+assert.deepEqual([...widgetSection.matchAll(/data-session="([^"]+)"/g)].map(m=>m[1]), group.collapsedFamilyIds);
 assert.match(widgetSection, /Show 2 more/);
-assert.doesNotMatch(html, /\/private\/example\/secret|\/work\/widget/, "project headers never show a root path");
-assert.match(html, /<span class="host-badge" title="On vps\.example\.ts\.net">vps<\/span>/, "a remote project names its host briefly");
-assert.match(html, /data-session="far".*<span class="host-badge" title="On vps\.example\.ts\.net">vps<\/span>/s, "a remote session shows a short host badge");
-assert.doesNotMatch(html.slice(0, html.indexOf("</section>")), /host-badge/, "local projects and sessions carry no host badge");
-assert.doesNotMatch(html, /data-session="hidden"|data-session="loose"/, "archived sessions and sessions without a project stay out");
-assert.match(html, /Archived \(1\)<\/summary>.*data-project-action="project-unarchive" data-project-id="project-notes".*data-session="kept"/s);
-assert.match(widgetSection, /data-project-message="project-widget" data-project-name="widget"[^>]*>Message<\/button>/, "an active project offers a message to its conversations");
-assert.doesNotMatch(html.slice(html.indexOf("Archived (1)")), /data-project-message/, "an archived project offers no message");
+context.app.expandedProjects.add(widget.id);
+assert.equal([...context.renderProjects().html.matchAll(/data-session=/g)].length,9);
+context.app.expandedProjects.clear();
+assert.doesNotMatch(html, /\/work\/widget/);
+assert.match(widgetSection, /data-project-message="project-widget"/);
 const local = { id: "h0", name: "laptop", state: "local" };
 const remote = { id: "h1", name: "vps.example.ts.net", state: "connected" };
 const leads = (coordinators) => {
@@ -65,7 +38,7 @@ const folder = { value: "~" };
 const select = { innerHTML: "", value: "" };
 const picker = {
   app: { startOptions: { projects: [{ id: "p-api", displayName: "api", rootPath: "/work/api", kind: "git" }, { id: "p-web", displayName: "web <x>", rootPath: "/work/web", kind: "git" }] } },
-  escape: context.escape,
+  escape: (value) => String(value).replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
   $: (selector) => (selector === "#new-conversation-project" ? select : { querySelector: () => folder }),
 };
 await dashboardModules(["start-form"], picker);
@@ -86,7 +59,7 @@ console.log("dashboard projects view tests passed");
 
 const metaContext = { backgroundWaiting: () => false, statusLabel: (status) => status, workingLabel: () => "Working", timeAgo: () => "now" };
 await dashboardModules(["session-labels"], metaContext);
-const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
+const meta = (configRoot) => vm.runInContext(`conversationMeta(${JSON.stringify({ display: {kind:"working",label:"Working",detail:""}, status: "busy", queueCount: 0, claudeConfigRoot: configRoot })})`, metaContext);
 assert(meta({ name: "work", root: "/w", signedInAs: "work@example.com" }).includes("config folder work · currently signed in as work@example.com"), "a session's config folder shows its current login");
 assert(meta({ name: "default", root: "/d", signedInAs: "me@example.com" }).includes("config folder default · currently signed in as me@example.com"), "the primary folder shows its login too");
 assert(meta({ name: "spare", root: "/s" }).endsWith("config folder spare"), "a folder with no login shows its name");
@@ -101,6 +74,7 @@ const shared = { id: "repo:github.com/example/widget", displayName: "widget", ch
 ], coordinators: [{ host: laptop, name: "widget-lead", surface: "claude", sessionId: "lead" }] };
 const sharedMenu = menu(shared);
 context.app.state.projects = [shared];
+context.app.sessionView.view.projects = [{id:shared.id, counts:{families:0,sessions:0},collapsedFamilyIds:[]}];
 const sharedSection = vm.runInContext('renderProjects("")', context).html;
 assert.match(sharedSection, /<span class="host-badge" title="On server\.example\.ts\.net">server<\/span>/, "a remote checkout's badge names its host");
 assert.doesNotMatch(sharedSection, /\/srv\/widget|\/work\/widget/, "the projects list never shows a checkout's folder, not even in an attribute");

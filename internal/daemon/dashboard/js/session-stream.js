@@ -1,3 +1,4 @@
+import { invalidatePresentation } from "./catalog-updates.js";
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape, labels } from "./format.js";
@@ -52,6 +53,7 @@ export function startLiveStream() {
     if (app.liveSessionID !== session.id || app.selected?.id !== session.id) return;
     const envelope = JSON.parse(event.data);
     const item = envelope.data;
+    if (["status", "waiting", "activity", "state", "metadata", "done"].includes(item.kind)) invalidatePresentation();
     app.history.journalSeq = Math.max(app.history.journalSeq || 0, envelope.seq || 0);
     if (item.kind === "source-error") { app.history.transcriptWarning = item.reason || "Live updates are unavailable."; renderChat(); return; }
     if (item.kind === "context" && item.context) { app.history.context = item.context; renderContextUsage(item.context); return; }

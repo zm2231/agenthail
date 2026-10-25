@@ -19,6 +19,10 @@ const (
 )
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("metadata") {
+		d.dashboardBrowserMetadata(w, r)
+		return
+	}
 	if r.URL.Query().Has("scope") {
 		d.sessionViewHandler(w, r)
 		return

@@ -85,7 +85,7 @@ export function renderChat() {
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     remoteHostName(session) ? "" : `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
-  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents));
+  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents, claudeSubagentsTotal, app.history?.claudeSubagentsWorking, app.history?.claudeSubagentsRemaining, app.allSubagents));
   const timeline = app.history?.timeline?.items || [];
   const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, app.allSubagents);
   if (app.transcriptSignature === signature) return;

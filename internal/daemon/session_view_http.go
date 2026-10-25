@@ -15,6 +15,7 @@ var errPresentationMember = errors.New("session is outside the selected view")
 var errPresentationCursor = errors.New("invalid catalog view cursor")
 
 type sessionViewRequest struct {
+	Detail   *dashboardSession
 	Scope    string
 	Filters  SessionViewFilters
 	Limit    int

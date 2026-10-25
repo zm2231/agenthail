@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { responseError } from "./http.js";
 import { escape } from "./format.js";
-import { waitingPlace } from "./presence.js";
+import { requireDisplay, displayText } from "./session-display.js";
 import { displayName } from "./session-labels.js";
 import { action } from "./actions.js";
 import { toast } from "./feedback.js";
@@ -64,17 +64,11 @@ export function renderRequests() {
 }
 
 export function renderElsewhereWait(session) {
-  const place = waitingPlace(session);
-  const asking = { question: "asks you a question", input: "needs your input", dialog: "has a dialog open in its terminal" }[session.waitingOn.kind] || "needs your approval";
-  const heading = place === "restart" ? "is waiting on a prompt Agenthail can't reach" : asking;
-  const detail = {
-    restart: "Nothing shows this prompt, so no one can answer it. Stop and resume the session to clear it; messages you send wait until then.",
-    terminal: "Agenthail can't answer this one. Answer it in the session's terminal. Messages you send wait until then.",
-  }[place] || "Agenthail can't answer this one. Answer it where the session runs, such as its terminal. Messages you send wait until then.";
+  const place = requireDisplay(session).waitingPlace;
   const actions = [];
   if (place === "restart") actions.push('<button class="primary-button" data-action="session-restart" type="button">Stop and resume</button>');
   if (session.runtime?.focusable) actions.push(`<button class="${actions.length ? "soft-button" : "primary-button"}" data-action="session-focus" type="button">Open session</button>`);
-  return `<div class="request-card"><h3>${escape(displayName(session))} ${heading}</h3><p>${detail}</p>${actions.length ? `<div class="request-actions">${actions.join("")}</div>` : ""}</div>`;
+  return `<div class="request-card"><h3>${escape(displayName(session))}</h3><p>${escape(displayText(session))}</p>${actions.length ? `<div class="request-actions">${actions.join("")}</div>` : ""}</div>`;
 }
 
 export function renderRequestCard(request) {

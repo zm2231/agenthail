@@ -1,31 +1,16 @@
 import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
 
-const context = { statusLabel: (status) => status, backgroundWaiting: () => false };
-await dashboardModules(["presence"], context);
-
-const now = Date.parse("2026-10-23T10:14:30Z");
-const busy = (activity) => JSON.parse(JSON.stringify({ name: "builder", status: "busy", currentReason: "working", activity }));
-const since = new Date("2026-10-23T10:02:00Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-assert.equal(
-  context.presenceLabel(busy({ busySince: "2026-10-23T10:00:00Z", lastProgressAt: "2026-10-23T10:02:00Z", tool: { name: "Bash", startedAt: "2026-10-23T10:02:00Z" } }), now),
-  `Working · no activity for 12 min · running Bash since ${since}`,
-);
-assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T10:05:00Z" }), now), "Working");
-const codexSince = new Date("2026-10-23T10:01:00.5Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-assert.equal(
-  context.presenceLabel({ ...busy({ busySince: "2026-10-23T09:58:00.034Z", lastProgressAt: "2026-10-23T06:02:00.123456789-04:00", tool: { name: "exec", startedAt: "2026-10-23T10:01:00.5Z" } }), surface: "codex" }, now),
-  `Working · no activity for 12 min · running exec since ${codexSince}`,
-  "a quiet Codex turn reads the same way, whatever offset and precision its times carry",
-);
-assert.equal(context.presenceLabel(busy(undefined), now), "Working");
-assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T05:07:57Z", noProcess: true }), now), "Working · no activity for 5 hr 6 min · no Claude process");
-assert.equal(context.presenceLabel(busy({ lastProgressAt: "2026-10-23T08:14:00Z" }), now), "Working · no activity for 2 hr");
-assert.equal(
-  context.presenceLabel({ ...busy({ lastProgressAt: "2026-10-23T09:00:00Z" }), waitingOn: { kind: "question", id: "q", answerable: true } }, now),
-  "Waiting on you",
-  "a wait outranks the quiet note",
-);
-assert.equal(context.presenceLabel({ name: "builder", status: "idle", currentReason: "recent", activity: { lastProgressAt: "2026-10-23T09:00:00Z" } }, now), "Recent");
-console.log("dashboard activity ok");
+const context = {};
+await dashboardModules(["session-display", "session-labels"], context);
+const display = { kind: "working", label: "Daemon label", detail: "Daemon detail", quietSince: "2026-10-23T10:02:00Z", toolStartedAt: "2026-10-23T10:03:00Z" };
+const row = { display, status: "idle", waitingOn: { answerable: true }, usageLimit: {}, backgroundTasks: { running: true } };
+assert.equal(context.displayText(row), `Daemon label · Daemon detail · ${new Date(display.quietSince).toLocaleString()} · ${new Date(display.toolStartedAt).toLocaleString()}`);
+assert.equal(context.conversationMeta(row), context.displayText(row));
+for (const key of ["resetsAt", "resumesAt", "quietSince", "toolStartedAt"]) {
+ const instant = "2026-10-25T12:34:56Z";
+ assert.equal(context.displayText({ display: { kind: "limited", label: "Sent", detail: "Text", [key]: instant } }), `Sent · Text · ${new Date(instant).toLocaleString()}`);
+}
+assert.throws(() => context.displayText({ status: "busy" }), /did not send/);
+assert.throws(() => context.displayText({ display: { ...display, resetsAt: "bad" } }), /Invalid display instant/);
+console.log("dashboard display text and locale instants passed");

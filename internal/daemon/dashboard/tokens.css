@@ -489,15 +489,18 @@ textarea:focus-visible {
   border-radius: 50%;
   background: var(--quiet);
 }
+.dot.working,
 .dot.busy,
 .dot.active {
   background: var(--good);
 }
 .dot.idle,
-.dot.blocked,
+.dot.waiting,
+.dot.limited,
 .dot.queued {
   background: var(--accent);
 }
+.dot.finishing,
 .dot.background {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--good);
@@ -1805,8 +1808,8 @@ select {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.status-pill.busy,
 .status-pill.working,
+.status-pill.busy,
 .status-pill.open,
 .status-pill.delivered {
   color: var(--good);
@@ -1814,9 +1817,12 @@ select {
 .status-pill.idle,
 .status-pill.pending,
 .status-pill.queued,
+.status-pill.waiting,
+.status-pill.limited,
 .status-pill.blocked {
   color: var(--accent);
 }
+.status-pill.finishing,
 .status-pill.background {
   color: var(--good);
 }

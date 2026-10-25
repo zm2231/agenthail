@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";
 
 const context = {};
-await dashboardModules(["presence"], context);
+await dashboardModules(["session-plan"], context);
 
 const session = (fields) => ({ id: "s", status: "busy", open: true, plan: { done: 3, total: 5, current: "Running gates" }, ...fields });
 assert.deepEqual({ ...context.livePlan(session({})) }, { done: 3, total: 5, current: "Running gates" }, "an open session part way through shows its progress");

@@ -105,7 +105,10 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			if result.err != nil {
 				errorsByField[result.field] = "Metadata unavailable."
 			} else if page, ok := result.value.(claudeSubagentPage); ok {
-				response[result.field] = page.links
+				links, working := displayClaudeSubagents(page)
+				response[result.field] = links
+				response["claudeSubagentsWorking"] = working
+				response["claudeSubagentsRemaining"] = page.total - len(page.links)
 				response["claudeSubagentsTotal"] = page.total
 			} else {
 				response[result.field] = result.value

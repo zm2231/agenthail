@@ -46,7 +46,7 @@ const context = {
     "'": "&#039;",
   })[char]),
 };
-await dashboardModules(["markdown", "messages", "timeline-items", "format", "tool-view", "tool-diffs", "tool-runs", "timeline", "claude-metadata", "session-metadata", "chat", "goals", "requests", "background-tasks", "context-usage", "presence"], context);
+await dashboardModules(["markdown", "messages", "timeline-items", "format", "tool-view", "tool-diffs", "tool-runs", "timeline", "claude-metadata", "session-metadata", "chat", "goals", "requests", "background-tasks", "context-usage", "session-plan"], context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -216,7 +216,7 @@ assert(html.includes("&lt;script&gt;"), "unknown body should use the escaped fal
 
 const claudeMetadata = context.renderClaudeMetadata(
   [{ jobId: "job-1", runType: "background", providerState: "working", sessionId: "session-1", recordPath: "/records/job-1.json" }],
-  [{ parentSessionId: "session-1", agentId: "agent-1", transcriptPath: "/transcripts/agent-1.jsonl" }],
+  [{ parentSessionId: "session-1", agentId: "agent-1", display: {kind:"idle",label:"Closed",detail:""}, transcriptPath: "/transcripts/agent-1.jsonl" }], 1, 0, 0,
 );
 for (const expected of ["job-1", "background", "working", "Subagent agent-1", "1 subagent in all"]) {
   assert(claudeMetadata.includes(expected), `Claude metadata omitted ${expected}`);
@@ -227,17 +227,17 @@ const subagentLinks = Array.from({ length: 12 }, (_, index) => ({
   parentSessionId: "session-1",
   agentId: `agent-${String(index).padStart(2, "0")}`,
   working: index >= 10,
+  display: { kind: "idle", label: `Sent ${index}`, detail: "" },
   lastActive: new Date(Date.UTC(2026, 9, 23, 12, 0) - index * 60000).toISOString(),
   transcriptPath: `/transcripts/agent-${index}.jsonl`,
   ...(index === 0 ? { description: "Review the parser", agentType: "general-purpose" } : {}),
 }));
 const rowsOf = (html) => [...html.matchAll(/<li><span>([^<]*)<\/span>/g)].map((match) => match[1]);
-const paged = context.renderClaudeMetadata([], subagentLinks, 30);
-assert.deepEqual(rowsOf(paged), ["Subagent agent-10", "Subagent agent-11", "Review the parser", ...[1, 2, 3, 4, 5, 6, 7].map((index) => `Subagent agent-0${index}`)], "working subagents come first, then the most recent");
-assert(paged.includes("2 working, 30 subagents in all") && paged.includes("data-subagents-all") && paged.includes("Show 20 earlier"), "the server total counts the earlier subagents");
-assert(paged.includes("· <span>general-purpose</span>") && !paged.includes("/transcripts/"), "a described subagent shows its type and no path");
-const older = context.renderClaudeMetadata([], subagentLinks);
-assert(rowsOf(older).length === 10 && older.includes("Show 2 earlier"), "a host without a total sent every subagent; the dashboard collapses them itself");
+const paged = context.renderClaudeMetadata([], subagentLinks, 30, 2, 18);
+assert.deepEqual(rowsOf(paged), ["Review the parser", ...Array.from({length:11}, (_, i) => `Subagent agent-${String(i+1).padStart(2,"0")}`)], "the server's order and complete page are retained");
+assert(paged.includes("2 working, 30 subagents in all") && paged.includes("Show 18 earlier"));
+assert(paged.includes("Sent 11"), "sent display is used despite contradictory working facts");
+assert.throws(() => context.renderClaudeMetadata([], subagentLinks), /Missing subagent presentation counts/);
 const fetched = [];
 context.fetch = (url) => { fetched.push(url); return new Promise(() => {}); };
 context.app.allSubagents = false;
@@ -245,7 +245,7 @@ context.loadSessionMetadata("session 1", {});
 context.app.allSubagents = true;
 context.loadSessionMetadata("session 1", {});
 assert.deepEqual(fetched, ["/api/session-metadata?id=session%201", "/api/session-metadata?id=session%201&subagents=all"], "only an expanded list asks for every subagent");
-const expanded = context.renderClaudeMetadata([], subagentLinks, 12, true);
+const expanded = context.renderClaudeMetadata([], subagentLinks, 12, 2, 0, true);
 assert(rowsOf(expanded).length === 12 && !expanded.includes("data-subagents-all") && expanded.includes("<details class=\"session-details\" open>"), "an expanded list shows every subagent and stays open");
 assert(!claudeMetadata.includes("wake") && !claudeMetadata.includes("cancel"), "Claude metadata must not invent controls");
 
@@ -256,7 +256,8 @@ context.app.history = {
   readOnly: false,
   timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
   claudeRuns: [{ jobId: "job-writable", providerState: "idle" }],
-  claudeSubagents: [{ parentSessionId: "session-1", agentId: "agent-writable", transcriptPath: "/transcripts/agent-writable.jsonl" }],
+  claudeSubagentsTotal: 1, claudeSubagentsWorking: 0, claudeSubagentsRemaining: 0,
+  claudeSubagents: [{ parentSessionId: "session-1", agentId: "agent-writable", display: {kind:"idle",label:"Closed",detail:""}, transcriptPath: "/transcripts/agent-writable.jsonl" }],
 };
 context.renderChat();
 assert(elements["#chat-body"].innerHTML.includes("job-writable"), "writable Claude sessions should render supplied run observations");
@@ -330,11 +331,6 @@ const backgroundSession = {
     { id: "m1", kind: "monitor", description: "file watcher", ambient: true },
   ] },
 };
-assert.equal(context.presenceLabel(backgroundSession), "Waiting on background work", "a session between turns with background work says so");
-assert.equal(context.presenceTone(backgroundSession), "background", "background work has its own tone");
-assert.equal(context.presenceLabel({ ...backgroundSession, status: "busy" }), "Working", "a turn in progress still reads as working");
-assert.equal(context.presenceLabel({ ...backgroundSession, waitingOn: { kind: "approval", id: "r1", answerable: true } }), "Waiting on you", "a question outranks background work");
-assert.notEqual(context.presenceLabel({ ...backgroundSession, backgroundTasks: { running: false, source: "host", tasks: [{ id: "m1", kind: "monitor", ambient: true }] } }), "Waiting on background work", "ambient tasks alone do not hold the session");
 context.renderBackgroundTasks(backgroundSession);
 const backgroundPanel = elements["#background-panel"].innerHTML;
 assert(!elements["#background-panel"].hidden, "background work shows its panel");
@@ -346,11 +342,11 @@ assert(notice.includes("timeline-notice") && notice.includes("Usage limit reache
 assert(context.renderTimeline([{ id: "limit-2", kind: "notice", title: "Usage limit reached", text: "limit", status: "usage_limit", resetsAt: "2026-10-21T11:00:00Z" }], session).includes("Resets "), "a usage-limit notice names when it resets");
 assert.equal(context.renderTimeline([{ id: "done-1", kind: "done", status: "failed", text: "limit" }], session), "", "a turn's end renders nothing");
 
-context.app.selected = { id: "session-dialog", name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
+context.app.selected = { id: "session-dialog", display: {kind:"waiting",label:"Waiting on you",detail:"A dialog is open in its terminal",waitingPlace:"dialog"}, name: "builder", surface: "claude", status: "busy", runtime: {}, waitingOn: { kind: "dialog", id: "session-dialog:dialog:1" } };
 context.app.history = { capabilities: { respond: true } };
 context.app.requests = { requests: [{ id: "stale", kind: "approval", title: "Run ls" }] };
 context.renderRequests();
-assert(elements["#request-panel"].innerHTML.includes("builder has a dialog open in its terminal") && !elements["#request-panel"].hidden, "a dialog says where to settle it even in a session that takes answers");
+assert(elements["#request-panel"].innerHTML.includes("A dialog is open in its terminal") && !elements["#request-panel"].hidden, "a dialog says where to settle it even in a session that takes answers");
 assert(!elements["#request-panel"].innerHTML.includes("data-request") && !elements["#request-panel"].innerHTML.includes("Run ls"), "a dialog shows no request still listed from before it opened");
 context.app.requests = { requests: [] };
 context.app.selected.waitingOn = { kind: "approval", id: "session-dialog:approval:1", answerable: true };

@@ -182,6 +182,7 @@
             </form>
             <div class="segmented" aria-label="Conversation scope">
               <button class="active" aria-pressed="true" type="button" data-inbox-mode="current">Current<span data-inbox-count="current"></span></button
+              ><button aria-pressed="false" type="button" data-inbox-mode="recent">Recent<span data-inbox-count="recent"></span></button
               ><button aria-pressed="false" type="button" data-inbox-mode="projects">Projects<span data-inbox-count="projects"></span></button
               ><button aria-pressed="false" type="button" data-inbox-mode="all">All<span data-inbox-count="all"></span></button>
             </div>
@@ -203,15 +204,18 @@
                   ><span>Status</span
                   ><select id="session-status-filter">
                     <option value="all">All statuses</option>
-                    <option value="busy">Working</option>
+                    <option value="working">Working</option>
+                    <option value="waiting">Waiting on you</option>
+                    <option value="limited">Usage limit</option>
+                    <option value="queued">Queued</option>
                     <option value="idle">Idle</option>
-                    <option value="background">Background work</option>
+                    <option value="finishing">Finishing</option>
                     <option value="offline">Offline</option>
                     <option value="unavailable">Unavailable</option>
                   </select></label
                 >
               </div>
-              <label class="show-archived" id="show-archived-row"><input id="show-archived" type="checkbox" /> Show archived</label>
+              <label class="show-archived" id="show-archived-row"><input id="show-archived" type="checkbox" /> Archived only</label>
             </div>
             <div class="filter-summary" id="filter-summary"></div>
             <div class="session-list" id="session-list"></div>

@@ -1,4 +1,4 @@
-import { statusLabel, statusPill } from "./presence.js";
+import { queueStatusPill } from "./queue-display.js";
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape, timeAgo } from "./format.js";
@@ -12,18 +12,9 @@ export function queueReason(item) {
 	if (item.evidence === "transport_accepted") return "Transport accepted; receiver completion is pending";
 	if (item.evidence === "unknown") return item.historical ? "Delivery was never confirmed" : "Submitted";
 	if (item.evidence === "failed") return "Delivery failed";
-	if (item.status !== "pending") return statusLabel(item.status);
+	if (item.status !== "pending") return item.status;
   if (item.heldBy === "hostUnreachable")
     return "Held: this agent's host is unreachable";
-  const target = app.state.sessions.find(
-    (session) => session.id === item.sessionId,
-  );
-  if (target?.readOnly) return target.readOnlyReason || "Target is not writable";
-  if (target?.surface === "codex" && target?.status === "notLoaded") {
-    return target.transport === "desktop"
-      ? "Loading this Codex conversation before delivery"
-      : "Codex conversation is not available to load";
-  }
   return (
     {
       waiting: "Held: this agent is waiting on you",
@@ -48,7 +39,7 @@ export function renderOperations() {
     queue
       .map(
         (item) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail queue-message">${escape(item.message)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${statusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail queue-message">${escape(item.message)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${queueStatusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
       )
       .join("") ||
     '<div class="empty-card">Nothing is waiting to be delivered.</div>';

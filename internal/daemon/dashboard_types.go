@@ -83,7 +83,7 @@ type dashboardState struct {
 	Sessions           []dashboardSession          `json:"sessions"`
 	TotalSessions      int                         `json:"totalSessions"`
 	Counts             map[string]int              `json:"counts,omitempty"`
-	Projects           []dashboardProject          `json:"projects,omitempty"`
+	Projects           []dashboardProject          `json:"projects"`
 	NextCursor         string                      `json:"nextCursor,omitempty"`
 	Queue              []dashboardQueue            `json:"queue"`
 	Channels           []dashboardChannel          `json:"channels"`

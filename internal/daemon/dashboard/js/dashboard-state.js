@@ -1,3 +1,4 @@
+import { rememberPresentation } from "./presentation-order.js";
 import { renderOverview } from "./overview.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
@@ -7,15 +8,16 @@ import { renderOperations } from "./operations.js";
 import { app } from "./state.js";
 import { renderSettings } from "./settings.js";
 import { loadTools } from "./tool-loader.js";
-import { responseError } from "./http.js";
 import { applyRekeys } from "./rekeys.js";
-import { stopLiveStream } from "./session-stream.js";
 import { selectSession } from "./session-selection.js";
 import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
-import { scopedSessions } from "./session-scope.js";
-import { friendlyError, toast } from "./feedback.js";
+import { viewSessions } from "./session-view.js";
+import { listParameters, readDashboardViews } from "./dashboard-view-loader.js";
+import { acceptSelectedPresentation } from "./session-detail.js";
+import { followCatalog } from "./catalog-updates.js";
+import { friendlyError } from "./feedback.js";
 
 export function renderAll() {
   try {
@@ -34,73 +36,59 @@ export function renderAll() {
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-export async function load(fresh = false) {
-  if (app.loading) return;
-  app.loading = true;
-  const slowTimer = setTimeout(() => {
-    if (app.loading && !app.hasState) {
-      $("#sync").textContent = "Still connecting";
-      $("#daemon-detail").textContent =
-        "Surface discovery is taking a little longer";
-      $("#surface-cards").innerHTML =
-        '<div class="empty-state compact">Connecting to Claude, Codex, and Notion.</div>';
-    }
-  }, 2000);
-  try {
-    await loadTools();
-    const response = await fetch(`/api/state${fresh ? "?fresh=1" : ""}`);
-    if (!response.ok) throw await responseError(response);
-    const state = await response.json();
-    app.state = {
-      ...state,
-      surfaces: state.surfaces || [],
-      sessions: state.sessions || [],
-      queue: state.queue || [],
-      channels: state.channels || [],
-      relays: state.relays || [],
-      history: state.history || [],
-      attention: state.attention || [],
-      deliveryProblems: state.deliveryProblems || [],
-    };
-    $("#daemon-presence").className = app.state.daemon?.running
-      ? "daemon-presence online"
-      : "daemon-presence offline";
-    app.hasState = true;
-    const rekeyed = state.rekeyed || {};
-    applyRekeys(rekeyed);
-    let followSelection = null;
-    if (app.selected) {
-      const replacement = app.state.sessions.find(
-        (session) => session.id === app.selected.id,
-      );
-      if (replacement) app.selected = replacement;
-      else if (rekeyed[app.selected.id]) {
-        followSelection = rekeyed[app.selected.id];
-        app.drafts.set(followSelection, $("#message").value);
-        stopLiveStream(true);
-        app.selected = null;
+let generation = 0;
+let pending = null;
+let dirty = false;
+let refreshTimer;
+
+export function load() {
+  generation++;
+  dirty = true;
+  if (!pending) pending = refreshLoop().finally(() => { pending = null; });
+  return pending;
+}
+
+async function refreshLoop() {
+  while (dirty) {
+    dirty = false;
+    const request = generation;
+    const params = listParameters();
+    const selectedID = app.selected?.id;
+    try {
+      await loadTools();
+      const loaded = await readDashboardViews(params, selectedID);
+      if (request !== generation || params.toString() !== listParameters().toString()) { dirty = true; continue; }
+      rememberPresentation(loaded.sessionView.presentationPosition);
+      app.state = { ...loaded.state, sessions: loaded.sessionView.sessions };
+      app.sessionView = loaded.sessionView;
+      app.overviewView = loaded.overviewView;
+      app.hasState = true;
+      applyRekeys(loaded.state.rekeyed || {});
+      if (loaded.state.rekeyed?.[selectedID]) {
+        app.drafts.set(loaded.state.rekeyed[selectedID], $("#message").value);
+        selectSession(loaded.state.rekeyed[selectedID]);
+      } else if (loaded.detail?.session && app.selected?.id === selectedID) acceptSelectedPresentation(loaded.detail);
+      if (loaded.detail?.error && app.history && app.selected?.id === selectedID) app.history.transcriptWarning = "Could not refresh the conversation transcript.";
+      $("#daemon-presence").className = "daemon-presence online";
+      renderAll();
+      if (app.selected && app.history) renderChat();
+      followCatalog(loaded.sessionView);
+      clearTimeout(refreshTimer);
+      const deadlines = [loaded.sessionView.view.refreshAt, loaded.overviewView.view.refreshAt].filter(Boolean).map(Date.parse);
+      if (deadlines.length) refreshTimer = setTimeout(load, Math.max(50, Math.min(2147483647, Math.min(...deadlines) - Date.now())));
+      if (app.audit.loaded) await loadAudit(true, true);
+      if (!app.selected && location.hash === "#conversations" && !mobileConversationView()) {
+        const first = viewSessions(app.sessionView)[0];
+        if (first) selectSession(first.id);
       }
+    } catch (error) {
+      if (request !== generation) { dirty = true; continue; }
+      $("#daemon-status").textContent = "Not connected";
+      $("#daemon-presence").className = "daemon-presence offline";
+      $("#daemon-detail").textContent = app.hasState ? "Showing the last complete view. Reconnecting…" : friendlyError(error);
+      $("#sync").textContent = "Not synced";
+      console.error("dashboard refresh failed", error);
+      if (error.retry || error.status === 409) { clearTimeout(refreshTimer); refreshTimer = setTimeout(load, 250); }
     }
-    renderAll();
-    if (followSelection) await selectSession(followSelection);
-    if (app.audit.loaded) await loadAudit(true, true);
-    if (app.selected && app.history) renderChat();
-    if (!app.selected && location.hash === "#conversations" && !mobileConversationView()) {
-      const first = scopedSessions()[0] || app.state.sessions[0];
-      if (first) selectSession(first.id);
-    }
-  } catch (error) {
-    const message = friendlyError(error);
-    $("#daemon-status").textContent = "Not connected";
-    $("#daemon-presence").className = "daemon-presence offline";
-    $("#daemon-detail").textContent =
-      "Restart Agenthail from the menu bar, then refresh";
-    $("#surface-cards").innerHTML =
-      `<div class="empty-state compact">${escape(message)}</div>`;
-    $("#recent-activity").innerHTML = "";
-    toast(message);
-  } finally {
-    clearTimeout(slowTimer);
-    app.loading = false;
   }
 }

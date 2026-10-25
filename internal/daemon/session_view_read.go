@@ -37,6 +37,13 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	var plan sessionViewPlan
 	internal := map[string]string{}
 	var selected []string
+	var emptyProjects []dashboardProject
+	if request.Detail == nil && (request.Scope == "all" || request.Scope == "archived") {
+		emptyProjects, err = d.presentationProjects(nil)
+		if err != nil {
+			return SessionViewSnapshot{}, err
+		}
+	}
 	full, err := d.Registry.ReadCatalogPresentation(ctx, func(read registry.CatalogPresentation) ([]string, error) {
 		result.HostEpoch, result.CatalogSeq = read.HostEpoch, read.CatalogSeq
 		rows := make([]dashboardSession, 0, len(read.Rows))
@@ -87,7 +94,16 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			}
 			rows = append(rows, row)
 		}
+		if request.Detail != nil && internal[request.Detail.ID] == "" {
+			row := *request.Detail
+			display := sessionDisplay(row, now)
+			row.Display = &display
+			rows = append(rows, row)
+		}
 		plan = newSessionViewPlan(rows, request.Scope, request.Filters, now)
+		if request.Detail == nil {
+			addEmptyPresentationProjects(&plan, emptyProjects)
+		}
 		plan.deadline(read.RefreshAt)
 		plan.view.CatalogHostID = result.PresentationPosition.HostID
 		for _, row := range rows {
@@ -127,7 +143,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 				}
 			}
 			for _, id := range request.IDs {
-				if !allowed[id] {
+				if !allowed[id] && request.Detail == nil {
 					return nil, errPresentationMember
 				}
 				selected = append(selected, id)
@@ -145,7 +161,9 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		}
 		ids := make([]string, 0, len(selected))
 		for _, id := range selected {
-			ids = append(ids, internal[id])
+			if internal[id] != "" {
+				ids = append(ids, internal[id])
+			}
 		}
 		return ids, nil
 	})
@@ -154,6 +172,10 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	}
 	for _, id := range selected {
 		row := plan.rows[id]
+		if internal[id] == "" {
+			result.Sessions = append(result.Sessions, row)
+			continue
+		}
 		var hydrated dashboardSession
 		if err := json.Unmarshal(full[internal[id]], &hydrated); err != nil {
 			return SessionViewSnapshot{}, err

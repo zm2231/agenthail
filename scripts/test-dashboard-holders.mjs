@@ -24,11 +24,12 @@ const context = {
     return { ok: true, json: async () => ({ ok: true }) };
   },
 };
-await dashboardModules(["presence"], context);
+await dashboardModules(["session-plan"], context);
 await dashboardModules(["holders", "session-row", "actions", "delivery-labels"], context);
 
 const shared = {
   id: "shared",
+  display: { kind: "idle", label: "Ready", detail: "" },
   surface: "claude",
   holders: [
     { pid: 4101, tty: "pts/1", status: "idle" },

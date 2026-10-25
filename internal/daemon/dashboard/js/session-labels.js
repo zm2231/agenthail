@@ -1,5 +1,4 @@
-import { backgroundWaiting, limitLabel, statusLabel, waitingLabels, waitingPlace, workingLabel } from "./presence.js";
-import { timeAgo } from "./format.js";
+import { displayText } from "./session-display.js";
 
 export const rawDisplayName = (session) =>
   session?.alias
@@ -13,8 +12,7 @@ export function displayName(session) {
 }
 
 export function conversationMeta(session, model = "", pendingModel = session.pendingModel || "") {
-  const parts = [session.waitingOn ? waitingLabels[waitingPlace(session)] : session.limitResume || session.usageLimit ? limitLabel(session) : backgroundWaiting(session) ? "Waiting on background work" : session.status === "busy" ? workingLabel(session) : statusLabel(session.status), `${session.queueCount || 0} queued`];
-  if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
+  const parts = [displayText(session)];
   const label = modelLabel(model, pendingModel);
   if (label) parts.push(label);
   const configRoot = session.claudeConfigRoot;

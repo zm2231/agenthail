@@ -1,20 +1,17 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape, labels, surfaceIcon, timeAgo } from "./format.js";
-import { sessionIsCurrent } from "./session-scope.js";
-import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
+import { displayText, requireDisplay } from "./session-display.js";
+import { viewSessions } from "./session-view.js";
 import { displayName } from "./session-labels.js";
 
 export function renderOverview() {
   const { surfaces, sessions, attention } = app.state;
   const connected = surfaces.filter((surface) => surface.connected).length;
-  const working = sessions.filter(
-    (session) => session.currentReason === "working",
-  ).length;
-  const queued = sessions.reduce(
-    (total, session) => total + session.queueCount,
-    0,
-  );
+  if (!app.overviewView) return;
+  const view = app.overviewView.view;
+  const working = view.counts.running.families;
+  const queued = view.summary.queuedMessages;
   const surfaceStatus =
     connected === 0
       ? "No surfaces connected"
@@ -38,26 +35,11 @@ export function renderOverview() {
   $("#surface-cards").innerHTML =
     surfaces
       .map((surface) => {
-        const owned = sessions.filter(
-          (session) => session.surface === surface.name,
-        );
-        const active = owned.filter(
-          (session) => session.currentReason === "working",
-        ).length;
-        const present = owned.filter((session) =>
-          surface.name === "claude"
-            ? session.open
-            : session.currentReason === "recent",
-        ).length;
-        const queued = owned.reduce(
-          (total, session) => total + session.queueCount,
-          0,
-        );
+        const stats = view.surfaces.find((item) => item.surface === surface.name);
+        const active = stats ? stats.counts.running.families : 0;
+        const present = stats ? stats.counts.current.families : 0;
+        const queued = stats ? stats.summary.queuedMessages : 0;
         const name = labels[surface.name] || surface.name;
-        const presenceWindow =
-          surface.name === "claude"
-            ? "Open now"
-            : `Past ${app.state.codexRecentHours || 5}h`;
         const healthLabel = surface.health === "degraded"
           ? "Needs attention"
           : surface.health === "signin_off"
@@ -67,26 +49,16 @@ export function renderOverview() {
             : surface.connected
             ? "Connected"
             : "Not connected";
-        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${escape(surface.health || (surface.connected ? "healthy" : "unavailable"))}" title="${escape(surface.healthDetail || surface.error || "")}"><i></i>${escape(healthLabel)}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>Current</span><strong>${present}</strong><small>${presenceWindow}</small></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
+        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${escape(surface.health || (surface.connected ? "healthy" : "unavailable"))}" title="${escape(surface.healthDetail || surface.error || "")}"><i></i>${escape(healthLabel)}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>Current</span><strong>${present}</strong><small>Conversations</small></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
       })
       .join("") ||
     '<div class="empty-state compact">No surfaces are connected yet.</div>';
-  const recent = [...sessions]
-    .filter(sessionIsCurrent)
-    .sort((a, b) => {
-      const rank = { working: 0, queued: 1, open: 2, recent: 3 };
-      const reasonOrder =
-        (rank[a.currentReason] ?? 9) - (rank[b.currentReason] ?? 9);
-      return (
-        reasonOrder || new Date(b.lastActive || 0) - new Date(a.lastActive || 0)
-      );
-    })
-    .slice(0, 8);
+  const recent = viewSessions(app.overviewView, view.projects.flatMap((project) => project.collapsedFamilyIds));
   $("#recent-activity").innerHTML =
     recent
       .map(
         (session) =>
-          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(backgroundWaiting(session) ? "background" : session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
+          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(requireDisplay(session).kind)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${escape(displayText(session))}</div></div><span class="status-pill ${escape(requireDisplay(session).kind)}">${escape(requireDisplay(session).label)}</span></button>`,
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';

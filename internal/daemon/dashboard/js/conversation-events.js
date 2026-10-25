@@ -5,7 +5,7 @@ import { $ } from "./dom.js";
 import { renderSlashMenu, resizeComposer, syncComposerAction } from "./composer.js";
 import { mobileConversationView, showView, syncConversationLayout } from "./navigation.js";
 import { app } from "./state.js";
-import { renderSessions, sessionBatchSize } from "./sessions.js";
+import { renderSessions } from "./sessions.js";
 import { selectSession } from "./session-selection.js";
 import { openVoice } from "./voice.js";
 import { cancelCodexSearch } from "./session-search.js";
@@ -84,8 +84,7 @@ export function bindConversationEvents() {
         $("#session-surface-filter").value = "all";
         $("#session-status-filter").value = "all";
       }
-      app.sessionLimit = sessionBatchSize();
-      renderSessions();
+      load();
       return;
     }
     const projectExpand = event.target.closest("[data-project-expand]");

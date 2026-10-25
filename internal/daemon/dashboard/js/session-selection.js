@@ -7,17 +7,23 @@ import { renderSessions } from "./sessions.js";
 import { escape, labels } from "./format.js";
 import { conversationMeta, displayName } from "./session-labels.js";
 import { resizeComposer, syncComposerAction } from "./composer.js";
-import { responseError } from "./http.js";
+import { readSessionDetail, acceptSelectedPresentation } from "./session-detail.js";
+import { load } from "./dashboard-state.js";
 import { renderChat } from "./chat.js";
 import { loadSessionMetadata } from "./session-metadata.js";
 
 export async function selectSession(id, focus = false) {
   if (app.selected?.id !== id) { for (const selector of ["#turn-effort", "#turn-mode", "#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
-  const session = app.state.sessions.find((item) => item.id === id) || app.codexSearch.results.find((item) => item.id === id);
-  if (!session) return;
+  const request = (app.selectionRequest || 0) + 1;
+  app.selectionRequest = request;
+  let detail;
+  try { detail = await readSessionDetail(id); }
+  catch (error) { if (app.selectionRequest === request) $("#chat-body").innerHTML = `<div class="empty-state">${escape(error.message)}</div>`; return; }
+  if (app.selectionRequest !== request) return;
+  const session = detail.session;
   if (app.selected?.id !== id) stopLiveStream(true);
   if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
-  app.selected = session;
+  if (!acceptSelectedPresentation(detail)) return;
   syncSessionOperationFields();
   app.history = null;
   app.transcriptSignature = null;
@@ -41,17 +47,11 @@ export async function selectSession(id, focus = false) {
     '<div class="empty-state">Loading recent messages…</div>';
   $("#chat-actions").innerHTML = "";
   try {
-    const response = await fetch(
-      `/api/session?id=${encodeURIComponent(id)}&limit=20&timeline=1`,
-    );
-    if (!response.ok) throw await responseError(response);
-    const detail = await response.json();
-    if (app.selected?.id !== id) return;
-    detail.transcriptWarning = detail.readError || "";
     app.history = detail;
     renderChat();
     app.allSubagents = false;
-    loadSessionMetadata(id, detail);
+    loadSessionMetadata(session.id, detail);
+    load();
     if (focus && mobileConversationView())
       requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {

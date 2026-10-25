@@ -62,10 +62,14 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(adapter, &result.Session)
-		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, WaitingOn: result.Session.WaitingOn, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport, Subagent: result.Session.Subagent, Delegated: result.Session.Delegated()},
-			"snippet": result.Snippet,
-		})
+		row := dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, WaitingOn: result.Session.WaitingOn, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport, Subagent: result.Session.Subagent, Delegated: result.Session.Delegated()}
+		row.RuntimeKind, row.BackgroundTasks, row.UsageLimit, row.Activity = result.Session.RuntimeKind, result.Session.BackgroundTasks, result.Session.UsageLimit, result.Session.Activity
+		presentation, err := d.readSessionView(ctx, sessionViewRequest{Scope: "all", IDs: []string{row.ID}, Detail: &row})
+		if err != nil {
+			writeAPIError(w, 500, "internal_error", err.Error())
+			return
+		}
+		payload = append(payload, map[string]any{"session": presentation.Sessions[0], "snippet": result.Snippet, "presentationPosition": presentation.PresentationPosition})
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"results": payload, "remoteError": remoteError})
 }
