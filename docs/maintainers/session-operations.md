@@ -4,25 +4,22 @@ Agenthail exposes these operations through the CLI and the authenticated dashboa
 
 The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, and `canceled`. Socket acceptance never proves model completion.
 
-`agenthail list --json` returns discovered sessions together with an `errors`
-object. A failed optional surface is a warning when at least one surface completed
-discovery; the command fails only when every configured surface failed. Codex
-rows take the local transcript's latest task lifecycle when it is known and the
-shared database state otherwise. Claude peer `idle` is trusted only from peers advertising idle
-notifications or from a readable transcript; otherwise the state is unknown.
+`agenthail list` renders the daemon's session view and needs the daemon; with
+the daemon stopped it returns an error. The daemon owns the scope, counts,
+ordering and each row's status text: `current` by default, or `--recent`,
+`--running`, `--all` (every catalog family that is not archived) or
+`--archived`. Counts are reported as conversations (families) and sessions, so
+a subagent appears with its root; a parent shown only because a child matched
+is marked "Parent of a match". The PROJECT column and the JSON `project` field
+are the daemon's project for the session, and `--project <name|id>` or
+`--cwd <path>` keeps one project; a name shared by several projects is an error
+that lists their ids. See [projects](projects.md) for the identity and archive
+rules.
 
-With the daemon running, `agenthail list` reads the daemon catalog and applies
-the daemon's scopes: current by default, or `--all` or `--archived`.
-The scopes count session families, so a subagent appears with its root. The
-table's PROJECT column and the JSON `project` field are the daemon's project for
-the session, and `--project <name|id>` keeps one project; a name shared by several projects
-is an error that lists their ids. See
-[projects](projects.md) for the identity and archive rules. Without the daemon,
-`list` discovers sessions directly and prints the working directory in place
-of the project. It shows the 15 most recently active session families and
-leaves out Notion threads idle for more than seven days; `--all` lists every
-saved session; `--project`, `--cwd` and `--archived`
-need the daemon.
+`agenthail list --json` returns the view (`view.scope`, `view.counts`,
+`view.families`, `view.revision`) and the `sessions` it lists, each with a
+`display` object (`kind`, `label`, `detail`, and UTC instants such as
+`resetsAt`). Surface health is reported by `agenthail doctor`, not by `list`.
 
 `agenthail project list [--all]`, `project add <path>`, and
 `project <archive|unarchive> <name|id>` manage projects. `project list` names

@@ -21,6 +21,8 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
+	Display             *SessionDisplay            `json:"display,omitempty"`
+	Attention           *SessionAttention          `json:"attention,omitempty"`
 	ID                  string                     `json:"id"`
 	Surface             surface.SurfaceKind        `json:"surface"`
 	RuntimeKind         surface.RuntimeKind        `json:"runtimeKind,omitempty"`

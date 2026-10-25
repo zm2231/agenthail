@@ -38,8 +38,8 @@ func TestAnUnchangedSnapshotIsNotSentAgainToAClientThatHoldsIt(t *testing.T) {
 	if held.Code != http.StatusNotModified || held.Body.Len() != 0 || held.Header().Get("ETag") != tag {
 		t.Fatalf("a held snapshot status=%d body=%d etag=%q", held.Code, held.Body.Len(), held.Header().Get("ETag"))
 	}
-	if filtered := getSnapshot(t, handler, "/api/v1/snapshot?scope=all", tag); filtered.Code != http.StatusOK || filtered.Header().Get("ETag") != "" {
-		t.Fatalf("a filtered snapshot status=%d etag=%q, want a full body without a tag", filtered.Code, filtered.Header().Get("ETag"))
+	if filtered := getSnapshot(t, handler, "/api/v1/snapshot?scope=all", tag); filtered.Code != http.StatusOK || filtered.Header().Get("ETag") == tag {
+		t.Fatalf("a filtered snapshot status=%d etag=%q, want a distinct scoped representation", filtered.Code, filtered.Header().Get("ETag"))
 	}
 	if fresh := getSnapshot(t, handler, "/api/v1/snapshot?fresh=1", tag); fresh.Code != http.StatusOK || fresh.Body.Len() == 0 {
 		t.Fatalf("a fresh snapshot status=%d", fresh.Code)

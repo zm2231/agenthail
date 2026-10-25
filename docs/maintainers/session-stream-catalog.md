@@ -24,7 +24,9 @@ A request with no query parameters is answered from the daemon's cached
 snapshot while that snapshot is current, and carries an `ETag` naming it. A
 client that sends the tag back in `If-None-Match` gets `304 Not Modified`
 with no body while the cache still holds that snapshot. Filtered, paged and
-`fresh=1` requests carry no tag.
+`fresh=1` requests on the unscoped path carry no tag. Explicit-scope views have their own ETag binding revision and page size.
+
+Explicit `scope` requests use the [canonical session presentation contract](session-presentation-design.md): five scopes, family pages, filtered family/session counts, project collapse IDs, and display text plus locale-formatable UTC instants. Use the returned revision with member hydration; a changed revision returns `catalog_changed` (409). CLI `list` drains these pages and fails without partial stdout if a revision changes. Unscoped snapshots and existing `parentId` child pages remain on the previous contract until dashboard/native migration; federation must keep its complete reconciliation set.
 
 The owning host resolves `project` from the session's working directory: the
 deepest added project holding the folder, read in a worktree as the same

@@ -108,8 +108,8 @@ Claude reports (`source: "runtime"`), the value actually in effect.
 The roots are those of the machine the command runs on; each host's settings
 are changed on that host or through its daemon.
 
-One unhealthy surface does not block the others. Preserve the `errors` object
-from JSON discovery output when reporting partial availability.
+One unhealthy surface does not block the others. `doctor --json` reports each
+surface's health; report an unavailable surface from there when it matters.
 
 ## Surface Contract
 
@@ -174,11 +174,13 @@ target has no writable transport.
 
 ## Find And Resolve Targets
 
-With the daemon running, `list` shows the daemon's current scope: open Claude
+`list` needs the daemon and shows its current scope by default: open Claude
 sessions, busy or loaded Codex sessions active within the configured recent
 window (five hours by default), and busy or recently active Notion threads.
-`--all` lists every session that is not archived, and `--archived`
-lists the archived ones. Use `--all` only when the user asks for history or a
+`--recent` adds anything active in the last 24 hours, `--running` keeps
+working sessions, `--all` lists every session family that is not archived, and
+`--archived` lists the archived ones. Each row's `display.label` and
+`display.detail` are the daemon's status text; render them as given. Use `--all` only when the user asks for history or a
 target is older or missing from the current view. `--project <name|id>` keeps
 one project's sessions; `agenthail project list` names the projects.
 

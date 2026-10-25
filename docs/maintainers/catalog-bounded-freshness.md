@@ -30,6 +30,8 @@ Every second the catalog goroutine stats the local status files of each session 
 
 ## Bounded catalog page
 
+Explicit-scope session views now use the [canonical presentation planner](session-presentation-design.md). They scan compact catalog facts in one read transaction, plan family membership/counts/order, then hydrate at most 200 roots (or explicitly requested members). This deliberately replaces the no-full-catalog-scan promise for scoped UI lists. Unscoped and `parentId` history pages retain the row API below during client release sequencing.
+
 The registry exposes a page request containing scope, project ID, query, offset, limit, and the current-time inputs needed by the existing `dashboardSessionPresence` rules. It reads the host epoch, latest catalog sequence, filtered ordered rows, and page look-ahead in one SQLite transaction. Filtering uses SQL aliases and JSON identity fields; queue presence is a grouped subquery, not a Go-side full-catalog scan. The stable ordering is busy first, then last-active, updated time, and session ID. The query returns at most `limit+1` session rows for a page and reports the total matching count separately.
 
 The daemon builds the existing dashboard envelope from that bounded catalog result. The page cursor continues to carry the host epoch, catalog sequence, filter, and offset; a changed epoch or sequence rejects continuation. Unbounded state reads retain the existing full snapshot path for non-page consumers.

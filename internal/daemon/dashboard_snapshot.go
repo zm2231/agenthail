@@ -19,6 +19,10 @@ const (
 )
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("scope") {
+		d.sessionViewHandler(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
@@ -92,6 +96,13 @@ func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Tim
 }
 
 func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
+	if !catalogMirror(r.Context()) {
+		state.Sessions = append([]dashboardSession{}, state.Sessions...)
+		for i := range state.Sessions {
+			display := sessionDisplay(state.Sessions[i], time.Now())
+			state.Sessions[i].Display = &display
+		}
+	}
 	if state.catalogPageApplied {
 		if raw := r.URL.Query().Get("cursor"); raw != "" {
 			decoded, err := base64.RawURLEncoding.DecodeString(raw)
