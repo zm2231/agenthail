@@ -45,7 +45,8 @@ class Server(ThreadingHTTPServer):
     # that can stall for the resolver timeout; the fixture needs no name.
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
-        self.server_name, self.server_port = self.server_address[:2]
+        host, self.server_port = self.server_address[:2]
+        self.server_name = str(host)
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -30,7 +30,10 @@ export function renderTimeline(items, session, expandAgents = false) {
     }
     if (isSend(item.agent)) {
       flush();
-      out.push({ html: renderAgentSend(item, sends.get(item.callId), session, expandAgents) });
+      const html = renderAgentSend(item, sends.get(item.callId), session, expandAgents);
+      const said = out.at(-1)?.sends;
+      if (said) said.push(html);
+      else out.push({ html });
       continue;
     }
     if (toolKinds.includes(item.kind)) {
@@ -45,11 +48,14 @@ export function renderTimeline(items, session, expandAgents = false) {
     if (item.kind === "done") continue;
     const next = items[index + 1];
     const ends = next?.kind === "event" && next.title === "Turn duration";
-    out.push({ html: renderTimelineItem(item, session, ends ? next : null) });
-    if (ends && ["text", "message", "assistant"].includes(item.kind) && item.role !== "user" && !isInstructions(item)) index += 1;
+    const reply = ["text", "message", "assistant"].includes(item.kind) && item.role !== "user" && !isInstructions(item);
+    const turnEnd = ends ? next : null;
+    out.push(reply ? { reply: item, turnEnd, sends: [] } : { html: renderTimelineItem(item, session, turnEnd) });
+    if (ends && reply) index += 1;
   }
   flush();
-  return (expandAgents ? out.map((entry) => entry.html) : foldAgentEntries(out, session)).join("");
+  const entries = out.map((entry) => (entry.reply ? { html: renderTimelineItem(entry.reply, session, entry.turnEnd, entry.sends.join("")) } : entry));
+  return (expandAgents ? entries.map((entry) => entry.html) : foldAgentEntries(entries, session)).join("");
 }
 
 export function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents, claudeSubagentsTotal, allSubagents, expandAgents) {

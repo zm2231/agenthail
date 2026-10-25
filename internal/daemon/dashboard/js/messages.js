@@ -13,7 +13,7 @@ export function exchangePrompt(exchange) {
   return { text, label: userLabel };
 }
 
-export function renderMessage(text, kind, label, turnKey, files = [], footer = "") {
+export function renderMessage(text, kind, label, turnKey, files = [], footer = "", after = "") {
   const safeText = String(text || "");
   const editable = kind === "user" && label === userLabel;
   const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
@@ -21,7 +21,7 @@ export function renderMessage(text, kind, label, turnKey, files = [], footer = "
   const actions = safeText ? `<span class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</span>` : "";
   const status = footer ? `<span class="turn-status">${escape(footer)}</span>` : "";
   const footerLine = status || actions ? `<footer class="turn-footer">${status}${actions}</footer>` : "";
-  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header>${content}${renderAttachedFiles(files)}${footerLine}</article>`;
+  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header>${content}${renderAttachedFiles(files)}${after}${footerLine}</article>`;
 }
 
 export function fileSize(bytes) {

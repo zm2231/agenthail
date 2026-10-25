@@ -453,6 +453,18 @@ assert(authors.includes('class="timeline-item agent-message"') && authors.includ
 const raw = context.renderTimeline([{ id: "r1", kind: "message", role: "user", text: "[from @builder] quoted" }], session);
 assert(raw.includes('class="turn user"') && raw.includes("[from @builder] quoted"), "the dashboard reads no envelope itself");
 assert(authors.includes('class="turn user"'), "a typed message reads as yours");
+const out = (id, call) => ({ id, kind: "toolCall", title: "SendMessage", text: "", callId: call, agent: { direction: "out", kind: "send", peer: "@builder", summary: id } });
+const sent = context.renderTimeline([
+  { id: "a1", kind: "message", role: "assistant", text: "Asking the builder." },
+  out("s1", "c1"),
+  { id: "s1r", kind: "toolResult", title: "SendMessage", text: "ok", callId: "c1" },
+  out("s2", "c2"),
+  { id: "t1", kind: "toolCall", title: "Read", text: "notes.md", callId: "c3" },
+  out("s3", "c4"),
+], session);
+const reply = sent.slice(sent.indexOf('class="turn agent"'), sent.indexOf("</article>"));
+assert(reply.indexOf("“s1”") > 0 && reply.indexOf("“s2”") > reply.indexOf("“s1”") && reply.indexOf("“s2”") < reply.indexOf('class="turn-footer"'), "sends after a reply sit under its text, before its actions");
+assert(!reply.includes("“s3”") && sent.indexOf("“s3”") > sent.indexOf("notes.md"), "a send after tool work stays its own row");
 assert(authors.includes('class="timeline-item timeline-divider"') && authors.includes("Context compacted: 38k tokens freed"), "an event is a divider, not an unknown card");
 assert.equal(context.durationClock("1h2m3s"), "1:02:03");
 assert.equal(context.durationClock("12s"), "0:12");

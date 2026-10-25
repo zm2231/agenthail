@@ -32,7 +32,7 @@ export function isInstructions(item) {
   return item.kind === "instructions" || (["message", "text"].includes(item.kind) && ["developer", "system"].includes(item.role));
 }
 
-export function renderTimelineItem(item, session, turnEnd = null) {
+export function renderTimelineItem(item, session, turnEnd = null, after = "") {
   const kind = String(item.kind || "unknown");
   const kindClass = timelineKindClass(kind);
   const attributes = timelineItemAttributes(item);
@@ -48,7 +48,7 @@ export function renderTimelineItem(item, session, turnEnd = null) {
     const user = item.role === "user";
     const label = user ? userLabel : labels[session.surface] || session.surface;
     const footer = user ? clockTime(item.timestamp) : turnEnd ? turnFooter(turnEnd.text, turnEnd.timestamp || item.timestamp) : "";
-    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, user ? "user" : "agent", label, `${session.id}:${item.id}`, user ? item.files : [], footer)}${metadata}</section>`;
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, user ? "user" : "agent", label, `${session.id}:${item.id}`, user ? item.files : [], footer, after)}${metadata}</section>`;
   }
   if (kind === "event") {
     const text = [item.title, item.status].filter(Boolean).join(" · ") + (item.text ? `: ${item.text}` : "");
