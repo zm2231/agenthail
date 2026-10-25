@@ -1,13 +1,5 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import vm from "node:vm";
-
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("async function signinRequest(");
-const end = source.indexOf("\n}\n", start) + 3;
-const devicesStart = source.indexOf("async function loadDevices(");
-const devicesEnd = source.indexOf("async function loadClaudeCompact(", devicesStart);
-assert(start >= 0 && end > start && devicesStart >= 0 && devicesEnd > devicesStart);
 
 const nodes = {};
 const node = (selector) => (nodes[selector] ??= { innerHTML: "" });
@@ -24,7 +16,7 @@ const context = {
   JSON,
   fetch: (url, options = {}) => new Promise((resolve) => pending.push({ url, options, resolve })),
 };
-vm.runInNewContext(source.slice(start, end) + source.slice(devicesStart, devicesEnd), context);
+await dashboardModules(["http", "devices"], context);
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const reply = async (status, body) => {

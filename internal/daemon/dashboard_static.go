@@ -11,9 +11,6 @@ import (
 //go:embed dashboard/index.html
 var dashboardHTML []byte
 
-//go:embed dashboard/app.js
-var dashboardJS []byte
-
 //go:embed dashboard/tokens.css
 var dashboardCSS []byte
 

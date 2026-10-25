@@ -1,33 +1,7 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = fs.readFileSync(path.join(root, "internal/daemon/dashboard/app.js"), "utf8");
-const markdownStart = source.indexOf("function inlineMarkdown");
-const markdownEnd = source.indexOf("const rawDisplayName", markdownStart);
-const messageStart = source.indexOf("function handoffMessage");
-const messageEnd = source.indexOf("function stopLiveStream", messageStart);
-const rendererStart = source.indexOf("function renderImageAttachment");
-const rendererEnd = source.indexOf("function renderChat", rendererStart);
-const chatStart = rendererEnd;
-const chatEnd = source.indexOf("function compactTokenCount", chatStart);
-const goalStart = chatEnd;
-const goalEnd = source.indexOf("function renderContextUsage", goalStart);
-const metadataStart = source.indexOf("function loadSessionMetadata");
-const metadataEnd = source.indexOf("function renderImageAttachment", metadataStart);
-const presenceStart = source.indexOf("function statusLabel");
-const presenceEnd = source.indexOf("function conversationMeta", presenceStart);
-assert(markdownStart >= 0 && markdownEnd > markdownStart, "markdown renderer boundary missing");
-assert(messageStart >= 0 && messageEnd > messageStart, "message renderer boundary missing");
-assert(rendererStart >= 0 && rendererEnd > rendererStart, "timeline renderer boundary missing");
-assert(chatEnd > chatStart, "chat renderer boundary missing");
-assert(goalEnd > goalStart, "goal renderer boundary missing");
-assert(presenceStart >= 0 && presenceEnd > presenceStart, "presence label boundary missing");
-assert(metadataStart >= 0 && metadataEnd > metadataStart, "metadata loader boundary missing");
 
 const elements = {
   "#chat-actions": { innerHTML: "" },
@@ -47,8 +21,9 @@ const elements = {
     getBoundingClientRect: () => ({ top: 0 }),
   },
 };
+let currentTools = tools;
 const context = {
-  tools,
+  tools: new Proxy({}, { get: (_target, name) => currentTools[name] }),
   app: { slashCommands: [], pendingEntryScroll: false, transcriptSignature: null },
   labels: { claude: "Claude Code", codex: "Codex" },
   $: (selector) => elements[selector],
@@ -60,7 +35,6 @@ const context = {
   remoteHostName: () => "",
   renderContextUsage: () => {},
   startLiveStream: () => {},
-  renderGoalAttention: () => "",
   renderLiveTurn: () => {},
   alignTranscriptTop: () => {},
   timeAgo: (value) => `ago:${value}`,
@@ -72,29 +46,7 @@ const context = {
     "'": "&#039;",
   })[char]),
 };
-vm.runInNewContext(`${source.slice(markdownStart, markdownEnd)}${source.slice(messageStart, messageEnd)}${source.slice(rendererStart, rendererEnd)}
-globalThis.renderTimeline = renderTimeline;
-globalThis.toolRows = toolRows;
-globalThis.showToolOutput = showToolOutput;
-globalThis.collapseToolRow = collapseToolRow;
-globalThis.rememberToolRow = rememberToolRow;
-globalThis.toggleFileChip = toggleFileChip;
-globalThis.showToolDiff = showToolDiff;
-globalThis.timelineSignature = timelineSignature;
-globalThis.renderClaudeMetadata = renderClaudeMetadata;
-${source.slice(metadataStart, metadataEnd)}
-globalThis.loadSessionMetadata = loadSessionMetadata;
-${source.slice(chatStart, chatEnd)}
-${source.slice(goalStart, goalEnd)}
-${source.slice(presenceStart, presenceEnd)}
-globalThis.presenceLabel = presenceLabel;
-globalThis.presenceTone = presenceTone;
-globalThis.renderBackgroundTasks = renderBackgroundTasks;
-globalThis.renderRequests = renderRequests;
-globalThis.renderRequestCard = renderRequestCard;
-globalThis.renderChat = renderChat;
-globalThis.goalStatusLabel = goalStatusLabel;
-globalThis.contextBreakdown = contextBreakdown;`, context);
+await dashboardModules(["markdown", "messages", "timeline-items", "format", "tool-view", "tool-diffs", "tool-runs", "timeline", "claude-metadata", "session-metadata", "chat", "goals", "requests", "background-tasks", "context-usage", "presence"], context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -221,12 +173,12 @@ assert(diffBlock.outerHTML.includes(">Show 100 more lines<"), "the last page off
 const patchText = `*** Begin Patch\n*** Update File: big.txt\n@@\n${Array.from({ length: 300 }, (_, index) => `-old ${index}\n+new ${index}`).join("\n")}\n*** End Patch`;
 const patchRun = Array.from({ length: 7 }, (_, index) => ({ id: `p-${index}`, kind: "toolCall", title: "apply_patch", text: index ? JSON.stringify({ command: `step ${index}` }) : patchText }));
 let derived = 0;
-const realTools = context.tools;
-context.tools = { ...realTools, toolDiffs: (call) => { derived += 1; return realTools.toolDiffs(call); }, toolLine: (call, diffs) => { if (call.title === "apply_patch") assert(diffs, "a patch's line reuses its cached diffs"); return realTools.toolLine(call, diffs); } };
+const realTools = tools;
+currentTools = { ...realTools, toolDiffs: (call) => { derived += 1; return realTools.toolDiffs(call); }, toolLine: (call, diffs) => { if (call.title === "apply_patch") assert(diffs, "a patch's line reuses its cached diffs"); return realTools.toolLine(call, diffs); } };
 context.renderTimeline(patchRun, session);
 const firstRender = derived;
 context.renderTimeline(patchRun, session);
-context.tools = realTools;
+currentTools = realTools;
 assert(firstRender > 0 && derived === firstRender, `a second render derives no diffs again (${firstRender} then ${derived - firstRender})`);
 
 // Collapse from the bottom closes the row and scrolls its header into view.
@@ -465,14 +417,24 @@ assert(pending({ status: "busy" }).includes("$ sleep 600\ntimeout: 600"), "input
 const split = pending({ status: "busy" }, { id: "n1", kind: "event", title: "Task notification", text: "done", turnId: "t9" }, { id: "p1-r", kind: "toolResult", title: "Bash result", text: "slept", callId: "p1", turnId: "t9" });
 assert(split.includes("Result recorded further down") && split.includes("slept") && !split.includes(">Running<"), "a result that lands after another item is pointed to, not called missing");
 {
-  const loader = source.slice(source.indexOf("let toolsLoading"), source.indexOf("const app = {"));
   let attempts = 0;
-  const box = { importModule: async () => { attempts += 1; if (attempts === 1) throw new Error("offline"); return { ok: true }; } };
-  vm.runInNewContext(`let tools;\n${loader.replace("import(", "importModule(")}\nglobalThis.loadTools = loadTools; globalThis.current = () => tools;`, box);
+  const box = {};
+  const modules = await dashboardModules(["tool-loader"], box, {
+    dynamicImport: async (_specifier, _parent, context) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("offline");
+      const module = new vm.SyntheticModule(["ok"], function () { this.setExport("ok", true); }, { context });
+      await module.link(() => {});
+      await module.evaluate();
+      return module;
+    },
+  });
   await assert.rejects(box.loadTools(), /offline/, "a failed import reaches load's error handling");
   await box.loadTools();
   assert.equal(attempts, 2, "the next load retries the import");
-  assert.deepEqual(box.current(), { ok: true });
+  assert.equal(modules["tool-loader"].tools.ok, true, "a successful retry installs the tool renderer");
+  await box.loadTools();
+  assert.equal(attempts, 2, "a successful import is reused");
 }
 const written = context.renderTimeline(call("w1", "Write", { file_path: "/work/One.swift", content: "one\n" }), session);
 assert(written.includes('<span>One.swift</span><span class="added">+1</span>'), `a final newline does not count as another line: ${written.match(/file-chips.*?<\/div>/)?.[0]}`);

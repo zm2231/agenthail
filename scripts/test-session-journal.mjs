@@ -1,15 +1,13 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import * as tools from '../internal/daemon/dashboard/js/tool-activity.js';
 
-const source = fs.readFileSync(new URL('../internal/daemon/dashboard/app.js', import.meta.url), 'utf8');
 const problemElements = {panel: {}, list: {}};
 const problemApp = {state: {sessions: [{id: 'target', name: 'Worker'}], deliveryProblems: [{deliveryId: 19, sessionId: 'target', message: '<script>payload</script>', reason: 'Target gone', status: 'failed', at: '2026-10-04T00:00:00Z'}]}, selected: null};
 const problemContext = vm.createContext({app: problemApp, tools, $: selector => selector.endsWith('panel') ? problemElements.panel : problemElements.list, displayName: session => session.name, escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'), timeAgo: () => 'just now'});
-const problemsStart = source.indexOf('function renderDeliveryProblems()');
-const problemsEnd = source.indexOf('function sessionIsCurrent(', problemsStart);
-vm.runInContext(source.slice(problemsStart, problemsEnd), problemContext);
+
+await dashboardModules(["overview"], problemContext);
 vm.runInContext('renderDeliveryProblems()', problemContext);
 assert.equal(problemElements.panel.hidden, false);
 assert.ok(problemElements.list.innerHTML.includes('data-delivery-dismiss="19"'));
@@ -18,13 +16,12 @@ assert.ok(!problemElements.list.innerHTML.includes('data-retry'), 'delivery prob
 problemApp.state.deliveryProblems = [];
 vm.runInContext('renderDeliveryProblems()', problemContext);
 assert.equal(problemElements.panel.hidden, true);
-const actionStart = source.indexOf('async function action(');
-const actionEnd = source.indexOf('async function voiceRequest(', actionStart);
+
 let dismissedRequest;
 let actionKeySequence = 0;
 problemContext.crypto = {randomUUID: () => `action-${++actionKeySequence}`};
 problemContext.fetch = async (url, options) => { dismissedRequest = {url, headers: options.headers, body: JSON.parse(options.body)}; return {ok: true, json: async () => ({ok: true})}; };
-vm.runInContext(source.slice(actionStart, actionEnd), problemContext);
+await dashboardModules(["actions", "delivery-labels"], problemContext);
 await vm.runInContext('action("delivery-dismiss", {deliveryId: 19})', problemContext);
 assert.equal(dismissedRequest.body.deliveryId, 19);
 assert.equal(dismissedRequest.body.action, 'delivery-dismiss');
@@ -35,9 +32,11 @@ await vm.runInContext('action("delivery-dismiss", {deliveryId: 19}, "same-logica
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'same-logical-request');
 await vm.runInContext('action("delivery-dismiss", {deliveryId: 19})', problemContext);
 assert.equal(dismissedRequest.headers['Idempotency-Key'], 'action-2', 'a distinct action must not reuse an earlier receipt');
-const metadataStart = source.indexOf('function applySessionMetadata(');
-const metadataEnd = source.indexOf('function renderChat(', metadataStart);
-vm.runInContext(source.slice(metadataStart, metadataEnd), problemContext);
+
+problemContext.handoffMessage = text => ({text, label: 'You'});
+problemContext.labels = {claude: 'Claude'};
+problemContext.renderMessage = (text, role) => `<p data-role="${role}">${text}</p>`;
+await dashboardModules(["session-metadata", "timeline-items", "format", "tool-view", "tool-diffs", "tool-runs", "timeline", "claude-metadata"], problemContext);
 problemContext.detail = {journalSeq: 8, goal: {status: 'complete'}, context: {usedTokens: 42}};
 vm.runInContext('applySessionMetadata(detail, {model: "new", goal: {status: "active"}, context: {usedTokens: 1}}, 7)', problemContext);
 assert.equal(problemContext.detail.goal.status, 'complete', 'late metadata cannot overwrite streamed goal');
@@ -52,9 +51,6 @@ assert.ok(imageHTML.includes('/api/session-attachment?sessionId=session%261&id=i
 assert.ok(imageHTML.includes('loading="lazy"'));
 problemContext.imageItem.attachment.mediaType = 'image/svg+xml';
 assert.ok(!vm.runInContext('renderImageAttachment(imageItem, imageSession)', problemContext).includes('<img'), 'active SVG is not embedded');
-problemContext.handoffMessage = text => ({text, label: 'You'});
-problemContext.labels = {claude: 'Claude'};
-problemContext.renderMessage = (text, role) => `<p data-role="${role}">${text}</p>`;
 problemContext.imageSession.surface = 'claude';
 problemContext.imageItem.attachment.mediaType = 'image/png';
 problemContext.imageItems = [
@@ -66,11 +62,6 @@ const timelineHTML = vm.runInContext('renderTimeline(imageItems, imageSession)',
 assert.ok(timelineHTML.indexOf('Before image') < timelineHTML.indexOf('<img'));
 assert.ok(timelineHTML.indexOf('<img') < timelineHTML.indexOf('After image'));
 assert.ok(timelineHTML.includes('data-role="user"') && timelineHTML.includes('data-role="agent"'));
-const stopStart = source.indexOf('function stopLiveStream(');
-const stopEnd = source.indexOf('function renderLiveTurn(', stopStart);
-const startStart = source.indexOf('function startLiveStream()');
-const startEnd = source.indexOf('function resizeComposer(', startStart);
-assert.ok(stopStart >= 0 && stopEnd > stopStart && startStart >= 0 && startEnd > startStart);
 
 const elements = new Map();
 const rendered = {chat: 0, context: 0};
@@ -111,7 +102,7 @@ const context = vm.createContext({
   selectSession: id => { reloaded.push(id); },
   $: selector => elements.get(selector),
 });
-vm.runInContext(source.slice(stopStart, stopEnd) + source.slice(startStart, startEnd), context);
+await dashboardModules(["session-stream", "stream-items"], context);
 
 vm.runInContext('startLiveStream()', context);
 vm.runInContext('startLiveStream()', context);
@@ -162,9 +153,8 @@ instances[1].emit('error', {});
 assert.deepEqual(reloaded, ['session-b'], 'terminal stream error reloads the bounded page');
 const indicator = {};
 const usageContext = vm.createContext({$: () => indicator});
-const usageStart = source.indexOf('function compactTokenCount(');
-const usageEnd = source.indexOf('async function action(', usageStart);
-vm.runInContext(source.slice(usageStart, usageEnd), usageContext);
+
+await dashboardModules(["format", "goals", "requests", "background-tasks", "context-usage", "actions"], usageContext);
 usageContext.escape = value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 for (const status of ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']) {
   usageContext.goal = {status};
@@ -193,9 +183,8 @@ const launcherContext = vm.createContext({app: {launchers: [
 ]}, $: selector => selector.endsWith('detail') ? launcherDetail : selector.endsWith('surface') ? launcherAgent : launcherSelect,
 document: {querySelectorAll: selector => selector === '[data-launch-option]' ? [launchOption] : []},
 escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;')});
-const launcherStart = source.indexOf('function renderStartLaunchers()');
-const launcherEnd = source.indexOf('async function loadStartOptions()', launcherStart);
-vm.runInContext(source.slice(launcherStart, launcherEnd), launcherContext);
+
+await dashboardModules(["start-form"], launcherContext);
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, 'tmux');
 assert.equal(launcherDetail.textContent, 'Terminal session');
@@ -212,9 +201,9 @@ launcherSelect.value = 'cmux';
 vm.runInContext('renderStartLaunchers()', launcherContext);
 assert.equal(launcherSelect.value, '', 'an unavailable launcher cannot remain selected');
 const groupingContext = vm.createContext({});
-const groupingStart = source.indexOf('function handoffMessage(');
-vm.runInContext(source.slice(groupingStart, source.indexOf('function renderMessage(', groupingStart)), groupingContext);
-vm.runInContext(source.slice(source.indexOf('function promptOrigin('), source.indexOf('function resizeComposer(')), groupingContext);
+
+await dashboardModules(["messages"], groupingContext);
+await dashboardModules(["stream-items"], groupingContext);
 groupingContext.groupItems = [
   {kind: 'message', role: 'user', text: 'first', turnId: 't1', timestamp: 'a'},
   {kind: 'message', role: 'assistant', text: 'one', turnId: 't1'},

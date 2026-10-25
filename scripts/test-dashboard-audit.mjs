@@ -1,13 +1,11 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("function auditKindLabel");
-const end = source.indexOf("function signinOffHint", start);
-assert(start >= 0 && end > start);
 const context = { escape: (value) => String(value).replaceAll("<", "&lt;") };
-vm.runInNewContext(source.slice(start, end) + "\nthis.label = auditKindLabel; this.heading = auditHeading; this.route = auditRoute;", context);
+await dashboardModules(["audit"], context);
+context.label = context.auditKindLabel;
+context.heading = context.auditHeading;
+context.route = context.auditRoute;
 
 assert.equal(context.label("peer_send"), "Peer send");
 assert.equal(context.label("transport-accepted"), "Transport accepted");

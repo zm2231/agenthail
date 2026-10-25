@@ -292,7 +292,7 @@ export const markLimit = 1000;
 const pairSimilarity = 0.25;
 const pairWindow = 8;
 
-function characters(text) {
+export function characters(text) {
   return Array.from(graphemes.segment(text), ({ segment }) => segment);
 }
 

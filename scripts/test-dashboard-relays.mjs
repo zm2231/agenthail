@@ -1,11 +1,7 @@
+import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import vm from "node:vm";
 
-const source = fs.readFileSync(new URL("../internal/daemon/dashboard/app.js", import.meta.url), "utf8");
-const start = source.indexOf("function renderOperations()");
-const end = source.indexOf("function auditKindLabel", start);
-assert(start >= 0 && end > start);
 const elements = new Map();
 const context = {
   app: { state: { queue: [], channels: [], history: [], relays: [
@@ -17,7 +13,8 @@ const context = {
   renderAudit: () => {}, renderSettings: () => {},
   escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
 };
-vm.runInNewContext(source.slice(start, end) + "\nrenderOperations();", context);
+await dashboardModules(["operations"], context);
+context.renderOperations();
 const html = elements.get("#relay-list").innerHTML;
 assert.match(html, /Goal completed/);
 assert.match(html, /Turn finished/);
