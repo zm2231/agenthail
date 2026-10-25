@@ -81,9 +81,7 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 
 	branchTranscript(t, fixture, branchConversation, originalConversation)
 	fixture.Record(branchConversation, fixture.Home, liveBridge)
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil {
-		t.Fatal(err)
-	}
+	registerDiscoveredClaudeSessions(t, app)
 
 	if owner, err := r.LookupAlias("worker"); err != nil || owner != originalConversation {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
@@ -129,9 +127,7 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 
 	fixture.RemoveRecord()
 	fixture.Record(originalConversation, fixture.Home, "session_other")
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil {
-		t.Fatal(err)
-	}
+	registerDiscoveredClaudeSessions(t, app)
 
 	if owner, err := r.LookupAlias("worker"); err != nil || owner != originalConversation {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
@@ -160,9 +156,7 @@ func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
 
 	transcript := fixture.Transcript(originalConversation, fixture.Home)
 	fixture.Record(originalConversation, fixture.Home, liveBridge)
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil {
-		t.Fatal(err)
-	}
+	registerDiscoveredClaudeSessions(t, app)
 
 	sessions, err := r.ListSessions(0)
 	if err != nil {
@@ -184,5 +178,19 @@ func TestVersionReportsTheRegistrySchema(t *testing.T) {
 	}
 	if err != nil || json.Unmarshal([]byte(output), &version) != nil || version.SchemaVersion != registry.SchemaVersion() || version.SchemaVersion == 0 {
 		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func registerDiscoveredClaudeSessions(t *testing.T, app *App) {
+	t.Helper()
+	adapter := app.adapters().ForSurface(surface.KindClaude)
+	sessions, err := adapter.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if err := app.Registry.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

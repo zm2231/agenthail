@@ -17,8 +17,8 @@ Session commands:
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread adopt <target>        Open a terminal Claude session in Agenthail
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--all|--archived] [--project <name|id>|--cwd <path>] [--wide]
-                                 List current sessions (with the daemon: --all or --archived);
+  list [--all|--archived|--recent|--running] [--project <name|id>|--cwd <path>] [--wide]
+                                 List daemon catalog conversations; --recent adds the last 24h;
                                  --cwd lists the project that holds that folder
   project list|add <path>|remove <name>|rename <name> <new>|archive <name>|unarchive <name>
                                  List, add, rename or remove project folders, or hide a project

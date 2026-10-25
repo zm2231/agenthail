@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
+func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
@@ -37,9 +37,6 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 		t.Fatalf("lifecycle commands=%v", commands)
 	}
 
-	if output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil || !strings.Contains(output, "@headless") || !strings.Contains(output, "Draft the changelog") {
-		t.Fatalf("list output=%q err=%v", output, err)
-	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "@headless", "Mention breaking changes"}) }); err != nil {
 		t.Fatalf("steer err=%v", err)
 	}

@@ -39,6 +39,7 @@ const (
 )
 
 type Daemon struct {
+	presentation         presentationClock
 	Registry             *registry.Registry
 	sessionFiles         sessionFileLists
 	claudeConfigRootsMu  sync.Mutex

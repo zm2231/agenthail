@@ -618,13 +618,6 @@ func listRemoteSession(record registry.CatalogSessionState) (surface.Session, li
 	return session, row
 }
 
-type listSessionView struct {
-	surface.Session
-	listCatalogView
-	Host              *hostRef `json:"host,omitempty"`
-	UnavailableReason string   `json:"unavailableReason,omitempty"`
-}
-
 // channelMember resolves a channel member on this host or a paired host. A
 // member on a paired host is stored as its mirrored row; whether it can take
 // a message is that host's call when the channel sends.
