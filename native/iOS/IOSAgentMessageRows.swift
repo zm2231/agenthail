@@ -50,6 +50,7 @@ struct IOSAgentMessageRow: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(PhonePalette.muted)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .opacity(expanded || expandable ? 1 : 0)
                         .accessibilityHidden(true)
                     if expanded {
                         Text(chip).font(.subheadline.weight(.semibold)).foregroundStyle(PhonePalette.peer)
@@ -123,10 +124,15 @@ struct IOSAgentSendRow: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(PhonePalette.muted)
-                    (Text("“\(agent.summary)”").italic() + Text(" → ") + Text(agent.chip).fontWeight(.medium))
+                    Text("“\(agent.summary)”").italic()
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    Text("→ \(agent.chip)")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
                     if failed { Text("failed").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.failed) }
                     Spacer(minLength: 0)
                 }

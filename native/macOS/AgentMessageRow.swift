@@ -42,7 +42,7 @@ struct AgentMessageRow: View {
     private var preview: some View {
         Button(action: toggle) {
             HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
-                AgentRowMetrics.marker(open: false)
+                AgentRowMetrics.marker(open: false).opacity(expandable ? 1 : 0)
                 ClampedText(text: Text(entry.chip).fontWeight(.semibold).foregroundStyle(DesktopPalette.peer) + Text("  ") + Text(entry.agent.summary).italic().foregroundStyle(DesktopPalette.text2) + Text(fileNote).foregroundStyle(DesktopPalette.muted), lines: 2, truncated: $truncated)
                     .font(.system(size: DesktopType.body))
                 if expandable {
@@ -117,11 +117,15 @@ struct AgentSendRow: View {
                     Image(systemName: "arrow.turn.down.right")
                         .font(.system(size: DesktopType.caption))
                         .foregroundStyle(DesktopPalette.muted)
-                    (Text("“\(entry.agent.summary)”").italic() + Text(" → ") + Text(entry.agent.chip).fontWeight(.medium))
+                    Text("“\(entry.agent.summary)”").italic()
                         .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                    Text("→ \(entry.agent.chip)")
+                        .font(.system(size: DesktopType.meta, weight: .medium))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .lineLimit(1)
+                        .fixedSize()
                     if entry.failed {
                         Text("failed").font(.system(size: DesktopType.meta, weight: .medium)).foregroundStyle(DesktopPalette.failed)
                     }

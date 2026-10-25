@@ -1,6 +1,8 @@
 import json
+import os
 import socketserver
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NOW = "2026-01-01T12:00:00Z"
@@ -35,6 +37,7 @@ RESPONSES = {
         "codexRecentHours": 24, "busyDelivery": "queue",
     },
 }
+HELD_STREAMS = set()
 
 
 class Server(ThreadingHTTPServer):
@@ -47,6 +50,13 @@ class Server(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.split("?", 1)[0] in HELD_STREAMS:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b":" + b" " * 1024 + b"\n\n")
+            self.wfile.flush()
+            threading.Event().wait()
         body = RESPONSES.get(self.path.split("?", 1)[0])
         if body is None:
             self.send_error(404)
@@ -78,6 +88,19 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/snapshot"]["deliveryProblems"] = [
             {"deliveryId": 1, "sessionId": SESSION["id"], "message": message, "reason": "session_waiting_on_you", "status": "failed", "at": NOW}
         ]
+    if sys.argv[1:2] == ["agents"]:
+        # An idle session whose transcript holds agent messages, sends and a fold, in the given theme.
+        SESSION["status"] = "idle"
+        with open(os.path.join(os.path.dirname(__file__), "agent-messages-timeline.json")) as timeline:
+            items = json.load(timeline)
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
+            "exchanges": [], "capabilities": CAPABILITIES, "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": items},
+        }
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.add("/api/v1/events")
     server = Server(("127.0.0.1", 0), Handler)
     print(server.server_address[1], flush=True)
     sys.stdout.close()
