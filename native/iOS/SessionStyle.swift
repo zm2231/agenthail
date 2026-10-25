@@ -27,10 +27,11 @@ enum SessionStyle {
 struct SessionMarkdown: View {
     let text: String
     var readingStyle = false
+    var textStyle: Font.TextStyle = .body
 
     var body: some View {
         StructuredText(markdown: text)
-            .font(.system(.body, design: readingStyle ? .serif : .default))
+            .font(.system(textStyle, design: readingStyle ? .serif : .default))
             .phoneInlineStyle()
             .textual.headingStyle(TranscriptHeadingStyle())
             .textual.paragraphStyle(TranscriptParagraphStyle())

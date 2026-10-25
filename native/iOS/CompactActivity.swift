@@ -39,8 +39,9 @@ struct TimelineGroup: Identifiable {
         var sends: [String: Int] = [:]
         for item in items {
             if item.agent?.isSend == true {
-                if let call = item.callId { sends[call] = groups.count }
-                groups.append(TimelineGroup(id: item.id, items: [item]))
+                if groups.last?.isSend != true { groups.append(TimelineGroup(id: item.id, items: [])) }
+                groups[groups.count - 1].items.append(item)
+                if let call = item.callId { sends[call] = groups.count - 1 }
                 continue
             }
             if item.kind == "toolResult", let call = item.callId, let index = sends[call] {
@@ -85,8 +86,8 @@ struct CompactActivityGroup: View {
     var body: some View {
         if group.foldLabel != nil {
             IOSAgentFoldRow(group: group)
-        } else if group.isSend, let call = group.items.first, let agent = call.agent {
-            IOSAgentSendRow(call: call, agent: agent, result: group.items.dropFirst().first)
+        } else if group.isSend {
+            IOSAgentSendRuns(items: group.items)
         } else if group.isActivity {
             let open = !group.folds || (rows.current(opened) ?? rows.isOpen(group.id) ?? false)
             let diffs = group.diffs

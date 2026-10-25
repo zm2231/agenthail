@@ -78,7 +78,7 @@ struct IOSAgentMessageRow: View {
             .accessibilityIdentifier("agent-message-" + item.id)
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    if !item.text.isEmpty { SessionMarkdown(text: item.text, readingStyle: true) }
+                    if !item.text.isEmpty { SessionMarkdown(text: item.text, textStyle: .subheadline) }
                     ForEach(Array(files.enumerated()), id: \.offset) { _, file in AttachedFileChip(file: file) }
                     if item.truncated { ShortenedNote() }
                     HStack {
@@ -99,6 +99,20 @@ struct IOSAgentMessageRow: View {
         let next = !expanded
         opened = rows.choice(next)
         rows.set(item.id, open: next)
+    }
+}
+
+struct IOSAgentSendRuns: View {
+    let items: [TimelineItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(items.filter { $0.agent?.isSend == true }) { call in
+                if let agent = call.agent {
+                    IOSAgentSendRow(call: call, agent: agent, result: items.first { $0.kind == "toolResult" && $0.callId != nil && $0.callId == call.callId })
+                }
+            }
+        }
     }
 }
 
@@ -136,7 +150,7 @@ struct IOSAgentSendRow: View {
                     if failed { Text("failed").font(.footnote.weight(.medium)).foregroundStyle(PhonePalette.failed) }
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 32)
+                .frame(minHeight: 26)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

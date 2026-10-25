@@ -239,6 +239,22 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(TimelineGroup.make([peer("a", "@x"), peer("b", "@y"), reply], foldAgents: false).map(\.id), ["a", "b", "r"])
     }
 
+    func testConsecutiveSendsShareOneGroupWithTheirResults() throws {
+        func send(_ id: String) -> TimelineItem {
+            var item = TimelineItem(id: id, kind: "toolCall", role: "assistant", title: "Bash", text: "", timestamp: nil, callId: "c" + id, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            item.agent = AgentMessage(direction: "out", kind: "send", peer: "x", summary: "go")
+            return item
+        }
+        func result(_ id: String) -> TimelineItem {
+            TimelineItem(id: "r" + id, kind: "toolResult", role: nil, title: "Bash", text: "ok", timestamp: nil, callId: "c" + id, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        }
+        let reply = TimelineItem(id: "m", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let groups = TimelineGroup.make([send("a"), send("b"), result("a"), result("b"), reply, send("c")])
+        XCTAssertEqual(groups.map(\.id), ["a", "m", "c"])
+        XCTAssertEqual(groups[0].items.map(\.id), ["a", "b", "ra", "rb"])
+        XCTAssertTrue(groups[0].isSend)
+    }
+
     @MainActor
     func testSessionStreamPreservesJournalItemMetadataAndBodyReference() throws {
         let model = Self.computerModel()
