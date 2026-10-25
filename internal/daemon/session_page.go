@@ -2,11 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -25,86 +21,6 @@ type journalPageItem struct {
 	position uint64
 	size     int
 	payload  sessionJournalPayload
-}
-
-// readJournalPage returns the newest limit exchanges before the cursor, each from the item that
-// opened it, with every item of those turns. It reads until it has seen where the oldest of them
-// starts or the journal begins, at most sessionPageScanRows rows and a little past sessionPageBytes,
-// and returns the whole exchanges that fit sessionPageBytes; the cursor addresses the next one.
-func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*surface.SessionReadResult, error) {
-	result := &surface.SessionReadResult{Source: "journal", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}}
-	toItem := d.journalItemReader(sessionID)
-	var collected []journalPageItem
-	var items []surface.TimelineItem
-	var positions, starts []int
-	cursor := before
-	var page registry.SessionJournalPage
-	reachedStart := false
-	collectedBytes := 0
-	for {
-		next, err := d.Registry.ReadSessionJournalPage(sessionID, cursor, 200)
-		var gap *registry.SessionJournalHistoryGapError
-		if cursor != before && errors.As(err, &gap) {
-			reachedStart = true
-			break
-		}
-		if err != nil {
-			return result, err
-		}
-		page = next
-		if cursor == before {
-			result.JournalSeq = page.LatestSeq
-		}
-		chunk := make([]journalPageItem, 0, len(page.Entries))
-		for _, entry := range page.Entries {
-			var payload sessionJournalPayload
-			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
-				return result, fmt.Errorf("decode journal item: %w", err)
-			}
-			chunk = append(chunk, journalPageItem{seq: entry.Seq, position: entry.Position, size: len(entry.Payload), payload: payload})
-		}
-		collected = append(chunk, collected...)
-		for _, item := range chunk {
-			collectedBytes += item.size
-		}
-		items, positions = journalVisibleItems(collected, toItem)
-		starts = surface.ExchangeStarts(items)
-		reachedStart = page.NextBefore == 0 || len(page.Entries) < 200
-		if len(starts) > limit || len(collected) >= sessionPageScanRows || collectedBytes > sessionPageBytes || reachedStart {
-			break
-		}
-		cursor = page.NextBefore
-	}
-	first, truncated := journalPageStart(collected, positions, starts, limit, reachedStart)
-	result.Truncated = truncated
-	if first > 0 {
-		result.NextBefore = int64(collected[first].position)
-	} else {
-		result.NextBefore = int64(page.NextBefore)
-		if page.HistoryBefore > 0 {
-			result.NextBefore = encodeProviderHistoryCursor(page.HistoryBefore)
-		}
-	}
-	var newestSourceErrorSeq uint64
-	for _, entry := range collected[first:] {
-		payload := entry.payload
-		if payload.Kind == "source-error" {
-			newestSourceErrorSeq = entry.seq
-			result.UnavailableReason = payload.Reason
-			continue
-		}
-		if !journalRowIsItem(payload) {
-			continue
-		}
-		result.UnavailableReason = ""
-		result.Items = append(result.Items, toItem(payload))
-		result.Truncated = result.Truncated || payload.Truncated
-	}
-	result.Exchanges = surface.ExchangesFromItems(result.Items, "journal")
-	if status, seedSeq, _, statusErr := d.Registry.SessionJournalSeedCheckpoint(sessionID); statusErr == nil && status == registry.SessionJournalSeeded && (newestSourceErrorSeq == 0 || newestSourceErrorSeq <= seedSeq) {
-		result.UnavailableReason = ""
-	}
-	return result, nil
 }
 
 // journalPageStart returns the first collected row of the page: the start of
@@ -172,9 +88,6 @@ func (d *Daemon) journalItemReader(sessionID string) func(sessionJournalPayload)
 	})
 }
 
-// codexJournalItemReader classifies Codex journal rows, reading each
-// retained body at most once: a page classifies its rows more than once
-// while it looks for where its oldest exchange starts.
 func codexJournalItemReader(readBody func(ref string) ([]byte, error)) func(sessionJournalPayload) surface.TimelineItem {
 	injected := map[string]bool{}
 	return func(payload sessionJournalPayload) surface.TimelineItem {
