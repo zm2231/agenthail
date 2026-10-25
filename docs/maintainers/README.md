@@ -20,4 +20,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)
 - [Coordinator: one per project, its saved spec, @lead, and how a send always lands](coordinator.md)
 - [Agent card: what a session knows about itself, and who started it](agent-card.md)
+- [Agent messages in the transcript: the `agent` field and the fold rule](agent-messages.md)
 - [Dashboard design reference](../../design.md)

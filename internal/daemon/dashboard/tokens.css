@@ -1241,13 +1241,6 @@ select {
   background: var(--raised);
   color: var(--ink);
 }
-.turn.peer {
-  padding-left: 14px;
-  border-left: 2px solid var(--focus);
-}
-.turn.peer .turn-label {
-  color: var(--focus);
-}
 .turn.agent .turn-label::before {
   content: "✦ ";
   color: var(--quiet);

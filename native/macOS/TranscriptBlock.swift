@@ -4,7 +4,8 @@ struct TranscriptBlock: Identifiable, Equatable {
     enum Kind: Equatable {
         case user(String, files: [AttachedFile])
         case assistant(String)
-        case peer(sender: String, text: String)
+        case agent(AgentEntry)
+        case agentFold(AgentFoldEntry)
         case tools([TimelineItem])
         case annotation(String)
         case notice(String)
@@ -19,15 +20,27 @@ struct TranscriptBlock: Identifiable, Equatable {
     /// How long the turn this reply ended took, from the host's turn duration record.
     var finished: String? = nil
 
-    static func build(_ items: [TimelineItem]) -> [TranscriptBlock] {
+    static func build(_ items: [TimelineItem], foldAgents: Bool = true) -> [TranscriptBlock] {
         var blocks: [TranscriptBlock] = []
         var tools: [TimelineItem] = []
+        var sends: [String: Int] = [:]
         func flushTools() {
             guard let first = tools.first else { return }
             blocks.append(TranscriptBlock(id: "tools-\(first.id)", kind: .tools(tools)))
             tools = []
         }
         for item in items {
+            if let agent = item.agent, agent.isIncoming || agent.isSend {
+                flushTools()
+                if agent.isSend, let call = item.callId { sends[call] = blocks.count }
+                blocks.append(TranscriptBlock(id: item.id, kind: .agent(AgentEntry(item: item, agent: agent)), truncated: item.truncated, timestamp: item.timestamp))
+                continue
+            }
+            if item.kind == "toolResult", let call = item.callId, let index = sends[call], case .agent(var entry) = blocks[index].kind {
+                entry.result = item
+                blocks[index] = TranscriptBlock(id: blocks[index].id, kind: .agent(entry), truncated: blocks[index].truncated, timestamp: blocks[index].timestamp)
+                continue
+            }
             if item.isInstructions {
                 flushTools()
                 if !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -44,8 +57,6 @@ struct TranscriptBlock: Identifiable, Equatable {
                     let (text, images) = stripImageMarkers(item.text)
                     if !text.isEmpty || !files.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text, files: files), truncated: item.truncated, timestamp: item.timestamp)) }
                     if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
-                } else if item.isPeerMessage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text), truncated: item.truncated, timestamp: item.timestamp))
                 } else {
                     blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text), truncated: item.truncated, timestamp: item.timestamp))
                 }
@@ -80,7 +91,7 @@ struct TranscriptBlock: Identifiable, Equatable {
             }
         }
         flushTools()
-        return blocks
+        return foldAgents ? folded(blocks) : blocks
     }
 
     static func gap(above block: Kind, after previous: Kind?) -> CGFloat {
@@ -94,7 +105,8 @@ struct TranscriptBlock: Identifiable, Equatable {
 extension TranscriptBlock.Kind {
     var isMessageIn: Bool {
         switch self {
-        case .user, .peer: true
+        case .user, .agentFold: true
+        case .agent(let entry): entry.agent.isIncoming
         default: false
         }
     }

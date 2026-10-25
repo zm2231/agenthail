@@ -190,10 +190,12 @@ assert.equal(JSON.stringify(summaryRevealed), JSON.stringify([{ block: "nearest"
 const longReply = Array.from({ length: 40 }, (_, index) => `- synthetic line ${index + 1} of a long reply`).join("\n");
 const conversation = context.renderTimeline([
   { id: "m-user", kind: "message", role: "user", text: "Synthetic **request**" },
-  { id: "m-handoff", kind: "message", role: "user", text: "[from @peer] Synthetic handoff" },
-  { id: "m-peer", kind: "message", role: "peer", sender: "@peer", text: "Synthetic peer note" },
+  { id: "m-handoff", kind: "message", role: "peer", sender: "@peer", text: "Synthetic handoff", agent: { direction: "in", kind: "peer", peer: "@peer", summary: "Synthetic handoff" } },
+  { id: "m-peer", kind: "message", role: "peer", sender: "@peer", text: "Synthetic peer note", agent: { direction: "in", kind: "peer", peer: "@peer", summary: "Synthetic peer note" } },
   { id: "m-agent", kind: "message", role: "assistant", text: longReply },
 ], session);
+assert(conversation.includes('<details class="timeline-item agent-fold"') && conversation.includes("2 messages from @peer"), "consecutive agent messages fold into one row");
+assert(!conversation.includes("[from"), "agent messages carry no envelope");
 assert(conversation.includes("synthetic line 40 of a long reply") && !conversation.includes("Show full message"), "long replies render in full without a crop");
 assert(conversation.includes(`data-copy-text="${longReply}"`), "Copy on a reply carries its whole Markdown");
 for (const text of ["Synthetic **request**", "Synthetic handoff", "Synthetic peer note"]) assert(conversation.includes(`data-copy-text="${text}"`), `Copy omitted ${text}`);
@@ -265,7 +267,7 @@ assert(elements["#chat-body"].innerHTML.includes("Subagent agent-wr"), "writable
 
 context.app.transcriptSignature = null;
 context.app.history = {
-  exchanges: [{ user: "Synthetic fallback request", assistant: "Synthetic fallback reply" }, { user: "[from @peer] Synthetic fallback handoff", assistant: "" }],
+  exchanges: [{ user: "Synthetic fallback request", assistant: "Synthetic fallback reply" }, { user: "Synthetic fallback handoff", origin: "peer", sender: "@peer", assistant: "" }],
   capabilities: {},
   readOnly: false,
   timeline: { items: [] },
@@ -443,12 +445,26 @@ assert(long.includes('class="tool-line tool-fold"') && long.includes("Ran 7 comm
 const six = context.renderTimeline(Array.from({ length: 6 }, (_, index) => call(`s${index}`, "Bash", { command: `go test ./case${index}` })).flat(), session);
 assert(!six.includes("tool-fold"), "six calls stay as lines");
 const authors = context.renderTimeline([
-  { id: "h1", kind: "message", role: "user", text: "[from @builder] Branch is ready" },
+  { id: "h1", kind: "message", role: "peer", sender: "@builder", text: "Branch is ready", agent: { direction: "in", kind: "peer", peer: "@builder", summary: "Branch is ready" } },
   { id: "h2", kind: "message", role: "user", text: "Ship it", timestamp: "2026-10-23T10:00:00Z" },
   { id: "e1", kind: "event", title: "Context compacted", text: "38k tokens freed" },
 ], session);
-assert(authors.includes('class="turn peer"') && authors.includes("From @builder"), "a handed-off message reads as another agent's");
+assert(authors.includes('class="timeline-item agent-message"') && authors.includes('<span class="agent-chip">@builder</span>'), "a handed-off message reads as another agent's");
+const raw = context.renderTimeline([{ id: "r1", kind: "message", role: "user", text: "[from @builder] quoted" }], session);
+assert(raw.includes('class="turn user"') && raw.includes("[from @builder] quoted"), "the dashboard reads no envelope itself");
 assert(authors.includes('class="turn user"'), "a typed message reads as yours");
+const out = (id, call) => ({ id, kind: "toolCall", title: "SendMessage", text: "", callId: call, agent: { direction: "out", kind: "send", peer: "@builder", summary: id } });
+const sent = context.renderTimeline([
+  { id: "a1", kind: "message", role: "assistant", text: "Asking the builder." },
+  out("s1", "c1"),
+  { id: "s1r", kind: "toolResult", title: "SendMessage", text: "ok", callId: "c1" },
+  out("s2", "c2"),
+  { id: "t1", kind: "toolCall", title: "Read", text: "notes.md", callId: "c3" },
+  out("s3", "c4"),
+], session);
+const reply = sent.slice(sent.indexOf('class="turn agent"'), sent.indexOf("</article>"));
+assert(reply.indexOf("“s1”") > 0 && reply.indexOf("“s2”") > reply.indexOf("“s1”") && reply.indexOf("“s2”") < reply.indexOf('class="turn-footer"'), "sends after a reply sit under its text, before its actions");
+assert(!reply.includes("“s3”") && sent.indexOf("“s3”") > sent.indexOf("notes.md"), "a send after tool work stays its own row");
 assert(authors.includes('class="timeline-item timeline-divider"') && authors.includes("Context compacted: 38k tokens freed"), "an event is a divider, not an unknown card");
 assert.equal(context.durationClock("1h2m3s"), "1:02:03");
 assert.equal(context.durationClock("12s"), "0:12");

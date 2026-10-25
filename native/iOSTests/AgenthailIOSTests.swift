@@ -216,11 +216,43 @@ final class AgenthailIOSTests: XCTestCase {
         detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
-        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"peer:m1","version":1,"kind":"message","op":"append","role":"peer","origin":"peer","sender":"builder","title":"builder","ts":"2026-10-03T12:00:00Z","body":"Branch is ready","truncated":false}}"#.utf8))
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"m1","version":1,"kind":"message","op":"append","role":"user","title":"user","ts":"2026-10-03T12:00:00Z","body":"[from builder] Branch is ready","truncated":false},"item":{"id":"m1","kind":"message","role":"peer","origin":"peer","sender":"builder","title":"builder","text":"Branch is ready","timestamp":"2026-10-03T12:00:00Z","truncated":false,"agent":{"direction":"in","kind":"peer","peer":"builder","summary":"Branch is ready"}}}"#.utf8))
         model.applySessionStreamEvent(event)
         let item = try XCTUnwrap(model.selectedDetail?.timeline?.items.first)
-        XCTAssertTrue(item.isPeerMessage)
-        XCTAssertEqual(item.peerLabel, "From builder")
+        XCTAssertEqual(item.role, "peer")
+        XCTAssertEqual(item.text, "Branch is ready")
+        XCTAssertEqual(item.agent, AgentMessage(direction: "in", kind: "peer", peer: "builder", summary: "Branch is ready"))
+    }
+
+    func testAgentMessagesFoldUnlessTheyEndTheTranscript() throws {
+        func peer(_ id: String, _ sender: String) -> TimelineItem {
+            var item = TimelineItem(id: id, kind: "message", role: "peer", title: sender, text: "hi", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            item.agent = AgentMessage(direction: "in", kind: "peer", peer: sender, summary: "hi")
+            return item
+        }
+        let reply = TimelineItem(id: "r", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let done = TimelineItem(id: "d", kind: "done", role: nil, title: "done", text: "", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let groups = TimelineGroup.make([peer("a", "@x"), done, peer("b", "@y"), reply])
+        XCTAssertEqual(groups.map(\.id), ["agents:a", "r"])
+        XCTAssertEqual(groups.first?.foldLabel, "2 messages from agents")
+        XCTAssertEqual(TimelineGroup.make([reply, peer("a", "@x"), peer("b", "@y")]).map(\.id), ["r", "a", "b"])
+        XCTAssertEqual(TimelineGroup.make([peer("a", "@x"), peer("b", "@y"), reply], foldAgents: false).map(\.id), ["a", "b", "r"])
+    }
+
+    func testConsecutiveSendsShareOneGroupWithTheirResults() throws {
+        func send(_ id: String) -> TimelineItem {
+            var item = TimelineItem(id: id, kind: "toolCall", role: "assistant", title: "Bash", text: "", timestamp: nil, callId: "c" + id, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            item.agent = AgentMessage(direction: "out", kind: "send", peer: "x", summary: "go")
+            return item
+        }
+        func result(_ id: String) -> TimelineItem {
+            TimelineItem(id: "r" + id, kind: "toolResult", role: nil, title: "Bash", text: "ok", timestamp: nil, callId: "c" + id, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        }
+        let reply = TimelineItem(id: "m", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let groups = TimelineGroup.make([send("a"), send("b"), result("a"), result("b"), reply, send("c")])
+        XCTAssertEqual(groups.map(\.id), ["a", "m", "c"])
+        XCTAssertEqual(groups[0].items.map(\.id), ["a", "b", "ra", "rb"])
+        XCTAssertTrue(groups[0].isSend)
     }
 
     @MainActor

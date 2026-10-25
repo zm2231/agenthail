@@ -61,6 +61,8 @@ targets:
       - path: DiffPresentation.swift
       - path: ToolRunSummary.swift
       - path: TranscriptRows.swift
+      - path: AgentMessage.swift
+      - path: ClampedText.swift
       - path: TurnClock.swift
       - path: TimelineMetadata.swift
       - path: VoiceAPI.swift

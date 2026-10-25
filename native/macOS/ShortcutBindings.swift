@@ -39,7 +39,7 @@ struct KeyboardSettings: View {
 
     private static let groups: [(String, [AppCommand])] = [
         ("Sessions", [.newSession, .goToSession, .findSession, .previousSession, .nextSession, .rename, .openInNewWindow]),
-        ("View", [.showRunning, .showRecent, .showAll, .showArchived, .toggleInspector, .jumpToLatest, .refresh]),
+        ("View", [.showRunning, .showRecent, .showAll, .showArchived, .toggleInspector, .jumpToLatest, .expandAgentMessages, .refresh]),
         ("Composer", [.send, .sendAlternate, .composerSendNow, .stop, .composerInterrupt, .composerCycleMode, .composerStash, .composerSearchHistory, .composerNewline, .composerDeleteToLineStart, .composerDeleteWordBackward, .composerPaste]),
     ]
 

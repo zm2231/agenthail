@@ -7,21 +7,45 @@ struct TranscriptBlockTest {
         TimelineItem(id: UUID().uuidString, kind: kind, role: role, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
     }
 
+    static func agentItem(_ kind: String, _ title: String, text: String, role: String, agent: AgentMessage, call: String? = nil, status: String? = nil) -> TimelineItem {
+        var value = TimelineItem(id: UUID().uuidString, kind: kind, role: role, title: title, text: text, timestamp: nil, callId: call, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
+        value.agent = agent
+        return value
+    }
+
     static func injected() {
-        var peer = item("message", "builder", text: "Branch is ready", role: "peer")
-        peer.sender = "builder"
-        var anonymous = item("message", "Agent message", text: "Hello", role: "peer")
-        anonymous.sender = ""
-        let kinds = TranscriptBlock.build([
-            peer,
-            anonymous,
-            item("event", "Task notification", text: "Tests passed", role: "system", status: "completed"),
-        ]).map(\.kind)
-        check(kinds == [
-            .peer(sender: "builder", text: "Branch is ready"),
-            .peer(sender: "another agent", text: "Hello"),
-            .notice("Task notification · completed: Tests passed"),
-        ], "injected prompts are not shown as the agent's own reply: \(kinds)")
+        let builder = AgentMessage(direction: "in", kind: "peer", peer: "builder", summary: "Branch is ready")
+        let anonymous = AgentMessage(direction: "in", kind: "peer", peer: "", summary: "Hello")
+        let task = AgentMessage(direction: "in", kind: "task", peer: "Task notification", summary: "Tests passed")
+        let peer = agentItem("message", "builder", text: "Branch is ready", role: "peer", agent: builder)
+        let other = agentItem("message", "Agent message", text: "Hello", role: "peer", agent: anonymous)
+        let notice = agentItem("event", "Task notification", text: "Tests passed", role: "system", agent: task, status: "completed")
+        let reply = item("message", "assistant", text: "On it", role: "assistant")
+        let blocks = TranscriptBlock.build([peer, other, notice, reply])
+        guard blocks.count == 2, case .agentFold(let fold) = blocks[0].kind else {
+            check(false, "consecutive agent items fold before a reply: \(blocks.map(\.kind))")
+            return
+        }
+        check(fold.label == "3 updates · 2 agent messages, 1 task notice" && fold.senders == "builder, another agent, Task notification", "the fold names its kinds: \(fold)")
+        check(fold.members.map(\.id) == [peer.id, other.id, notice.id] && blocks[0].id == "agents:" + peer.id, "the fold keeps its members in order")
+        if case .agent(let entry) = fold.members[2].kind {
+            check(entry.chip == "Task notification · completed", "a task notice names its status: \(entry.chip)")
+        }
+        let trailing = TranscriptBlock.build([reply, peer, other]).map(\.kind)
+        check(trailing.count == 3 && trailing.dropFirst().allSatisfy { if case .agent = $0 { true } else { false } }, "the trailing run stays unfolded: \(trailing)")
+        let open = TranscriptBlock.build([peer, other, reply], foldAgents: false).map(\.kind)
+        check(open.count == 3, "expand all leaves every agent message on its own: \(open)")
+    }
+
+    static func outgoingSend() {
+        let send = AgentMessage(direction: "out", kind: "send", peer: "@collab", summary: "Tests pass", body: "Tests pass\nDetails")
+        let call = agentItem("toolCall", "Bash", text: "{}", role: "assistant", agent: send, call: "k")
+        let result = TimelineItem(id: "result", kind: "toolResult", role: nil, title: "Bash", text: "not delivered", timestamp: nil, callId: "k", status: "failed", truncated: false, truncationReason: nil, bodyRef: nil)
+        let blocks = TranscriptBlock.build([item("toolCall", "Read"), call, result, item("toolCall", "Grep")])
+        check(blocks.count == 3, "a send splits its tool run: \(blocks.map(\.kind))")
+        guard blocks.count == 3, case .agent(let entry) = blocks[1].kind else { return }
+        check(entry.agent.isSend && entry.result?.id == result.id && entry.failed, "the send keeps its failed result: \(entry)")
+        if case .tools(let after) = blocks[2].kind { check(after.count == 1, "the result does not reappear in the next run") }
     }
 
     static func attachedFiles() {
@@ -81,7 +105,7 @@ struct TranscriptBlockTest {
         let user = TranscriptBlock.Kind.user("Fix it", files: [])
         let reply = TranscriptBlock.Kind.assistant("Looking")
         let tools = TranscriptBlock.Kind.tools([])
-        let peer = TranscriptBlock.Kind.peer(sender: "builder", text: "Ready")
+        let peer = TranscriptBlock.Kind.agent(AgentEntry(item: item("message", "builder", text: "Ready", role: "peer"), agent: AgentMessage(direction: "in", kind: "peer", peer: "builder", summary: "Ready")))
         check(TranscriptBlock.gap(above: user, after: nil) == 0, "the first block sits on the top padding")
         let within = [TranscriptBlock.gap(above: tools, after: reply), TranscriptBlock.gap(above: reply, after: tools), TranscriptBlock.gap(above: reply, after: reply)]
         let opening = TranscriptBlock.gap(above: reply, after: user)
@@ -96,6 +120,7 @@ struct TranscriptBlockTest {
         injectedInstructions()
         usageLimitNotice()
         injected()
+        outgoingSend()
         attachedFiles()
         let blocks = TranscriptBlock.build([
             item("message", "user", text: "Start", role: "user"),

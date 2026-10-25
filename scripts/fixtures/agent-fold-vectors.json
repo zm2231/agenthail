@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "name": "two agent messages from different agents, then a reply",
+      "agents": [{"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, {"direction": "in", "kind": "peer", "peer": "@b", "summary": "y"}, null],
+      "runs": [[0, 2]],
+      "labels": ["2 messages from agents"],
+      "senders": ["@a, @b"]
+    },
+    {
+      "name": "one agent sending three times",
+      "agents": [null, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "y"}, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "z"}, null],
+      "runs": [[1, 4]],
+      "labels": ["3 messages from @a"],
+      "senders": ["@a"]
+    },
+    {
+      "name": "a channel post names its channel",
+      "agents": [{"direction": "in", "kind": "peer", "peer": "@a", "channel": "ops", "summary": "x"}, {"direction": "in", "kind": "peer", "peer": "@a", "channel": "ops", "summary": "y"}, null],
+      "runs": [[0, 2]],
+      "labels": ["2 messages from @a · #ops"],
+      "senders": ["@a · #ops"]
+    },
+    {
+      "name": "agent messages mixed with a task notification",
+      "agents": [{"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, {"direction": "in", "kind": "task", "peer": "Task notification", "summary": "done"}, {"direction": "in", "kind": "peer", "peer": "@b", "summary": "y"}, null],
+      "runs": [[0, 3]],
+      "labels": ["3 updates · 2 agent messages, 1 task notice"],
+      "senders": ["@a, Task notification, @b"]
+    },
+    {
+      "name": "notices only",
+      "agents": [{"direction": "in", "kind": "task", "peer": "Task notification", "summary": "a"}, {"direction": "in", "kind": "continuation", "peer": "Continued automatically", "summary": "b"}, {"direction": "in", "kind": "notice", "peer": "Agenthail notice", "summary": "c"}, null],
+      "runs": [[0, 3]],
+      "labels": ["3 updates · 1 task notice, 1 automatic continuation, 1 Agenthail notice"],
+      "senders": ["Task notification, Continued automatically, Agenthail notice"]
+    },
+    {
+      "name": "a lone message never folds",
+      "agents": [{"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, null, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "y"}, null],
+      "runs": [],
+      "labels": [],
+      "senders": []
+    },
+    {
+      "name": "the trailing run stays unfolded",
+      "agents": [null, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, {"direction": "in", "kind": "peer", "peer": "@b", "summary": "y"}],
+      "runs": [],
+      "labels": [],
+      "senders": []
+    },
+    {
+      "name": "an outgoing send breaks a run",
+      "agents": [{"direction": "in", "kind": "peer", "peer": "@a", "summary": "x"}, {"direction": "out", "kind": "send", "peer": "@a", "summary": "ok"}, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "y"}, {"direction": "in", "kind": "peer", "peer": "@a", "summary": "z"}, null],
+      "runs": [[2, 4]],
+      "labels": ["2 messages from @a"],
+      "senders": ["@a"]
+    },
+    {
+      "name": "an agent without a name",
+      "agents": [{"direction": "in", "kind": "peer", "summary": "x"}, {"direction": "in", "kind": "peer", "peer": "", "summary": "y"}, null],
+      "runs": [[0, 2]],
+      "labels": ["2 messages from another agent"],
+      "senders": ["another agent"]
+    }
+  ]
+}

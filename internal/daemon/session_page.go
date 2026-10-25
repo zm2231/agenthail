@@ -78,14 +78,16 @@ func journalVisibleItems(entries []journalPageItem, toItem func(sessionJournalPa
 // context; a row whose full body was not retained stays a prompt, since the
 // request Codex appends may be in the part that was dropped.
 func (d *Daemon) journalItemReader(sessionID string) func(sessionJournalPayload) surface.TimelineItem {
-	kind, _, _, err := d.Registry.GetSession(sessionID)
-	if err != nil || kind != string(surface.KindCodex) {
-		return journalTimelineItem
+	read := journalTimelineItem
+	if kind, _, _, err := d.Registry.GetSession(sessionID); err == nil && kind == string(surface.KindCodex) {
+		read = codexJournalItemReader(func(ref string) ([]byte, error) {
+			body, _, err := d.Registry.SessionJournalBody(sessionID, ref, 0, sessionJournalRetentionBytes)
+			return body, err
+		})
 	}
-	return codexJournalItemReader(func(ref string) ([]byte, error) {
-		body, _, err := d.Registry.SessionJournalBody(sessionID, ref, 0, sessionJournalRetentionBytes)
-		return body, err
-	})
+	return func(payload sessionJournalPayload) surface.TimelineItem {
+		return surface.PresentTimelineItem(read(payload))
+	}
 }
 
 func codexJournalItemReader(readBody func(ref string) ([]byte, error)) func(sessionJournalPayload) surface.TimelineItem {
@@ -193,8 +195,8 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 		}
 		cursor = read.NextBefore
 	}
-	result.Items = items
-	result.Exchanges = surface.ExchangesFromItems(items, result.Source)
+	result.Items = surface.PresentTimelineItems(items)
+	result.Exchanges = surface.ExchangesFromItems(result.Items, result.Source)
 	result.NextBefore = encodeProviderHistoryCursor(result.NextBefore)
 	return result, nil
 }

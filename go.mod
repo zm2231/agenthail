@@ -1,6 +1,6 @@
 module github.com/zm2231/agenthail
 
-go 1.26
+go 1.26.0
 
 toolchain go1.26.5
 
@@ -15,9 +15,10 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tidwall/gjson v1.20.0
 	github.com/tidwall/sjson v1.2.5
-	golang.org/x/sys v0.44.0
+	golang.org/x/sys v0.47.0
 	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.53.0
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (

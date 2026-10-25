@@ -879,9 +879,10 @@ struct TranscriptView: View {
     @State private var paneWidth: CGFloat = 0
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
 
     var body: some View {
-        let blocks = TranscriptBlock.build(pane.timelineItems)
+        let blocks = TranscriptBlock.build(pane.timelineItems, foldAgents: !expandAgents)
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
         ScrollView {
@@ -938,6 +939,7 @@ struct TranscriptView: View {
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
+            .environment(\.expandAgentMessages, expandAgents)
         }
         .clipped()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
@@ -1201,43 +1203,6 @@ struct UserBubble: View {
         }
         .font(.system(size: DesktopType.caption))
         .foregroundStyle(DesktopPalette.text2)
-    }
-}
-
-/// A message another agent sent this session: on the reader's side, marked by a rule and its sender.
-struct PeerMessage: View {
-    let sender: String
-    let text: String
-    var time: String? = nil
-    var note: String? = nil
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: DesktopSpace.s) {
-                Text(sender)
-                    .font(.system(size: DesktopType.meta, weight: .semibold))
-                    .foregroundStyle(DesktopPalette.peer)
-                let status = [time, note].compactMap { $0 }.joined(separator: " · ")
-                if !status.isEmpty {
-                    Text(status)
-                        .font(.system(size: DesktopType.caption))
-                        .foregroundStyle(DesktopPalette.meta)
-                }
-                MessageActions(text: text, revealed: hovering)
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("From \(sender)")
-            Text(text)
-                .font(.system(size: DesktopType.prose))
-                .lineSpacing(DesktopType.proseLineSpacing)
-                .foregroundStyle(DesktopPalette.text)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.leading, DesktopSpace.m)
-        .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.peer).frame(width: 2) }
-        .onHover { hovering = $0 }
     }
 }
 
