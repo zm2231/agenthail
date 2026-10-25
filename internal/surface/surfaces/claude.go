@@ -697,34 +697,6 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	return claudeProcess{session: sess, record: m, startedAt: startedAt}, true
 }
 
-// applyRecordStatus takes status and last activity from Claude's session
-// record. The transcript decides only when the record does not report status,
-// and dates a working session by its turn's last progress when that is later.
-func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
-	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
-		sess.LastActive = time.UnixMilli(int64(ts))
-	}
-	sess.Status = claudePeerStatus(record)
-	sess.WaitingOn = nil
-	sess.BackgroundTasks = nil
-	sess.UsageLimit = nil
-	sess.Activity = nil
-	sess.Plan = nil
-	if sess.HasLocal {
-		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
-			sess.Status = observation.Status
-			sess.WaitingOn = observation.WaitingOn
-			sess.BackgroundTasks = observation.BackgroundTasks
-			sess.UsageLimit = observation.UsageLimit
-			sess.Activity = observation.Activity
-			sess.Plan = observation.Plan
-		}
-	}
-	if sess.Activity != nil && sess.Activity.LastProgressAt.After(sess.LastActive) {
-		sess.LastActive = sess.Activity.LastProgressAt
-	}
-}
-
 // claudeRootTranscript returns a conversation's one transcript when it lies
 // under root.
 func claudeRootTranscript(paths []string, root string) string {
