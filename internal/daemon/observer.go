@@ -140,12 +140,16 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	observed := observeOnce(adapter, session, d.observeTurn)
+	observation, err := observed.get(ctx)
+	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
 	d.syncRelaysObserved(ctx, adapter, session, observed)
 	source, transport := session.Source, session.Transport
-	observation, err := observed.get(ctx)
 	if err != nil {
 		d.recordObservationFailure(session.ID)
 		d.logObserveError(session.ID, err)
+		if unobserved {
+			d.releaseUnobservedHold(session)
+		}
 		return
 	}
 	d.clearObservationFailure(session.ID)
@@ -234,15 +238,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
 	if desktopNotificationMessage != "" {
-		desktopMessage, mobileMessage, sessionID, turnID := desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID
-		d.background.start(func(ctx context.Context) {
-			if err := d.notifyDesktop("Agenthail", desktopMessage, sessionID, "", "", nil); err != nil {
-				d.log.Printf("desktop notification: %s", err)
-			}
-			notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed"})
-		})
+		d.notifyTurnCompleted(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
 	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)

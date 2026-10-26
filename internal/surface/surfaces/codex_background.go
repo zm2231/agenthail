@@ -16,6 +16,18 @@ type codexBackgroundState struct {
 	read   bool
 }
 
+func (c *Codex) Background(ctx context.Context, session surface.Session) *surface.BackgroundTasks {
+	path := codexTranscriptPath(&session)
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return c.codexBackground(ctx, session.ID, path, info)
+}
+
 // Background processes live in the app-server that has the thread loaded.
 func (c *Codex) codexBackground(ctx context.Context, threadID, path string, info os.FileInfo) *surface.BackgroundTasks {
 	commands := c.backgroundCommands(ctx, path, info)
@@ -88,7 +100,6 @@ func (c *Codex) forgetUnreadBackground() {
 	}
 }
 
-// A runtime whose loaded threads could not be listed keeps its last listing.
 func (c *Codex) noteLoaded(runtimes *codexRuntimes) {
 	c.backgroundMu.Lock()
 	defer c.backgroundMu.Unlock()

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -130,6 +131,54 @@ func TestATurnFinishedRelayHeldByBackgroundWorkDeliversOnceWhenThatWorkStops(t *
 	observe(nil)
 	if count := r.QueueCount(to.ID); count != 1 {
 		t.Fatalf("relayed %d once the background work stopped", count)
+	}
+}
+
+type backgroundSourceSurface struct {
+	*daemonSurface
+	background *surface.BackgroundTasks
+}
+
+func (s backgroundSourceSurface) Background(context.Context, surface.Session) *surface.BackgroundTasks {
+	return s.background
+}
+
+func TestAHeldTurnCompletesOnceWhenItsRuntimeCanNoLongerBeObserved(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, fake, from, to := daemonFixture(t)
+	received := pushNotifications(t, r)
+	if err := r.PrepareRelaySource(context.Background(), fake, &from, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRelayRoute(from.ID, to.ID, ".*", false, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
+	running := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceTranscript, Tasks: []surface.BackgroundTask{{ID: "call-build", Kind: surface.BackgroundShell}}}
+	source := backgroundSourceSurface{daemonSurface: fake, background: running}
+	for _, observation := range []*surface.TurnObservation{
+		{Status: surface.StatusIdle},
+		{Status: surface.StatusBusy, ActiveTurnID: "turn-1"},
+		{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Text: "built", Done: true}, BackgroundTasks: running},
+	} {
+		fake.observations["from"] = observation
+		d.observeSession(t.Context(), source, &from)
+	}
+	fake.observeErr = errors.New("Codex is unavailable")
+	d.observeSession(t.Context(), source, &from)
+	expectNoNotification(t, received, "a held turn whose work may still run notified")
+	if count := r.QueueCount(to.ID); count != 0 {
+		t.Fatalf("relayed %d while background work may still run", count)
+	}
+	source.background = nil
+	d.observeSession(t.Context(), source, &from)
+	d.observeSession(t.Context(), source, &from)
+	expectNotification(t, received, "turn-1")
+	expectNoNotification(t, received, "an unobserved release notified twice")
+	if state, _, err := r.RuntimeState("from"); err != nil || state.HeldCompletionTurnID != "" {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if count := r.QueueCount(to.ID); count != 1 {
+		t.Fatalf("relayed %d once nothing could run", count)
 	}
 }
 

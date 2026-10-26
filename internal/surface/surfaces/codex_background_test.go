@@ -79,8 +79,12 @@ func TestAThreadNoRuntimeHasLoadedRunsNoBackgroundWork(t *testing.T) {
 		t.Fatalf("unloaded background=%+v", background)
 	}
 	c = loadedCodex("thread")
+	var source surface.BackgroundSource = c
+	if background := source.Background(context.Background(), surface.Session{ID: "thread", Transcript: path}); !surface.BackgroundRunning(background) {
+		t.Fatalf("loaded background=%+v", background)
+	}
 	c.noteLoaded(&codexRuntimes{})
-	if background := codexBackgroundAt(t, c, "thread", path); background != nil {
+	if background := source.Background(context.Background(), surface.Session{ID: "thread", Transcript: path}); background != nil {
 		t.Fatalf("after the app-server went away background=%+v", background)
 	}
 }
