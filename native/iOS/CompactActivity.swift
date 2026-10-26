@@ -401,6 +401,10 @@ struct FileChips: View {
 struct TranscriptDivider: View {
     let text: String
 
+    static func fits(_ detail: String) -> Bool {
+        detail.utf8.count <= 160 && !detail.contains("\n")
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Rectangle().fill(.separator).frame(minWidth: 16, maxHeight: 0.5)

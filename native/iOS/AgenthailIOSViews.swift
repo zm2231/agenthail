@@ -471,6 +471,21 @@ struct SessionScreen: View {
         timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
     }
 
+    private var latestRowID: String? {
+        guard let detail, let timeline = detail.timeline else { return nil }
+        let items = items
+        guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) else { return nil }
+        return activityOnly ? items.last?.id : TimelineGroup.make(items, foldAgents: !expandAgents).last?.id
+    }
+
+    private func scrollToLatest() {
+        if let id = latestRowID {
+            position.scrollTo(id: id, anchor: .bottom)
+        } else {
+            position.scrollTo(edge: .bottom)
+        }
+    }
+
     @ViewBuilder private var transcriptRows: some View {
         let connection = model.connectionState(for: session.id)
         if let error = connection.error {
@@ -557,7 +572,7 @@ struct SessionScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
             if phase == .interacting {
                 userScrolling = true
@@ -571,7 +586,7 @@ struct SessionScreen: View {
             geometry.contentSize.height - geometry.visibleRect.maxY < 60
         } action: { _, value in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
             atLatest = value
         }
@@ -585,7 +600,7 @@ struct SessionScreen: View {
                 if !atLatest && detail != nil {
                     Button {
                         followingLatest = true
-                        position.scrollTo(edge: .bottom)
+                        scrollToLatest()
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
@@ -681,14 +696,14 @@ struct SessionScreen: View {
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
             } else {
-                position.scrollTo(edge: .bottom)
+                scrollToLatest()
             }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
-            if followingLatest { position.scrollTo(edge: .bottom) }
+            if followingLatest { scrollToLatest() }
         }
         .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
-            if followingLatest { position.scrollTo(edge: .bottom) }
+            if followingLatest { scrollToLatest() }
         }
     }
 }
@@ -1113,7 +1128,7 @@ struct IOSTimelineRow: View {
                 .font(.caption)
                 .foregroundStyle(PhonePalette.muted)
                 .padding(.vertical, 4)
-        } else if item.kind == "event" {
+        } else if item.kind == "event", TranscriptDivider.fits(item.text) {
             TranscriptDivider(text: [eventLabel, TurnClock.time(item.timestamp)].compactMap { $0 }.joined(separator: " · "))
             if item.truncated { ShortenedNote() }
         } else {
