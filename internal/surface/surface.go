@@ -231,6 +231,7 @@ type Session struct {
 	CodexPendingEventUser bool              `json:"-"`
 	CodexPendingEventTurn string            `json:"-"`
 	CodexCurrentTurnID    string            `json:"-"`
+	CodexToolWindow       CodexToolWindow   `json:"-"`
 	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
 
 	// TranscriptFromStart says the session source has seen none of the

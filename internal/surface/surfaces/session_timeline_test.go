@@ -553,7 +553,7 @@ func TestCodexTranscriptPreservesTerminalStatusesAndOpaqueRecords(t *testing.T) 
 		}
 	}
 	future := page.Items[len(statuses)]
-	if future.Role != "user" || !future.Truncated || len(future.Text) > timelineTextBudget+3 || !strings.Contains(future.Text, "future_item") {
+	if future.Kind != "event" || future.Title != "Codex · Future item" || future.Text != "" {
 		t.Fatalf("opaque=%+v", future)
 	}
 	redacted := page.Items[len(statuses)+1]
@@ -562,8 +562,9 @@ func TestCodexTranscriptPreservesTerminalStatusesAndOpaqueRecords(t *testing.T) 
 	}
 }
 
-func TestCodexStreamPreservesObservedCommandOutputTruncationMetadata(t *testing.T) {
-	record := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", strings.Repeat("x", 34517))
+func TestCodexStreamServesACommandSeenWithoutItsCallAsAToolRow(t *testing.T) {
+	output := strings.Repeat("x", 34517)
+	record := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"exec-1","command":["/bin/zsh","-lc","make build"],"aggregated_output":%q,"exit_code":0,"status":"completed"}}}`+"\n", output)
 	path := timelineFixture(t, record)
 	session := &surface.Session{ID: "observed-item-completed", Transcript: path, TranscriptOffsetSet: true}
 	var events []surface.StreamEvent
@@ -576,22 +577,8 @@ func TestCodexStreamPreservesObservedCommandOutputTruncationMetadata(t *testing.
 	if !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream error=%v", err)
 	}
-	if len(events) != 1 {
+	if len(events) != 2 || events[0].Kind != "toolCall" || events[0].Title != "exec_command" || events[0].Text != `{"cmd":"make build"}` || events[1].Kind != "toolResult" || events[1].CallID != "exec-1" || events[1].Text != output {
 		t.Fatalf("events=%+v", events)
-	}
-	if !events[0].Truncated || events[0].TruncationReason == "" {
-		t.Fatalf("truncation metadata=%+v", events[0])
-	}
-	encoded, err := json.Marshal(events[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(encoded, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload["truncated"] != true || payload["truncationReason"] != events[0].TruncationReason {
-		t.Fatalf("serialized truncation metadata=%s", encoded)
 	}
 }
 

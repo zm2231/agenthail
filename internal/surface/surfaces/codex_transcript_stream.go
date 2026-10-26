@@ -29,6 +29,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		session.CodexCurrentTurnID = ""
 		session.CodexPendingEventUser = false
 		session.CodexPendingEventTurn = ""
+		session.CodexToolWindow = surface.CodexToolWindow{}
 	}
 	session.TranscriptIdentity = identity
 	offset := session.TranscriptOffset
@@ -37,6 +38,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		session.CodexCurrentTurnID = ""
 		session.CodexPendingEventUser = false
 		session.CodexPendingEventTurn = ""
+		session.CodexToolWindow = surface.CodexToolWindow{}
 	}
 	meter, err := codexStreamTurnMeter(ctx, path, offset)
 	if err != nil {
@@ -58,6 +60,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			session.CodexCurrentTurnID = ""
 			session.CodexPendingEventUser = false
 			session.CodexPendingEventTurn = ""
+			session.CodexToolWindow = surface.CodexToolWindow{}
 			meter, err = codexStreamTurnMeter(ctx, path, 0)
 			if err != nil {
 				return err
@@ -75,7 +78,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 				currentTurnID = turnID
 			}
 			turn := meter.observe(record)
-			items := codexTimelineItems(record)
+			items := codexRecordItems(&session.CodexToolWindow, record, currentTurnID)
 			effectiveTurnID := currentTurnID
 			for index := range items {
 				if effectiveTurnID != "" {
@@ -96,12 +99,6 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			session.CodexPendingEventTurn = projection.turnID
 			session.CodexCurrentTurnID = currentTurnID
 			if len(items) == 0 {
-				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
-					if opaque.Kind == "done" {
-						opaque.Turn = turn
-					}
-					emitCodexTranscriptItem(session, uuid, record, line, recordOffset, 0, *opaque, currentTurnID, onEvent)
-				}
 				return nil
 			}
 			if err := decorateTimelineAttachments(ctx, items, record, "codex", recordOffset); err != nil {
@@ -133,10 +130,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if uuid != "" && turnID != "" && turnID != uuid {
 		return
 	}
-	key := codexTranscriptItemKey(record, item, index)
-	if key == "" || item.Kind == "event" {
-		key = codexTranscriptFallbackKey(offset, line, index)
-	}
+	key := codexServedItemKey(record, line, offset, item, index)
 	at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 	operation := "upsert"
 	if item.Kind == "done" {

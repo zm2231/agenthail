@@ -45,6 +45,7 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 		remote.CodexPendingEventUser = local.CodexPendingEventUser
 		remote.CodexPendingEventTurn = local.CodexPendingEventTurn
 		remote.CodexCurrentTurnID = local.CodexCurrentTurnID
+		remote.CodexToolWindow = local.CodexToolWindow
 		return remote, nil
 	}
 	failure := codexNativeReadFailure(remoteErr)
