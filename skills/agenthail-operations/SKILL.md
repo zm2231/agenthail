@@ -85,7 +85,9 @@ sign-in profile signed into it and its current usage from claude.ai; a root is
 a config folder, not an account, and `/login` moves every session of the root,
 running ones included, to the new login. `thread create claude
 --root <name|dir>` starts the session in that root; `list --wide` shows the
-config folder each Claude session lives in.
+config folder each Claude session lives in. `agenthail usage [--json]` shows
+every account's limits and resets on this host and its paired hosts, with the
+sessions working on each.
 A `send --reply` that fails with "out of usage" means the session
 hit its limit; wait for the reset it names rather than resending.
 
