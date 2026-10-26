@@ -288,6 +288,14 @@ const colourOf = (doc) => (value) => surfaces[doc.documentElement.dataset.theme]
   }
   assert.equal(solve.alphaOver([[0.02, 0.02, 0.02]], [ink], "dark", 4.5, ground), 0, "a dark enough picture needs no tint");
   assert.equal(solve.alphaOver([[0.02, 0.02, 0.02]], [ink], "dark", 4.5, ground, 0.3), 0.3, "and a pane keeps its own opacity as a floor");
+  {
+    const wash = [[0.96, 0.58, 0.39], 0.12];
+    const bright = [[0.4, 0.5, 0.35], [0.55, 0.45, 0.6]];
+    const bare = solve.alphaOver(bright, [ink, quiet], "dark", 7, ground);
+    const alpha = solve.alphaOver(bright, [ink, quiet], "dark", 7, ground, 0, [wash]);
+    const onWash = (a) => Math.min(...bright.map((c) => c.map((v, i) => v + (ground[i] - v) * a)).map((c) => c.map((v, i) => v + (wash[0][i] - v) * wash[1])).flatMap((c) => [ink, quiet].map((role) => contrast.ratio(role, contrast.luminance(c)))));
+    assert.ok(onWash(bare) < 7 && onWash(alpha) >= 7, `a pane carries its text on the accent wash too (${onWash(bare)} -> ${onWash(alpha)})`);
+  }
 
   const pack = ([r, g, b]) => (r << 16) | (g << 8) | b;
   const look = { strength: 1, dim: 0, ground, polarity: "dark", texture: "none", textureStrength: 0, roles: [ink, quiet], target: 4.5 };
