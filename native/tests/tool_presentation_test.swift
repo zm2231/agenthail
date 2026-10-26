@@ -74,6 +74,14 @@ struct ToolPresentationTest {
         check(once == stored && again == stored && made == 1, "a call's diffs are worked out once: made \(made)")
         _ = ToolDiffCache.diffs(name: "Edit", text: "cache-probe-2") { made += 1; return [] }
         check(made == 2, "a different call input is diffed on its own")
+        let large = String(repeating: "x", count: 600_000)
+        for n in 0..<12 { _ = ToolDiffCache.diffs(name: "Write", text: "\(n)" + large) { [] } }
+        check(ToolDiffCache.retainedBytes <= ToolDiffCache.byteBudget, "large inputs stay within the byte budget: \(ToolDiffCache.retainedBytes)")
+        var remade = 0
+        _ = ToolDiffCache.diffs(name: "Write", text: "11" + large) { remade += 1; return [] }
+        check(remade == 0, "the latest large input is still reused")
+        _ = ToolDiffCache.diffs(name: "Write", text: String(repeating: "y", count: ToolDiffCache.byteBudget)) { [] }
+        check(ToolDiffCache.retainedBytes <= ToolDiffCache.byteBudget, "an input larger than the budget is not kept")
         check(edit.diffs == ToolPresentation(name: "Edit", text: edit.text).diffs, "the same edit reads back the same diff")
     }
 
