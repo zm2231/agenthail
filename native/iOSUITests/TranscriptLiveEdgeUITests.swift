@@ -74,6 +74,8 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
         sleep(2)
+        let latest = newestReply(app)
+        XCTAssertGreaterThan(latest, 0, "the session opened without a reply on screen")
         for _ in 0..<2 { timeline.swipeDown(velocity: .slow) }
         let middle = timeline.frame.insetBy(dx: 0, dy: timeline.frame.height * 0.25)
         guard let toolID = elements(app).filter({ $0.identifier.hasPrefix("tool-call-") && middle.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }).map(\.identifier).first
@@ -90,6 +92,8 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         app.buttons["Jump to latest"].tapWhenReady()
         XCTAssertTrue(app.buttons["Jump to latest"].waitForNonExistence(timeout: 3), "Jump to latest did not reach the latest row")
         record(app, "after-jump")
+        let viewport = timeline.frame
+        XCTAssertTrue(elements(app).contains { $0.label.contains("of reply \(latest).") && viewport.intersects($0.frame) }, "the latest reply \(latest) is not on screen after Jump to latest")
         XCTAssertTrue((composer.value as? String ?? "").contains("draft kept"), "the draft was lost on Jump to latest")
         XCTAssertEqual(app.keyboards.firstMatch.exists, focused, "Jump to latest changed the composer's focus")
         let row = timeline.buttons[toolID]
