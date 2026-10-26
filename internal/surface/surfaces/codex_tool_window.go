@@ -6,9 +6,13 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codemode"
 )
 
-const codexBackgroundLimit = 16
+const (
+	codexBackgroundLimit = 16
+	codexOpenCallLimit   = 16
+)
 
 // codexRecordItems serves one transcript record in order. The window joins a
 // tool call, the actions Codex records while it runs and its output into one
@@ -17,7 +21,7 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 	payload, _ := record["payload"].(map[string]any)
 	if codexRecordStartsTurn(record) {
 		window.Known = true
-		codexCloseWindow(window)
+		window.Open = nil
 	}
 	if str(record, "type") == "event_msg" && str(payload, "type") == "item_completed" {
 		item, _ := payload["item"].(map[string]any)
@@ -30,48 +34,75 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 		}
 	}
 	if _, ended := codexRecordEndsTurn(record); ended {
-		codexCloseWindow(window)
+		window.Open = nil
 		return items
 	}
-	if str(record, "type") != "response_item" || len(items) == 0 {
+	if str(record, "type") != "response_item" || len(items) == 0 || items[0].CallID == "" {
 		return items
 	}
 	switch str(payload, "type") {
 	case "function_call", "custom_tool_call":
-		codexOpenWindow(window, record, items[0], turnID)
+		codexOpenCall(window, record, items[0], turnID)
 	case "function_call_output", "custom_tool_call_output":
-		if items[0].CallID != "" && items[0].CallID == window.CallID {
-			return codexWindowOutput(window, items)
+		if index := slices.IndexFunc(window.Open, func(call surface.CodexOpenCall) bool { return call.CallID == items[0].CallID }); index >= 0 {
+			return codexCallOutput(window, index, items)
 		}
 	}
 	return items
 }
 
-func codexOpenWindow(window *surface.CodexToolWindow, record map[string]any, call surface.TimelineItem, turnID string) {
+func codexOpenCall(window *surface.CodexToolWindow, record map[string]any, item surface.TimelineItem, turnID string) {
 	payload, _ := record["payload"].(map[string]any)
-	window.CallID, window.CallKey, window.TurnID = call.CallID, codexTranscriptItemKey(record, call, 0), turnID
-	window.Consumed, window.Failed = false, false
+	call := surface.CodexOpenCall{CallID: item.CallID, CallKey: codexTranscriptItemKey(record, item, 0), TurnID: turnID, At: str(record, "timestamp"), Tools: []string{item.Title}}
 	if calls, ok := codexCodeModeScript(payload); ok {
-		window.Commands = codexScriptCommands(calls)
-	} else if call.Title == "exec_command" {
-		var input map[string]any
-		_ = json.Unmarshal([]byte(call.Text), &input)
-		window.Commands = nil
-		if command := strings.TrimSpace(str(input, "cmd")); command != "" {
-			window.Commands = []string{command}
+		call.Tools = nil
+		for _, script := range calls {
+			call.Tools = append(call.Tools, codemode.ToolName(script.Tool))
 		}
-	} else {
-		window.Commands = nil
+		call.Commands = codexScriptCommands(calls)
+	} else if item.Title == "exec_command" {
+		var input map[string]any
+		_ = json.Unmarshal([]byte(item.Text), &input)
+		if command := strings.TrimSpace(str(input, "cmd")); command != "" {
+			call.Commands = []string{command}
+		}
 	}
+	open := slices.DeleteFunc(slices.Clone(window.Open), func(other surface.CodexOpenCall) bool { return other.CallID == call.CallID })
+	open = append(open, call)
+	window.Open = open[max(0, len(open)-codexOpenCallLimit):]
 }
 
-func codexCloseWindow(window *surface.CodexToolWindow) {
-	window.CallID, window.CallKey, window.TurnID = "", "", ""
-	window.Commands, window.Consumed, window.Failed = nil, false, false
-}
-
-func codexWindowOpen(window *surface.CodexToolWindow, turnID string) bool {
-	return window.CallID != "" && (window.TurnID == "" || turnID == "" || window.TurnID == turnID)
+// codexActionCall finds the open call an action belongs to: the one running
+// its command, else the one calling its tool, else the only one open.
+func codexActionCall(window *surface.CodexToolWindow, action codexAction, turnID string) int {
+	candidate := func(call surface.CodexOpenCall) bool {
+		return call.TurnID == "" || turnID == "" || call.TurnID == turnID
+	}
+	if action.Command != "" {
+		if index := slices.IndexFunc(window.Open, func(call surface.CodexOpenCall) bool {
+			return candidate(call) && slices.Contains(call.Commands, action.Command)
+		}); index >= 0 {
+			return index
+		}
+		if slices.ContainsFunc(window.Background, func(command surface.CodexBackgroundCommand) bool { return command.Command == action.Command }) {
+			return -1
+		}
+	}
+	if index := slices.IndexFunc(window.Open, func(call surface.CodexOpenCall) bool {
+		return candidate(call) && slices.Contains(call.Tools, action.Tool)
+	}); index >= 0 {
+		return index
+	}
+	only := -1
+	for index, call := range window.Open {
+		if candidate(call) {
+			if only >= 0 {
+				return -1
+			}
+			only = index
+		}
+	}
+	return only
 }
 
 func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, turnID string) []surface.TimelineItem {
@@ -82,13 +113,15 @@ func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, t
 	if !ok {
 		return []surface.TimelineItem{codexUnknownItem(str(item, "type"))}
 	}
-	if codexWindowOpen(window, turnID) {
-		window.Commands = slices.DeleteFunc(slices.Clone(window.Commands), func(command string) bool { return command == action.Command })
-		window.Failed = window.Failed || action.Failed
-		if !window.Consumed {
-			window.Consumed = true
-			call := surface.TimelineItem{ID: window.CallKey, Kind: "toolCall", Title: action.Tool, Text: codexActionInput(action), CallID: window.CallID}
-			return []surface.TimelineItem{call, codexActionResult(action, window.CallID)}
+	if index := codexActionCall(window, action, turnID); index >= 0 {
+		window.Open = slices.Clone(window.Open)
+		call := &window.Open[index]
+		call.Commands = slices.DeleteFunc(slices.Clone(call.Commands), func(command string) bool { return command == action.Command })
+		call.Failed = call.Failed || action.Failed
+		if !call.Consumed {
+			call.Consumed = true
+			row := surface.TimelineItem{ID: call.CallKey, Kind: "toolCall", Title: action.Tool, Text: codexActionInput(action), CallID: call.CallID, Timestamp: call.At}
+			return []surface.TimelineItem{row, codexActionResult(action, call.CallID)}
 		}
 		return codexActionRow(action, str(item, "id"))
 	}
@@ -115,24 +148,23 @@ func codexActionResult(action codexAction, callID string) surface.TimelineItem {
 	return result
 }
 
-func codexWindowOutput(window *surface.CodexToolWindow, items []surface.TimelineItem) []surface.TimelineItem {
-	consumed, failed, commands, callID := window.Consumed, window.Failed, window.Commands, window.CallID
-	codexCloseWindow(window)
+func codexCallOutput(window *surface.CodexToolWindow, index int, items []surface.TimelineItem) []surface.TimelineItem {
+	call := window.Open[index]
+	window.Open = slices.Delete(slices.Clone(window.Open), index, index+1)
 	output := items[0]
-	if consumed {
-		if output.Status == "failed" && !failed {
+	if call.Consumed {
+		if output.Status == "failed" && !call.Failed {
 			return []surface.TimelineItem{{Kind: "notice", Title: "Script failed", Text: output.Text, Status: "failed"}}
 		}
 		return nil
 	}
-	if len(commands) > 0 && output.Status != "failed" {
+	if len(call.Commands) > 0 && output.Status != "failed" {
 		output.Status = codexBackgroundStatus
-		for _, command := range commands {
-			window.Background = append(window.Background, surface.CodexBackgroundCommand{CallID: callID, Command: command})
+		background := slices.Clone(window.Background)
+		for _, command := range call.Commands {
+			background = append(background, surface.CodexBackgroundCommand{CallID: call.CallID, Command: command})
 		}
-		if extra := len(window.Background) - codexBackgroundLimit; extra > 0 {
-			window.Background = slices.Clone(window.Background[extra:])
-		}
+		window.Background = background[max(0, len(background)-codexBackgroundLimit):]
 	}
 	if output.Status == codexBackgroundStatus {
 		output.Text = strings.TrimSpace("Running in the background.\n\n" + output.Text)

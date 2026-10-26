@@ -47,6 +47,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	currentTurnID := ""
 	codexTurns := map[int]*surface.TurnMetadata{}
 	codexItems := map[int][]surface.TimelineItem{}
+	callRecords := map[string]int{}
 	window := surface.CodexToolWindow{}
 	// Claude's turn state is rebuilt at start; Codex's turn and prompt state
 	// are known from the span's first turn start.
@@ -75,7 +76,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 				currentTurnID = turnID
 			}
 			recordTurnIDs[index] = currentTurnID
-			codexItems[index] = codexRecordItems(&window, record, currentTurnID)
+			codexItems[index] = codexPlaceItems(codexItems, callRecords, index, record, codexRecordItems(&window, record, currentTurnID))
 			if projection.consume(record, codexItems[index], currentTurnID) {
 				skipResponseUsers[index] = true
 			}
@@ -167,7 +168,9 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			}
 			for i := range items {
 				items[i].ID = codexServedItemKey(record, line, offset, items[i], i)
-				items[i].Timestamp = str(record, "timestamp")
+				if items[i].Timestamp == "" {
+					items[i].Timestamp = str(record, "timestamp")
+				}
 			}
 		}
 		if len(items) == 0 {

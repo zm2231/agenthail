@@ -131,7 +131,11 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 		return
 	}
 	key := codexServedItemKey(record, line, offset, item, index)
-	at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+	stamp := item.Timestamp
+	if stamp == "" {
+		stamp = str(record, "timestamp")
+	}
+	at, _ := time.Parse(time.RFC3339Nano, stamp)
 	operation := "upsert"
 	if item.Kind == "done" {
 		operation = "phase"

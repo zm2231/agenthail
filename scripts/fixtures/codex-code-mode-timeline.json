@@ -24,7 +24,7 @@
     "kind": "toolCall",
     "title": "exec_command",
     "text": "{\"cmd\":\"go test ./...\",\"workdir\":\"/work/fixture-project\"}",
-    "timestamp": "2026-01-01T12:00:21.000Z",
+    "timestamp": "2026-01-01T12:00:03.000Z",
     "callId": "call-tests",
     "turnId": "turn-1",
     "truncated": false
@@ -45,7 +45,7 @@
     "kind": "toolCall",
     "title": "apply_patch",
     "text": "{\"input\":\"*** Begin Patch\\n*** Update File: /work/fixture-project/render/title.go\\n@@ -12 +12 @@\\n-\\treturn \\\"Draft\\\"\\n+\\treturn \\\"Final\\\"\\n*** End Patch\"}",
-    "timestamp": "2026-01-01T12:00:24.500Z",
+    "timestamp": "2026-01-01T12:00:24.000Z",
     "callId": "call-patch",
     "turnId": "turn-1",
     "truncated": false
@@ -86,7 +86,7 @@
     "kind": "toolCall",
     "title": "mcp__docs__search",
     "text": "{\"query\":\"title rendering rules\"}",
-    "timestamp": "2026-01-01T12:00:34.000Z",
+    "timestamp": "2026-01-01T12:00:33.000Z",
     "callId": "call-lookup",
     "turnId": "turn-1",
     "truncated": false
@@ -106,7 +106,7 @@
     "kind": "toolCall",
     "title": "exec_command",
     "text": "{\"cmd\":\"go test ./render/...\",\"workdir\":\"/work/fixture-project\"}",
-    "timestamp": "2026-01-01T12:00:36.000Z",
+    "timestamp": "2026-01-01T12:00:35.000Z",
     "callId": "call-retest",
     "turnId": "turn-1",
     "truncated": false
@@ -173,7 +173,7 @@
     "role": "system",
     "origin": "task-notification",
     "title": "Background command",
-    "text": "Finished `make docs-site` · exit 0 · 1m26s\n\n```\nbuilding 214 pages\nwrote site/index.html\ndone in 86s\n```",
+    "text": "make docs-site · exit 0 · 1m26s\n\n```\nbuilding 214 pages\nwrote site/index.html\ndone in 86s\n```",
     "timestamp": "2026-01-01T12:01:52.000Z",
     "callId": "call-docs",
     "turnId": "turn-1",
@@ -183,7 +183,7 @@
       "direction": "in",
       "kind": "task",
       "peer": "Background command",
-      "summary": "Finished `make docs-site` · exit 0 · 1m26s"
+      "summary": "make docs-site · exit 0 · 1m26s"
     }
   }
 ]

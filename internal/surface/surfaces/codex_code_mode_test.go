@@ -62,7 +62,7 @@ func codexStreamedItems(t *testing.T, path string) []surface.TimelineItem {
 		if event.Kind == "commands" {
 			return
 		}
-		item := surface.TimelineItem{ID: event.ID, Kind: event.Kind, Title: event.Title, Text: event.Text, Status: event.Status, CallID: event.CallID, Origin: event.Origin}
+		item := surface.TimelineItem{ID: event.ID, Kind: event.Kind, Title: event.Title, Text: event.Text, Status: event.Status, CallID: event.CallID, Origin: event.Origin, Timestamp: event.Timestamp.Format(time.RFC3339Nano)}
 		if at, ok := index[item.ID]; ok {
 			items[at] = item
 			return
@@ -82,7 +82,8 @@ func codexServedShape(items []surface.TimelineItem) []surface.TimelineItem {
 		if item.Kind == "done" {
 			continue
 		}
-		shape = append(shape, surface.TimelineItem{ID: item.ID, Kind: item.Kind, Title: item.Title, Text: item.Text, Status: item.Status, CallID: item.CallID, Origin: item.Origin})
+		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		shape = append(shape, surface.TimelineItem{ID: item.ID, Kind: item.Kind, Title: item.Title, Text: item.Text, Status: item.Status, CallID: item.CallID, Origin: item.Origin, Timestamp: at.Format(time.RFC3339Nano)})
 	}
 	return shape
 }
@@ -108,14 +109,14 @@ func TestACodeModeThreadReadsAsToolRowsWhetherPagedOrStreamed(t *testing.T) {
 		{Kind: "toolCall", Title: "spawn_agent", Text: `{"prompt":"Review the parser"}`, CallID: "call-agent"},
 		{Kind: "toolResult", Title: "Tool result", Text: "Ada: pending init", CallID: "call-agent"},
 		{Kind: "event", Title: "Codex · Future event"},
-		{Kind: "event", Title: "Background command", Text: "Finished `make build` · exit 0 · 48s\n\n```\ncompiling\nok\n```", Status: "completed", CallID: "call-build", Origin: surface.OriginTaskNotification},
+		{Kind: "event", Title: "Background command", Text: "make build · exit 0 · 48s\n\n```\ncompiling\nok\n```", Status: "completed", CallID: "call-build", Origin: surface.OriginTaskNotification},
 	}
 	if len(paged) != len(want) {
 		t.Fatalf("paged=%s", pagedJSON)
 	}
 	for index := range want {
 		got := paged[index]
-		got.ID = ""
+		got.ID, got.Timestamp = "", ""
 		if !reflect.DeepEqual(got, want[index]) {
 			t.Fatalf("item %d=%+v want %+v", index, got, want[index])
 		}
@@ -127,7 +128,7 @@ func TestACodeModeThreadReadsAsToolRowsWhetherPagedOrStreamed(t *testing.T) {
 	if notice.Kind == "done" {
 		notice = surface.PresentTimelineItem(page.Items[len(page.Items)-2])
 	}
-	if notice.Agent == nil || notice.Agent.Kind != surface.AgentKindTask || notice.Agent.Summary != "Finished `make build` · exit 0 · 48s" {
+	if notice.Agent == nil || notice.Agent.Kind != surface.AgentKindTask || notice.Agent.Summary != "make build · exit 0 · 48s" {
 		t.Fatalf("background notice=%+v", notice)
 	}
 }

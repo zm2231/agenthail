@@ -23,11 +23,11 @@ func codexBackgroundFinished(window *surface.CodexToolWindow, action codexAction
 		callID = window.Background[index].CallID
 		window.Background = slices.Delete(slices.Clone(window.Background), index, index+1)
 	}
-	status, verb := "completed", "Finished"
+	status := "completed"
 	if action.Failed {
-		status, verb = "failed", "Failed"
+		status = "failed"
 	}
-	parts := []string{verb + " `" + codexCommandLine(action.Command) + "`"}
+	parts := []string{codexCommandLine(action.Command)}
 	if action.ExitCode != nil {
 		parts = append(parts, fmt.Sprintf("exit %d", *action.ExitCode))
 	}
