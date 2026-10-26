@@ -21,7 +21,7 @@ struct LocalSend: Identifiable, Equatable {
     }
 
     static func label(for status: String?, evidence: String? = nil, waitingOnYou: Bool = false) -> String {
-        if evidence == "transport_accepted" { return "Accepted · Not yet confirmed" }
+        if evidence == "transport_accepted" { return "Steer sent" }
         switch status {
         case "queued": return waitingOnYou ? "Queued · Waiting on you" : "Queued"
         case "submitted": return "Submitted"

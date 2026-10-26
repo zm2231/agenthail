@@ -41,6 +41,8 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
         sleep(3)
+        let left = newestReply(app)
+        XCTAssertGreaterThan(left, 0, "the session showed no reply before switching away")
         app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
         app.buttons["session-computer::codex-demo"].tapWhenReady()
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
@@ -55,6 +57,7 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
             if newest > 0, seen.last != newest { seen.append(newest) }
             record(app, "return-\(seen.count)")
         }
+        XCTAssertGreaterThan(seen.first ?? 0, left, "the returned session did not show the replies it caught up on")
         XCTAssertLessThanOrEqual(seen.count, 2, "the transcript walked through caught-up replies \(seen) instead of opening at the latest")
         XCTAssertFalse(app.buttons["Jump to latest"].exists, "a returned session opened away from its latest row")
     }
