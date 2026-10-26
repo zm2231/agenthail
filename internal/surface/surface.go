@@ -804,6 +804,21 @@ type TurnObservation struct {
 	Reply     *ReplyResult `json:"reply,omitempty"`
 }
 
+// UsageLimitReader reads what a session's transcript alone says about its
+// usage limits, asking no process that may hold the session.
+type UsageLimitReader interface {
+	// UsageLimitTranscript is the session's transcript, or "" while it has
+	// none.
+	UsageLimitTranscript(*Session) string
+	ReadUsageLimit(ctx context.Context, sess *Session, transcript string) (UsageLimitEvidence, error)
+}
+
+type UsageLimitEvidence struct {
+	Account   string
+	SettledAt time.Time
+	Stop      *LimitStop
+}
+
 // LimitStop is a session's last turn, refused by a usage limit. TurnID is the
 // refused turn; ResetsAt is when the limit lifts, when the provider said.
 type LimitStop struct {

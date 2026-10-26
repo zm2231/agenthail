@@ -94,9 +94,10 @@ func (d *Daemon) resumeAfterLimits(ctx context.Context, now time.Time) {
 	}
 }
 
-// sweepLimitStops reads each recently active local Claude session whose
-// transcript changed since the last pass, recording a usage-limit stop and
-// forgetting one that something ran after.
+// sweepLimitStops reads the transcript of each local Claude session that
+// changed recently and since the last pass, recording a usage-limit stop and
+// forgetting one that something ran after. It reads transcripts only, so a
+// pass asks nothing of the sessions' processes or of Claude.
 func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 	sessions, err := d.Registry.ListSessions(0)
 	if err != nil {
@@ -114,27 +115,32 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 		if session.Surface != surface.KindClaude {
 			continue
 		}
-		changed, recent := d.limitResumes.transcriptChanged(session, now)
+		adapter, err := d.adapters().For(session)
+		if err != nil {
+			continue
+		}
+		reader, ok := adapter.(surface.UsageLimitReader)
+		if !ok {
+			continue
+		}
+		transcript := reader.UsageLimitTranscript(session)
+		changed, recent := d.limitResumes.transcriptChanged(session.ID, transcript, now)
 		if _, stopped := recorded[session.ID]; !recent && !stopped {
 			continue
 		}
 		if !changed {
 			continue
 		}
-		adapter, err := d.adapters().For(session)
-		if err != nil {
-			continue
-		}
 		operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-		observation, err := adapter.Observe(operationCtx, session)
+		evidence, err := reader.ReadUsageLimit(operationCtx, session, transcript)
 		cancel()
-		if err != nil || observation == nil {
+		if err != nil {
 			d.limitResumes.forget(session.ID)
 			continue
 		}
-		d.limitResumes.noteSettled(observation.UsageAccount, observation.SettledAt)
-		if stop := observation.LimitStop; stop != nil {
-			if err := d.Registry.RecordLimitStop(*session, observation.UsageAccount, *stop); err != nil {
+		d.limitResumes.noteSettled(evidence.Account, evidence.SettledAt)
+		if stop := evidence.Stop; stop != nil {
+			if err := d.Registry.RecordLimitStop(*session, evidence.Account, *stop); err != nil {
 				d.log.Printf("record usage-limit stop of %s: %s", d.resolveDisplay(session.ID), err)
 			}
 			continue
@@ -255,28 +261,25 @@ func (d *Daemon) logLimitResume(_ bool, err error) {
 	}
 }
 
-// transcriptChanged reports whether session's transcript changed since the
-// last pass and whether the session was active within the sweep window. A
-// session without a known transcript is always read.
-func (l *limitResumer) transcriptChanged(session *surface.Session, now time.Time) (bool, bool) {
-	stamp := session.LastActive
-	if session.Transcript != "" {
-		info, err := os.Stat(session.Transcript)
-		if err != nil {
-			return false, false
-		}
-		stamp = info.ModTime()
+// transcriptChanged reports whether a session's transcript changed since the
+// last pass and whether it changed within the sweep window. A session with no
+// transcript has nothing to read.
+func (l *limitResumer) transcriptChanged(sessionID, transcript string, now time.Time) (bool, bool) {
+	if transcript == "" {
+		return false, false
 	}
-	recent := stamp.IsZero() || now.Sub(stamp) < limitSweepWindow
-	if session.Transcript == "" {
-		return true, recent
+	info, err := os.Stat(transcript)
+	if err != nil {
+		return false, false
 	}
+	stamp := info.ModTime()
+	recent := now.Sub(stamp) < limitSweepWindow
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if previous, ok := l.seen[session.ID]; ok && previous.Equal(stamp) {
+	if previous, ok := l.seen[sessionID]; ok && previous.Equal(stamp) {
 		return false, recent
 	}
-	l.seen[session.ID] = stamp
+	l.seen[sessionID] = stamp
 	return true, recent
 }
 

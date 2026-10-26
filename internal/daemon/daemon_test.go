@@ -41,6 +41,8 @@ type daemonSurface struct {
 	turnID         string
 	observeErr     error
 	observeCalls   atomic.Int32
+	transcripts    map[string]string
+	limitReads     atomic.Int32
 	startOptions   []surface.SessionStartOptions
 	startErr       error
 	startHook      func()
