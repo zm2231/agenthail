@@ -105,6 +105,7 @@
 		A9E65E3E5334FADC7423AE86 /* PreviewStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4A81FE780AC8CD4C5CBA01 /* PreviewStream.swift */; };
 		AB62E3BDE27A26B462335BEA /* SessionSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */; };
 		AC307D7B22335D90E69B08B8 /* UIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39165C9FB624F0AFA9B6A590 /* UIConfig.swift */; };
+		B100C4F4AE622463D602F2D7 /* ScreenshotInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19AE4DCCC41C8D6914C5B04 /* ScreenshotInk.swift */; };
 		B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */; };
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
@@ -343,6 +344,7 @@
 		EDE9B5CB52773C3043A3F2D0 /* TabHitAreaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabHitAreaUITests.swift; sourceTree = "<group>"; };
 		F09A07A373E592786676A4E6 /* ActivityCollapseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityCollapseTests.swift; sourceTree = "<group>"; };
 		F1089664ADD0371302D4F1A5 /* RoleStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleStyle.swift; sourceTree = "<group>"; };
+		F19AE4DCCC41C8D6914C5B04 /* ScreenshotInk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotInk.swift; sourceTree = "<group>"; };
 		F24B656FE4EB45788315815D /* SessionStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStyle.swift; sourceTree = "<group>"; };
 		F61606F9A50CEDA19D8E2CEE /* HolderPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HolderPicker.swift; sourceTree = "<group>"; };
 		F6B8A40C6D1F7B04C813965F /* CatalogBatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogBatch.swift; sourceTree = "<group>"; };
@@ -445,6 +447,7 @@
 				7A65688305EB3C5F6866CCBF /* GoalStatusUITests.swift */,
 				82CF227CB7E6B02B97811F14 /* HolderPickerUITests.swift */,
 				5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */,
+				F19AE4DCCC41C8D6914C5B04 /* ScreenshotInk.swift */,
 				87E83870853635F81A3F0906 /* SessionHeaderBackingUITests.swift */,
 				2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */,
 				62E544A356E8BB25131FFEBB /* SessionScopeUITests.swift */,
@@ -821,6 +824,7 @@
 				D228ECC8541A3BCD7512D4A3 /* GoalStatusUITests.swift in Sources */,
 				3E9810790B94455AAC3A00A5 /* HolderPickerUITests.swift in Sources */,
 				65BD86F3827C034C03B23A9A /* NeedsYouUITests.swift in Sources */,
+				B100C4F4AE622463D602F2D7 /* ScreenshotInk.swift in Sources */,
 				EF5CB7B9895493DA47298FEB /* SessionHeaderBackingUITests.swift in Sources */,
 				070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */,
 				14444A5A7280E6DCE1836F46 /* SessionScopeUITests.swift in Sources */,

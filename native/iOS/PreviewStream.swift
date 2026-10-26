@@ -10,7 +10,9 @@ enum PreviewStream {
     nonisolated(unsafe) static var base: UInt64 = 0
     nonisolated(unsafe) static var history = 160
 
-    static var now: Int { history + Int(Date().timeIntervalSince(started) / interval) }
+    static let paused = ProcessInfo.processInfo.arguments.contains("--preview-stream-paused")
+
+    static var now: Int { history + (paused ? 0 : Int(Date().timeIntervalSince(started) / interval)) }
 
     static func event(_ k: Int, session: String) -> [String: Any] {
         let ts = ISO8601DateFormatter().string(from: started.addingTimeInterval(Double(k - history) * interval))

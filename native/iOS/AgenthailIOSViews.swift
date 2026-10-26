@@ -451,6 +451,8 @@ struct SessionScreen: View {
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
     @State private var atLatest = true
+    @State private var overflows = false
+    @State private var jumps = 0
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
 
@@ -479,7 +481,7 @@ struct SessionScreen: View {
     }
 
     private func scrollToLatest() {
-        if let id = latestRowID {
+        if overflows, let id = latestRowID {
             position.scrollTo(id: id, anchor: .bottom)
         } else {
             position.scrollTo(edge: .bottom)
@@ -562,6 +564,7 @@ struct SessionScreen: View {
             .padding(.vertical, 16)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             .transcriptScrimContent()
+            .id(jumps)
         }
         .scrollPosition($position)
         .accessibilityIdentifier("session-timeline")
@@ -590,6 +593,11 @@ struct SessionScreen: View {
 #endif
             atLatest = value
         }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height > geometry.visibleRect.height
+        } action: { _, value in
+            overflows = value
+        }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         .edgeBar(.top, spacing: 0) {
@@ -600,7 +608,8 @@ struct SessionScreen: View {
                 if !atLatest && detail != nil {
                     Button {
                         followingLatest = true
-                        scrollToLatest()
+                        jumps += 1
+                        position.scrollTo(edge: .bottom)
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
@@ -1099,7 +1108,7 @@ struct IOSTimelineRow: View {
     var onInspect: () -> Void = {}
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
-	@State private var retainedBody: RetainedBodyResult?
+	@State private var loadedBody: RowChoice<RetainedBodyResult>?
 
     var body: some View {
         if item.kind == "done" {
@@ -1150,8 +1159,15 @@ struct IOSTimelineRow: View {
                     }
                     .padding(.leading, ToolLineLabel.indent)
                 } else if item.truncated { ShortenedNote().padding(.leading, ToolLineLabel.indent) }
+				let retainedBody = rows.current(loadedBody) ?? rows.body(item.id)
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
-					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
+					Button("Load retained body") {
+						Task {
+							guard let body = await bodyLoader(item) else { return }
+							loadedBody = rows.choice(body)
+							rows.set(item.id, body: body)
+						}
+					}.font(.caption)
 				} else if let retainedBody {
                     SessionMarkdown(text: retainedBody.text, readingStyle: item.kind == "reasoning")
                     if let error = retainedBody.error {

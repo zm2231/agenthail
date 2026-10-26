@@ -63,6 +63,9 @@ struct ToolPresentationTest {
         check(TranscriptRows(memory: memory, session: "s1").isOpen("row") == true, "coming back to the session finds it open")
         check(TranscriptRows(memory: memory, session: "s2").isOpen("row") == nil, "another session keeps its own rows")
         check(first == TranscriptRows(memory: memory, session: "s1") && first != TranscriptRows(memory: memory, session: "s2"), "row memory is equal only for the same session")
+        first.set("row", body: RetainedBodyResult(text: "kept", error: nil))
+        check(TranscriptRows(memory: memory, session: "s1").body("row")?.text == "kept", "a loaded retained body outlives the row that loaded it")
+        check(TranscriptRows(memory: memory, session: "s2").body("row") == nil, "another session keeps its own bodies")
     }
 
     static func check(_ condition: Bool, _ message: String) {
