@@ -48,6 +48,22 @@ func newLimitFixture(t *testing.T, ids ...string) *limitFixture {
 	return f
 }
 
+func (f *daemonSurface) UsageLimitTranscript(session *surface.Session) string {
+	if session.Transcript != "" {
+		return session.Transcript
+	}
+	return f.transcripts[session.ID]
+}
+
+func (f *daemonSurface) ReadUsageLimit(_ context.Context, session *surface.Session, _ string) (surface.UsageLimitEvidence, error) {
+	f.limitReads.Add(1)
+	observation := f.observations[session.ID]
+	if observation == nil {
+		return surface.UsageLimitEvidence{}, nil
+	}
+	return surface.UsageLimitEvidence{Account: observation.UsageAccount, SettledAt: observation.SettledAt, Stop: observation.LimitStop}, nil
+}
+
 func (f *limitFixture) observe(id string, at time.Time, observation *surface.TurnObservation) {
 	f.t.Helper()
 	f.fake.observations[id] = observation
@@ -287,8 +303,40 @@ func TestAnUnchangedTranscriptIsNotReadAgain(t *testing.T) {
 	f.refused("worker", "/roots/work", "u1", refusedAt, refusedAt.Add(time.Hour))
 	f.pass(refusedAt.Add(time.Second))
 	f.pass(refusedAt.Add(2 * time.Second))
-	if calls := f.fake.observeCalls.Load(); calls != 1 {
-		t.Fatalf("observed %d times", calls)
+	if reads := f.fake.limitReads.Load(); reads != 1 {
+		t.Fatalf("read %d times", reads)
+	}
+}
+
+func TestASessionWhoseRowNamesNoTranscriptIsReadFromTheOneItHas(t *testing.T) {
+	f := newLimitFixture(t, "worker")
+	session := f.fake.sessions["worker"]
+	f.fake.transcripts = map[string]string{"worker": session.Transcript}
+	session.Transcript = ""
+	if err := f.r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	f.refused("worker", "/roots/work", "u1", refusedAt, refusedAt.Add(2*time.Hour))
+	f.pass(refusedAt.Add(time.Minute))
+	if state := f.state("worker"); state != registry.LimitResumeWaiting {
+		t.Fatalf("state=%q, want waiting", state)
+	}
+}
+
+func TestASessionWithoutATranscriptIsNotReadEachPass(t *testing.T) {
+	f := newLimitFixture(t)
+	session := surface.Session{ID: "exited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: 1 << 30, Status: surface.StatusIdle}
+	if err := f.r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.sessions["exited"] = session
+	now := time.Now()
+	for pass := range 3 {
+		f.pass(now.Add(time.Duration(pass) * limitResumeEvery))
+	}
+	if reads, observed := f.fake.limitReads.Load(), f.fake.observeCalls.Load(); reads != 0 || observed != 0 {
+		t.Fatalf("read %d and observed %d times", reads, observed)
 	}
 }
 

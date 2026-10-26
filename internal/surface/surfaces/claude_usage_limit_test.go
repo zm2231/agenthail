@@ -54,6 +54,12 @@ func TestAUsageLimitedTurnEndsTheReplyWithTheLimit(t *testing.T) {
 // limit refused, as Claude Code records it.
 func usageLimitedConversation(t *testing.T) (*Claude, *surface.Session) {
 	t.Helper()
+	_, c, sess := usageLimitedFixture(t)
+	return c, sess
+}
+
+func usageLimitedFixture(t *testing.T) (*claudetest.Fixture, *Claude, *surface.Session) {
+	t.Helper()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	fixture := claudetest.New(t)
 	transcript := filepath.Join(fixture.Root, "projects", "fixture-project", fixtureConversation+".jsonl")
@@ -64,7 +70,32 @@ func usageLimitedConversation(t *testing.T) (*Claude, *surface.Session) {
 	if err := os.WriteFile(transcript, []byte(user+"\n"+claudeUsageLimitLine+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return NewClaude(nil, fixture.Home), &surface.Session{ID: fixtureConversation, Surface: surface.KindClaude, Transcript: transcript}
+	return fixture, NewClaude(nil, fixture.Home), &surface.Session{ID: fixtureConversation, Surface: surface.KindClaude, Transcript: transcript}
+}
+
+func TestReadingTheLimitOfAnExitedSessionAsksNoClaudeCommand(t *testing.T) {
+	fixture, c, sess := usageLimitedFixture(t)
+	transcript := sess.Transcript
+	sess.Transcript, sess.PID, sess.RuntimeKind = "", exitedPID, surface.RuntimeClaudeCLI
+	if found := c.UsageLimitTranscript(sess); found != transcript {
+		t.Fatalf("transcript=%q, want %q", found, transcript)
+	}
+	evidence, err := c.ReadUsageLimit(context.Background(), sess, transcript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Stop == nil || evidence.Stop.TurnID != "u1" || evidence.Account != claudeTranscriptRoot(transcript) {
+		t.Fatalf("evidence=%+v", evidence)
+	}
+	if calls := fixture.Invocations("agents", "--json", "--all"); calls != 0 {
+		t.Fatalf("listed Claude's agents %d times", calls)
+	}
+	if _, err := c.Observe(context.Background(), sess); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.Invocations("agents", "--json", "--all") == 0 {
+		t.Fatal("observing the exited session listed no agents, so this test counts nothing")
+	}
 }
 
 func TestAUsageLimitedTurnReadsAsANoticeAndAFailedTurn(t *testing.T) {
