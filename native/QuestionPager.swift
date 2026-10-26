@@ -3,7 +3,7 @@ import Foundation
 struct QuestionPager: Hashable {
     let questions: [SessionRequest.Question]
     private(set) var step = 0
-    private(set) var picks: [Int: Set<String>] = [:]
+    private(set) var picks: [Int: Set<Int>] = [:]
     private(set) var typed: [Int: String] = [:]
 
     init(questions: [SessionRequest.Question]) {
@@ -16,8 +16,8 @@ struct QuestionPager: Hashable {
     var onReview: Bool { !isSingle && step == reviewStep }
     var current: SessionRequest.Question? { questions.indices.contains(step) ? questions[step] : nil }
 
-    func isPicked(_ label: String, at index: Int) -> Bool {
-        picks[index]?.contains(label) == true
+    func isPicked(_ option: Int, at index: Int) -> Bool {
+        picks[index]?.contains(option) == true
     }
 
     func typedAnswer(at index: Int) -> String {
@@ -28,7 +28,8 @@ struct QuestionPager: Hashable {
         guard questions.indices.contains(index) else { return nil }
         let other = typedAnswer(at: index).trimmingCharacters(in: .whitespacesAndNewlines)
         if !other.isEmpty { return other }
-        let picked = questions[index].options.map(\.label).filter { isPicked($0, at: index) }
+        let options = questions[index].options
+        let picked = options.indices.filter { isPicked($0, at: index) }.map { options[$0].label }
         return picked.isEmpty ? nil : picked.joined(separator: ", ")
     }
 
@@ -45,16 +46,16 @@ struct QuestionPager: Hashable {
         return answers
     }
 
-    mutating func choose(_ label: String) -> [String: String]? {
-        guard let question = current else { return nil }
-        if isOneTap { return [question.question: label] }
+    mutating func choose(_ option: Int) -> [String: String]? {
+        guard let question = current, question.options.indices.contains(option) else { return nil }
+        if isOneTap { return [question.question: question.options[option].label] }
         var picked = picks[step] ?? []
         if question.multiSelect {
-            if picked.contains(label) { picked.remove(label) } else { picked.insert(label) }
+            if picked.contains(option) { picked.remove(option) } else { picked.insert(option) }
             picks[step] = picked
             return nil
         }
-        picks[step] = [label]
+        picks[step] = [option]
         typed[step] = nil
         step += 1
         return nil

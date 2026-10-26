@@ -31,7 +31,7 @@ export function bindQuestionPager(respond) {
     }
     const pick = event.target.closest("[data-pager-pick]");
     if (!pick) return;
-    const answers = choose(pager, pick.dataset.pagerPick);
+    const answers = choose(pager, Number(pick.dataset.pagerPick));
     if (answers) await send(form, answers, respond);
     else refresh(form, pager);
   });
@@ -57,7 +57,7 @@ export function bindQuestionPager(respond) {
   });
   document.addEventListener("keydown", (event) => {
     const form = event.target.closest?.("form[data-request-question]");
-    if (!form || event.target.matches("input, textarea, select") || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (!form || event.target.matches("input, textarea, select") || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     const request = requestOf(form);
     if (!request) return;
     const pager = pagerFor(request);

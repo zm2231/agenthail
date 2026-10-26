@@ -28,11 +28,11 @@ struct QuestionPagerView: View {
             }
             actions
         }
-        .contentShape(Rectangle())
-        .onTapGesture { focused = true }
+        #if os(macOS)
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
+        #endif
         .onKeyPress(keys: [.leftArrow, .rightArrow, .tab, .return]) { press in
             handle(press)
         }
@@ -65,7 +65,7 @@ struct QuestionPagerView: View {
             focused = true
         } label: {
             Label {
-                Text(title).lineLimit(1).truncationMode(.tail)
+                Text(title).underline(selected).lineLimit(1).truncationMode(.tail)
             } icon: {
                 Image(systemName: systemImage)
             }
@@ -74,7 +74,7 @@ struct QuestionPagerView: View {
             .padding(.vertical, 4)
             .foregroundStyle(selected ? accent : AnyShapeStyle(RoleStyle(.muted)))
             .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.clear), in: Capsule())
-            .overlay(Capsule().strokeBorder(.quaternary))
+            .overlay(Capsule().strokeBorder(.quaternary, lineWidth: selected ? 2 : 1))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -88,8 +88,8 @@ struct QuestionPagerView: View {
                 Text(question.header).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             Text(question.question).font(.body.weight(.medium))
-            ForEach(Array(question.options.enumerated()), id: \.element.label) { number, option in
-                optionRow(option, number: number + 1, multiSelect: question.multiSelect)
+            ForEach(question.options.indices, id: \.self) { index in
+                optionRow(question.options[index], index: index, multiSelect: question.multiSelect)
             }
             TextField("Other answer", text: Binding(get: { pager.typedAnswer(at: pager.step) }, set: { pager.type($0) }))
                 .textFieldStyle(.roundedBorder)
@@ -98,12 +98,17 @@ struct QuestionPagerView: View {
         }
     }
 
-    private func optionRow(_ option: SessionRequest.Option, number: Int, multiSelect: Bool) -> some View {
-        let picked = pager.isPicked(option.label, at: pager.step)
+    private func optionRow(_ option: SessionRequest.Option, index: Int, multiSelect: Bool) -> some View {
+        let picked = pager.isPicked(index, at: pager.step)
+        let number = index + 1
         return Button {
-            choose(option.label)
+            choose(index)
         } label: {
             HStack(alignment: .firstTextBaseline) {
+                #if os(macOS)
+                Text(number < 10 ? "\(number)" : "").font(.caption.monospacedDigit()).foregroundStyle(RoleStyle(.faint))
+                    .frame(width: 10, alignment: .trailing)
+                #endif
                 Image(systemName: picked ? (multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle") : (multiSelect ? "square" : "circle"))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.label)
@@ -112,11 +117,6 @@ struct QuestionPagerView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                #if os(macOS)
-                if number < 10 {
-                    Text("\(number)").font(.caption.monospacedDigit()).foregroundStyle(RoleStyle(.faint))
-                }
-                #endif
             }
             .contentShape(Rectangle())
         }
@@ -180,9 +180,9 @@ struct QuestionPagerView: View {
         }
     }
 
-    private func choose(_ label: String) {
+    private func choose(_ option: Int) {
         focused = true
-        if let answers = pager.choose(label) { respond(.answers(answers)) }
+        if let answers = pager.choose(option) { respond(.answers(answers)) }
     }
 
     private func advance() {
@@ -209,7 +209,7 @@ struct QuestionPagerView: View {
     private func pickNumber(_ characters: String) -> KeyPress.Result {
         guard !answering, let number = Int(characters), let question = pager.current,
               question.options.indices.contains(number - 1) else { return .ignored }
-        choose(question.options[number - 1].label)
+        choose(number - 1)
         return .handled
     }
 }

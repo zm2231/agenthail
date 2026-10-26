@@ -32,7 +32,7 @@ export function answerAt(pager, index) {
   if (!question) return null;
   const other = (pager.typed[index] || "").trim();
   if (other) return other;
-  const picked = (question.options || []).map((option) => option.label).filter((label) => pager.picks[index].includes(label));
+  const picked = (question.options || []).filter((_, option) => pager.picks[index].includes(option)).map((option) => option.label);
   return picked.length ? picked.join(", ") : null;
 }
 
@@ -44,16 +44,17 @@ export function answers(pager) {
   return Object.fromEntries(pager.questions.map((question, index) => [question.question, answerAt(pager, index)]));
 }
 
-export function choose(pager, label) {
+export function choose(pager, option) {
   const question = pager.questions[pager.step];
-  if (!question) return null;
-  if (isOneTap(pager)) return { [question.question]: label };
+  const chosen = question?.options?.[option];
+  if (!chosen) return null;
+  if (isOneTap(pager)) return { [question.question]: chosen.label };
   const picked = pager.picks[pager.step];
   if (question.multiSelect) {
-    pager.picks[pager.step] = picked.includes(label) ? picked.filter((value) => value !== label) : [...picked, label];
+    pager.picks[pager.step] = picked.includes(option) ? picked.filter((value) => value !== option) : [...picked, option];
     return null;
   }
-  pager.picks[pager.step] = [label];
+  pager.picks[pager.step] = [option];
   pager.typed[pager.step] = "";
   pager.step += 1;
   return null;
@@ -99,8 +100,8 @@ export function renderPage(pager) {
   if (!question) return "";
   const header = isSingle(pager) && question.header ? `<small>${escape(question.header)}</small>` : "";
   const options = (question.options || []).map((option, index) => {
-    const picked = pager.picks[pager.step].includes(option.label);
-    return `<button type="button" class="pager-option" data-pager-pick="${escape(option.label)}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span>${index < 9 ? `<kbd>${index + 1}</kbd>` : ""}</button>`;
+    const picked = pager.picks[pager.step].includes(index);
+    return `<button type="button" class="pager-option" data-pager-pick="${index}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><kbd aria-hidden="true">${index < 9 ? index + 1 : ""}</kbd><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span></button>`;
   }).join("");
   return `${header}<p class="pager-question">${escape(question.question)}</p>${options}<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>`;
 }

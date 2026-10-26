@@ -2690,9 +2690,14 @@ select {
   flex: none;
 }
 .pager-chip[aria-current="step"] {
-  border-color: var(--accent);
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
   color: var(--ink);
   font-weight: 600;
+}
+.pager-chip[aria-current="step"] .pager-chip-label {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .pager-chip-label {
   overflow: hidden;
@@ -2720,7 +2725,7 @@ select {
   text-align: left;
   cursor: pointer;
 }
-.pager-option > span:nth-child(2),
+.pager-option > span:last-child,
 .pager-review-row {
   display: grid;
   flex: 1;
@@ -2732,6 +2737,8 @@ select {
   color: var(--quiet);
 }
 .pager-option kbd {
+  min-width: 1ch;
+  text-align: right;
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 0.75rem;

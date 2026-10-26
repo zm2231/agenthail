@@ -40,6 +40,13 @@ final class QuestionPagerUITests: XCTestCase {
 
         app.buttons.matching(identifier: "question-pager-chips").element(boundBy: 0).tap()
         XCTAssertTrue(app.buttons["Stream reader first, Smaller change that unblocks the failing regression test today"].waitForExistence(timeout: 5), "a chip goes back to its question")
+
+        let other = app.textFields["Other answer"]
+        other.tap()
+        other.typeText("Write the test first")
+        XCTAssertEqual(other.value as? String, "Write the test first", "the Other field takes typing inside the card")
+        app.buttons.matching(identifier: "question-pager-chips").element(boundBy: 2).tap()
+        XCTAssertTrue(app.buttons["Landing order for the reconnect fix, Write the test first"].waitForExistence(timeout: 5), "a typed answer replaces the pick in the review")
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
