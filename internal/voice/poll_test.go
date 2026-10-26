@@ -50,7 +50,7 @@ func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
 	if got := f.View(); !got.Truncated {
 		t.Fatalf("the lost events were not recorded: %+v", got)
 	}
-	f.ticks <- time.Time{}
+	f.clockTicks <- time.Time{}
 	testkit.Eventually(t, "the poll after the next tick", 5*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()

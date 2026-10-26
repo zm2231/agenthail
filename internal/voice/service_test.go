@@ -42,8 +42,8 @@ type fixtureProvider struct {
 	// releases one as Codex sending an event would.
 	ticks   <-chan time.Time
 	arrived chan struct{}
-	// waiting counts observers waiting on ticks, in Poll or in the
-	// service's pause.
+	// waiting counts observers waiting on ticks, in Poll or on the
+	// service's clock.
 	waiting  atomic.Int32
 	lastWait time.Duration
 	// lost makes every Poll report its events lost, as a dropped source does.
@@ -410,7 +410,10 @@ type voiceFixture struct {
 	provider *fixtureProvider
 	path     string
 	ticks    chan time.Time
-	mu       sync.Mutex
+	// clockTicks feeds the service's tickers apart from Poll, as real tickers
+	// are, so a follower waiting on a delegation cannot take the poll's tick.
+	clockTicks chan time.Time
+	mu         sync.Mutex
 	now      time.Time
 	cycles   chan time.Time
 	ticked   int64
@@ -502,7 +505,7 @@ func fixture(t *testing.T) (*voiceFixture, *fixtureProvider) {
 func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	t.Helper()
 	g := &gate{entered: make(chan string, 16)}
-	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
+	f := &voiceFixture{t: t, gate: g, provider: &fixtureProvider{gate: g}, path: filepath.Join(t.TempDir(), "voice", "operator.json"), ticks: make(chan time.Time), clockTicks: make(chan time.Time), now: time.Unix(1_700_000_000, 0)}
 	f.provider.ticks = f.ticks
 	var resolver TargetResolver
 	if options.path != "" {
@@ -530,7 +533,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 		},
 		ticker: func() (<-chan time.Time, func()) {
 			f.provider.waiting.Add(1)
-			return f.ticks, func() { f.provider.waiting.Add(-1) }
+			return f.clockTicks, func() { f.provider.waiting.Add(-1) }
 		},
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
@@ -543,7 +546,10 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 			}
 		}
 	}
-	t.Cleanup(func() { close(f.ticks) })
+	t.Cleanup(func() {
+		close(f.ticks)
+		close(f.clockTicks)
+	})
 	t.Cleanup(f.service.Close)
 	return f
 }
