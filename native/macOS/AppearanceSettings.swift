@@ -117,7 +117,7 @@ struct AppearanceSettings: View {
         .confirmationDialog("Reset appearance to the defaults?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { write(draft.reset()) }
         } message: {
-            Text(draft.scope == .thisMac ? "This removes every appearance setting made for this Mac only." : "This removes every appearance setting that applies to all devices. Settings made for this Mac only stay.")
+            Text(draft.scope == .thisMac ? "This removes every appearance setting made for this Mac only." : "This removes every appearance setting that applies to all devices, and this Mac's own settings that would hide the reset. Other devices keep their own settings.")
         }
         .onDisappear { AccentPanel.shared.dismiss() }
         .task {

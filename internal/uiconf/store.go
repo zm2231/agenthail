@@ -132,8 +132,9 @@ func (s *Store) Write(text, author, message string) (State, bool, error) {
 	return state, changed, err
 }
 
-// Update applies change to the current text and commits the result.
-func (s *Store) Update(author, message string, change func(string) string) (State, bool, error) {
+// Update applies change to the current text and commits the result with the
+// message change returns.
+func (s *Store) Update(author string, change func(string) (text, message string)) (State, bool, error) {
 	unlock, err := s.lock()
 	if err != nil {
 		return State{}, false, err
@@ -146,7 +147,8 @@ func (s *Store) Update(author, message string, change func(string) string) (Stat
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return State{}, false, err
 	}
-	if err := atomicfile.Write(s.Path(), []byte(change(string(current))), 0o600); err != nil {
+	text, message := change(string(current))
+	if err := atomicfile.Write(s.Path(), []byte(text), 0o600); err != nil {
 		return State{}, false, err
 	}
 	changed, err := s.commitLocked(author, message)

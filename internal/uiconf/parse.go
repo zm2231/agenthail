@@ -138,24 +138,13 @@ func (p Parsed) Resolve(device Device) map[string]any {
 // Chosen returns, for one device, each key's value as ui.conf writes it, and
 // the device of every value that comes from a key@<device> line.
 func (p Parsed) Chosen(device Device) (map[string]string, map[string]string) {
-	rank := func(s setting) int {
-		switch {
-		case s.device == "":
-			return 1
-		case s.device == device.Class:
-			return 2
-		case device.Name != "" && s.device == "device:"+device.Name:
-			return 3
-		}
-		return 0
-	}
 	winners := map[string]setting{}
 	for _, s := range p.settings {
-		r := rank(s)
+		r := device.rank(s.device)
 		if r == 0 {
 			continue
 		}
-		if current, ok := winners[s.key]; !ok || r >= rank(current) {
+		if current, ok := winners[s.key]; !ok || r >= device.rank(current.device) {
 			winners[s.key] = s
 		}
 	}
