@@ -31,6 +31,7 @@ export const VIEWS = [
   { name: "voice dialog", dashboard: "full", hash: "overview", act: opened((page) => press(page, "#voice-orchestrator"), "#voice-dialog[open]") },
   { name: "project dialog", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, "[data-project-new]")), "#project-dialog[open]") },
   { name: "project menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, ".project-menu summary")), ".project-menu[open] .project-menu-items") },
+  { name: "usage accounts", dashboard: "full", hash: "overview", wideOnly: true, act: opened((page) => press(page, "#usage-line"), "#usage-panel .usage-account") },
   { name: "host picker", dashboard: "full", hash: "conversations", act: opened(async (page) => (await press(page, "#new-conversation-toggle"), await press(page, "#new-conversation-host")), "#new-conversation-host-menu") },
   { name: "overview", dashboard: "full", hash: "overview", ready: "#recent-activity > *" },
   { name: "conversations", dashboard: "full", hash: "conversations", ready: "#session-list [data-session]" },
@@ -45,7 +46,7 @@ export const VIEWS = [
   { name: "empty audit", dashboard: "empty", hash: "operations", act: operations("audit") },
 ];
 
-const LOADED = { full: "#usage-line .usage-meter" };
+const LOADED = { full: "#usage-line .usage-chip" };
 
 export async function openView(page, dashboard, view) {
   await page.goto("about:blank");

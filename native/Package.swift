@@ -46,7 +46,7 @@ let package = Package(
                 "ProjectActions.swift",
                 "HostNames.swift",
                 "UsageMeterText.swift",
-                "UsageStrip.swift",
+                "UsageAccounts.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",

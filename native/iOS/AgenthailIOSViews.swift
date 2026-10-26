@@ -239,7 +239,7 @@ struct ConversationListView: View {
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-            UsageMetersRow(feed: usage)
+            UsageMetersRow(feed: usage, sessions: model.snapshot?.sessions ?? [], open: openSession)
             if let error = model.connectionError {
                 Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(PhonePalette.muted)
                     .listRowBackground(GlassRowBackground(selected: false))

@@ -73,7 +73,7 @@ SOURCES=(
   BackdropLayers.swift
   macOS/BoundedDock.swift
   UsageMeterText.swift
-  UsageStrip.swift
+  UsageAccounts.swift
   macOS/ContextRingGauge.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift

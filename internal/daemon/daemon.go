@@ -45,6 +45,7 @@ type Daemon struct {
 	claudeConfigRootsMu  sync.Mutex
 	claudeConfigRootsAt  time.Time
 	claudeConfigRootList []surface.ClaudeConfigRoot
+	claudeUsage          claudeUsageCache
 	coordinatorMu        sync.Mutex
 	pollInterval         time.Duration
 	Surfaces             []surface.Surface

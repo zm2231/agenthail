@@ -10,7 +10,7 @@ struct StatusTail: View {
     var body: some View {
         HStack(spacing: DesktopSpace.l) {
             if items.contains("usage") && (density == .full || density == .compact) {
-                UsageLimits(usage: usage, bars: density == .full)
+                UsageChips(usage: usage, model: model, pane: pane, bars: density == .full)
             }
             Spacer(minLength: density == .none ? 0 : DesktopSpace.l)
             if density != .none {
@@ -74,52 +74,5 @@ private struct StatusLabel<Icon: View>: View {
         .help(title == spoken ? "" : spoken)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
-    }
-}
-
-private struct UsageLimits: View {
-    @ObservedObject var usage: UsageMonitor
-    let bars: Bool
-
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            let strip = usage.strip(now: context.date)
-            HStack(spacing: DesktopSpace.l) {
-                if let problem = strip.problem {
-                    Text(problem).help(problem)
-                }
-                ForEach(strip.meters, id: \.self) { meter in
-                    let critical = meter.severity == "critical"
-                    let spoken = UsageMeterText.spokenLabel(meter, now: context.date)
-                    HStack(spacing: 6) {
-                        Text(meter.label)
-                        if bars {
-                            ProgressView(value: min(max(meter.percent / 100, 0), 1))
-                                .progressViewStyle(.linear)
-                                .frame(width: 44)
-                                .tint(critical ? DesktopPalette.failed : DesktopPalette.text2)
-                        }
-                        Text(bars ? UsageMeterText.text(meter, now: context.date) : UsageMeterText.percent(meter.percent))
-                            .monospacedDigit()
-                            .foregroundStyle(!bars && critical ? DesktopPalette.failed : DesktopPalette.text2)
-                    }
-                    .help(spoken)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(spoken)
-                }
-                ForEach(strip.others(compact: !bars)) { other in
-                    HStack(spacing: 4) {
-                        Text(other.title)
-                        Text(UsageMeterText.percent(other.percent))
-                            .monospacedDigit()
-                            .foregroundStyle(other.critical ? DesktopPalette.failed : DesktopPalette.muted)
-                    }
-                    .foregroundStyle(DesktopPalette.muted)
-                    .help(other.spoken)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(other.spoken)
-                }
-            }
-        }
     }
 }

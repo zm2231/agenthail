@@ -171,10 +171,12 @@ struct UsageReport: Decodable, Hashable {
         let hostId: String
         var local: Bool? = nil
         var provider: String? = nil
+        var name: String? = nil
         var account: String? = nil
         var root: String? = nil
         var primary: Bool? = nil
         var meters: [Meter]? = nil
+        var asOf: String? = nil
         var problem: String? = nil
     }
     var sets: [Set]? = nil

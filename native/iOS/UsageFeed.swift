@@ -2,7 +2,7 @@ import SwiftUI
 
 @MainActor
 final class UsageFeed: ObservableObject {
-    @Published private(set) var strip = UsageStrip()
+    @Published private(set) var accounts: [UsageAccount] = []
     @Published private(set) var now = Date()
     private var sets: [UsageReport.Set] = []
 
@@ -12,7 +12,7 @@ final class UsageFeed: ObservableObject {
             if minutes % 2 == 0 {
                 let answers = await Self.read(readers)
                 if Task.isCancelled { return }
-                sets = UsageStrip.merged(answers)
+                sets = UsageAccounts.merged(answers)
             }
             show(at: Date())
             minutes += 1
@@ -21,14 +21,14 @@ final class UsageFeed: ObservableObject {
     }
 
     func ingest(_ answers: [[UsageReport.Set]?], at date: Date) {
-        sets = UsageStrip.merged(answers)
+        sets = UsageAccounts.merged(answers)
         show(at: date)
     }
 
     func show(at date: Date) {
         now = date
-        let next = UsageStrip.make(sets, now: date)
-        if next != strip { strip = next }
+        let next = UsageAccounts.make(sets, now: date)
+        if next != accounts { accounts = next }
     }
 
     private static func read(_ readers: [AgenthailAPI]) async -> [[UsageReport.Set]?] {

@@ -1,71 +1,121 @@
 import assert from "node:assert/strict";
-import { POLL_MS, render, start, text, usageStrip, visible } from "../internal/daemon/dashboard/js/usage.js";
+import { POLL_MS, accounts, activeSessions, byHost, render, renderPanel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
 import { dropOrder, fit } from "../internal/daemon/dashboard/js/usage-fit.js";
 
 const now = Date.parse("2026-10-23T14:00:00Z");
 const meter = (label, percent, until, extra = {}) => ({ provider: "claude", kind: "session", label, percent, asOf: "2026-10-23T13:59:00Z", aged: false, until, resetsAt: until, ...extra });
+const noLogin = "This config root has no claude.ai login (it may use an API key), so claude.ai reports no usage for it.";
 const sets = [
-  { host: "studio", hostId: "h1", local: true, provider: "claude", account: "work@example.com", root: "/a", primary: true, meters: [meter("Claude", 40, "2026-10-23T16:12:00Z")] },
+  { host: "studio", hostId: "h1", local: true, provider: "claude", name: "default", account: "work@example.com", root: "/a", primary: true, asOf: "2026-10-23T13:57:00Z", meters: [meter("Claude", 40, "2026-10-23T16:12:00Z")] },
   { host: "studio", hostId: "h1", local: true, provider: "codex", meters: [meter("Codex week", 19, "2026-10-26T16:00:00Z", { provider: "codex", kind: "weekly" })] },
-  { host: "studio", hostId: "h1", local: true, provider: "claude", account: "team@example.com", root: "/b", meters: [meter("Claude", 12, "2026-10-23T16:00:00Z"), meter("Claude week", 91, "2026-10-26T16:00:00Z", { severity: "critical" })] },
-  { host: "vps", hostId: "h2", local: false, provider: "claude", account: "ops@example.com", primary: true, meters: [meter("Claude", 5, "2026-10-23T13:30:00Z")] },
+  { host: "studio", hostId: "h1", local: true, provider: "claude", name: "team", account: "team@example.com", root: "/b", meters: [meter("Claude", 12, "2026-10-23T16:00:00Z"), meter("Claude week", 91, "2026-10-26T16:00:00Z", { kind: "weekly_all", severity: "critical" })] },
+  { host: "vps", hostId: "h2", local: false, provider: "claude", name: "default", account: "default", root: "/srv/claude", primary: true, meters: [], problem: noLogin },
+  { host: "vps", hostId: "h2", local: false, provider: "codex", meters: [meter("Codex week", 5, "2026-10-23T13:30:00Z", { provider: "codex", kind: "weekly" })] },
   { host: "old", hostId: "h3", local: false, meters: [], problem: "old runs an older Agenthail. Update it to see its usage." },
 ];
 
-const strip = usageStrip(sets, now);
-assert.deepEqual(strip.meters.map((m) => m.label), ["Claude", "Codex week"], "this host's primary account and Codex show in full");
-assert.deepEqual(strip.others.map((o) => o.title), ["team"], "another account shows compact; a host whose meters all passed shows nothing");
-assert.equal(strip.others[0].percent, 91);
-assert.equal(strip.others[0].critical, true);
-assert.ok(strip.others[0].spoken.startsWith("team@example.com: Claude usage 12 percent"), strip.others[0].spoken);
-assert.equal(strip.problem, null, "a problem stays quiet while there are meters");
-assert.deepEqual(usageStrip([{ ...sets[3], meters: sets[0].meters }], now).others.map((o) => o.title), ["ops · vps"], "another host's account names the host");
-assert.equal(usageStrip([{ host: "studio", hostId: "h1", local: true, provider: "claude", primary: true, meters: [], problem: "claude.ai could not be asked" }], now).problem, "claude.ai could not be asked");
+const list = accounts(sets, now);
+assert.deepEqual(list.map((a) => a.title), ["work", "studio · Codex", "team", "default", "vps · Codex", "old"], "every account gets a chip; a host prefix only when a name repeats across hosts");
+assert.equal(list[0].subtitle, "default · read 3m ago");
+assert.equal(list[2].worst.percent, 91);
+assert.equal(list[2].critical, true);
+assert.ok(list[2].spoken.startsWith("team@example.com: Claude usage 12 percent"), list[2].spoken);
+assert.equal(list[3].problem, noLogin, "an API-key root keeps its problem");
+assert.equal(list[3].fullTitle, "default on vps");
+assert.deepEqual(list[4].meters, [], "a reading past its window keeps the account with no meters");
+assert.deepEqual(byHost(list).map((g) => [g.name, g.accounts.length]), [["studio", 3], ["vps", 2], ["old", 1]]);
 assert.equal(text(sets[0].meters[0], now), "40% · resets 2h 12m");
 assert.equal(text(meter("Claude week", 62, null, { aged: true, asOf: "2026-10-23T10:40:00Z", resetsAt: null }), now), "62% · as of 3h ago");
-assert.deepEqual(visible(sets[3].meters, now), [], "a meter hides once its until passes");
+assert.deepEqual(visible(sets[4].meters, now), [], "a meter hides once its until passes");
+
+const session = (id, surface, host, root, status, extra = {}) => ({ id, surface, host: { id: host }, claudeConfigRoot: root ? { root } : undefined, status, current: false, ...extra });
+const sessions = [
+  session("s1", "claude", "h1", "/a", "busy"),
+  session("s2", "claude", "h1", "/b", "idle", { current: true }),
+  session("s3", "claude", "h1", "/b", "idle"),
+  session("s4", "claude", "h2", "/a", "busy"),
+  session("s5", "codex", "h1", null, "busy"),
+  session("s6", "claude", "h1", "/a", "busy", { archived: true }),
+];
+assert.deepEqual(activeSessions(list[0], sessions).map((s) => s.id), ["s1"], "a session belongs to its root and host");
+assert.deepEqual(activeSessions(list[2], sessions).map((s) => s.id), ["s2"], "only working or current sessions are listed");
+assert.deepEqual(activeSessions(list[1], sessions).map((s) => s.id), ["s5"]);
 
 class Node {
   constructor(tag) {
     this.tagName = tag;
     this.children = [];
     this.attributes = {};
+    this.listeners = {};
     this.hidden = false;
     this.textContent = "";
+    this.className = "";
   }
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = nodes; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  contains(node) { return node === this || this.children.some((child) => child.contains?.(node)); }
 }
-const line = new Node("span");
-const document = { createElement: (tag) => new Node(tag), getElementById: (id) => (id === "usage-line" ? line : null) };
+const line = new Node("button");
+const panel = new Node("div");
+panel.hidden = true;
+const document = { createElement: (tag) => new Node(tag), getElementById: (id) => ({ "usage-line": line, "usage-panel": panel })[id] || null, addEventListener() {} };
 const texts = (node) => [node.textContent, ...node.children.flatMap(texts)].filter(Boolean);
 
-render(document, line, strip, now);
+render(document, line, list);
 assert.equal(line.hidden, false);
-assert.deepEqual(line.children.map((c) => c.className), ["usage-meter", "usage-meter", "usage-other critical"]);
-assert.deepEqual(texts(line.children[0]), ["Claude", "40%", "· resets 2h 12m"]);
-assert.equal(line.children[0].children[1].tagName, "meter");
-assert.equal(line.children[2].attributes["aria-label"], strip.others[0].spoken, "every item reads out its full text");
-render(document, line, usageStrip([], now), now);
+assert.deepEqual(line.children.map((c) => c.className), ["usage-chip", "usage-chip", "usage-chip critical", "usage-chip problem", "usage-chip", "usage-chip problem", "usage-more"]);
+assert.deepEqual(texts(line.children[0]), ["work", "40%"]);
+assert.equal(line.children[0].children[1].children[0].tagName, "meter");
+assert.deepEqual(texts(line.children[3]), ["default", "!"], "an account with only a problem still shows");
+assert.equal(line.children[2].attributes["aria-label"], list[2].spoken, "every chip reads out its full text");
+render(document, line, []);
 assert.equal(line.hidden, true, "nothing to show hides the line");
 
-const item = (className) => ({ className, hidden: true });
-const crowded = { children: [item("usage-problem"), item("usage-meter"), item("usage-meter critical"), item("usage-other critical"), item("usage-other"), item("usage-other")] };
-const [problem, calmMeter, criticalMeter, criticalOther, calmOther, lastOther] = crowded.children;
-assert.deepEqual(dropOrder(crowded.children), [lastOther, calmOther, calmMeter, criticalOther, criticalMeter], "calm accounts go first, then calm meters, then anything near its limit; the problem never");
+const opened = [];
+renderPanel(document, panel, list, sessions, now, (id) => opened.push(id));
+const cards = panel.children.filter((c) => c.tagName === "section");
+assert.equal(cards.length, list.length, "the panel has one card per account");
+assert.deepEqual(panel.children.filter((c) => c.tagName === "h3").map((c) => c.textContent), ["studio", "vps", "old"], "cards group by host");
+assert.ok(texts(cards[2]).includes("Week") && texts(cards[2]).includes("91%"), texts(cards[2]).join("|"));
+assert.ok(texts(cards[3]).includes(noLogin));
+const button = cards[0].children.find((c) => c.className === "usage-sessions").children[0];
+button.listeners.click();
+assert.deepEqual(opened, ["s1"], "a session in the panel opens it");
+
+const item = (className) => ({ className, hidden: true, textContent: "" });
+const attributed = (children) => ({ children, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; } });
+const roomy = attributed([item("usage-chip"), item("usage-more")]);
+fit(roomy, (l) => !("data-compact" in l.attributes));
+assert.equal("data-compact" in roomy.attributes, true, "a line that overflows with bars first drops the bars");
+assert.equal(roomy.children[0].hidden, false, "and keeps every account when that is enough");
+fit(roomy, () => false);
+assert.equal("data-compact" in roomy.attributes, false, "with room the bars come back");
+const crowded = attributed([item("usage-chip"), item("usage-chip critical"), item("usage-chip problem"), item("usage-chip"), item("usage-chip"), item("usage-more")]);
+const [calmFirst, criticalChip, problemChip, calmMid, calmLast, more] = crowded.children;
+assert.deepEqual(dropOrder(crowded.children), [calmLast, calmMid, calmFirst], "calm accounts go from the end; critical and problem accounts never");
 const room = (count) => (l) => l.children.filter((c) => !c.hidden).length > count;
-fit(crowded, room(3));
-assert.deepEqual(crowded.children.filter((c) => !c.hidden), [problem, criticalMeter, criticalOther], "a narrow line keeps the problem and what is near its limit");
+fit(crowded, room(4));
+assert.deepEqual(crowded.children.filter((c) => !c.hidden), [calmFirst, criticalChip, problemChip, more]);
+assert.equal(more.textContent, "+2", "the line counts the accounts it dropped");
 fit(crowded, room(6));
-assert.equal(crowded.children.every((c) => !c.hidden), true, "with room nothing is dropped");
+assert.equal(crowded.children.filter((c) => !c.hidden).length, 5, "with room nothing is dropped and the counter hides");
+assert.equal(more.hidden, true);
 
 const intervals = [];
 let answer = { status: 200, ok: true, json: async () => ({ sets }) };
-const started = start({ document, fetch: async (path) => { assert.equal(path, "/api/v1/usage"); return answer; }, setInterval: (fn, ms) => intervals.push(ms), now: () => now });
+const started = start({ document, fetch: async (path) => { assert.equal(path, "/api/v1/usage"); return answer; }, setInterval: (fn, ms) => intervals.push(ms), now: () => now, sessions: () => sessions, open: (id) => opened.push(id) });
 await started.ready;
 assert.deepEqual(intervals, [POLL_MS, 60_000]);
 assert.equal(line.hidden, false);
+line.listeners.click();
+assert.equal(panel.hidden, false, "clicking the line opens the panel");
+assert.equal(line.attributes["aria-expanded"], "true");
+assert.equal(panel.children.filter((c) => c.tagName === "section").length, list.length);
+started.toggle(false);
+assert.equal(panel.hidden, true);
 answer = { status: 404, ok: false };
 await started.load();
 assert.equal(line.hidden, true, "an older daemon with no usage route shows nothing");

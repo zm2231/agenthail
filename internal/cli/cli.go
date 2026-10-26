@@ -129,6 +129,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdWhoami(rest)
 	case "roots":
 		return a.cmdRoots(rest)
+	case "usage":
+		return a.cmdUsage(rest)
 	case "claude":
 		return a.cmdClaude(rest)
 	case "search":

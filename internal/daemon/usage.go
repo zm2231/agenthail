@@ -18,10 +18,12 @@ type usageSet struct {
 	HostID   string       `json:"hostId"`
 	Local    bool         `json:"local"`
 	Provider string       `json:"provider,omitempty"`
+	Name     string       `json:"name,omitempty"`
 	Account  string       `json:"account,omitempty"`
 	Root     string       `json:"root,omitempty"`
 	Primary  bool         `json:"primary,omitempty"`
 	Meters   []usageMeter `json:"meters"`
+	AsOf     time.Time    `json:"asOf,omitzero"`
 	Problem  string       `json:"problem,omitempty"`
 }
 
@@ -79,31 +81,36 @@ func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usageSet 
 	sets := make([]usageSet, len(roots))
 	var wait sync.WaitGroup
 	for i, root := range roots {
-		wait.Go(func() { sets[i] = claudeUsageSet(ctx, reader, root, now) })
+		wait.Go(func() { sets[i] = d.claudeUsageSet(ctx, reader, root, now) })
 	}
 	wait.Wait()
 	sort.SliceStable(sets, func(i, j int) bool { return sets[i].Primary && !sets[j].Primary })
 	return sets
 }
 
-func claudeUsageSet(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) usageSet {
-	set := usageSet{Provider: "claude", Account: claudeAccount(root), Root: root.Root, Primary: root.Primary}
-	ctx, cancel := context.WithTimeout(ctx, claudeRootUsageTimeout)
-	defer cancel()
-	live, err := reader.ClaudeConfigRoot(ctx, root.Root)
-	if err != nil {
-		set.Meters, set.Problem = usageMeters("claude", root.Usage, now), err.Error()
+const claudeNoLoginProblem = "This config root has no claude.ai login (it may use an API key), so claude.ai reports no usage for it."
+
+func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) usageSet {
+	set := usageSet{Provider: "claude", Name: root.Name, Account: claudeAccount(root), Root: root.Root, Primary: root.Primary}
+	switch {
+	case root.Error != "":
+		set.Problem = root.Error
+		return set
+	case root.SignedInAs == nil || root.SignedInAs.AccountID == "":
+		set.Problem = claudeNoLoginProblem
 		return set
 	}
-	if live.SignedInAs != nil && live.SignedInAs.Email != "" {
-		set.Account = live.SignedInAs.Email
+	live, usage, err := d.claudeUsage.read(ctx, reader, root, now)
+	if usage != nil {
+		set.AsOf = usage.FetchedAt
 	}
-	usage := live.Usage
-	if usage == nil {
-		usage = root.Usage
-	}
-	set.Meters, set.Problem = usageMeters("claude", usage, now), live.UsageProblem
-	if set.Problem == "" && live.SigninProblem != "" {
+	set.Meters = usageMeters("claude", usage, now)
+	switch {
+	case err != nil:
+		set.Problem = err.Error()
+	case live.UsageProblem != "":
+		set.Problem = live.UsageProblem
+	case live.SigninProblem != "":
 		set.Problem = "no browser sign-in profile here is signed into this login on claude.ai; agenthail signin list shows which accounts they hold"
 	}
 	return set

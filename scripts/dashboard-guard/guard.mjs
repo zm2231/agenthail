@@ -115,6 +115,7 @@ async function guardTheme(browser, theme, dashboards) {
       failures.push(...(await themeSurvivesHiddenText(pages.full, dashboards.full, `${theme} ${background} ${contrast === "more" ? "more contrast " : ""}theme pass`)));
       for (const [width, height] of Object.values(SIZES)) {
         for (const view of VIEWS) {
+          if (view.wideOnly && width < SIZES.wide[0]) continue;
           const page = pages[view.dashboard];
           await page.setViewport({ width, height });
           await page.emulateMediaFeatures([{ name: "prefers-contrast", value: contrast }]);

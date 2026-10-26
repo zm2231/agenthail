@@ -12,10 +12,8 @@ final class UsageMonitor: ObservableObject {
         }
     }
 
-    func strip(now: Date) -> UsageStrip {
-        var strip = UsageStrip.make(sets, now: now)
-        if strip.meters.isEmpty && strip.problem == nil { strip.problem = problem }
-        return strip
+    func accounts(now: Date) -> [UsageAccount] {
+        UsageAccounts.make(sets, now: now)
     }
 
     private func load(_ model: AgenthailModel) async {
