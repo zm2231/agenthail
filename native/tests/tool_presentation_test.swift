@@ -82,6 +82,15 @@ struct ToolPresentationTest {
         check(remade == 0, "the latest large input is still reused")
         _ = ToolDiffCache.diffs(name: "Write", text: String(repeating: "y", count: ToolDiffCache.byteBudget)) { [] }
         check(ToolDiffCache.retainedBytes <= ToolDiffCache.byteBudget, "an input larger than the budget is not kept")
+        let manyLines = ToolPresentation(name: "Write", text: json(["file_path": "/work/Lines.txt", "content": String(repeating: "a\n", count: 300_000)]))
+        check(manyLines.diffs.first?.hunks.first?.lines.count == 300_000, "a long write is diffed in full")
+        var rediffed = 0
+        _ = ToolDiffCache.diffs(name: "Write", text: manyLines.text) { rediffed += 1; return [] }
+        check(rediffed == 1, "a short input whose diff exceeds the byte budget is not kept")
+        let fewLines = ToolPresentation(name: "Write", text: json(["file_path": "/work/Few.txt", "content": "one\ntwo"]))
+        let before = ToolDiffCache.retainedBytes
+        _ = fewLines.diffs
+        check(ToolDiffCache.retainedBytes - before == "Write".utf8.count + fewLines.text.utf8.count + ToolDiffCache.bytes(fewLines.diffs), "a kept write is charged for its input and its diff lines")
         check(edit.diffs == ToolPresentation(name: "Edit", text: edit.text).diffs, "the same edit reads back the same diff")
     }
 

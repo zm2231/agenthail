@@ -21,7 +21,7 @@ enum ToolDiffCache {
         let key = Key(name: name, text: text)
         if let cached = state.withLock({ $0.entries[key] }) { return cached }
         let diffs = make()
-        let cost = 2 * (name.utf8.count + text.utf8.count)
+        let cost = name.utf8.count + text.utf8.count + bytes(diffs)
         guard cost <= byteBudget else { return diffs }
         state.withLock { state in
             guard state.entries[key] == nil else { return }
@@ -33,5 +33,18 @@ enum ToolDiffCache {
             state.bytes += cost
         }
         return diffs
+    }
+
+    static func bytes(_ diffs: [FileDiff]) -> Int {
+        var total = 0
+        for diff in diffs {
+            total += diff.path.utf8.count
+            for hunk in diff.hunks {
+                for line in hunk.lines {
+                    total += MemoryLayout<TextDiff.Line>.stride + line.text.utf8.count + line.marks.count * MemoryLayout<Range<Int>>.stride
+                }
+            }
+        }
+        return total
     }
 }
