@@ -135,7 +135,7 @@ func (d *Daemon) apiUIHandler(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "The request body must be JSON.")
 			return
 		}
-		state, entry, err := applyUIChange(store, uiconf.Person, request)
+		state, entry, err := applyUIChange(store, uiconf.Person, requestDevice(r), request)
 		var problems *uiconf.ProblemsError
 		if errors.As(err, &problems) {
 			writeDashboardJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": map[string]string{"code": "ui_problems", "message": err.Error()}, "problems": problems.Problems})
@@ -154,9 +154,10 @@ func (d *Daemon) apiUIHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// applyUIChange performs one checked change as author. Assignments are all
-// checked before anything is written, so a bad one changes nothing.
-func applyUIChange(store *uiconf.Store, author string, request uiChangeRequest) (uiconf.State, *uiconf.Entry, error) {
+// applyUIChange performs one checked change as author on device, so the
+// change takes effect there. Assignments are all checked before anything is
+// written, so a bad one changes nothing.
+func applyUIChange(store *uiconf.Store, author string, device uiconf.Device, request uiChangeRequest) (uiconf.State, *uiconf.Entry, error) {
 	message := strings.TrimSpace(request.Message)
 	var (
 		state   uiconf.State
@@ -179,7 +180,10 @@ func applyUIChange(store *uiconf.Store, author string, request uiChangeRequest) 
 		if message == "" {
 			message = "Set " + assignmentNames(assignments)
 		}
-		state, changed, err = store.Update(author, message, func(text string) string { return uiconf.Set(text, assignments...) })
+		state, changed, err = store.Update(author, func(text string) (string, string) {
+			text, cleared := uiconf.SetFor(text, device, assignments...)
+			return text, noteCleared(message, cleared)
+		})
 	case "unset":
 		if len(request.Unset) == 0 {
 			return uiconf.State{}, nil, errors.New("unset needs at least one key")
@@ -193,12 +197,9 @@ func applyUIChange(store *uiconf.Store, author string, request uiChangeRequest) 
 		if message == "" {
 			message = "Reset " + strings.Join(request.Unset, ", ")
 		}
-		state, changed, err = store.Update(author, message, func(text string) string {
-			for _, name := range request.Unset {
-				key, device, _ := strings.Cut(name, "@")
-				text = uiconf.Unset(text, key, device)
-			}
-			return text
+		state, changed, err = store.Update(author, func(text string) (string, string) {
+			text, cleared := uiconf.UnsetFor(text, device, request.Unset...)
+			return text, noteCleared(message, cleared)
 		})
 	case "write":
 		if message == "" {
@@ -235,6 +236,13 @@ func assignmentNames(assignments []uiconf.Assignment) string {
 		names = append(names, name)
 	}
 	return strings.Join(names, ", ")
+}
+
+func noteCleared(message string, cleared []string) string {
+	if len(cleared) == 0 {
+		return message
+	}
+	return message + "; cleared " + strings.Join(cleared, ", ")
 }
 
 func (d *Daemon) apiUILogHandler(w http.ResponseWriter, r *http.Request) {

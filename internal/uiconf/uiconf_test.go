@@ -188,10 +188,10 @@ func TestStoreVersionsEveryChange(t *testing.T) {
 		t.Fatalf("initial state = %+v", state)
 	}
 	theme, _ := ParseAssignment("theme = light")
-	if _, changed, err := s.Update("@fixer", "Light theme", func(text string) string { return Set(text, theme) }); err != nil || !changed {
+	if _, changed, err := s.Update("@fixer", func(text string) (string, string) { return Set(text, theme), "Light theme" }); err != nil || !changed {
 		t.Fatalf("update: changed=%v err=%v", changed, err)
 	}
-	if _, changed, err := s.Update("@fixer", "Light theme again", func(text string) string { return Set(text, theme) }); err != nil || changed {
+	if _, changed, err := s.Update("@fixer", func(text string) (string, string) { return Set(text, theme), "Light theme again" }); err != nil || changed {
 		t.Fatalf("no-op update: changed=%v err=%v", changed, err)
 	}
 	if err := os.WriteFile(s.Path(), []byte(Set(mustRead(t, s.Path()), mustAssign(t, "texture.spacing = 5"))), 0o600); err != nil {
@@ -222,7 +222,7 @@ func TestUndoRevertsAndRefusesConflicts(t *testing.T) {
 	s := openStore(t)
 	update := func(author, message, line string) {
 		t.Helper()
-		if _, _, err := s.Update(author, message, func(text string) string { return Set(text, mustAssign(t, line)) }); err != nil {
+		if _, _, err := s.Update(author, func(text string) (string, string) { return Set(text, mustAssign(t, line)), message }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -265,7 +265,7 @@ func TestBackgroundsAreImportedAndOnlyThoseServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Update(Person, "Wallpaper", func(text string) string { return Set(text, mustAssign(t, "background = image: "+rel)) }); err != nil {
+	if _, _, err := s.Update(Person, func(text string) (string, string) { return Set(text, mustAssign(t, "background = image: "+rel)), "Wallpaper" }); err != nil {
 		t.Fatal(err)
 	}
 	files, err := s.git("ls-files")

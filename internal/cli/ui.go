@@ -232,7 +232,7 @@ func (a *App) uiSet(store *uiconf.Store, parsed uiArgs) error {
 		}
 		message = "Set " + strings.Join(names, ", ")
 	}
-	state, changed, err := store.Update(a.uiAuthor(), message, func(text string) string { return uiconf.Set(text, assignments...) })
+	state, changed, err := store.Update(a.uiAuthor(), func(text string) (string, string) { return uiconf.Set(text, assignments...), message })
 	return a.reportUIChange(state, changed, err)
 }
 
@@ -250,12 +250,12 @@ func (a *App) uiUnset(store *uiconf.Store, parsed uiArgs) error {
 	if message == "" {
 		message = "Reset " + strings.Join(parsed.positional, ", ")
 	}
-	state, changed, err := store.Update(a.uiAuthor(), message, func(text string) string {
+	state, changed, err := store.Update(a.uiAuthor(), func(text string) (string, string) {
 		for _, name := range parsed.positional {
 			key, device, _ := strings.Cut(name, "@")
 			text = uiconf.Unset(text, key, device)
 		}
-		return text
+		return text, message
 	})
 	return a.reportUIChange(state, changed, err)
 }
