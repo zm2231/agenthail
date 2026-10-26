@@ -65,6 +65,7 @@ targets:
       - path: ClampedText.swift
       - path: TurnClock.swift
       - path: TimelineMetadata.swift
+      - path: TimelineEventLabel.swift
       - path: VoiceAPI.swift
       - path: VoiceAudioBridge.swift
       - path: VoiceCallDiagnostics.swift

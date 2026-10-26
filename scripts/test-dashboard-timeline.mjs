@@ -448,6 +448,7 @@ const authors = context.renderTimeline([
   { id: "h1", kind: "message", role: "peer", sender: "@builder", text: "Branch is ready", agent: { direction: "in", kind: "peer", peer: "@builder", summary: "Branch is ready" } },
   { id: "h2", kind: "message", role: "user", text: "Ship it", timestamp: "2026-10-23T10:00:00Z" },
   { id: "e1", kind: "event", title: "Context compacted", text: "38k tokens freed" },
+  { id: "e2", kind: "event", title: "Goal updated", status: "active", text: "Green test suite" },
 ], session);
 assert(authors.includes('class="timeline-item agent-message"') && authors.includes('<span class="agent-chip">@builder</span>'), "a handed-off message reads as another agent's");
 const raw = context.renderTimeline([{ id: "r1", kind: "message", role: "user", text: "[from @builder] quoted" }], session);
@@ -466,6 +467,7 @@ const reply = sent.slice(sent.indexOf('class="turn agent"'), sent.indexOf("</art
 assert(reply.indexOf("“s1”") > 0 && reply.indexOf("“s2”") > reply.indexOf("“s1”") && reply.indexOf("“s2”") < reply.indexOf('class="turn-footer"'), "sends after a reply sit under its text, before its actions");
 assert(!reply.includes("“s3”") && sent.indexOf("“s3”") > sent.indexOf("notes.md"), "a send after tool work stays its own row");
 assert(authors.includes('class="timeline-item timeline-divider"') && authors.includes("Context compacted: 38k tokens freed"), "an event is a divider, not an unknown card");
+assert(authors.includes("<span>Goal updated · active: Green test suite</span>"), "an event reads as served, the same line as the native apps");
 assert.equal(context.durationClock("1h2m3s"), "1:02:03");
 assert.equal(context.durationClock("12s"), "0:12");
 assert.equal(context.durationClock("about a minute"), "about a minute");
