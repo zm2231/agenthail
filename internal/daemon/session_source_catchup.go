@@ -65,7 +65,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 				return err
 			}
 			if !continued {
-				return s.restartJournal(read)
+				return s.restartMovedJournal(read)
 			}
 			transcriptIdentity = read.TranscriptIdentity
 		}
@@ -75,6 +75,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			s.session.CodexPendingEventUser = read.CodexPendingEventUser
 			s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 			s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+			s.session.CodexToolWindow = read.CodexToolWindow
 			s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 			s.session.TranscriptIdentity = read.TranscriptIdentity
 		}
