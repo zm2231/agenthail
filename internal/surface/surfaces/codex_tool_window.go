@@ -9,11 +9,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/codemode"
 )
 
-const (
-	codexBackgroundLimit = 16
-	codexOpenCallLimit   = 16
-)
-
 // codexRecordItems serves one transcript record in order. The window joins a
 // tool call, the actions Codex records while it runs and its output into one
 // row, and turns a command that outlived its call into a task notice.
@@ -67,9 +62,7 @@ func codexOpenCall(window *surface.CodexToolWindow, record map[string]any, item 
 			call.Commands = []string{command}
 		}
 	}
-	open := slices.DeleteFunc(slices.Clone(window.Open), func(other surface.CodexOpenCall) bool { return other.CallID == call.CallID })
-	open = append(open, call)
-	window.Open = open[max(0, len(open)-codexOpenCallLimit):]
+	window.Open = append(slices.DeleteFunc(slices.Clone(window.Open), func(other surface.CodexOpenCall) bool { return other.CallID == call.CallID }), call)
 }
 
 // codexActionCall finds the open call an action belongs to: the one running
@@ -164,7 +157,7 @@ func codexCallOutput(window *surface.CodexToolWindow, index int, items []surface
 		for _, command := range call.Commands {
 			background = append(background, surface.CodexBackgroundCommand{CallID: call.CallID, Command: command})
 		}
-		window.Background = background[max(0, len(background)-codexBackgroundLimit):]
+		window.Background = background
 	}
 	if output.Status == codexBackgroundStatus {
 		output.Text = strings.TrimSpace("Running in the background.\n\n" + output.Text)

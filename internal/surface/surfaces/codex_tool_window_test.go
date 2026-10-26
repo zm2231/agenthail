@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -51,6 +52,42 @@ func TestOverlappingCodeModeCallsKeepTheirOwnActions(t *testing.T) {
 		got.ID, got.Timestamp = "", ""
 		if !reflect.DeepEqual(got, want[index]) {
 			t.Fatalf("item %d=%+v want %+v", index, got, want[index])
+		}
+	}
+}
+
+func TestManyOverlappingCallsAllKeepTheirActions(t *testing.T) {
+	const calls = 24
+	lines := []string{`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`}
+	for n := range calls {
+		lines = append(lines, fmt.Sprintf(`{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"call-%d","input":"text((await tools.exec_command({cmd:\"make t%d\"})).output)"}}`, n, n))
+	}
+	for n := range calls {
+		lines = append(lines, fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"CommandExecution","id":"exec-%d","command":["/bin/zsh","-lc","make t%d"],"aggregated_output":"built %d\n","exit_code":0,"status":"completed"}}}`, n, n, n))
+	}
+	for n := calls - 1; n >= 0; n-- {
+		lines = append(lines, fmt.Sprintf(`{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-%d","output":[{"type":"input_text","text":"Script completed\nWall time 0.1 seconds\nOutput:\nbuilt %d\n"}]}}`, n, n))
+	}
+	path := timelineFixture(t, strings.Join(lines, "\n")+"\n")
+	page, err := readTimeline(context.Background(), path, "codex", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paged := codexServedShape(page.Items)
+	pagedJSON, _ := json.Marshal(paged)
+	if streamedJSON, _ := json.Marshal(codexServedShape(codexStreamedItems(t, path))); string(pagedJSON) != string(streamedJSON) {
+		t.Fatalf("paged=%s\nstreamed=%s", pagedJSON, streamedJSON)
+	}
+	if len(paged) != 2*calls {
+		t.Fatalf("paged=%s", pagedJSON)
+	}
+	for n := range calls {
+		row, result := paged[n], paged[calls+n]
+		if row.Kind != "toolCall" || row.Text != fmt.Sprintf(`{"cmd":"make t%d"}`, n) || row.CallID != fmt.Sprintf("call-%d", n) {
+			t.Fatalf("row %d=%+v", n, row)
+		}
+		if result.Kind != "toolResult" || result.Text != fmt.Sprintf("built %d\n", n) || result.CallID != row.CallID {
+			t.Fatalf("result %d=%+v", n, result)
 		}
 	}
 }
