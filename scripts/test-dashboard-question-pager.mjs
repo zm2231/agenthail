@@ -92,7 +92,11 @@ const hostile = pagers.renderQuestionCard({ id: "q3", kind: "question", question
 assert.doesNotMatch(hostile, /<b>|<i>|<img>/);
 
 const sent = [];
-pagers.bindQuestionPager(async (requestId, decision) => sent.push({ requestId, decision }));
+let release = () => {};
+pagers.bindQuestionPager((requestId, decision) => {
+  sent.push({ requestId, decision });
+  return new Promise((resolve) => { release = resolve; });
+});
 const slot = () => ({ innerHTML: "" });
 const parts = { ".pager-chips": slot(), ".pager-page": slot(), ".request-actions": slot() };
 let submits = 0;
@@ -119,8 +123,8 @@ function element(dataset, { other = false } = {}) {
   return node;
 }
 const pick = (index) => element({ pagerPick: String(index) });
-async function fire(type, event) {
-  for (const listener of listeners[type] || []) await listener({ preventDefault() {}, ...event });
+function fire(type, event) {
+  return Promise.all((listeners[type] || []).map((listener) => listener({ preventDefault() {}, ...event })));
 }
 const key = (key, modifiers = {}) => fire("keydown", { target: form, key, ...modifiers });
 
@@ -147,9 +151,15 @@ assert.equal(parts[".pager-page"].innerHTML, page, "typing leaves the page, and 
 assert.match(parts[".pager-chips"].innerHTML, /Targets, answered/, "the chip marks the typed answer at once");
 await key("ArrowRight");
 assert.ok(pagers.onReview(live()), "an arrow moves to the review");
+const first = key("Enter");
+const second = key("Enter");
+assert.equal(submits, 2);
+same(sent, [{ requestId: "dom", decision: { behavior: "allow", answers: { "Which scope?": "Yes", "Which targets?": "Everywhere" } } }], "a second Enter while the answer is in flight sends nothing");
+release();
+await Promise.all([first, second]);
 await key("Enter");
-assert.equal(submits, 1);
-same(sent, [{ requestId: "dom", decision: { behavior: "allow", answers: { "Which scope?": "Yes", "Which targets?": "Everywhere" } } }], "review sends the answers once");
+assert.equal(sent.length, 2, "once the first answer settles a retry can send");
+release();
 await fire("click", { target: element({ pagerStep: "0" }) });
 assert.equal(live().step, 0, "a chip goes back");
 console.log("dashboard question pager ok");

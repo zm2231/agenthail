@@ -12,9 +12,18 @@ function refresh(form, pager, { page = true } = {}) {
   if (page) form.focus({ preventScroll: true });
 }
 
+const sending = new Set();
+
 async function send(form, answers, respond) {
+  const requestId = form.dataset.requestQuestion;
+  if (sending.has(requestId)) return;
+  sending.add(requestId);
   form.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-  await respond(form.dataset.requestQuestion, { behavior: "allow", answers });
+  try {
+    await respond(requestId, { behavior: "allow", answers });
+  } finally {
+    sending.delete(requestId);
+  }
 }
 
 export function bindQuestionPager(respond) {
