@@ -1220,6 +1220,9 @@ struct AttachmentRow: View {
     @State private var data: Data?
     @State private var attempted = false
     @State private var retryCount = 0
+    @Environment(\.transcriptRows) private var rows
+
+    private var failedKey: String { "attachment-failed-" + item.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1227,16 +1230,17 @@ struct AttachmentRow: View {
                 Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
                 Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(PhonePalette.muted)
-                if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
+                if attempted || rows.isOpen(failedKey) == true, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
             }
             SessionTimestamp(value: item.timestamp)
         }
         .padding(.vertical, 4)
         .contextMenu { CopyCallID(item: item) }
         .task(id: "\(item.id)-\(retryCount)") {
-            guard let loader, data == nil else { return }
+            guard let loader, data == nil, retryCount > 0 || rows.isOpen(failedKey) != true else { return }
             attempted = true
             data = await loader()
+            if !Task.isCancelled { rows.set(failedKey, open: data == nil) }
         }
     }
 
