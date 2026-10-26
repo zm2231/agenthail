@@ -57,6 +57,7 @@ let package = Package(
                 "CatalogFeed.swift",
                 "ToolPresentation.swift",
                 "TextDiff.swift",
+                "ToolDiffCache.swift",
                 "DiffPresentation.swift",
                 "ToolRunSummary.swift",
                 "TranscriptRows.swift",

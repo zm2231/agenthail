@@ -168,6 +168,10 @@ extension ToolPresentation {
 
     /// What the call changed in each file, for edits, writes and patches.
     var diffs: [FileDiff] {
+        ToolDiffCache.diffs(name: name, text: text) { madeDiffs }
+    }
+
+    private var madeDiffs: [FileDiff] {
         switch content {
         case .edit(let path, let before, let after):
             return [FileDiff(path: path, hunks: [TextDiff(before: before, after: after)])]

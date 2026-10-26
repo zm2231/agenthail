@@ -58,6 +58,7 @@ targets:
       - path: CatalogFeed.swift
       - path: ToolPresentation.swift
       - path: TextDiff.swift
+      - path: ToolDiffCache.swift
       - path: DiffPresentation.swift
       - path: ToolRunSummary.swift
       - path: TranscriptRows.swift
