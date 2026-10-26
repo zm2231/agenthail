@@ -109,7 +109,7 @@ func TestSteeringARemoteControlClaudeReportsTransportAcceptanceWithItsRequest(t 
 	if len(sent) != 1 || sent[0]["type"] != "user" {
 		t.Fatalf("posted=%v", sent)
 	}
-	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || receipt["requestId"] != sent[0]["uuid"] || !strings.Contains(fmt.Sprint(receipt["detail"]), "not yet confirmed") {
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || receipt["requestId"] != sent[0]["uuid"] || !strings.HasPrefix(fmt.Sprint(receipt["detail"]), "Steer sent to ") {
 		t.Fatalf("a Remote Control steer claimed more than transport acceptance: %v", receipt)
 	}
 	if evidence := h.historyEvidence(session.ID, fmt.Sprint(sent[0]["uuid"])); evidence != string(surface.EvidenceTransportAccepted) {

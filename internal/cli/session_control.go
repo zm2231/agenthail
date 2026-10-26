@@ -344,7 +344,7 @@ func printSteerReceipt(receipt delivery.Receipt, target string) {
 	case receipt.Status == string(registry.DeliveryIntentSubmitted):
 		fmt.Printf("Submitted to %s.\n", target)
 	case receipt.Evidence == surface.EvidenceTransportAccepted:
-		fmt.Printf("Steer accepted for %s (request %s); not yet confirmed in the current turn.\n", target, receipt.RequestID)
+		fmt.Printf("Steer sent to %s (request %s).\n", target, receipt.RequestID)
 	default:
 		fmt.Printf("Sent to %s.\n", target)
 	}

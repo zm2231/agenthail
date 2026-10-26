@@ -167,7 +167,7 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 		if err != nil {
 			return nil, err
 		}
-		return &surface.ControlResult{SessionID: sess.ID, RequestID: sent.UUID, TurnID: sent.UUID, Action: "steer", Evidence: surface.EvidenceTransportAccepted, Source: "claude-remote-control", Detail: "Steer accepted; Claude has not confirmed it reached the current turn."}, nil
+		return &surface.ControlResult{SessionID: sess.ID, RequestID: sent.UUID, TurnID: sent.UUID, Action: "steer", Evidence: surface.EvidenceTransportAccepted, Source: "claude-remote-control", Detail: "Steer sent."}, nil
 	}
 	result, err := c.controlRequest(ctx, sess, "interrupt", map[string]any{"subtype": "interrupt"})
 	if err != nil {

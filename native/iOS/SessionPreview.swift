@@ -242,7 +242,33 @@ struct SessionPreview: View {
 private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    private let feed = PreviewStreamFeed()
+
     override func startLoading() {
+        let streamed = SessionCapture.current?.initialSessionID ?? "demo"
+        let requestQuery = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let requestID = requestQuery.first(where: { $0.name == "id" })?.value
+        if PreviewStream.enabled, request.url?.path == "/api/v1/session", requestID == streamed,
+           requestQuery.first(where: { $0.name == "timelineBefore" }) == nil {
+            let base = SessionCapture.current?.detailJSON[streamed] ?? SessionPreview.previewDetailJSON.replacingOccurrences(of: "\"id\":\"demo\"", with: "\"id\":\"\(streamed)\"")
+            let body = PreviewStream.detailJSON(base: base, captured: SessionCapture.current != nil)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        if PreviewStream.enabled, request.url?.path == "/api/v1/session-stream", requestID == streamed {
+            let after = requestQuery.first(where: { $0.name == "after" })?.value.flatMap(UInt64.init) ?? 0
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
+            feed.start(session: streamed, after: after, send: { [weak self] data in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didLoad: data)
+            }, drop: { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            })
+            return
+        }
         var status = 200
         let body: String
         if let capture = SessionCapture.current {
@@ -288,6 +314,6 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
+    override func stopLoading() { feed.stop() }
 }
 #endif

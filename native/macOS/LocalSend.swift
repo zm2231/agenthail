@@ -20,12 +20,11 @@ struct LocalSend: Identifiable, Equatable {
         attachments.map { AttachedFile(name: $0.name, bytes: Int64($0.data.count)) }
     }
 
-    static func label(for status: String?, evidence: String? = nil, waitingOnYou: Bool = false) -> String {
-        if evidence == "transport_accepted" { return "Accepted · Not yet confirmed" }
+    static func label(for status: String?, waitingOnYou: Bool = false, steer: Bool = false) -> String {
         switch status {
         case "queued": return waitingOnYou ? "Queued · Waiting on you" : "Queued"
         case "submitted": return "Submitted"
-        default: return "Sent"
+        default: return steer ? "Steer sent" : "Sent"
         }
     }
 

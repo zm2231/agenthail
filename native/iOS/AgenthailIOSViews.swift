@@ -451,6 +451,8 @@ struct SessionScreen: View {
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
     @State private var atLatest = true
+    @State private var overflows = false
+    @State private var jumps = 0
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
 
@@ -469,6 +471,29 @@ struct SessionScreen: View {
 
     static func showsActivity(timeline: SessionTimeline, itemCount: Int, activityCursor: Int64?, exchangeCount: Int) -> Bool {
         timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
+    }
+
+    private var latestRowID: String? {
+        guard let detail, let timeline = detail.timeline else { return nil }
+        let items = items
+        guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) else { return nil }
+        return activityOnly ? items.last?.id : TimelineGroup.make(items, foldAgents: !expandAgents).last?.id
+    }
+
+    private func scrollToLatest() {
+        if overflows, let id = latestRowID {
+            position.scrollTo(id: id, anchor: .bottom)
+        } else {
+            position.scrollTo(edge: .bottom)
+        }
+    }
+
+    private func settleAtLatest() async {
+        for _ in 0..<5 {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard followingLatest, !atLatest else { return }
+            scrollToLatest()
+        }
     }
 
     @ViewBuilder private var transcriptRows: some View {
@@ -547,6 +572,7 @@ struct SessionScreen: View {
             .padding(.vertical, 16)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             .transcriptScrimContent()
+            .id(jumps)
         }
         .scrollPosition($position)
         .accessibilityIdentifier("session-timeline")
@@ -557,7 +583,7 @@ struct SessionScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
             if phase == .interacting {
                 userScrolling = true
@@ -571,9 +597,14 @@ struct SessionScreen: View {
             geometry.contentSize.height - geometry.visibleRect.maxY < 60
         } action: { _, value in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
             atLatest = value
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height > geometry.visibleRect.height
+        } action: { _, value in
+            overflows = value
         }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
@@ -585,7 +616,9 @@ struct SessionScreen: View {
                 if !atLatest && detail != nil {
                     Button {
                         followingLatest = true
+                        jumps += 1
                         position.scrollTo(edge: .bottom)
+                        Task { await settleAtLatest() }
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
@@ -681,14 +714,14 @@ struct SessionScreen: View {
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
             } else {
-                position.scrollTo(edge: .bottom)
+                scrollToLatest()
             }
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
-            if followingLatest { position.scrollTo(edge: .bottom) }
+            if followingLatest { scrollToLatest() }
         }
         .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
-            if followingLatest { position.scrollTo(edge: .bottom) }
+            if followingLatest { scrollToLatest() }
         }
     }
 }
@@ -809,16 +842,10 @@ struct IOSComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let status = model.deliveryStatus[session.id] {
-                NavigationLink {
-                    QueueListView(model: model, sessionID: session.id)
-                } label: {
-                    Text("Latest instruction: " + status).font(.footnote).foregroundStyle(PhonePalette.muted)
-                        .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)
-                }.accessibilityHint("Open this session’s delivery inbox")
-                    .accessibilityIdentifier("latest-instruction")
-            }
             VStack(alignment: .leading, spacing: 6) {
+                if let status = model.deliveryStatus[session.id] {
+                    ComposerReceipt(model: model, sessionID: session.id, status: status)
+                }
                 if !model.composerAttachments.isEmpty {
                     ComposerAttachmentStrip(model: model)
                 }
@@ -871,6 +898,8 @@ struct IOSComposer: View {
             .padding(10)
             .floatingGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(Color.primary.opacity(0.06)) }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("composer")
         }
         .frame(maxWidth: SessionStyle.readingWidth)
         .frame(maxWidth: .infinity)
@@ -1088,7 +1117,7 @@ struct IOSTimelineRow: View {
     var onInspect: () -> Void = {}
     @State private var opened: RowChoice<Bool>?
     @Environment(\.transcriptRows) private var rows
-	@State private var retainedBody: RetainedBodyResult?
+	@State private var loadedBody: RowChoice<RetainedBodyResult>?
 
     var body: some View {
         if item.kind == "done" {
@@ -1113,7 +1142,7 @@ struct IOSTimelineRow: View {
                 .font(.caption)
                 .foregroundStyle(PhonePalette.muted)
                 .padding(.vertical, 4)
-        } else if item.kind == "event" {
+        } else if item.kind == "event", TranscriptDivider.fits(item.text) {
             TranscriptDivider(text: [eventLabel, TurnClock.time(item.timestamp)].compactMap { $0 }.joined(separator: " · "))
             if item.truncated { ShortenedNote() }
         } else {
@@ -1139,8 +1168,15 @@ struct IOSTimelineRow: View {
                     }
                     .padding(.leading, ToolLineLabel.indent)
                 } else if item.truncated { ShortenedNote().padding(.leading, ToolLineLabel.indent) }
+				let retainedBody = rows.current(loadedBody) ?? rows.body(item.id)
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
-					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
+					Button("Load retained body") {
+						Task {
+							guard let body = await bodyLoader(item) else { return }
+							loadedBody = rows.choice(body)
+							rows.set(item.id, body: body)
+						}
+					}.font(.caption)
 				} else if let retainedBody {
                     SessionMarkdown(text: retainedBody.text, readingStyle: item.kind == "reasoning")
                     if let error = retainedBody.error {
@@ -1193,6 +1229,9 @@ struct AttachmentRow: View {
     @State private var data: Data?
     @State private var attempted = false
     @State private var retryCount = 0
+    @Environment(\.transcriptRows) private var rows
+
+    private var failedKey: String { "attachment-failed-" + item.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1200,16 +1239,17 @@ struct AttachmentRow: View {
                 Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
                 Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(PhonePalette.muted)
-                if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
+                if attempted || rows.isOpen(failedKey) == true, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
             }
             SessionTimestamp(value: item.timestamp)
         }
         .padding(.vertical, 4)
         .contextMenu { CopyCallID(item: item) }
         .task(id: "\(item.id)-\(retryCount)") {
-            guard let loader, data == nil else { return }
+            guard let loader, data == nil, retryCount > 0 || rows.isOpen(failedKey) != true else { return }
             attempted = true
             data = await loader()
+            if !Task.isCancelled { rows.set(failedKey, open: data == nil) }
         }
     }
 

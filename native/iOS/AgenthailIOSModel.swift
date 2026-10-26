@@ -405,8 +405,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
         case "queued": return detail ?? "Queued"
-        case "transport_accepted": return detail ?? "Accepted; not yet confirmed"
-        case "delivered": return detail ?? "Sent"
+        case "transport_accepted", "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
         case "held": return "Held by the receiver."
@@ -1091,9 +1090,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             streamOutranPage = false
             if let journalSeq = detail.journalSeq {
                 sessionStreamCursor = journalSeq
-                for row in rowsDuringPageRead where row.seq > journalSeq {
-                    applySessionStreamEvent(row, route: route, server: connection, replaying: true)
-                }
+                applySessionStreamEvents(rowsDuringPageRead.filter { $0.seq > journalSeq }, route: route, server: connection, replaying: true)
             }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
@@ -1180,7 +1177,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
             case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
             case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
-            case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
+            case "transport_accepted": deliveryStatus[sessionID] = "Sent to \(item.target)."
             case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
             case "held": deliveryStatus[sessionID] = "Held by the receiver."
             case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
@@ -1682,13 +1679,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard selectedSessionID == id, case let (connection, route)? = try? resolveServer(id) else { return }
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()
+            let batch = StreamBatch<SessionStreamEvent> { [weak self] events in
+                self?.applySessionStreamEvents(events, route: route, server: connection)
+            }
             while !Task.isCancelled, selectedSessionID == id, server(for: id) === connection {
                 do {
-                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: { [weak self] in await self?.streamConnected(id) }, onEvent: { [weak self] event in
+                    try await connection.api.streamSession(id: route.sessionID, after: sessionStreamCursor, onConnected: { [weak self] in await self?.streamConnected(id) }, onEvent: { event in
                         backoff.reset()
-                        await self?.applySessionStreamEvent(event, route: route, server: connection)
+                        batch.add(event)
                     })
                 } catch {
+                    batch.flush()
                     if Task.isCancelled || selectedSessionID != id || server(for: id) !== connection { return }
                     if case AgenthailAPIError.streamUnsupported = error,
                        snapshot?.sessions.first(where: { $0.id == id })?.capabilities.stream != true {
@@ -1761,49 +1762,52 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard let id = selectedSessionID, let route = catalog.route(for: id), let connection = connections[route.hostID] else { return }
-        applySessionStreamEvent(event, route: route, server: connection)
+        applySessionStreamEvents([event], route: route, server: connection)
     }
 
-    private func applySessionStreamEvent(_ event: SessionStreamEvent, route: SessionRoute, server connection: HostConnection, replaying: Bool = false) {
-        guard event.stream == "session", event.sessionId == route.sessionID, let selected = selectedSessionID,
-              catalog.route(for: selected) == route, server(for: selected) === connection,
+    private func applySessionStreamEvents(_ events: [SessionStreamEvent], route: SessionRoute, server connection: HostConnection, replaying: Bool = false) {
+        guard let selected = selectedSessionID, catalog.route(for: selected) == route, server(for: selected) === connection,
               var detail = selectedDetail, detail.session.id == selected else { return }
-        if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
-        sessionStreamCursor = max(sessionStreamCursor, event.seq)
-        if event.data.kind == "commands" {
-            store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: selected)
-            return
-        }
-        if event.data.kind == "context" {
-            sessionMetadata.stream(context: event.data.context)
-            detail.context = event.data.context
-            selectedDetail = detail
-            return
-        } else if event.data.kind == "goal" {
-            sessionMetadata.stream(goal: event.data.goal)
-            detail.goal = event.data.goal
-            selectedDetail = detail
-            return
-        }
-        if event.data.op == "reset", event.data.kind == "source-error" {
-            sessionError = event.data.reason ?? "The session source restarted."
-            streamOutranPage = true
-            return
-        }
-        guard var timeline = detail.timeline else { return }
-        guard !event.data.itemId.isEmpty else { return }
-        let item = event.item ?? TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt, turnId: event.data.turnId)
         var older = olderActivity
-        if event.data.op == "remove" {
-            timeline.items.removeAll { $0.id == event.data.itemId }
-            older.removeAll { $0.id == event.data.itemId }
-        } else {
-            SessionStore.place(item, in: &timeline, older: &older)
+        var error = sessionError
+        var changed = false
+        for event in events where event.stream == "session" && event.sessionId == route.sessionID {
+            if pageReadsInFlight > 0, !replaying { rowsDuringPageRead.append(event) }
+            sessionStreamCursor = max(sessionStreamCursor, event.seq)
+            switch event.data.kind {
+            case "commands":
+                store.commandsStreamed(RuntimeCommands(commands: event.data.commands ?? [], unavailable: event.data.unavailable ?? ""), for: selected)
+            case "context":
+                sessionMetadata.stream(context: event.data.context)
+                detail.context = event.data.context
+                changed = true
+            case "goal":
+                sessionMetadata.stream(goal: event.data.goal)
+                detail.goal = event.data.goal
+                changed = true
+            case "source-error" where event.data.op == "reset":
+                error = event.data.reason ?? "The session source restarted."
+                streamOutranPage = true
+            default:
+                guard var timeline = detail.timeline, !event.data.itemId.isEmpty else { continue }
+                if event.data.op == "remove" {
+                    timeline.items.removeAll { $0.id == event.data.itemId }
+                    older.removeAll { $0.id == event.data.itemId }
+                } else {
+                    SessionStore.place(Self.timelineItem(event), in: &timeline, older: &older)
+                }
+                detail.timeline = timeline
+                error = nil
+                changed = true
+            }
         }
         if older != olderActivity { olderActivity = older }
-        detail.timeline = timeline
-        selectedDetail = detail
-        sessionError = nil
+        if changed { selectedDetail = detail }
+        if error != sessionError { sessionError = error }
+    }
+
+    private static func timelineItem(_ event: SessionStreamEvent) -> TimelineItem {
+        event.item ?? TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender, files: event.data.files, resetsAt: event.data.resetsAt, turnId: event.data.turnId)
     }
 
     func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {

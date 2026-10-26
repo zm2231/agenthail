@@ -56,7 +56,7 @@ struct LocalSendTest {
 
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")
         expect(LocalSend.label(for: "queued", waitingOnYou: true) == "Queued · Waiting on you" && LocalSend.label(for: "sent", waitingOnYou: true) == "Sent", "a queued receipt to a session waiting on you says so")
-        expect(LocalSend.label(for: "sent", evidence: "transport_accepted") == "Accepted · Not yet confirmed" && LocalSend.label(for: "sent", evidence: "delivered") == "Sent", "a steer only the transport accepted is not shown as sent")
+        expect(LocalSend.label(for: "sent", steer: true) == "Steer sent" && LocalSend.label(for: "sent") == "Sent", "a steer reads as a steer and an ordinary send as sent")
         print("local send tests passed")
     }
 

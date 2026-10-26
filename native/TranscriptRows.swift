@@ -7,8 +7,13 @@ import SwiftUI
 final class TranscriptRowMemory {
     private var rows: [String: [String: Bool]] = [:]
     private var counts: [String: [String: Int]] = [:]
+    private var bodies: [String: [String: RetainedBodyResult]] = [:]
 
     func isOpen(_ row: String, in session: String) -> Bool? { rows[session]?[row] }
+
+    func body(_ row: String, in session: String) -> RetainedBodyResult? { bodies[session]?[row] }
+
+    func set(_ row: String, body: RetainedBodyResult, in session: String) { bodies[session, default: [:]][row] = body }
 
     func set(_ row: String, open: Bool, in session: String) { rows[session, default: [:]][row] = open }
 
@@ -37,6 +42,10 @@ struct TranscriptRows: Equatable {
     @MainActor func count(_ row: String) -> Int? { memory?.count(row, in: session) }
 
     @MainActor func set(_ row: String, count: Int) { memory?.set(row, count: count, in: session) }
+
+    @MainActor func body(_ row: String) -> RetainedBodyResult? { memory?.body(row, in: session) }
+
+    @MainActor func set(_ row: String, body: RetainedBodyResult) { memory?.set(row, body: body, in: session) }
 
     /// A row's own copy of a choice, so toggling redraws that row. It counts only while the transcript shows
     /// the session it was made in: rows outlive a session switch and timeline ids can repeat across sessions.
