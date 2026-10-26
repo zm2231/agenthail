@@ -207,7 +207,7 @@ func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session 
 	kind := "control-accepted"
 	if result.Evidence == surface.EvidenceTransportAccepted {
 		kind = "transport-accepted"
-		receipt.Detail = fmt.Sprintf("Steer accepted for %s; not yet confirmed in the current turn.", target)
+		receipt.Detail = fmt.Sprintf("Steer sent to %s.", target)
 	}
 	d.markSent(receipt, intent, result.RequestID, target)
 	d.record(registry.HistoryEntry{Kind: kind, SessionID: session.ID, SourceSessionID: sourceID, Message: label, Result: result.RequestID})

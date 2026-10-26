@@ -405,7 +405,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
         case "queued": return detail ?? "Queued"
-        case "transport_accepted": return detail ?? "Accepted; not yet confirmed"
+        case "transport_accepted": return detail ?? "Steer sent."
         case "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
@@ -1178,7 +1178,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
             case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
             case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
-            case "transport_accepted": deliveryStatus[sessionID] = "Accepted for \(item.target); not yet confirmed."
+            case "transport_accepted": deliveryStatus[sessionID] = "Sent to \(item.target)."
             case "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
             case "held": deliveryStatus[sessionID] = "Held by the receiver."
             case "canceled": deliveryStatus[sessionID] = "Instruction canceled."

@@ -169,7 +169,7 @@ final class TurnSettingsFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testTransportAcceptedSteerIsNotShownAsSent() async throws {
+    func testTransportAcceptedSteerIsShownAsASteer() async throws {
         let fixture = try makeFixture(status: "busy")
         TurnSettingsFlowProtocol.state.reset()
         let model = makeModel()
@@ -180,7 +180,7 @@ final class TurnSettingsFlowTests: XCTestCase {
         model.send(to: fixture.session)
         try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
-        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Accepted; not yet confirmed")
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Steer sent.")
     }
 
     @MainActor

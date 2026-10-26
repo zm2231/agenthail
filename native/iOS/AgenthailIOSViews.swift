@@ -824,16 +824,10 @@ struct IOSComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let status = model.deliveryStatus[session.id] {
-                NavigationLink {
-                    QueueListView(model: model, sessionID: session.id)
-                } label: {
-                    Text("Latest instruction: " + status).font(.footnote).foregroundStyle(PhonePalette.muted)
-                        .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)
-                }.accessibilityHint("Open this session’s delivery inbox")
-                    .accessibilityIdentifier("latest-instruction")
-            }
             VStack(alignment: .leading, spacing: 6) {
+                if let status = model.deliveryStatus[session.id] {
+                    ComposerReceipt(model: model, sessionID: session.id, status: status)
+                }
                 if !model.composerAttachments.isEmpty {
                     ComposerAttachmentStrip(model: model)
                 }
@@ -886,6 +880,8 @@ struct IOSComposer: View {
             .padding(10)
             .floatingGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(Color.primary.opacity(0.06)) }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("composer")
         }
         .frame(maxWidth: SessionStyle.readingWidth)
         .frame(maxWidth: .infinity)
