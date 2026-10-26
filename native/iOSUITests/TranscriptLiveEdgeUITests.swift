@@ -88,11 +88,12 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         let focused = app.keyboards.firstMatch.exists
         app.buttons["Jump to latest"].tapWhenReady()
-        sleep(1)
+        XCTAssertTrue(app.buttons["Jump to latest"].waitForNonExistence(timeout: 3), "Jump to latest did not reach the latest row")
+        record(app, "after-jump")
         XCTAssertTrue((composer.value as? String ?? "").contains("draft kept"), "the draft was lost on Jump to latest")
         XCTAssertEqual(app.keyboards.firstMatch.exists, focused, "Jump to latest changed the composer's focus")
         let row = timeline.buttons[toolID]
-        for _ in 0..<4 where !row.isHittable { timeline.swipeDown(velocity: .slow) }
+        for _ in 0..<4 where !row.exists { timeline.swipeDown(velocity: .slow) }
         XCTAssertEqual(row.value as? String, "Expanded", "an open tool row closed on Jump to latest")
     }
 

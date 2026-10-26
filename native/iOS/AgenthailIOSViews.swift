@@ -488,6 +488,14 @@ struct SessionScreen: View {
         }
     }
 
+    private func settleAtLatest() async {
+        for _ in 0..<5 {
+            try? await Task.sleep(for: .milliseconds(50))
+            guard followingLatest, !atLatest else { return }
+            scrollToLatest()
+        }
+    }
+
     @ViewBuilder private var transcriptRows: some View {
         let connection = model.connectionState(for: session.id)
         if let error = connection.error {
@@ -610,6 +618,7 @@ struct SessionScreen: View {
                         followingLatest = true
                         jumps += 1
                         position.scrollTo(edge: .bottom)
+                        Task { await settleAtLatest() }
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
