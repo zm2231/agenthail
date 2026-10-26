@@ -1083,11 +1083,15 @@ func TestFederationRenameRacesReadsAndLocalRouting(t *testing.T) {
 	}
 }
 
-// The launching closures are on the stack from creation, so a loop not yet scheduled still counts.
-func hostLoopsRunning() int {
-	buffer := make([]byte, 1<<22)
-	stacks := string(buffer[:runtime.Stack(buffer, true)])
-	return strings.Count(stacks, "daemon.(*Daemon).attachHostLocked.func")
+// The launching closures are on the stack from creation, so a loop not yet
+// scheduled still counts. A detached loop has signalled host.done before its
+// goroutine returns, so the count settles rather than drops at once.
+func waitHostLoops(t *testing.T, when string, want int) {
+	t.Helper()
+	testkit.Eventually(t, fmt.Sprintf("%d host loops %s", want, when), 5*time.Second, func() bool {
+		buffer := make([]byte, 1<<22)
+		return strings.Count(string(buffer[:runtime.Stack(buffer, true)]), "daemon.(*Daemon).attachHostLocked.func") == want
+	})
 }
 
 func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testing.T) {
@@ -1103,16 +1107,12 @@ func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testin
 		}()
 	}
 	wg.Wait()
-	if got := hostLoopsRunning(); got != 2 {
-		t.Fatalf("host loops after overlapping attaches=%d", got)
-	}
+	waitHostLoops(t, "after overlapping attaches", 2)
 	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := hostLoopsRunning(); got != 0 {
-		t.Fatalf("host loops after remove=%d", got)
-	}
+	waitHostLoops(t, "after remove", 0)
 	if _, found := local.daemon.pairedHost(record.ID); found {
 		t.Fatal("removed host still routed")
 	}
@@ -1133,9 +1133,7 @@ func TestFederationAttachAfterRemovalIsRefused(t *testing.T) {
 	if _, found := local.daemon.pairedHost(record.ID); found {
 		t.Fatal("unpaired host routed")
 	}
-	if got := hostLoopsRunning(); got != 0 {
-		t.Fatalf("host loops for an unpaired host=%d", got)
-	}
+	waitHostLoops(t, "for an unpaired host", 0)
 }
 
 func TestFederationShowsARemoteConversationsHoldersAndForwardsThePick(t *testing.T) {
