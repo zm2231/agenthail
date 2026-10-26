@@ -129,7 +129,16 @@ func codexActionRow(action codexAction, id string) []surface.TimelineItem {
 }
 
 func codexActionInput(action codexAction) string {
-	encoded, _ := json.Marshal(action.Input)
+	input := map[string]any{}
+	for key, value := range action.Input {
+		if value != nil && value != "" {
+			input[key] = value
+		}
+	}
+	if len(input) == 0 {
+		return ""
+	}
+	encoded, _ := json.Marshal(input)
 	return string(encoded)
 }
 
