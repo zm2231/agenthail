@@ -180,7 +180,22 @@ final class TurnSettingsFlowTests: XCTestCase {
         model.send(to: fixture.session)
         try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
-        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Steer sent.")
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Steer sent to fixture.")
+    }
+
+    @MainActor
+    func testATransportAcceptedSendWithoutDetailReadsSent() async throws {
+        let fixture = try makeFixture(status: "idle")
+        TurnSettingsFlowProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = fixture.session.id
+        model.selectedDetail = fixture.detail
+        model.composer = "Send over a peer transport"
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Sent")
     }
 
     @MainActor
@@ -259,7 +274,10 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
                 return (200, #"{"ok":true,"result":{"evidence":"reply_observed","requestId":"request-proof","output":"Context Usage 41%"}}"#)
             }
             if body["message"] as? String == "Steer over Remote Control" {
-                return (200, #"{"ok":true,"result":{"evidence":"transport_accepted","status":"sent","requestId":"posted-steer"}}"#)
+                return (200, #"{"ok":true,"result":{"evidence":"transport_accepted","status":"sent","requestId":"posted-steer","detail":"Steer sent to fixture."}}"#)
+            }
+            if body["message"] as? String == "Send over a peer transport" {
+                return (200, #"{"ok":true,"result":{"evidence":"transport_accepted","status":"sent","requestId":"posted-send"}}"#)
             }
             return (200, #"{"ok":true}"#)
         }

@@ -405,8 +405,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
         case "queued": return detail ?? "Queued"
-        case "transport_accepted": return detail ?? "Steer sent."
-        case "delivered": return detail ?? "Sent"
+        case "transport_accepted", "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
         case "held": return "Held by the receiver."
