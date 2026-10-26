@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (s *sessionSource) restartJournal(read *surface.SessionReadResult) error {
+func (s *sessionSource) restartMovedJournal(read *surface.SessionReadResult) error {
 	notice := surface.TimelineItem{
 		ID:        "transcript-restart:" + read.TranscriptIdentity,
 		Kind:      "notice",
@@ -21,9 +21,13 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult) error {
 		Text:      "This conversation moved to a new transcript that could not be matched to the one shown before, so it was read again from the new transcript.",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 	}
+	return s.restartJournal(read, append(slices.Clone(read.Items), notice))
+}
+
+func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []surface.TimelineItem) error {
 	var fresh []surface.StreamEvent
 	keep := map[string]bool{}
-	for _, item := range append(slices.Clone(read.Items), notice) {
+	for _, item := range items {
 		if item.ID == "" {
 			continue
 		}
@@ -83,6 +87,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult) error {
 	s.session.CodexPendingEventUser = read.CodexPendingEventUser
 	s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 	s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+	s.session.CodexToolWindow = read.CodexToolWindow
 	s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 	s.session.TranscriptIdentity = read.TranscriptIdentity
 	s.mu.Lock()
@@ -104,7 +109,7 @@ const transcriptJournalDerivation = 1
 func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	reader, ok := s.adapter.(surface.TranscriptItemReader)
 	if !ok {
-		return nil
+		return s.rederiveCodexJournal(ctx)
 	}
 	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
 	if err != nil || version >= transcriptJournalDerivation {

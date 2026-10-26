@@ -3,7 +3,7 @@ package surfaces
 import (
 	"crypto/sha256"
 	"fmt"
-	"unicode/utf8"
+	"slices"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -67,25 +67,26 @@ func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	switch typ {
 	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count", "task_started", "turn_started":
 		return nil
-	case "item_started", "item_completed":
-		// These mirror response_item records that already render as messages.
-		item, _ := payload["item"].(map[string]any)
-		switch str(item, "type") {
-		case "UserMessage", "AgentMessage", "Reasoning":
-			return nil
-		}
+	case "thread_goal_updated":
+		notice := codexGoalNotice(payload)
+		return &notice
 	}
-	text := typ + ": " + timelineValue(payload)
-	truncated := false
-	if len(text) > timelineTextBudget {
-		truncated = true
-		text = text[:timelineTextBudget]
-		for !utf8.ValidString(text) {
-			text = text[:len(text)-1]
-		}
-		text += "…"
+	if slices.Contains(codexUnservedEvents, typ) {
+		return nil
 	}
-	return &surface.TimelineItem{Kind: "event", Role: str(payload, "role"), Title: "Codex activity", Text: text, Truncated: truncated, TruncationReason: "timeline text limit"}
+	unknown := codexUnknownItem(typ)
+	return &unknown
+}
+
+func codexServedItemKey(record map[string]any, line []byte, offset int64, item surface.TimelineItem, index int) string {
+	if item.ID != "" {
+		return item.ID
+	}
+	key := codexTranscriptItemKey(record, item, index)
+	if key == "" || item.Kind == "event" {
+		key = codexTranscriptFallbackKey(offset, line, index)
+	}
+	return key
 }
 
 func codexTranscriptFallbackKey(offset int64, line []byte, index int) string {

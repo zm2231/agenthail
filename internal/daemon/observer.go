@@ -140,12 +140,16 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	observed := observeOnce(adapter, session, d.observeTurn)
+	observation, err := observed.get(ctx)
+	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
 	d.syncRelaysObserved(ctx, adapter, session, observed)
 	source, transport := session.Source, session.Transport
-	observation, err := observed.get(ctx)
 	if err != nil {
 		d.recordObservationFailure(session.ID)
 		d.logObserveError(session.ID, err)
+		if unobserved {
+			d.releaseUnobservedHold(session)
+		}
 		return
 	}
 	d.clearObservationFailure(session.ID)
@@ -198,22 +202,20 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 				}
 			}
 		}
-		// A turn that leaves background tasks running has not finished the
-		// work it started: the notification stays armed for the turn Claude
-		// starts when they report.
-		terminalCompletion := observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks)
-		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
-			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
-			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
-			if observation.Reply.Error != "" {
-				desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
-				mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
-			}
+	}
+	held, released := heldCompletion(previous, observation, completionChanged)
+	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
+	if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
+		desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+		mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
+		if observation.Reply.Error != "" {
+			desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+			mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
 		}
-		if terminalCompletion {
-			if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
-				d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
-			}
+	}
+	if terminalCompletion {
+		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
+			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
 	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
@@ -223,6 +225,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	if held != previous.HeldCompletionTurnID {
+		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {
+			d.log.Printf("hold completion %s: %s", d.resolveDisplay(session.ID), err)
+		}
+	}
 	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
 	if changed {
 		d.publishEvent("session.updated", session.ID, map[string]any{"status": observation.Status, "activeTurnId": observation.ActiveTurnID, "completedTurnId": observation.CompletedTurnID})
@@ -231,15 +238,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
 	if desktopNotificationMessage != "" {
-		desktopMessage, mobileMessage, sessionID, turnID := desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID
-		d.background.start(func(ctx context.Context) {
-			if err := d.notifyDesktop("Agenthail", desktopMessage, sessionID, "", "", nil); err != nil {
-				d.log.Printf("desktop notification: %s", err)
-			}
-			notificationCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: sessionID, TurnID: turnID, EventType: "turn.completed"})
-		})
+		d.notifyTurnCompleted(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
 	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)

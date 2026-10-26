@@ -24,15 +24,16 @@ const (
 	AgentKindNotice       = "notice"
 	AgentKindSend         = "send"
 
-	OriginPerson = "person"
+	OriginPerson           = "person"
+	OriginTaskNotification = "task-notification"
 
 	agentSummaryRunes = 400
 )
 
 var injectedNoticeKinds = map[string]string{
-	"task-notification": AgentKindTask,
-	"auto-continuation": AgentKindContinuation,
-	"agenthail-notice":  AgentKindNotice,
+	OriginTaskNotification: AgentKindTask,
+	"auto-continuation":    AgentKindContinuation,
+	"agenthail-notice":     AgentKindNotice,
 }
 
 func PresentTimelineItem(item TimelineItem) TimelineItem {
@@ -76,7 +77,8 @@ func agentMessage(item TimelineItem, channel string) *AgentMessage {
 	case item.Kind == "message" && item.Role == "peer":
 		return &AgentMessage{Direction: AgentIn, Kind: AgentKindPeer, Peer: PeerDisplayName(item.Sender), Channel: channel, Summary: AgentSummary(item.Text)}
 	case item.Kind == "event" && item.Role == "system" && injectedNoticeKinds[item.Origin] != "":
-		return &AgentMessage{Direction: AgentIn, Kind: injectedNoticeKinds[item.Origin], Peer: item.Title, Summary: AgentSummary(item.Text)}
+		lead, _, _ := strings.Cut(strings.TrimSpace(item.Text), "\n\n")
+		return &AgentMessage{Direction: AgentIn, Kind: injectedNoticeKinds[item.Origin], Peer: item.Title, Summary: AgentSummary(lead)}
 	case item.Kind == "toolCall" || item.Kind == "tool" || item.Kind == "command":
 		send, ok := ParseOutgoingSend(item.Title, item.Text)
 		if !ok {

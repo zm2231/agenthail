@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codemode"
 )
 
 func codexTimelineItems(record map[string]any) []surface.TimelineItem {
@@ -71,6 +72,11 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		item.Kind = "toolCall"
 		item.Title = str(payload, "name")
 		item.CallID = str(payload, "call_id")
+		if calls, ok := codexCodeModeScript(payload); ok {
+			row := codemode.Present(calls)
+			item.Title, item.Text = row.Tool, row.Text()
+			break
+		}
 		item.Text = timelineValue(payload["arguments"])
 		if item.Text == "" {
 			item.Text = timelineValue(payload["input"])
@@ -81,6 +87,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		item.CallID = str(payload, "call_id")
 		if text, images, ok := codexTypedToolOutput(payload["output"]); ok {
 			item.Text = text
+			if body, status, ok := codexScriptOutput(text); ok {
+				item.Text, item.Status = body, status
+			}
 			items := []surface.TimelineItem{item}
 			for i := 0; i < images; i++ {
 				items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment", CallID: item.CallID})

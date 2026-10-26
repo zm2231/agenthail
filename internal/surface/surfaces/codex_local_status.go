@@ -40,6 +40,7 @@ func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Sessi
 // still reports the turn running.
 func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface.Session, info os.FileInfo) {
 	session.Plan = c.plan(ctx, session.Transcript, info)
+	session.BackgroundTasks = c.codexBackground(ctx, session.ID, session.Transcript, info)
 	status, activity := codexTranscriptTurn(session.Transcript, info.ModTime(), time.Now())
 	session.Activity = nil
 	if status != surface.StatusUnknown {

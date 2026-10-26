@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	waiting_id TEXT NOT NULL DEFAULT '',
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
 	waiting_announced INTEGER NOT NULL DEFAULT 0,
-	waiting_answerable INTEGER NOT NULL DEFAULT 0
+	waiting_answerable INTEGER NOT NULL DEFAULT 0,
+	held_completion_turn_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS limit_resumes (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,

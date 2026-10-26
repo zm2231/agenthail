@@ -298,7 +298,7 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	if len(done) != 1 || done[0].Status != "turn_aborted" {
 		t.Fatalf("lifecycle=%+v", done)
 	}
-	if got := byCall["call_json"]; len(got) != 1 || got[0].Kind != "toolResult" || got[0].Text != "Script completed\nWall time 0.0 seconds\nOutput:\n{\"goal\":{\"status\":\"active\"}}" {
+	if got := byCall["call_json"]; len(got) != 1 || got[0].Kind != "toolResult" || got[0].Text != "{\"goal\":{\"status\":\"active\"}}" {
 		t.Fatalf("typed tool output=%+v", got)
 	}
 	imageItems := byCall["call_image"]

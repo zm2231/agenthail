@@ -76,6 +76,7 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 			SELECT from_session FROM routes WHERE active=1
 			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
+			UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
 		)
 		ORDER BY s.surface,s.id`)
 	if err != nil {

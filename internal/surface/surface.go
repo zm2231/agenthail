@@ -231,6 +231,7 @@ type Session struct {
 	CodexPendingEventUser bool              `json:"-"`
 	CodexPendingEventTurn string            `json:"-"`
 	CodexCurrentTurnID    string            `json:"-"`
+	CodexToolWindow       CodexToolWindow   `json:"-"`
 	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
 
 	// TranscriptFromStart says the session source has seen none of the
@@ -1128,6 +1129,11 @@ type TurnInterrupter interface {
 type LocalStatusSource interface {
 	LocalStatusFiles(session Session) []string
 	LocalStatus(ctx context.Context, session Session) (Session, error)
+}
+
+// BackgroundSource reads a session's background work when its turns cannot be observed.
+type BackgroundSource interface {
+	Background(ctx context.Context, session Session) *BackgroundTasks
 }
 
 // CatalogLister lists sessions for the daemon catalog and reports whether the

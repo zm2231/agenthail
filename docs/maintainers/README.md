@@ -10,6 +10,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Claude goals: transcript records, statuses and clients](claude-goals.md)
 - [Codex integration decisions](../codex-protocol.md)
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)
+- [Code mode: tool calls written as scripts, detection and presentation](code-mode.md)
 - [Push notification service](push-relay.md)
 - [Mobile session fidelity audit](mobile-session-ux.md)
 - [Desktop parity: web dashboard vs Mac app](desktop-parity.md)

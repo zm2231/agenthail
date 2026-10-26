@@ -82,6 +82,7 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventUser = s.session.CodexPendingEventUser
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
+		current.CodexToolWindow = s.session.CodexToolWindow
 		current.ClaudeClosingTurn = s.session.ClaudeClosingTurn
 		current.TranscriptFromStart = s.session.TranscriptFromStart
 		streamContext, stopStream := context.WithCancel(s.ctx)
@@ -116,6 +117,7 @@ func (s *sessionSource) run() {
 			s.session.CodexPendingEventUser = current.CodexPendingEventUser
 			s.session.CodexPendingEventTurn = current.CodexPendingEventTurn
 			s.session.CodexCurrentTurnID = current.CodexCurrentTurnID
+			s.session.CodexToolWindow = current.CodexToolWindow
 			s.session.ClaudeClosingTurn = current.ClaudeClosingTurn
 			s.session.TranscriptFromStart = false
 			if err := s.recordTranscriptCheckpoint(s.session.TranscriptOffset, s.session.TranscriptIdentity); err != nil {
