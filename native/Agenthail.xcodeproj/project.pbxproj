@@ -106,6 +106,7 @@
 		A9E65E3E5334FADC7423AE86 /* PreviewStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4A81FE780AC8CD4C5CBA01 /* PreviewStream.swift */; };
 		AB62E3BDE27A26B462335BEA /* SessionSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */; };
 		AC307D7B22335D90E69B08B8 /* UIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39165C9FB624F0AFA9B6A590 /* UIConfig.swift */; };
+		B07446A550EC20C10B4D81C3 /* ToolDiffCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B51912943C3AB5349211FF /* ToolDiffCache.swift */; };
 		B100C4F4AE622463D602F2D7 /* ScreenshotInk.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19AE4DCCC41C8D6914C5B04 /* ScreenshotInk.swift */; };
 		B44C624C75C0ECD2F23A9F6B /* PushRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6106D394E6CAEE8B12827D6 /* PushRelayClient.swift */; };
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
@@ -202,6 +203,7 @@
 
 /* Begin PBXFileReference section */
 		023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperatorUITests.swift; sourceTree = "<group>"; };
+		04B51912943C3AB5349211FF /* ToolDiffCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDiffCache.swift; sourceTree = "<group>"; };
 		0864D478BAA6B9611ABCBF30 /* AgenthailIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgenthailIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0B076C97F3E9777192BE7445 /* TapWhenReady.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapWhenReady.swift; sourceTree = "<group>"; };
 		0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExperienceTests.swift; sourceTree = "<group>"; };
@@ -514,6 +516,7 @@
 				9110800F97A7ED841FDCED47 /* TextDiff.swift */,
 				4F7A9AA7E564B9BE9256DC60 /* TimelineEventLabel.swift */,
 				8F21ADA618DF4770F00C79A8 /* TimelineMetadata.swift */,
+				04B51912943C3AB5349211FF /* ToolDiffCache.swift */,
 				EB53D9DA4DA0D72FCE6BE06B /* ToolPresentation.swift */,
 				DE75ABB49AC40D0AF64253E2 /* ToolRunSummary.swift */,
 				A36D99BE4B16C1C05F7C009F /* TranscriptRows.swift */,
@@ -788,6 +791,7 @@
 				6B4A786AEBA5BC34039ABB98 /* TimelineEventLabel.swift in Sources */,
 				FCB4639F067D8EC20FB942CC /* TimelineMetadata.swift in Sources */,
 				DE883C8BB5916D7DCC2A68FF /* ToolContentView.swift in Sources */,
+				B07446A550EC20C10B4D81C3 /* ToolDiffCache.swift in Sources */,
 				E1BE6F2DF9A47358981475ED /* ToolPresentation.swift in Sources */,
 				979AD7FEC1F38748FA3D6993 /* ToolRunSummary.swift in Sources */,
 				FA9155E997577CAC5815DA96 /* TranscriptContext.swift in Sources */,

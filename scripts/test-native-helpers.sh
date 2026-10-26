@@ -39,6 +39,7 @@ SOURCES=(
   StatusRefreshPolicy.swift
   ToolPresentation.swift
   TextDiff.swift
+  ToolDiffCache.swift
   DiffPresentation.swift
   ToolRunSummary.swift
   TranscriptRows.swift

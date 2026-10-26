@@ -66,6 +66,32 @@ struct ToolPresentationTest {
         first.set("row", body: RetainedBodyResult(text: "kept", error: nil))
         check(TranscriptRows(memory: memory, session: "s1").body("row")?.text == "kept", "a loaded retained body outlives the row that loaded it")
         check(TranscriptRows(memory: memory, session: "s2").body("row") == nil, "another session keeps its own bodies")
+
+        var made = 0
+        let stored = [FileDiff(path: "c", hunks: [TextDiff(before: "1", after: "2")])]
+        let once = ToolDiffCache.diffs(name: "Edit", text: "cache-probe") { made += 1; return stored }
+        let again = ToolDiffCache.diffs(name: "Edit", text: "cache-probe") { made += 1; return [] }
+        check(once == stored && again == stored && made == 1, "a call's diffs are worked out once: made \(made)")
+        _ = ToolDiffCache.diffs(name: "Edit", text: "cache-probe-2") { made += 1; return [] }
+        check(made == 2, "a different call input is diffed on its own")
+        let large = String(repeating: "x", count: 600_000)
+        for n in 0..<12 { _ = ToolDiffCache.diffs(name: "Write", text: "\(n)" + large) { [] } }
+        check(ToolDiffCache.retainedBytes <= ToolDiffCache.byteBudget, "large inputs stay within the byte budget: \(ToolDiffCache.retainedBytes)")
+        var remade = 0
+        _ = ToolDiffCache.diffs(name: "Write", text: "11" + large) { remade += 1; return [] }
+        check(remade == 0, "the latest large input is still reused")
+        _ = ToolDiffCache.diffs(name: "Write", text: String(repeating: "y", count: ToolDiffCache.byteBudget)) { [] }
+        check(ToolDiffCache.retainedBytes <= ToolDiffCache.byteBudget, "an input larger than the budget is not kept")
+        let manyLines = ToolPresentation(name: "Write", text: json(["file_path": "/work/Lines.txt", "content": String(repeating: "a\n", count: 300_000)]))
+        check(manyLines.diffs.first?.hunks.first?.lines.count == 300_000, "a long write is diffed in full")
+        var rediffed = 0
+        _ = ToolDiffCache.diffs(name: "Write", text: manyLines.text) { rediffed += 1; return [] }
+        check(rediffed == 1, "a short input whose diff exceeds the byte budget is not kept")
+        let fewLines = ToolPresentation(name: "Write", text: json(["file_path": "/work/Few.txt", "content": "one\ntwo"]))
+        let before = ToolDiffCache.retainedBytes
+        _ = fewLines.diffs
+        check(ToolDiffCache.retainedBytes - before == "Write".utf8.count + fewLines.text.utf8.count + ToolDiffCache.bytes(fewLines.diffs), "a kept write is charged for its input and its diff lines")
+        check(edit.diffs == ToolPresentation(name: "Edit", text: edit.text).diffs, "the same edit reads back the same diff")
     }
 
     static func check(_ condition: Bool, _ message: String) {
