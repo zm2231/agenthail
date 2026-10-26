@@ -781,11 +781,12 @@ struct IOSComposer: View {
         if let mode = permissionMode {
             Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
                 Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
-                    .lineLimit(1).fixedSize()
+                    .lineLimit(1)
                     .padding(.horizontal, 10).frame(minHeight: 44)
                     .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
             }
             .buttonStyle(.plain)
+            .layoutPriority(1)
             .accessibilityLabel("Mode, " + SessionRequests.permissionModeLabel(mode))
             .accessibilityHint("Changes to the next mode")
             .accessibilityIdentifier("composer-mode")
@@ -797,11 +798,12 @@ struct IOSComposer: View {
                 model.setTurnSettings(settings, for: session.id)
             } label: {
                 Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session").font(.footnote.weight(.medium))
-                    .lineLimit(1).fixedSize()
+                    .lineLimit(1)
                     .padding(.horizontal, 10).frame(minHeight: 44)
                     .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
             }
             .buttonStyle(.plain)
+            .layoutPriority(1)
             .accessibilityLabel("Mode, " + (mode == .plan ? "Plan" : mode == .default ? "Work" : "session setting"))
             .accessibilityHint("Switches between Work and Plan for the next message")
             .accessibilityIdentifier("composer-mode")
