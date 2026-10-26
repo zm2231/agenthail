@@ -58,11 +58,15 @@ struct SessionPreview: View {
     }
 
     static var previewAppearance: UIConfig? {
-        guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-backdrop") else { return nil }
         let arguments = ProcessInfo.processInfo.arguments
-        let background = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
-        let theme = arguments.firstIndex(of: "--preview-theme").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "system"
-        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "chosen": [:], "overrides": [:], "values": ["background": background, "theme": theme]]) else { return nil }
+        let theme = arguments.firstIndex(of: "--preview-theme").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+        var values = ["theme": theme ?? "system"]
+        if let index = arguments.firstIndex(of: "--preview-backdrop") {
+            values["background"] = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
+        } else if theme == nil {
+            return nil
+        }
+        guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "chosen": [:], "overrides": [:], "values": values]) else { return nil }
         return try? JSONDecoder().decode(UIConfig.self, from: json)
     }
 
@@ -86,6 +90,8 @@ struct SessionPreview: View {
     /// approval Agenthail does not hold, and another session is stopped by a
     /// usage limit.
     nonisolated static var previewUnreachable: [String: Any] { ["kind": "approval", "id": "preview-approval", "answerable": false] }
+    nonisolated static var previewQuestions: [String: Any] { ["kind": "question", "id": "preview-questions", "answerable": true] }
+    nonisolated static let previewQuestionsJSON = #"{"permissionMode":"","requests":[{"id":"preview-questions","kind":"question","tool":"AskUserQuestion","alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z","questions":[{"question":"The reconnect fix touches the session store and the stream reader. Which part should land first so the other can build on it?","header":"Landing order for the reconnect fix","multiSelect":false,"options":[{"label":"Session store first","description":"Keeps the saved identity stable before the reader changes"},{"label":"Stream reader first","description":"Smaller change that unblocks the failing regression test today"},{"label":"Both together","description":"One pull request, one review, one risk window"},{"label":"Neither yet","description":"Write the failing test first and decide after"}]},{"question":"Where should the regression check run?","header":"Checks","multiSelect":true,"options":[{"label":"Mac","description":"Run the suite on the desktop build"},{"label":"iPhone","description":"Run it on the shared simulator"},{"label":"Dashboard","description":"Run it in the browser harness"}]}]}]}"#
     nonisolated static let previewHostedLifecycle: [String: Bool] = ["status": true, "logs": true, "stop": true, "resume": true]
     nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
 
@@ -95,8 +101,16 @@ struct SessionPreview: View {
     /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        if arguments.contains("--preview-questions") {
+            var session = detail["session"] as! [String: Any]
+            session["waitingOn"] = previewQuestions
+            detail["session"] = session
+            var capabilities = detail["capabilities"] as! [String: Any]
+            capabilities["respond"] = true
+            detail["capabilities"] = capabilities
+        }
         if arguments.contains("--preview-waiting") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewWaiting
@@ -181,6 +195,14 @@ struct SessionPreview: View {
             waitingSessions[0]["waitingOn"] = previewWaiting
             waitingSessions[0]["runtime"] = ["launcher": "cmux", "focusable": true]
             snapshot["sessions"] = waitingSessions
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-questions") {
+            var asking = snapshot["sessions"] as! [[String: Any]]
+            asking[0]["waitingOn"] = previewQuestions
+            var askingCapabilities: [String: Any] = capabilities
+            askingCapabilities["respond"] = true
+            asking[0]["capabilities"] = askingCapabilities
+            snapshot["sessions"] = asking
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]
@@ -302,6 +324,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
+        case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/usage": body = UsagePreview.json()
         case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
         case "/api/v1/session":

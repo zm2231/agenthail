@@ -2658,6 +2658,87 @@ select {
   min-width: 0;
   flex: 1;
 }
+.question-pager:focus {
+  outline: none;
+}
+.pager-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pager-chips:empty {
+  display: none;
+}
+.pager-chip {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 4px;
+  align-items: center;
+  max-width: 240px;
+  padding: 3px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.pager-chip:last-child {
+  flex: none;
+}
+.pager-chip[aria-current="step"] {
+  border-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+.pager-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pager-page {
+  display: grid;
+  gap: 6px;
+}
+.request-card .pager-question {
+  color: var(--ink);
+  font-weight: 600;
+}
+.pager-option,
+.pager-review-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pager-option > span:nth-child(2),
+.pager-review-row {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+}
+.pager-option small,
+.pager-review-row small,
+.pager-page > small {
+  color: var(--quiet);
+}
+.pager-option kbd {
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.pager-review-row.unanswered span {
+  color: var(--accent);
+}
 .request-actions {
   display: flex;
   flex-wrap: wrap;

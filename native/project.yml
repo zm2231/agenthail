@@ -73,6 +73,9 @@ targets:
       - path: VoiceOperatorModel.swift
       - path: RequestNotifications.swift
       - path: RequestAnswer.swift
+      - path: QuestionPager.swift
+      - path: QuestionPagerDrafts.swift
+      - path: QuestionPagerView.swift
       - path: RequestCard.swift
       - path: PairedCredential.swift
       - path: iOS
