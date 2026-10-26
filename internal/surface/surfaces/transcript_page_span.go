@@ -46,6 +46,9 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	recordTurnIDs := map[int]string{}
 	currentTurnID := ""
 	codexTurns := map[int]*surface.TurnMetadata{}
+	codexItems := map[int][]surface.TimelineItem{}
+	callRecords := map[string]int{}
+	window := surface.CodexToolWindow{}
 	// Claude's turn state is rebuilt at start; Codex's turn and prompt state
 	// are known from the span's first turn start.
 	exactFrom := start
@@ -73,7 +76,8 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 				currentTurnID = turnID
 			}
 			recordTurnIDs[index] = currentTurnID
-			if projection.consume(record, codexTimelineItems(record), currentTurnID) {
+			codexItems[index] = codexPlaceItems(codexItems, callRecords, index, record, codexRecordItems(&window, record, currentTurnID))
+			if projection.consume(record, codexItems[index], currentTurnID) {
 				skipResponseUsers[index] = true
 			}
 		}
@@ -81,6 +85,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	result.CodexPendingEventUser = projection.pending
 	result.CodexPendingEventTurn = projection.turnID
 	result.CodexCurrentTurnID = currentTurnID
+	result.CodexToolWindow = window
 	var claudeEnds map[int][]claudeTurnEnd
 	var claudeInterrupts map[int]bool
 	if source == "claude" {
@@ -146,12 +151,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 				return false, err
 			}
 		} else {
-			items = codexTimelineItems(record)
-			if len(items) == 0 {
-				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
-					items = []surface.TimelineItem{*opaque}
-				}
-			}
+			items = slices.Clone(codexItems[index])
 			for itemIndex := range items {
 				if turnID := recordTurnIDs[index]; turnID != "" {
 					items[itemIndex].TurnID = turnID
@@ -167,11 +167,10 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 				continue
 			}
 			for i := range items {
-				items[i].ID = codexTranscriptItemKey(record, items[i], i)
-				if items[i].Kind == "event" || items[i].ID == "" {
-					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
+				items[i].ID = codexServedItemKey(record, line, offset, items[i], i)
+				if items[i].Timestamp == "" {
+					items[i].Timestamp = str(record, "timestamp")
 				}
-				items[i].Timestamp = str(record, "timestamp")
 			}
 		}
 		if len(items) == 0 {

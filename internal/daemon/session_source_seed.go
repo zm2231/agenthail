@@ -156,6 +156,7 @@ func (s *sessionSource) loadSeed() error {
 		s.session.CodexPendingEventUser = read.CodexPendingEventUser
 		s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 		s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+		s.session.CodexToolWindow = read.CodexToolWindow
 		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 		s.session.TranscriptIdentity = read.TranscriptIdentity
 	} else if localTranscript {
@@ -171,6 +172,9 @@ func (s *sessionSource) loadSeed() error {
 	s.appendSeedItems(read.Items)
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
 		return err
+	}
+	if s.codexTranscriptJournal() {
+		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, codexJournalDerivation)
 	}
 	if _, ok := s.adapter.(surface.TranscriptItemReader); ok {
 		if err := s.recordTranscriptCheckpoint(read.TranscriptOffset, read.TranscriptIdentity); err != nil {

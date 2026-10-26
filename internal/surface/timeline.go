@@ -73,6 +73,7 @@ type SessionReadResult struct {
 	CodexPendingEventUser bool              `json:"-"`
 	CodexPendingEventTurn string            `json:"-"`
 	CodexCurrentTurnID    string            `json:"-"`
+	CodexToolWindow       CodexToolWindow   `json:"-"`
 	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
 	Items                 []TimelineItem    `json:"items"`
 	Exchanges             []Exchange        `json:"exchanges"`
