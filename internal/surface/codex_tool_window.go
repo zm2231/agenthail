@@ -21,4 +21,5 @@ type CodexOpenCall struct {
 type CodexBackgroundCommand struct {
 	CallID  string
 	Command string
+	At      string
 }

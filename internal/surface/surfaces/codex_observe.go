@@ -34,6 +34,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	if path := codexTranscriptPath(sess); path != "" {
 		if info, err := os.Stat(path); err == nil {
 			observation.Plan = c.plan(ctx, path, info)
+			observation.BackgroundTasks = c.codexBackground(ctx, sess.ID, path, info)
 		}
 	}
 	return observation, nil

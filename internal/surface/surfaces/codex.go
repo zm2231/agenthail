@@ -27,6 +27,9 @@ type Codex struct {
 	usageReads   map[string]*codexUsageRead
 	planMu       sync.Mutex
 	planState    map[string]*codexPlanState
+	backgroundMu    sync.Mutex
+	backgroundState map[string]*codexBackgroundState
+	loadedThreads   map[string]map[string]bool
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;

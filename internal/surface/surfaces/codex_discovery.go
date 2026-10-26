@@ -59,6 +59,7 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	}
 	if complete {
 		c.forgetUnreadPlans()
+		c.forgetUnreadBackground()
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
 	return out, complete, nil
