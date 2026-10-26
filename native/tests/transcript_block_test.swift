@@ -114,7 +114,15 @@ struct TranscriptBlockTest {
         check(within[0] < opening && opening < turn.min()!, "within a turn is tighter than after a message, which is tighter than before one: \(within[0]) \(opening) \(turn)")
     }
 
+    static func eventLabels() {
+        let goal = item("event", "Goal updated", text: "Green test suite\n", status: "active")
+        check(goal.eventLine == "Goal updated · active: Green test suite", "an event line keeps the served title: \(goal.eventLine)")
+        check(item("event", "Codex · Future event").eventLine == "Codex · Future event", "a title-only event is its title")
+        check(TranscriptBlock.build([goal]).map(\.kind) == [.notice(goal.eventLine)], "the transcript notice is the shared event line")
+    }
+
     static func main() {
+        eventLabels()
         gaps()
         turnFooter()
         injectedInstructions()

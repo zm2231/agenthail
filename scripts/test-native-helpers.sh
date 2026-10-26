@@ -47,6 +47,7 @@ SOURCES=(
   ClampedText.swift
   TurnClock.swift
   TimelineMetadata.swift
+  TimelineEventLabel.swift
   TurnSettings.swift
   UIConfig.swift
   SurfaceMode.swift
