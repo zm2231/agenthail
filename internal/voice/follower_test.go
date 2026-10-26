@@ -237,7 +237,7 @@ func TestATurnVoiceCannotPlaceWhileADelegationIsUnsettledIsTakenAsTypedAfterItsB
 	f.advance(unattributedWait + time.Second)
 	testkit.Eventually(t, "the unplaced turn to be taken as typed", 5*time.Second, func() bool {
 		select {
-		case f.ticks <- time.Time{}:
+		case f.clockTicks <- time.Time{}:
 		default:
 		}
 		return hasEventWith(f.View(), "voice/target/turn-unattributed", "turnId", "typed-1") && spokenWith(f, "The linter passed.") == 1

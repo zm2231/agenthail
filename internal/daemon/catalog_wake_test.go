@@ -69,10 +69,13 @@ func newestChild(dir string) string {
 	return filepath.Join(dir, names[len(names)-1])
 }
 
-func runCatalogLoop(t *testing.T, d *Daemon) {
+// runCatalogLoop returns the earliest time the loop's discovery ticker can
+// start its first pass.
+func runCatalogLoop(t *testing.T, d *Daemon) time.Time {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	firstTick := time.Now().Add(catalogDiscoveryInterval)
 	go func() {
 		defer close(done)
 		d.runCatalog(ctx)
@@ -81,12 +84,14 @@ func runCatalogLoop(t *testing.T, d *Daemon) {
 		cancel()
 		<-done
 	})
+	return firstTick
 }
 
-func awaitCatalogRow(t *testing.T, d *Daemon, id string) {
+// awaitCatalogRow fails unless the row is published before the discovery
+// ticker could have published it, so only a wake can satisfy it.
+func awaitCatalogRow(t *testing.T, d *Daemon, id string, firstTick time.Time) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	for time.Now().Before(firstTick) {
 		snapshot, err := d.Registry.CatalogSnapshot()
 		if err != nil {
 			t.Fatal(err)
@@ -107,11 +112,11 @@ func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.
 	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
 	codex := newWatchingSurface(surface.KindCodex, func() []string { return []string{rollouts} })
 	d.Surfaces = []surface.Surface{claude, codex}
-	runCatalogLoop(t, d)
+	firstTick := runCatalogLoop(t, d)
 	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return claude.lists.Load() == 1 && codex.lists.Load() == 1 })
 
 	claude.start(t, "outside", records)
-	awaitCatalogRow(t, d, "outside")
+	awaitCatalogRow(t, d, "outside", firstTick)
 	if codex.lists.Load() != 1 {
 		t.Fatalf("a new Claude session listed Codex too: %d Codex lists", codex.lists.Load())
 	}
@@ -120,7 +125,7 @@ func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.
 	for index := range 40 {
 		claude.start(t, "burst-"+strconv.Itoa(index), records)
 	}
-	awaitCatalogRow(t, d, "burst-39")
+	awaitCatalogRow(t, d, "burst-39", firstTick)
 	if passes := claude.lists.Load() - before; passes < 1 || passes > 3 {
 		t.Fatalf("40 sessions starting at once took %d discovery passes; they coalesce into a pass and at most one more", passes)
 	}
@@ -150,8 +155,7 @@ func TestASessionStartedDuringTheFirstPassIsNotLeftForTheTicker(t *testing.T) {
 	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
 	claude.listed = func() { claude.start(t, "during-the-pass", records) }
 	d.Surfaces = []surface.Surface{claude}
-	runCatalogLoop(t, d)
-	awaitCatalogRow(t, d, "during-the-pass")
+	awaitCatalogRow(t, d, "during-the-pass", runCatalogLoop(t, d))
 }
 
 func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
@@ -160,7 +164,7 @@ func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
 	records := filepath.Join(root, "sessions")
 	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
 	d.Surfaces = []surface.Surface{claude}
-	runCatalogLoop(t, d)
+	firstTick := runCatalogLoop(t, d)
 	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return claude.lists.Load() == 1 })
 
 	if err := os.MkdirAll(records, 0700); err != nil {
@@ -168,7 +172,7 @@ func TestASessionsFolderCreatedLaterIsWatchedFromItsParent(t *testing.T) {
 	}
 	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return claude.lists.Load() >= 2 })
 	claude.start(t, "first-ever", records)
-	awaitCatalogRow(t, d, "first-ever")
+	awaitCatalogRow(t, d, "first-ever", firstTick)
 }
 
 func TestASyncThatFindsAnAwaitedFolderAsksForItsPass(t *testing.T) {
@@ -249,7 +253,7 @@ func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 		return dirs
 	})
 	d.Surfaces = []surface.Surface{codex}
-	runCatalogLoop(t, d)
+	firstTick := runCatalogLoop(t, d)
 	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return codex.lists.Load() == 1 })
 
 	day := filepath.Join(root, "23")
@@ -258,7 +262,7 @@ func TestANewDatedFolderIsWatchedBeforeItsFirstSessionLands(t *testing.T) {
 	}
 	testkit.Eventually(t, "the pass the new folder starts", 10*time.Second, func() bool { return codex.lists.Load() >= 2 })
 	codex.start(t, "after-midnight", day)
-	awaitCatalogRow(t, d, "after-midnight")
+	awaitCatalogRow(t, d, "after-midnight", firstTick)
 }
 
 func TestClosedCatalogWakesFollowNothingMore(t *testing.T) {

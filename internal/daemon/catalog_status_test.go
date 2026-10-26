@@ -722,17 +722,18 @@ func TestStatusPassWakesTheObserverOnceForManyTransitions(t *testing.T) {
 	}
 }
 
-// limitStatusSurface reports a usage limit until it resets, as Claude does
-// when it reads a refused turn.
+// limitStatusSurface reports a usage limit until the test lifts it, as Claude
+// does when it reads a refused turn.
 type limitStatusSurface struct {
 	*localStatusSurface
 	resetsAt time.Time
+	lifted   atomic.Bool
 }
 
 func (s *limitStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
 	session, err := s.localStatusSurface.LocalStatus(ctx, session)
 	session.UsageLimit = nil
-	if session.ID == "from" && time.Now().Before(s.resetsAt) {
+	if session.ID == "from" && !s.lifted.Load() {
 		session.UsageLimit = &surface.UsageLimit{ResetsAt: s.resetsAt}
 	}
 	return session, err
@@ -770,6 +771,7 @@ func TestTheStatusPassDropsAUsageLimitOnceItResetsWithoutAFileChange(t *testing.
 		t.Fatal("the catalog row lacks the usage limit before it resets")
 	}
 	time.Sleep(time.Until(source.resetsAt) + 50*time.Millisecond)
+	source.lifted.Store(true)
 	d.refreshCatalogStatus(context.Background())
 	if got := limit(); got != nil {
 		t.Fatalf("usage limit %+v still published after it reset", got)

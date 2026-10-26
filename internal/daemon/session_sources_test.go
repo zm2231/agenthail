@@ -1480,9 +1480,13 @@ func TestAUsageLimitNoticeKeepsItsResetTimeThroughTheJournal(t *testing.T) {
 func followJournal(t *testing.T, manager *sessionSourceManager, sessionID string, subscription sessionSourceSubscription) <-chan registry.SessionJournalEntry {
 	t.Helper()
 	entries := make(chan registry.SessionJournalEntry)
-	done := make(chan struct{})
-	t.Cleanup(func() { close(done) })
+	done, exited := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		close(done)
+		<-exited
+	})
 	go func() {
+		defer close(exited)
 		defer close(entries)
 		var cursor uint64
 		for open := true; ; {
