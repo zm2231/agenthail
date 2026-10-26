@@ -308,5 +308,3 @@ Optional fields may be omitted. Fork, queue and lifecycle successes return `{ok:
 ## Verification boundary
 
 The implementation was checked against installed Claude 2.1.263 help/extracted source and Codex 0.153.4 generated experimental app-server schemas. Automated tests cover fake Claude subprocess launch/identity/lifecycle, a local Codex socket for forks and all six queue methods, turn-option protocol mapping, schema migration and queued replay, CLI parsing/output, and dashboard API consumers. These are deterministic integration checks with no paid model calls. Live model execution, production daemon replacement and installation are separate release steps.
-
-See [the capability audit](agent-capability-audit.md) for the historical inventory and remaining adapters and controls.

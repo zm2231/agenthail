@@ -6,7 +6,7 @@ September 12, 2026. This audit supersedes the September 7 local layout verdict. 
 
 The installed build exposed oversized Markdown headings, repository instructions occupying the chat, raw identifiers in untitled session headers, and inadequate reading hierarchy. The live queue capture contained 40 dead rows, all past their recorded expiry, still presented as current delivery decisions. Claude model discovery returned a fixed three-option list. These are concrete follow-up defects, not simulator or mirroring explanations.
 
-The [research comparison](../research/mobile-agent-clients-2026-09.md) records pinned source inspection for Happy, HAPI, Mimi, Agent Phone and Inkbox, plus the maintainer’s concrete ChatGPT Remote and Claude mobile references. [Native design](../../native/DESIGN.md) records the resulting interaction choices. The minimum version is deliberately iOS/iPadOS 18 for Textual 0.5.0.
+[Native design](../../native/DESIGN.md) records the resulting interaction choices. The minimum version is deliberately iOS/iPadOS 18 for Textual 0.5.0.
 
 ## Product paths
 

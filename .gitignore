@@ -8,6 +8,7 @@ build/
 *.log
 *.tmp
 .research/
+docs/research/
 
 # build output
 /agenthail
