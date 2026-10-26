@@ -77,7 +77,8 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
   const target = effectiveTarget(values, highContrast);
   const readable = highContrast || values["glass.readability"] !== "off";
   const choice = values["glass.tint"];
-  const tint = (choice === "accent" ? colourOf("var(--accent)") : parseHex(choice)) || ground;
+  const accentColour = colourOf("var(--accent)");
+  const tint = (choice === "accent" ? accentColour : parseHex(choice)) || ground;
   return {
     spec: parseBackground(theme === "light" ? values["background.light"] : values.background),
     fit: values["background.fit"],
@@ -97,6 +98,7 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
       on: theme === "dark" && values.glass !== "off" && !reducedTransparency,
       tint: readable ? readableSurface(tint, texts, ground, target + MARGIN) : tint,
       edge: colourOf("var(--ink)") || (theme === "dark" ? [1, 1, 1] : [0, 0, 0]),
+      washes: readable && accentColour ? [[accentColour, SOFT]] : [],
       panes: {
         content: number("glass.opacity", 0.18),
         sidebar: number("glass.sidebar.opacity", 0.45),

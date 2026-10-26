@@ -1,27 +1,29 @@
 import { blendFloor, boundary, linear, passes } from "./ui-contrast.js";
 
-function solve(visit, roles, polarity, target, tint, start = 0) {
+const washed = (colour, [wash, strength]) => colour.map((v, i) => v + (wash[i] - v) * strength);
+
+function solve(visit, roles, polarity, target, tint, start = 0, washes = []) {
   const limit = boundary(roles, polarity, target);
-  const [tr, tg, tb] = tint;
-  const colour = [0, 0, 0];
+  const layers = [[tint, null], ...washes.map((wash) => [washed(tint, wash), wash])];
   let alpha = start;
   if (alpha >= 1) return 1;
   visit((r, g, b) => {
-    const shown = 0.2126 * linear(r + (tr - r) * alpha) + 0.7152 * linear(g + (tg - g) * alpha) + 0.0722 * linear(b + (tb - b) * alpha);
-    if (passes(shown, limit, polarity)) return true;
-    colour[0] = r;
-    colour[1] = g;
-    colour[2] = b;
-    alpha = Math.max(alpha, blendFloor(colour, tint, polarity, limit));
-    return alpha < 1;
+    for (const [[tr, tg, tb], wash] of layers) {
+      const [cr, cg, cb] = wash ? washed([r, g, b], wash) : [r, g, b];
+      const shown = 0.2126 * linear(cr + (tr - cr) * alpha) + 0.7152 * linear(cg + (tg - cg) * alpha) + 0.0722 * linear(cb + (tb - cb) * alpha);
+      if (passes(shown, limit, polarity)) continue;
+      alpha = Math.max(alpha, blendFloor([cr, cg, cb], [tr, tg, tb], polarity, limit));
+      if (alpha >= 1) return false;
+    }
+    return true;
   });
   return alpha;
 }
 
-export function alphaOver(samples, roles, polarity, target, tint, floor = 0) {
+export function alphaOver(samples, roles, polarity, target, tint, floor = 0, washes = []) {
   return solve((check) => {
     for (const [r, g, b] of samples) if (!check(r, g, b)) return;
-  }, roles, polarity, target, tint, floor);
+  }, roles, polarity, target, tint, floor, washes);
 }
 
 function visitShown(colours, { strength, dim, ground, polarity, texture, textureStrength }) {
@@ -47,7 +49,7 @@ function visitShown(colours, { strength, dim, ground, polarity, texture, texture
 }
 
 export function alphaForColours(colours, look, tint, floor = 0) {
-  return solve(visitShown(colours, look), look.roles, look.polarity, look.target, tint, floor);
+  return solve(visitShown(colours, look), look.roles, look.polarity, look.target, tint, floor, look.glass?.washes);
 }
 
 export function paneAlphas(coloursByKind, look) {
