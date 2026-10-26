@@ -35,10 +35,10 @@ func TestASourceThatLostItsEventsIsAskedAgainOnlyOnTheNextTick(t *testing.T) {
 	before := p.polls
 	p.mu.Unlock()
 	f.ticks <- time.Time{}
-	testkit.Eventually(t, "the lost poll", 5*time.Second, func() bool {
+	testkit.Eventually(t, "the observer to pause after the lost poll", 5*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		return p.polls-before >= 1
+		return p.polls-before >= 1 && p.waiting.Load() > 0
 	})
 	time.Sleep(50 * time.Millisecond)
 	p.mu.Lock()
