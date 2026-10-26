@@ -34,4 +34,4 @@ Controls follow each adapter's reported capabilities. Recorded activity is not a
 
 ## Evidence on Hand
 
-The September 12 physical-device audit reproduced a session-list navigation failure and an empty, twice-nested turn-duration card. The reference inventory and pinned source links are in ../docs/research/mobile-agent-clients-2026-09.md.
+The September 12 physical-device audit reproduced a session-list navigation failure and an empty, twice-nested turn-duration card.
