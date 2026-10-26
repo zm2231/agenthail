@@ -15,14 +15,15 @@ type RuntimeState struct {
 	CompletedTurnID   string
 	RelayHops         int
 	NotificationArmed bool
-	UpdatedAt         time.Time
+	HeldCompletionTurnID string
+	UpdatedAt            time.Time
 }
 
 func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
 	var status, updatedAt string
 	var notificationArmed int
-	err := r.read.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
+	err := r.read.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,held_completion_turn_id,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &state.HeldCompletionTurnID, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -47,6 +48,11 @@ func (r *Registry) MarkDeliveryStarted(sessionID, activeTurnID, completedTurnID 
 
 func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnObservation) error {
 	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,turn_observed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,turn_observed=1,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
+	return err
+}
+
+func (r *Registry) HoldCompletion(sessionID, turnID string) error {
+	_, err := r.db.Exec(`UPDATE session_runtime SET held_completion_turn_id=? WHERE session_id=?`, turnID, sessionID)
 	return err
 }
 

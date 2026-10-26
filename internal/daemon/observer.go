@@ -198,22 +198,20 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 				}
 			}
 		}
-		// A turn that leaves background tasks running has not finished the
-		// work it started: the notification stays armed for the turn Claude
-		// starts when they report.
-		terminalCompletion := observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks)
-		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
-			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
-			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
-			if observation.Reply.Error != "" {
-				desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
-				mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
-			}
+	}
+	held, released := heldCompletion(previous, observation, completionChanged)
+	terminalCompletion := completionChanged && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks) || released
+	if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() && observation.Reply != nil && observation.Reply.Done {
+		desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+		mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
+		if observation.Reply.Error != "" {
+			desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+			mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
 		}
-		if terminalCompletion {
-			if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
-				d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
-			}
+	}
+	if terminalCompletion {
+		if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
+			d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
 	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
@@ -222,6 +220,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
+	}
+	if held != previous.HeldCompletionTurnID {
+		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {
+			d.log.Printf("hold completion %s: %s", d.resolveDisplay(session.ID), err)
+		}
 	}
 	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
 	if changed {

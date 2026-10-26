@@ -1,4 +1,4 @@
--- schemaVersion 39
+-- schemaVersion 40
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -515,7 +515,8 @@ CREATE TABLE session_runtime (
 	waiting_id TEXT NOT NULL DEFAULT '',
 	waiting_since_ms INTEGER NOT NULL DEFAULT 0,
 	waiting_announced INTEGER NOT NULL DEFAULT 0,
-	waiting_answerable INTEGER NOT NULL DEFAULT 0
+	waiting_answerable INTEGER NOT NULL DEFAULT 0,
+	held_completion_turn_id TEXT NOT NULL DEFAULT ''
 );
 
 -- table sessions
