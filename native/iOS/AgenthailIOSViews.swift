@@ -781,6 +781,7 @@ struct IOSComposer: View {
         if let mode = permissionMode {
             Button { Task { await model.setPermissionMode(SessionRequests.cycled(from: mode), sessionID: session.id) } } label: {
                 Text(SessionRequests.permissionModeLabel(mode)).font(.footnote.weight(.medium))
+                    .lineLimit(1).fixedSize()
                     .padding(.horizontal, 10).frame(minHeight: 44)
                     .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
             }
@@ -795,7 +796,8 @@ struct IOSComposer: View {
                 settings.mode = TurnSettings.Mode.cycled(from: settings.mode)
                 model.setTurnSettings(settings, for: session.id)
             } label: {
-                Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session mode").font(.footnote.weight(.medium))
+                Text(mode == .plan ? "Plan" : mode == .default ? "Work" : "Session").font(.footnote.weight(.medium))
+                    .lineLimit(1).fixedSize()
                     .padding(.horizontal, 10).frame(minHeight: 44)
                     .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.4)).frame(height: 28))
             }
@@ -986,7 +988,7 @@ struct IOSComposer: View {
         return options
     }
     private var modelLabel: some View {
-        Text(modelName).font(.caption.weight(.medium)).lineLimit(2)
+        Text(modelName).font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
             .padding(.horizontal, 12).frame(minHeight: 44)
             .background(Color.primary.opacity(0.05), in: Capsule())
     }
@@ -1206,10 +1208,7 @@ struct IOSTimelineRow: View {
         if item.title.contains("analysis") { return "Reasoning" }
         return "Assistant"
     }
-    private var eventLabel: String {
-        let title = [item.title.replacingOccurrences(of: "_", with: " ").capitalized, item.status ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-        return item.text.isEmpty ? title : "\(title) · \(item.text)"
-    }
+    private var eventLabel: String { item.eventLine }
 }
 
 /// Call ids are for debugging, so they are copied from a menu rather than shown.

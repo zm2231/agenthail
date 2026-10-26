@@ -64,6 +64,7 @@ let package = Package(
                 "ClampedText.swift",
                 "TurnClock.swift",
                 "TimelineMetadata.swift",
+                "TimelineEventLabel.swift",
                 "OperationsRefreshPolicy.swift",
                 "RequestNotifications.swift",
                 "RequestAnswer.swift",

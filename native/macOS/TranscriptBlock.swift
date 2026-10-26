@@ -81,9 +81,8 @@ struct TranscriptBlock: Identifiable, Equatable {
                 }
             case "event":
                 flushTools()
-                let title = [item.title, item.status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)"), truncated: item.truncated))
+                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(item.eventTitle) : .notice(item.eventLine), truncated: item.truncated))
             case "context", "goal", "done", "phase":
                 continue
             default:
