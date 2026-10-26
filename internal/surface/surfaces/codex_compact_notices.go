@@ -17,9 +17,13 @@ const (
 
 var codexUnservedEvents = []string{"thread_settings_applied", "additional_tools", "item_started"}
 
+func codexBackgroundIndex(window *surface.CodexToolWindow, command string) int {
+	return slices.IndexFunc(window.Background, func(running surface.CodexBackgroundCommand) bool { return running.Command == command })
+}
+
 func codexBackgroundFinished(window *surface.CodexToolWindow, action codexAction) surface.TimelineItem {
 	callID := ""
-	if index := slices.IndexFunc(window.Background, func(command surface.CodexBackgroundCommand) bool { return command.Command == action.Command }); index >= 0 {
+	if index := codexBackgroundIndex(window, action.Command); index >= 0 {
 		callID = window.Background[index].CallID
 		window.Background = slices.Delete(slices.Clone(window.Background), index, index+1)
 	}

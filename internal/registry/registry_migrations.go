@@ -144,6 +144,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
 		{"waiting_answerable", `INTEGER NOT NULL DEFAULT 0`},
+		{"held_completion_turn_id", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "session_runtime", column.name, column.decl); err != nil {
 			return err

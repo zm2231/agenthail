@@ -1131,6 +1131,11 @@ type LocalStatusSource interface {
 	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
+// BackgroundSource reads a session's background work when its turns cannot be observed.
+type BackgroundSource interface {
+	Background(ctx context.Context, session Session) *BackgroundTasks
+}
+
 // CatalogLister lists sessions for the daemon catalog and reports whether the
 // result enumerates every session the runtime holds. Only a complete result
 // retires the sessions it omits. Adapters without it list completely.

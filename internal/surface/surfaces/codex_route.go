@@ -45,16 +45,17 @@ func (c *Codex) openRuntimes(ctx context.Context) *codexRuntimes {
 	} else {
 		runtimes.failures = append(runtimes.failures, "Codex's app-server daemon is not running: "+err.Error())
 	}
+	c.noteLoaded(runtimes)
 	return runtimes
 }
 
 func (r *codexRuntimes) loadedSet(ctx context.Context, c *Codex, client codexClient, name string) map[string]bool {
-	loaded := map[string]bool{}
 	ids, err := c.loadedThreadIDs(ctx, client, 0)
 	if err != nil {
 		r.loadFailures = append(r.loadFailures, name+": "+err.Error())
-		return loaded
+		return nil
 	}
+	loaded := map[string]bool{}
 	for _, id := range ids {
 		loaded[id] = true
 	}

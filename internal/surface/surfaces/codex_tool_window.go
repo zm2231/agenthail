@@ -77,7 +77,7 @@ func codexActionCall(window *surface.CodexToolWindow, action codexAction, turnID
 		}); index >= 0 {
 			return index
 		}
-		if slices.ContainsFunc(window.Background, func(command surface.CodexBackgroundCommand) bool { return command.Command == action.Command }) {
+		if codexBackgroundIndex(window, action.Command) >= 0 {
 			return -1
 		}
 	}
@@ -118,7 +118,7 @@ func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, t
 		}
 		return codexActionRow(action, str(item, "id"))
 	}
-	if action.Tool == "exec_command" && window.Known {
+	if action.Tool == "exec_command" && (window.Known || codexBackgroundIndex(window, action.Command) >= 0) {
 		return []surface.TimelineItem{codexBackgroundFinished(window, action)}
 	}
 	return codexActionRow(action, str(item, "id"))
@@ -164,7 +164,7 @@ func codexCallOutput(window *surface.CodexToolWindow, index int, items []surface
 		output.Status = codexBackgroundStatus
 		background := slices.Clone(window.Background)
 		for _, command := range call.Commands {
-			background = append(background, surface.CodexBackgroundCommand{CallID: call.CallID, Command: command})
+			background = append(background, surface.CodexBackgroundCommand{CallID: call.CallID, Command: command, At: call.At})
 		}
 		window.Background = background
 	}
