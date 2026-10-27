@@ -1,12 +1,16 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/proxyacct"
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestAUsageAnswerNeverWaitsOnTheProxy(t *testing.T) {
@@ -28,6 +32,41 @@ func TestAUsageAnswerNeverWaitsOnTheProxy(t *testing.T) {
 	sets := f.daemon.proxyUsageSets(time.Now().Add(2 * proxyUsageTTL))
 	if elapsed := time.Since(started); elapsed > time.Second || len(sets) != 1 || len(sets[0].Accounts) != 2 {
 		t.Fatalf("an old reading is served while it refreshes, after %s: %+v", elapsed, sets)
+	}
+}
+
+func TestTheDaemonStartsTheFirstProxyReadWhenItStarts(t *testing.T) {
+	f := newProxyUsageFixture(t, "file")
+	store, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, store, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = d.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+		store.Close()
+	})
+	configs, err := surface.ConfiguredProxies(f.home)
+	if err != nil || len(configs) != 1 {
+		t.Fatalf("configs=%+v err=%v", configs, err)
+	}
+	entry := d.proxyUsage.entry(configs[0])
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if last := entry.last.Load(); last != nil && last.err == nil && len(last.accounts) == 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no reading landed after the daemon started, with nothing asking for usage")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
