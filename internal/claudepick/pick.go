@@ -78,6 +78,9 @@ func Choose(candidates []Candidate, policy Policy, now time.Time) Pick {
 	if preferred != nil && preferred.Login == surface.ClaudeLoginAPIKey {
 		return pick(*preferred, "preferred; uses an API key")
 	}
+	if preferred != nil && preferred.Login == surface.ClaudeLoginProxy {
+		return pick(*preferred, "preferred; the proxy chooses the account")
+	}
 	if preferred != nil && known(*preferred) && under(*preferred, policy) {
 		return pick(*preferred, "preferred, "+readings(*preferred))
 	}
