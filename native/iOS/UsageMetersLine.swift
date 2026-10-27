@@ -9,7 +9,7 @@ struct UsageMetersRow: View {
     var body: some View {
         if !feed.accounts.isEmpty {
             Button { showing = true } label: {
-                UsageMetersLine(accounts: feed.accounts, now: feed.now)
+                UsageMetersLine(accounts: feed.accounts, sessions: sessions, now: feed.now)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows each account's limits and sessions")
@@ -29,6 +29,7 @@ struct UsageMetersRow: View {
 
 struct UsageMetersLine: View {
     let accounts: [UsageAccount]
+    var sessions: [SessionState] = []
     let now: Date
 
     var body: some View {
@@ -47,7 +48,7 @@ struct UsageMetersLine: View {
 
     private func row(_ shown: [UsageAccount], bars: Bool, hidden: Int) -> some View {
         HStack(spacing: 12) {
-            ForEach(shown) { UsageChipLabel(account: $0, bars: bars) }
+            ForEach(shown) { UsageChipLabel(account: $0, sessions: sessions, bars: bars) }
             if hidden > 0 {
                 Text(shown.isEmpty ? "\(hidden) accounts" : "+\(hidden)").foregroundStyle(PhonePalette.muted)
             }
@@ -56,8 +57,19 @@ struct UsageMetersLine: View {
     }
 }
 
+extension UsageProblemTone {
+    var phoneStyle: RoleStyle {
+        switch self {
+        case .failed: PhonePalette.failed
+        case .warning: PhonePalette.attention
+        case .quiet: PhonePalette.muted
+        }
+    }
+}
+
 private struct UsageChipLabel: View {
     let account: UsageAccount
+    let sessions: [SessionState]
     let bars: Bool
 
     var body: some View {
@@ -72,8 +84,8 @@ private struct UsageChipLabel: View {
                 Text(UsageMeterText.percent(worst.percent))
                     .monospacedDigit()
                     .foregroundStyle(account.critical ? PhonePalette.failed : RoleStyle(.body))
-            } else if account.problem != nil {
-                Image(systemName: "exclamationmark.circle").foregroundStyle(PhonePalette.muted)
+            } else if let tone = account.problemTone(sessions) {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(tone.phoneStyle)
             } else {
                 Text("–").foregroundStyle(PhonePalette.muted)
             }

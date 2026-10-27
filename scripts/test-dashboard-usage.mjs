@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { POLL_MS, accounts, activeSessions, byHost, render, renderPanel, shortLabel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
+import { POLL_MS, accounts, activeSessions, byHost, problemTone, render, renderPanel, shortLabel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
 import { dropOrder, fit } from "../internal/daemon/dashboard/js/usage-fit.js";
 
 const now = Date.parse("2026-10-23T14:00:00Z");
@@ -79,7 +79,15 @@ const texts = (node) => [node.textContent, ...node.children.flatMap(texts)].filt
 
 render(document, line, list);
 assert.equal(line.hidden, false);
-assert.deepEqual(line.children.map((c) => c.className), ["usage-chip", "usage-chip", "usage-chip critical", "usage-chip problem", "usage-chip", "usage-chip problem", "usage-more"]);
+assert.deepEqual(line.children.map((c) => c.className), ["usage-chip", "usage-chip", "usage-chip critical", "usage-chip note", "usage-chip", "usage-chip problem", "usage-more"], "an API-key root is a normal state; a host that cannot answer is a problem");
+const signedOut = accounts([{ host: "box", hostId: "h4", provider: "claude", name: "default", login: "signed_out", root: "/c", meters: [], problem: "Not signed in; no usage reported." }], now)[0];
+assert.equal(problemTone(list[3], sessions), "quiet");
+assert.equal(problemTone(list[5], sessions), "failed");
+assert.equal(problemTone(signedOut, []), "quiet", "a signed-out root with nothing running is a normal state");
+assert.equal(problemTone(signedOut, [session("s9", "claude", "h4", "/c", "busy")]), "warning", "a signed-out root with running sessions warns");
+render(document, line, [signedOut], [session("s9", "claude", "h4", "/c", "busy")]);
+assert.equal(line.children[0].className, "usage-chip problem warning");
+render(document, line, list);
 assert.deepEqual(texts(line.children[0]), ["work", "40%"]);
 assert.equal(line.children[0].children[1].children[0].tagName, "meter");
 assert.deepEqual(texts(line.children[3]), ["vps (API key)", "!"], "an account with only a problem still shows");
@@ -94,6 +102,8 @@ assert.equal(cards.length, list.length, "the panel has one card per account");
 assert.deepEqual(panel.children.filter((c) => c.tagName === "h3").map((c) => c.textContent), ["studio", "vps", "old"], "cards group by host");
 assert.ok(texts(cards[2]).includes("Week") && texts(cards[2]).includes("91%"), texts(cards[2]).join("|"));
 assert.ok(texts(cards[3]).includes(noLogin));
+assert.equal(cards[3].children.find((c) => c.tagName === "p").className, "usage-note", "an API-key note is secondary text, not an error");
+assert.equal(cards[5].children.find((c) => c.tagName === "p").className, "usage-note bad");
 const button = cards[0].children.find((c) => c.className === "usage-sessions").children[0];
 button.listeners.click();
 assert.deepEqual(opened, ["s1"], "a session in the panel opens it");

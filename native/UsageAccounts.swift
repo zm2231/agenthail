@@ -1,9 +1,14 @@
 import Foundation
 
+enum UsageProblemTone {
+    case quiet, warning, failed
+}
+
 struct UsageAccount: Equatable, Identifiable {
     let id: String
     let title: String
     let login: String
+    let signIn: String?
     let host: String
     let hostId: String
     let local: Bool
@@ -42,6 +47,15 @@ struct UsageAccount: Equatable, Identifiable {
         sessions.filter { owns($0) && ($0.isWorking || $0.current) }
             .sorted { ($0.isWorking ? 0 : 1, $1.lastActive ?? "") < ($1.isWorking ? 0 : 1, $0.lastActive ?? "") }
     }
+
+    func problemTone(_ sessions: [SessionState]) -> UsageProblemTone? {
+        guard problem != nil else { return nil }
+        switch signIn {
+        case "api_key": return .quiet
+        case "signed_out": return activeSessions(sessions).isEmpty ? .quiet : .warning
+        default: return meters.isEmpty ? .failed : .quiet
+        }
+    }
 }
 
 struct UsageHostGroup: Identifiable {
@@ -68,6 +82,7 @@ enum UsageAccounts {
                 id: key(set),
                 title: title,
                 login: fullName(set),
+                signIn: set.login,
                 host: set.host,
                 hostId: set.hostId,
                 local: set.local == true,

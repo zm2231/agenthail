@@ -293,8 +293,13 @@ textarea:focus-visible {
   color: var(--bad);
 }
 .usage-chip.problem .usage-value,
+.usage-chip.note .usage-value,
 .usage-more {
   color: var(--quiet);
+}
+.usage-chip.warning .usage-value,
+.usage-note.warn {
+  color: var(--warn);
 }
 .usage-panel {
   position: absolute;
@@ -369,6 +374,7 @@ textarea:focus-visible {
 }
 .usage-note {
   margin: 0;
+  color: var(--muted);
 }
 .usage-sessions {
   display: grid;

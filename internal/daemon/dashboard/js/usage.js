@@ -128,6 +128,7 @@ export function accounts(sets, now) {
       critical: meters.some(critical),
       problem: set.problem || null,
       problemDetail: set.problemDetail || null,
+      signIn: set.login || null,
       subtitle: [set.provider === "claude" && set.name !== name ? set.name : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
@@ -158,6 +159,16 @@ export function activeSessions(account, sessions) {
     .sort((a, b) => Number(working(b)) - Number(working(a)) || String(b.lastActive || "").localeCompare(String(a.lastActive || "")));
 }
 
+export function problemTone(account, sessions) {
+  if (!account.problem) return null;
+  if (account.signIn === "api_key") return "quiet";
+  if (account.signIn === "signed_out") return activeSessions(account, sessions).length ? "warning" : "quiet";
+  return account.meters.length ? "quiet" : "failed";
+}
+
+const chipTone = { failed: "problem", warning: "problem warning", quiet: "note" };
+const noteTone = { failed: "usage-note bad", warning: "usage-note warn", quiet: "usage-note" };
+
 function node(document, tag, className, content) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -174,9 +185,10 @@ function bar(document, meter) {
   return element;
 }
 
-export function render(document, element, list) {
+export function render(document, element, list, sessions = []) {
   const chips = list.map((account) => {
-    const chip = node(document, "span", ["usage-chip", account.critical ? "critical" : "", account.problem && !account.meters.length ? "problem" : ""].filter(Boolean).join(" "));
+    const tone = !account.meters.length && problemTone(account, sessions);
+    const chip = node(document, "span", ["usage-chip", account.critical ? "critical" : "", tone ? chipTone[tone] : ""].filter(Boolean).join(" "));
     chip.append(node(document, "span", "usage-label", account.title));
     if (account.meters.length) {
       const bars = node(document, "span", "usage-bars");
@@ -196,6 +208,7 @@ export function render(document, element, list) {
 }
 
 function accountCard(document, account, sessions, now, open) {
+  const tone = problemTone(account, sessions);
   const card = node(document, "section", "usage-account");
   const head = node(document, "div", "usage-account-head");
   head.append(node(document, "strong", "", account.login));
@@ -209,7 +222,7 @@ function accountCard(document, account, sessions, now, open) {
     card.append(row);
   }
   if (account.problem) {
-    const problem = node(document, "p", account.meters.length ? "usage-note" : "usage-note bad", account.problem);
+    const problem = node(document, "p", noteTone[tone], account.problem);
     if (account.problemDetail) problem.title = account.problemDetail;
     card.append(problem);
   }
@@ -254,7 +267,7 @@ export function start({ document, fetch, setInterval, now = Date.now, sessions =
     drawPanel();
   };
   const draw = () => {
-    render(document, element, accounts(sets, now()));
+    render(document, element, accounts(sets, now()), sessions());
     fit(element, wrapped);
     drawPanel();
   };

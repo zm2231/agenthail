@@ -262,12 +262,15 @@ the same name is on more than one host, the root's name after it when one host
 would show two accounts alike, small
 bars for its limits, and its highest limit. An account with only a problem
 shows a mark instead of a number; one whose readings have all passed shows a
-dash. Opening the line lists every account by host with each limit, its reset,
+dash. A root that uses an API key or is signed out is a normal state, shown in
+secondary text; a signed-out root with sessions working or open on it shows as a
+warning. Only a limit near its end, or a failed read that left no reading,
+shows as an error. Opening the line lists every account by host with each limit, its reset,
 when it was read, its problem with its detail as help text, and the sessions working or open on it, which
 open on click. A session belongs to the account of its host and, for Claude,
 its `claudeConfigRoot`. When the Mac strip narrows it drops the bars first. The
 dashboard drops the bars first, then accounts that are neither near a limit nor
-showing a problem, last one first, and counts what it dropped; narrower than
+showing a warning or error, last one first, and counts what it dropped; narrower than
 760px it shows no usage. The iPhone drops the bars, then accounts from the end,
 counting them. The iPhone asks each computer it is paired with and lists a host
 two computers both report once. `agenthail usage [--json]` prints the same

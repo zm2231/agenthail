@@ -66,9 +66,9 @@ private struct UsageAccountRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(UsageMeterText.spokenLabel(meter, now: now))
             }
-            if let problem = account.problem {
+            if let problem = account.problem, let tone = account.problemTone(sessions) {
                 Text(problem)
-                    .foregroundStyle(account.meters.isEmpty ? DesktopPalette.failed : DesktopPalette.muted)
+                    .foregroundStyle(tone.desktopStyle)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(account.problemDetail ?? problem)
             } else if account.meters.isEmpty {

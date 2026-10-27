@@ -19,7 +19,7 @@ final class UsageMetersLineTests: XCTestCase {
 
     func testTheLineNeverOverflowsAPhoneWidth() {
         let many = accounts + accounts.map { account in
-            UsageAccount(id: account.id + "-2", title: account.title + " spare", login: account.login, host: account.host, hostId: account.hostId + "-2", local: false, provider: account.provider, rootName: account.rootName, root: account.root, meters: account.meters, problem: account.problem, problemDetail: account.problemDetail, asOf: account.asOf)
+            UsageAccount(id: account.id + "-2", title: account.title + " spare", login: account.login, signIn: account.signIn, host: account.host, hostId: account.hostId + "-2", local: false, provider: account.provider, rootName: account.rootName, root: account.root, meters: account.meters, problem: account.problem, problemDetail: account.problemDetail, asOf: account.asOf)
         }
         for available in [320.0, 375, 393, 430] as [CGFloat] {
             XCTAssertLessThanOrEqual(width(many, at: available), available, "at \(available)pt the usage line must fall back rather than overflow")

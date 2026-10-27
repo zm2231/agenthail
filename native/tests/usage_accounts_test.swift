@@ -44,6 +44,12 @@ struct UsageAccountsTest {
         check(accounts[4].meters.isEmpty && accounts[4].problem == nil, "a reading past its window keeps the account with no meters")
         check(accounts[5].fullTitle == "old" && accounts[5].problem != nil, "a host that cannot answer is one account with its problem")
         check(UsageAccounts.make([], now: now).isEmpty, "no sets, nothing to show")
+        check(accounts[3].problemTone([]) == .quiet, "an API-key root is a normal state")
+        check(accounts[5].problemTone([]) == .failed, "a host that cannot answer is a failure")
+        check(accounts[0].problemTone([]) == nil, "no problem, no tone")
+        let signedOut = UsageAccounts.make([UsageReport.Set(host: "box", hostId: "h4", provider: "claude", name: "c", login: "signed_out", root: "/c", problem: "Not signed in; no usage reported.")], now: now)[0]
+        check(signedOut.problemTone([]) == .quiet, "a signed-out root with nothing running is a normal state")
+        check(signedOut.problemTone([session(id: "s9", surface: "claude", host: "h4", root: "/c", status: "busy")]) == .warning, "a signed-out root with running sessions warns")
 
         let work = accounts[0], team = accounts[2], codex = accounts[1]
         let mine = session(id: "s1", surface: "claude", host: "h1", root: "/a", status: "busy")

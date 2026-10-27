@@ -58,8 +58,8 @@ private struct PhoneUsageAccountRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(UsageMeterText.spokenLabel(meter, now: now))
             }
-            if let problem = account.problem {
-                Text(problem).font(.footnote).foregroundStyle(account.meters.isEmpty ? PhonePalette.failed : PhonePalette.muted)
+            if let problem = account.problem, let tone = account.problemTone(sessions) {
+                Text(problem).font(.footnote).foregroundStyle(tone.phoneStyle)
                     .accessibilityHint(account.problemDetail ?? "")
             } else if account.meters.isEmpty {
                 Text("No current reading").font(.footnote).foregroundStyle(PhonePalette.muted)
