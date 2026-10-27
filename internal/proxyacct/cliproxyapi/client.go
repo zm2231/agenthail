@@ -95,16 +95,17 @@ func (c *Client) manage(ctx context.Context, method, path string, payload any) (
 		return nil, &proxyacct.Error{Problem: proxyacct.Unreachable, Err: err}
 	}
 	if status != http.StatusOK {
-		return nil, c.refusal(path, status, body, sum)
+		return nil, c.refusal(path, status, body, key, sum)
 	}
 	return body, nil
 }
 
-func (c *Client) refusal(path string, status int, body []byte, sum [sha256.Size]byte) error {
+func (c *Client) refusal(path string, status int, body []byte, key string, sum [sha256.Size]byte) error {
 	var answer struct {
 		Error string `json:"error"`
 	}
 	json.Unmarshal(body, &answer)
+	answer.Error = proxyText(answer.Error, key)
 	message := strings.ToLower(answer.Error)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -156,6 +157,17 @@ func (c *Client) send(ctx context.Context, method, path, key string, payload any
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxAnswerBytes))
 	return response.StatusCode, body, redact(err, key)
+}
+
+// The proxy's own error text can echo what it was sent, so it never carries the key.
+func proxyText(text, key string) string {
+	if key != "" {
+		text = strings.ReplaceAll(text, key, "[key]")
+	}
+	if len(text) > 300 {
+		text = text[:300] + "…"
+	}
+	return text
 }
 
 func redact(err error, key string) error {

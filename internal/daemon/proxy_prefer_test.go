@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -141,6 +142,21 @@ func TestAFailedStepStopsAndSaysWhatChanged(t *testing.T) {
 	}
 	if writes := f.proxy.Writes(); len(writes) != 2 {
 		t.Fatalf("the sequence stops at the failure and nothing is rolled back: %q", writes)
+	}
+}
+
+func TestAProxyErrorEchoingTheKeyStaysOutOfTheAnswerAndTheLog(t *testing.T) {
+	f, proxy := newPreferFixture(t)
+	var logged bytes.Buffer
+	f.daemon.log = log.New(&logged, "", 0)
+	f.proxy.FailWrite.Store(`claude-spare.json 500 {"error":"rejected Bearer ` + proxyaccttest.Key + `"}`)
+	plan := f.plan(t, proxy, "claude-spare.json", preferOn, false)
+	code, body := f.prefer(t, proxyPreferRequest{Proxy: proxy, Account: "claude-spare.json", Set: preferOn, PlanID: plan.PlanID})
+	if code != http.StatusBadGateway || strings.Contains(body, proxyaccttest.Key) || !strings.Contains(body, "Bearer [key]") {
+		t.Fatalf("%d %s", code, body)
+	}
+	if logged.Len() == 0 || strings.Contains(logged.String(), proxyaccttest.Key) {
+		t.Fatalf("log: %q", logged.String())
 	}
 }
 

@@ -56,6 +56,9 @@ func (a *App) cmdProxiesPrefer(args []string, positional []string) error {
 	default:
 		return errors.New(proxiesPreferUsage)
 	}
+	if hasFlag(args, "--json") && hasFlag(args, "--yes") {
+		return errors.New("--json prints the plan without writing; drop --json to apply it with --yes")
+	}
 	if hasFlag(args, "--now") && set != "only" {
 		return errors.New("--now applies only to --only: it releases the sessions on the accounts it turns off")
 	}
@@ -77,7 +80,7 @@ func (a *App) cmdProxiesPrefer(args []string, positional []string) error {
 	if err := a.signinCall(ctx, http.MethodGet, "/api/v1/proxies/prefer", query, nil, &plan); err != nil {
 		return err
 	}
-	if hasFlag(args, "--json") && !hasFlag(args, "--yes") {
+	if hasFlag(args, "--json") {
 		return emit(plan)
 	}
 	writePreferPlan(os.Stdout, plan)

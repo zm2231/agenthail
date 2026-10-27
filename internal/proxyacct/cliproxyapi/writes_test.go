@@ -64,6 +64,20 @@ func TestAReadOnlyKeyIsNamedAndNotLatched(t *testing.T) {
 	}
 }
 
+func TestAProxyErrorThatEchoesTheKeyNeverCarriesIt(t *testing.T) {
+	proxy := proxyaccttest.New(t)
+	client := New(proxy.Server.URL, keyFile(t, proxyaccttest.Key, 0o600), nil)
+	proxy.FailWrite.Store(`claude-dev.json 500 {"error":"bad header Bearer ` + proxyaccttest.Key + `"}`)
+	err := client.SetPreference(context.Background(), "claude-dev.json", proxyacct.NotPreferred)
+	if err == nil || strings.Contains(err.Error(), proxyaccttest.Key) || !strings.Contains(err.Error(), "Bearer [key]") {
+		t.Fatalf("err=%v", err)
+	}
+	proxy.Forced.Store(`500 {"error":"` + proxyaccttest.Key + `"}`)
+	if _, err := client.Accounts(context.Background()); err == nil || strings.Contains(err.Error(), proxyaccttest.Key) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestAWriteToAMissingAccountSaysSo(t *testing.T) {
 	proxy := proxyaccttest.New(t)
 	client := New(proxy.Server.URL, keyFile(t, proxyaccttest.Key, 0o600), nil)

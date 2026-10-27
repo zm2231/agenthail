@@ -30,6 +30,14 @@ func TestPreferNamesAnAccountByLabelOrIDAndRefusesAnAmbiguousOne(t *testing.T) {
 	}
 }
 
+func TestJSONNeverWritesEvenWithYes(t *testing.T) {
+	args := []string{"prefer", "shared", "lead", "on", "--json", "--yes"}
+	err := (&App{}).cmdProxies(args)
+	if err == nil || !strings.Contains(err.Error(), "--json prints the plan without writing") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestThePreferPlanShowsEveryChangeAndWhatItReaches(t *testing.T) {
 	var plan preferPlanView
 	json.Unmarshal([]byte(`{"proxy":{"name":"shared","id":"p"},"host":"server","account":{"id":"claude-spare.json","label":"spare@example.com"},"set":"only","now":true,

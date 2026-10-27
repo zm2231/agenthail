@@ -198,6 +198,7 @@ each proxy with its accounts, problems and the roots that use it.
 `agenthail proxies prefer <proxy> <account> on|off` toggles one account and
 `agenthail proxies prefer <proxy> <account> --only [--now]` prefers it alone.
 Both print the plan and ask before writing; `--yes` skips the question and
-`--json` prints the plan without writing.
+`--json` prints the plan without writing, so it refuses `--yes`. A proxy's
+own error text is passed on with the key replaced by `[key]`.
 `agenthail roots` says when a root goes through a proxy. New-session forms name
 such a root `shared via proxy`.
