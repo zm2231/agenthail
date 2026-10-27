@@ -27,6 +27,10 @@ func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, 
 		d.limitResumeAction(w, session.ID, request.Action == "limit-resume")
 		return
 	}
+	if request.Action == "limit-move" {
+		d.limitMoveAction(w, r, session.ID, request.ConfigRoot, request.StopTerminal)
+		return
+	}
 	if request.Action == "session-focus" {
 		if session.Runtime == nil || !session.Runtime.Focusable || session.Runtime.Location == nil {
 			writeAPIError(w, http.StatusConflict, "conflict", "session is not focusable")

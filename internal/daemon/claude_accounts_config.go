@@ -11,6 +11,7 @@ type ClaudeAccountsConfig struct {
 	Preferred      string  `json:"preferred,omitempty"`
 	SessionCeiling float64 `json:"sessionCeiling,omitempty"`
 	WeeklyCeiling  float64 `json:"weeklyCeiling,omitempty"`
+	AutoMove       bool    `json:"autoMove,omitempty"`
 }
 
 func (c DashboardConfig) ClaudeAccountPolicy() claudepick.Policy {
@@ -22,6 +23,7 @@ func (c DashboardConfig) ClaudeAccountPolicy() claudepick.Policy {
 		policy.Auto = *c.ClaudeAccounts.Auto
 	}
 	policy.Preferred = c.ClaudeAccounts.Preferred
+	policy.AutoMove = c.ClaudeAccounts.AutoMove
 	if c.ClaudeAccounts.SessionCeiling > 0 {
 		policy.SessionCeiling = c.ClaudeAccounts.SessionCeiling
 	}
@@ -38,6 +40,6 @@ func (c *DashboardConfig) SetClaudeAccountPolicy(policy claudepick.Policy) error
 		}
 	}
 	auto := policy.Auto
-	c.ClaudeAccounts = &ClaudeAccountsConfig{Auto: &auto, Preferred: policy.Preferred, SessionCeiling: policy.SessionCeiling, WeeklyCeiling: policy.WeeklyCeiling}
+	c.ClaudeAccounts = &ClaudeAccountsConfig{Auto: &auto, Preferred: policy.Preferred, SessionCeiling: policy.SessionCeiling, WeeklyCeiling: policy.WeeklyCeiling, AutoMove: policy.AutoMove}
 	return nil
 }

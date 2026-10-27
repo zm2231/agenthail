@@ -26,7 +26,7 @@ Session commands:
   whoami [--json]                Who the calling session is, who it reports to, how it reaches the person
   help agent                    What the calling session can do through Agenthail
   roots [--json]                 List each Claude config directory and the login it currently holds
-  roots policy [auto on|off | prefer <root>|none | ceilings <session %> <week %>]
+  roots policy [auto on|off | prefer <root>|none | ceilings <session %> <week %> | automove on|off]
                                  Show or set how new Claude sessions choose a config directory
   usage [--json]                 Show every account's usage limits, resets and running sessions on each host
   proxies [--json]               List account proxies, their health and the accounts behind them

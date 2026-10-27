@@ -74,6 +74,7 @@ func (d *Daemon) moveSessionToRoot(ctx context.Context, request sessionMoveReque
 		}
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "moved to account " + request.Root})
+	d.releaseMovedLimitStop(session.ID)
 	d.settledRootMove()
 	result.Move, _ = d.Registry.SessionMove(manifest.ID)
 	return result, nil

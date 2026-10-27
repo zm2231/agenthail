@@ -20,6 +20,7 @@ type Policy struct {
 	Preferred      string  `json:"preferred,omitempty"`
 	SessionCeiling float64 `json:"sessionCeiling"`
 	WeeklyCeiling  float64 `json:"weeklyCeiling"`
+	AutoMove       bool    `json:"autoMove"`
 }
 
 func DefaultPolicy() Policy {

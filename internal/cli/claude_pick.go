@@ -15,7 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const rootsPolicyUsage = "usage: agenthail roots policy [--json] | auto on|off | prefer <root>|none | ceilings <session %> <week %>"
+const rootsPolicyUsage = "usage: agenthail roots policy [--json] | auto on|off | prefer <root>|none | ceilings <session %> <week %> | automove on|off"
 
 func (a *App) claudeRootPick(ctx context.Context) (claudepick.Pick, error) {
 	if a.daemonIsRunning() {
@@ -76,10 +76,16 @@ func (a *App) cmdRootsPolicy(args []string) error {
 		if preferred == "" {
 			preferred = "none"
 		}
-		fmt.Printf("automatic choice: %s\npreferred root: %s\nceilings: session %.0f%%, week %.0f%%\nnext session: %s (%s)\n", auto, preferred, policy.SessionCeiling, policy.WeeklyCeiling, pickTitle(pick), pick.Reason)
+		autoMove := "off"
+		if policy.AutoMove {
+			autoMove = "on"
+		}
+		fmt.Printf("automatic choice: %s\npreferred root: %s\nceilings: session %.0f%%, week %.0f%%\nmove at a usage limit: %s\nnext session: %s (%s)\n", auto, preferred, policy.SessionCeiling, policy.WeeklyCeiling, autoMove, pickTitle(pick), pick.Reason)
 		return nil
 	case len(positional) == 2 && positional[0] == "auto" && (positional[1] == "on" || positional[1] == "off"):
 		policy.Auto = positional[1] == "on"
+	case len(positional) == 2 && positional[0] == "automove" && (positional[1] == "on" || positional[1] == "off"):
+		policy.AutoMove = positional[1] == "on"
 	case len(positional) == 2 && positional[0] == "prefer":
 		policy.Preferred = positional[1]
 		if policy.Preferred == "none" {

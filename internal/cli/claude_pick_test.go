@@ -49,17 +49,17 @@ func TestRootsPolicyShowsAndChangesTheHostsChoice(t *testing.T) {
 	if policy, pick := show(); policy != claudepick.DefaultPolicy() || pick.Root != "" || pick.Reason != "no usage reading" {
 		t.Fatalf("defaults pick the primary when no usage is known and never the API key: policy=%+v pick=%+v", policy, pick)
 	}
-	for _, args := range [][]string{{"prefer", "nope"}, {"ceilings", "0", "90"}, {"ceilings", "x", "90"}, {"auto", "maybe"}} {
+	for _, args := range [][]string{{"prefer", "nope"}, {"ceilings", "0", "90"}, {"ceilings", "x", "90"}, {"auto", "maybe"}, {"automove", "maybe"}} {
 		if err := app.Run(append([]string{"roots", "policy"}, args...)); err == nil {
 			t.Fatalf("%v was accepted", args)
 		}
 	}
-	for _, args := range [][]string{{"ceilings", "80", "95"}, {"auto", "off"}} {
+	for _, args := range [][]string{{"ceilings", "80", "95"}, {"auto", "off"}, {"automove", "on"}} {
 		if _, err := captureStdout(t, func() error { return app.Run(append([]string{"roots", "policy"}, args...)) }); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if policy, pick := show(); policy.SessionCeiling != 80 || policy.WeeklyCeiling != 95 || policy.Auto || pick.Reason != "automatic choice is off" {
+	if policy, pick := show(); policy.SessionCeiling != 80 || policy.WeeklyCeiling != 95 || policy.Auto || !policy.AutoMove || pick.Reason != "automatic choice is off" {
 		t.Fatalf("policy=%+v pick=%+v", policy, pick)
 	}
 }
