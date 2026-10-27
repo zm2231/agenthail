@@ -10,6 +10,8 @@ import (
 	"github.com/zm2231/agenthail/internal/proxyacct"
 )
 
+const proxyStepTimeout = proxyacct.KeyReadLimit + 10*time.Second
+
 type proxyStep struct {
 	done string
 	not  string
@@ -38,7 +40,10 @@ func (d *Daemon) applyProxyPrefer(ctx context.Context, config proxyacct.Config, 
 	host := d.localHost().Name
 	done := []string{}
 	for i, step := range steps {
-		if err := step.run(ctx); err != nil {
+		stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), proxyStepTimeout)
+		err := step.run(stepCtx)
+		cancel()
+		if err != nil {
 			parts := append(append([]string{}, done...), step.not+": "+proxyWriteProblem(config, err))
 			for _, rest := range steps[i+1:] {
 				parts = append(parts, rest.not)

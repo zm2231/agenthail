@@ -124,6 +124,19 @@ func TestARefusedKeySaysHowToFixIt(t *testing.T) {
 	}
 }
 
+func TestASlowKeyCommandGetsItsWholeTimeToRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits nine seconds for the key")
+	}
+	slow := `sleep 9; printf '%s\n' "$0"`
+	f := newProxyUsageFixture(t, `,"management":{"command":["/bin/sh","-c","`+strings.ReplaceAll(slow, `"`, `\"`)+`","`+proxyaccttest.Key+`"]}`)
+	body, raw := f.usage(t)
+	group := body.Sets[2]
+	if group.ProxyProblem != "" || len(group.Accounts) != 2 || strings.Contains(raw, proxyaccttest.Key) {
+		t.Fatalf("group=%+v", group)
+	}
+}
+
 func TestAProxySharedByHostsShowsOnceFromAHostThatCanReadIt(t *testing.T) {
 	shared := &usageProxy{Name: "shared", ID: "http://proxy.example:8317"}
 	sets := mergeProxySets([]usageSet{

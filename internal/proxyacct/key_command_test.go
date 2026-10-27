@@ -35,7 +35,7 @@ func TestAFailingKeyCommandNeverCarriesItsOutput(t *testing.T) {
 
 func TestAKeyCommandThatHangsIsStoppedWithItsChildren(t *testing.T) {
 	keyCommandTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { keyCommandTimeout = 10 * time.Second })
+	t.Cleanup(func() { keyCommandTimeout = KeyReadLimit })
 	started := time.Now()
 	_, err := readCommand(t, printTheKey+"; sleep 30 & sleep 30")
 	if ProblemOf(err) != KeyUnreadable || !strings.Contains(err.Error(), "did not finish within") || strings.Contains(err.Error(), commandKey) {

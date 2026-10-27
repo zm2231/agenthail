@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-var keyCommandTimeout = 10 * time.Second
+// Deadlines around a proxy request must leave this much for reading the key.
+const KeyReadLimit = 10 * time.Second
+
+var keyCommandTimeout = KeyReadLimit
 
 func readKeyCommand(ctx context.Context, argv []string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, keyCommandTimeout)

@@ -32,6 +32,9 @@ func TestProxiesConfigIsValidated(t *testing.T) {
 		`[{"name":"a","url":"http://x","management":{"keychain":{"service":"s"}}}]`: "service and account",
 		`[{"name":"a","url":"http://x","management":{"command":["setec","get","k"]}}]`: "absolute path",
 		`[{"name":"a","url":"http://x","management":{"command":["/bin/k"],"env":"A"}}]`: "one of file",
+		`[{"name":"a","url":"http://x","management":{"command":[]}}]`:                  "one of file",
+		`[{"name":"a","url":"http://x","management":{"file":""}}]`:                     "one of file",
+		`[{"name":"a","url":"http://x","management":{}}]`:                              "one of file",
 	} {
 		if _, err := ParseConfigs([]byte(raw)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("%s: %v", raw, err)

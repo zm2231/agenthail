@@ -13,7 +13,7 @@ import (
 
 const (
 	proxyUsageTTL     = time.Minute
-	proxyUsageTimeout = 8 * time.Second
+	proxyUsageTimeout = proxyacct.KeyReadLimit + 8*time.Second
 )
 
 type proxyUsageCache struct {
