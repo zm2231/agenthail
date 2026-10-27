@@ -37,7 +37,8 @@ enum ClaudeRootLabels {
         if let until = root.exhaustedUntil() {
             return "\(title) · out of usage until \(until.formatted(date: .abbreviated, time: .shortened))"
         }
-        return usage(root, pick: pick).map { "\(title) · \($0.text)" } ?? title
+        let best = root.best.map { "best: " + ($0.split(separator: "@").first.map(String.init) ?? $0) }
+        return [title, best, usage(root, pick: pick)?.text].compactMap { $0 }.joined(separator: " · ")
     }
 
     static func picked(_ pick: ClaudeRootPick, roots: [ClaudeConfigRootOption], titles: [String]) -> String {

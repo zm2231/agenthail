@@ -36,8 +36,10 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     var login: String? = nil
     var proxy: String? = nil
     var usage: ProviderUsage? = nil
+    var best: String? = nil
     var id: String { root }
     var signedIn: Bool { signedInAs != nil }
+    var readsUsage: Bool { signedIn || proxy != nil }
     var selectable: Bool { signedIn || login == "api_key" || login == "proxy" }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
@@ -156,6 +158,7 @@ struct ClaudeRootUsage: Decodable {
     let root: String
     var usage: ProviderUsage? = nil
     var usageProblem: String? = nil
+    var best: String? = nil
 }
 
 struct UsageReport: Decodable, Hashable {
@@ -323,6 +326,7 @@ struct CreationHostPicker {
     mutating func receive(usage next: ClaudeRootUsage, for loaded: Int) {
         guard loaded == generation, let index = options?.claudeConfigRoots?.firstIndex(where: { $0.root == next.root }) else { return }
         options?.claudeConfigRoots?[index].usage = next.usage
+        options?.claudeConfigRoots?[index].best = next.best
     }
 
     mutating func receive(pick next: ClaudeRootPick, for loaded: Int) {

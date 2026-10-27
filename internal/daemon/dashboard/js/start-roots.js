@@ -45,12 +45,13 @@ export function loadStartRootPick(options, host) {
 
 export function loadStartRootUsage(options, host) {
   for (const root of options.claudeConfigRoots || []) {
-    if (!root.signedInAs) continue;
+    if (!root.signedInAs && !root.proxy) continue;
     fetch(`/api/v1/session-options/claude-usage?root=${encodeURIComponent(root.root)}${startHostQuery("&")}`)
       .then(response => response.ok ? response.json() : null)
       .then(answer => {
         if (!answer || host !== app.startHost || app.startOptions !== options) return;
         root.usage = answer.usage;
+        root.best = answer.best || null;
         renderStartConfigRoots(options.claudeConfigRoots, options.claudePick);
       })
       .catch(() => {});
@@ -62,7 +63,7 @@ export function claudeConfigRootOption(root, title = root.name) {
   const detail = exhausted
     ? `out of usage until ${new Date(exhausted).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
     : rootUsage(root, app.startOptions?.claudePolicy);
-  return detail ? `${title} · ${detail}` : title;
+  return [title, root.best ? `best: ${root.best.split("@")[0]}` : null, detail].filter(Boolean).join(" · ");
 }
 
 export function claudeUsageExhausted(root) {

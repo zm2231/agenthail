@@ -117,7 +117,7 @@ final class NewSessionDraft: ObservableObject {
         let host = hosts.hostQuery
         let model = model
         await withTaskGroup(of: ClaudeRootUsage?.self) { group in
-            for root in options.claudeConfigRoots ?? [] where root.signedIn {
+            for root in options.claudeConfigRoots ?? [] where root.readsUsage {
                 group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }
             }
             for await usage in group {

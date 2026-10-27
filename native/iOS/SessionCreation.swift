@@ -230,7 +230,7 @@ struct NewSessionSheet: View {
                 hosts.receive(pick: pick, for: generation)
             }
             await withTaskGroup(of: ClaudeRootUsage?.self) { group in
-                for root in loaded.claudeConfigRoots ?? [] where root.signedIn {
+                for root in loaded.claudeConfigRoots ?? [] where root.readsUsage {
                     group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }
                 }
                 for await usage in group {
