@@ -21,6 +21,8 @@ func (d *Daemon) rootProxy(name string) *usageProxy {
 	return &usageProxy{Name: name}
 }
 
+const proxyReadingProblem = "reading"
+
 // Hosts that share a proxy each report it; it shows once, read from a host
 // that holds a working key when any does.
 func mergeProxySets(sets []usageSet) []usageSet {
@@ -37,6 +39,9 @@ func mergeProxySets(sets []usageSet) []usageSet {
 		}
 		if set.ProxyProblem == "" && !readable[id] {
 			best[id], readable[id] = i, true
+		}
+		if !readable[id] && sets[best[id]].ProxyProblem == string(proxyacct.KeyMissing) && set.ProxyProblem != string(proxyacct.KeyMissing) {
+			best[id] = i
 		}
 		if set.ProxyProblem != string(proxyacct.KeyMissing) {
 			keyless[id] = false
