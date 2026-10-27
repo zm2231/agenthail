@@ -130,6 +130,25 @@ func TestAStoppedSessionIsOfferedTheAccountWithRoomAndMovesThere(t *testing.T) {
 	}
 }
 
+func TestAModelScopedWeekNeverHidesAFullWeekFromTheOffer(t *testing.T) {
+	now := time.Now()
+	meter := func(kind string, percent float64) usageMeter {
+		return usageMeter{Provider: "claude", Kind: kind, Percent: percent, ResetsAt: now.Add(time.Hour)}
+	}
+	sets := []usageSet{
+		{Provider: "claude", Name: "default", Root: "/home/dev/.claude", Primary: true, Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 100)}},
+		{Provider: "claude", Name: "team", Root: "/home/dev/.team/.claude", Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 18), meter("weekly_all", 92), meter("weekly_scoped", 40)}},
+	}
+	candidates := claudePickCandidates(sets, nil, now)
+	if pick, ok := claudepick.MoveTarget(candidates, "/home/dev/.claude", claudepick.DefaultPolicy()); ok {
+		t.Fatalf("a root whose week is 92%% was offered by its scoped 40%%: %+v", pick)
+	}
+	sets[1].Meters[1].Percent = 40
+	if pick, ok := claudepick.MoveTarget(claudePickCandidates(sets, nil, now), "/home/dev/.claude", claudepick.DefaultPolicy()); !ok || pick.Reason != "most headroom, session 18%, week 40%" {
+		t.Fatalf("pick=%+v ok=%v", pick, ok)
+	}
+}
+
 func TestNoMoveIsOfferedWhenNoOtherAccountHasRoom(t *testing.T) {
 	node, _, _ := limitMoveNode(t, "95")
 	session := startMovable(t, node)
