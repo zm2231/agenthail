@@ -96,6 +96,10 @@ func (d *Daemon) claudeRootUsageHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusNotFound, "root_not_found", err.Error())
 		return
 	}
+	if root.Proxy != "" {
+		writeDashboardJSON(w, http.StatusOK, d.proxyRootUsage(ctx, root, time.Now()))
+		return
+	}
 	problem := root.UsageProblem
 	if problem == "" && root.SigninProblem != "" {
 		problem = "no browser sign-in profile here is signed into this login on claude.ai; agenthail signin list shows which accounts they hold"

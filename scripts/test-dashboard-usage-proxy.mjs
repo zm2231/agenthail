@@ -76,5 +76,5 @@ const lists = panel.children.filter((c) => c.className === "usage-sessions");
 assert.equal(lists.length, 1, "the proxy group has one session list, not one per account");
 assert.deepEqual(texts(lists[0]), ["s1", "s2"]);
 
-assert.deepEqual(rootTitles([{ name: "default", primary: true, signedInAs: { email: "dev@example.com" } }, { name: "work", login: "proxy", proxy: "shared", signedInAs: { email: "stale@example.com" } }], "laptop"), ["dev", "shared (proxy)"], "a root through a proxy is named for the proxy");
+assert.deepEqual(rootTitles([{ name: "default", primary: true, signedInAs: { email: "dev@example.com" } }, { name: "work", login: "proxy", proxy: "shared", signedInAs: { email: "stale@example.com" } }], "laptop"), ["dev", "shared via proxy"], "a root through a proxy is named for the proxy");
 console.log("ok");

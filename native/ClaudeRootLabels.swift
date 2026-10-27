@@ -8,7 +8,7 @@ enum ClaudeRootLabels {
 
     static func titles(_ roots: [ClaudeConfigRootOption], host: String) -> [String] {
         let names = roots.map { root -> String in
-            if let proxy = root.proxy, !proxy.isEmpty { return "\(proxy) (proxy)" }
+            if let proxy = root.proxy, !proxy.isEmpty { return "\(proxy) via proxy" }
             if let email = root.signedInAs?.email, !email.isEmpty { return String(email.split(separator: "@")[0]) }
             return "\(host) (\(root.login == "api_key" ? "API key" : "signed out"))"
         }
@@ -37,7 +37,8 @@ enum ClaudeRootLabels {
         if let until = root.exhaustedUntil() {
             return "\(title) · out of usage until \(until.formatted(date: .abbreviated, time: .shortened))"
         }
-        return usage(root, pick: pick).map { "\(title) · \($0.text)" } ?? title
+        let best = root.best.map { "next: " + ($0.split(separator: "@").first.map(String.init) ?? $0) }
+        return [title, best, usage(root, pick: pick)?.text].compactMap { $0 }.joined(separator: " · ")
     }
 
     static func picked(_ pick: ClaudeRootPick, roots: [ClaudeConfigRootOption], titles: [String]) -> String {

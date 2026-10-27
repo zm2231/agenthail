@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -28,16 +29,20 @@ func DefaultPolicy() Policy {
 type Window struct {
 	Percent  float64
 	ResetsAt time.Time
+	Ceiling  float64
 }
 
 type Candidate struct {
-	Name    string
-	Root    string
-	Account string
-	Login   string
-	Primary bool
-	Session *Window
-	Weekly  *Window
+	Name      string
+	Root      string
+	Account   string
+	Login     string
+	Primary   bool
+	Session   *Window
+	Weekly    *Window
+	Pool      []Member
+	Best      string
+	FullUntil time.Time
 }
 
 // Pick is the chosen root. Root is empty for the primary root.
@@ -68,10 +73,11 @@ func Choose(candidates []Candidate, policy Policy, now time.Time) Pick {
 	eligible := []Candidate{}
 	var preferred *Candidate
 	for _, candidate := range candidates {
+		candidate = pooled(candidate, policy, now)
 		if candidate.Name == policy.Preferred && policy.Preferred != "" && candidate.Login != surface.ClaudeLoginSignedOut {
 			preferred = &candidate
 			eligible = append(eligible, candidate)
-		} else if candidate.Login == surface.ClaudeLoginClaudeAI {
+		} else if candidate.Login == surface.ClaudeLoginClaudeAI || candidate.Login == surface.ClaudeLoginProxy {
 			eligible = append(eligible, candidate)
 		}
 	}
@@ -79,6 +85,12 @@ func Choose(candidates []Candidate, policy Policy, now time.Time) Pick {
 		return pick(*preferred, "preferred; uses an API key")
 	}
 	if preferred != nil && preferred.Login == surface.ClaudeLoginProxy {
+		switch {
+		case !preferred.FullUntil.IsZero():
+			return pick(*preferred, fmt.Sprintf("preferred proxy; every account is near its limit, the proxy will wait for the first to free up in %s", until(preferred.FullUntil.Sub(now))))
+		case known(*preferred):
+			return pick(*preferred, "preferred, "+readings(*preferred))
+		}
 		return pick(*preferred, "preferred; the proxy chooses the account")
 	}
 	if preferred != nil && known(*preferred) && under(*preferred, policy) {
@@ -124,29 +136,39 @@ func pick(candidate Candidate, reason string) Pick {
 	return Pick{Root: root, Name: candidate.Name, Account: candidate.Account, Reason: reason}
 }
 
-func known(c Candidate) bool { return c.Session != nil || c.Weekly != nil }
+func known(c Candidate) bool { return c.Session != nil || c.Weekly != nil || !c.FullUntil.IsZero() }
+
+func ceiling(w *Window, fallback float64) float64 {
+	if w != nil && w.Ceiling > 0 {
+		return w.Ceiling
+	}
+	return fallback
+}
 
 func under(c Candidate, policy Policy) bool {
-	return (c.Session == nil || c.Session.Percent < policy.SessionCeiling) && (c.Weekly == nil || c.Weekly.Percent < policy.WeeklyCeiling)
+	return c.FullUntil.IsZero() && (c.Session == nil || c.Session.Percent < ceiling(c.Session, policy.SessionCeiling)) && (c.Weekly == nil || c.Weekly.Percent < ceiling(c.Weekly, policy.WeeklyCeiling))
 }
 
 func load(c Candidate, policy Policy) float64 {
 	value := 0.0
 	if c.Session != nil {
-		value = math.Max(value, c.Session.Percent/policy.SessionCeiling)
+		value = math.Max(value, c.Session.Percent/ceiling(c.Session, policy.SessionCeiling))
 	}
 	if c.Weekly != nil {
-		value = math.Max(value, c.Weekly.Percent/policy.WeeklyCeiling)
+		value = math.Max(value, c.Weekly.Percent/ceiling(c.Weekly, policy.WeeklyCeiling))
 	}
 	return value
 }
 
 func frees(c Candidate, policy Policy) time.Time {
+	if !c.FullUntil.IsZero() {
+		return c.FullUntil
+	}
 	var at time.Time
 	for _, window := range []struct {
 		reading *Window
 		ceiling float64
-	}{{c.Session, policy.SessionCeiling}, {c.Weekly, policy.WeeklyCeiling}} {
+	}{{c.Session, ceiling(c.Session, policy.SessionCeiling)}, {c.Weekly, ceiling(c.Weekly, policy.WeeklyCeiling)}} {
 		if window.reading != nil && window.reading.Percent >= window.ceiling && window.reading.ResetsAt.After(at) {
 			at = window.reading.ResetsAt
 		}
@@ -158,17 +180,17 @@ func frees(c Candidate, policy Policy) time.Time {
 }
 
 func readings(c Candidate) string {
-	text := ""
+	parts := []string{}
+	if c.Best != "" {
+		parts = append(parts, "next: "+c.Best)
+	}
 	if c.Session != nil {
-		text = fmt.Sprintf("session %.0f%%", c.Session.Percent)
+		parts = append(parts, fmt.Sprintf("session %.0f%%", c.Session.Percent))
 	}
 	if c.Weekly != nil {
-		if text != "" {
-			text += ", "
-		}
-		text += fmt.Sprintf("week %.0f%%", c.Weekly.Percent)
+		parts = append(parts, fmt.Sprintf("week %.0f%%", c.Weekly.Percent))
 	}
-	return text
+	return strings.Join(parts, ", ")
 }
 
 func until(d time.Duration) string {

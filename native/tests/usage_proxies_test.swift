@@ -55,7 +55,11 @@ struct UsageProxiesTest {
             ClaudeConfigRootOption(name: "default", root: "/a", primary: true, signedInAs: .init(email: "dev@example.com")),
             ClaudeConfigRootOption(name: "work", root: "/w", primary: false, signedInAs: .init(email: "stale@example.com"), login: "proxy", proxy: "shared"),
         ]
-        check(ClaudeRootLabels.titles(roots, host: "laptop") == ["dev", "shared (proxy)"] && roots[1].selectable, "a root through a proxy is named for it and can be chosen")
+        check(ClaudeRootLabels.titles(roots, host: "laptop") == ["dev", "shared via proxy"] && roots[1].selectable, "a root through a proxy is named for it and can be chosen")
+        var viaProxy = roots[1]
+        viaProxy.best = "team@example.com"
+        viaProxy.usage = try JSONDecoder().decode(ProviderUsage.self, from: Data(#"{"limits":[{"kind":"session","percent":18},{"kind":"weekly_all","percent":41}]}"#.utf8))
+        check(viaProxy.readsUsage && ClaudeRootLabels.option(viaProxy, title: "shared via proxy", pick: nil) == "shared via proxy · next: team · session 18%, week 41%", "a proxy root reads as the account the proxy would use next: \(ClaudeRootLabels.option(viaProxy, title: "shared via proxy", pick: nil))")
         print("ok")
     }
 

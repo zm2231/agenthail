@@ -72,4 +72,14 @@ context.renderStartConfigRoots(context.app.startOptions.claudeConfigRoots);
 pending[0].resolve(answer(exhausted));
 await settle();
 assert(!select.innerHTML.includes("out of usage"), "an answer for the host the form left is dropped");
+
+context.app.startHost = "";
+const proxied = { claudeConfigRoots: [roots()[0], { name: "shared", root: "/home/me/.shared/.claude", primary: false, login: "proxy", proxy: "shared" }] };
+context.app.startOptions = proxied;
+const asked = pending.length;
+context.loadStartRootUsage(proxied, "");
+assert.equal(pending[asked + 1]?.url, "/api/v1/session-options/claude-usage?root=%2Fhome%2Fme%2F.shared%2F.claude", "a root through a proxy is asked too, though it holds no login");
+pending[asked + 1].resolve({ ok: true, json: async () => ({ best: "team@example.com", usage: { limits: [{ kind: "session", percent: 18 }, { kind: "weekly_all", percent: 41 }] } }) });
+await settle();
+assert(select.innerHTML.includes(">shared via proxy · next: team · session 18%, week 41%</option>"), select.innerHTML);
 console.log("ok dashboard config roots");

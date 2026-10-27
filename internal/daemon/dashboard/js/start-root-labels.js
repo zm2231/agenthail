@@ -2,7 +2,7 @@ const kinds = { api_key: "API key", signed_out: "signed out" };
 
 export function rootTitles(roots, host) {
   const names = roots.map((root) => {
-    if (root.proxy) return `${root.proxy} (proxy)`;
+    if (root.proxy) return `${root.proxy} via proxy`;
     const email = root.signedInAs?.email;
     if (email) return email.split("@")[0];
     return `${host || "this host"} (${kinds[root.login] || "signed out"})`;
