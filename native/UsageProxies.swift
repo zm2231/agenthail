@@ -97,10 +97,17 @@ enum UsageProxies {
 
     // Each paired computer reports a shared proxy; keep one, read from a host whose key works when any does.
     static func merged(_ sets: [UsageReport.Set]) -> [UsageReport.Set] {
+        func rank(_ set: UsageReport.Set) -> Int {
+            switch set.proxyProblem {
+            case nil: 0
+            case "key_missing": 2
+            default: 1
+            }
+        }
         var best: [String: Int] = [:]
         for (index, set) in sets.enumerated() where set.provider == "proxy" {
             guard let id = set.proxy?.id else { continue }
-            if let current = best[id], sets[current].proxyProblem == nil || set.proxyProblem != nil { continue }
+            if let current = best[id], rank(sets[current]) <= rank(set) { continue }
             best[id] = index
         }
         var placed = Swift.Set<String>()

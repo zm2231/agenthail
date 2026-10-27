@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -31,7 +30,7 @@ type usageAccount struct {
 	AsOf       time.Time    `json:"asOf,omitzero"`
 }
 
-func (d *Daemon) proxyUsageSets(ctx context.Context, now time.Time) []usageSet {
+func (d *Daemon) proxyUsageSets(now time.Time) []usageSet {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -44,7 +43,7 @@ func (d *Daemon) proxyUsageSets(ctx context.Context, now time.Time) []usageSet {
 	sets := make([]usageSet, len(configs))
 	var wait sync.WaitGroup
 	for i, config := range configs {
-		wait.Go(func() { sets[i] = d.proxyUsageSet(ctx, config, now) })
+		wait.Go(func() { sets[i] = d.proxyUsageSet(config, now) })
 	}
 	wait.Wait()
 	return sets
@@ -58,9 +57,14 @@ func (d *Daemon) proxyIdentity(config proxyacct.Config) *usageProxy {
 	return &usageProxy{Name: config.Name, ID: id, URL: config.URL}
 }
 
-func (d *Daemon) proxyUsageSet(ctx context.Context, config proxyacct.Config, now time.Time) usageSet {
+func (d *Daemon) proxyUsageSet(config proxyacct.Config, now time.Time) usageSet {
 	set := usageSet{Provider: "proxy", Name: config.Name, Proxy: d.proxyIdentity(config), Accounts: []usageAccount{}}
-	reading := d.proxyUsage.read(ctx, config, now)
+	reading := d.proxyUsage.cached(config, now)
+	if reading == nil {
+		set.ProxyProblem = proxyReadingProblem
+		set.Problem = "Reading the " + config.Name + " proxy's accounts."
+		return set
+	}
 	if reading.err != nil {
 		set.ProxyProblem = string(proxyacct.ProblemOf(reading.err))
 		set.Problem, set.Detail = proxyProblemText(config, reading.err)

@@ -107,6 +107,13 @@ account it reports the status (`active`, `cooling` with when it may be tried
 again, `disabled` or `unavailable`), the proxy's preference, and the session,
 week and per-model week windows with the proxy's own ceiling for each.
 
+The usage API, including the answer a paired host asks for, and a session
+start never wait on a proxy or its key. They use the last reading and refresh
+it in the background once it is a minute old; the daemon starts the first read
+when it starts. Until the first read lands, the set says it is reading the
+proxy. The new-session preview reads through the once-a-minute cache, and a
+preference plan and its change read the proxy afresh.
+
 A refused key is not offered again until the key it reads changes, and after
 the proxy blocks this host for failed attempts the daemon waits that out, so
 polling never adds to the proxy's failed-attempt count.
@@ -126,6 +133,7 @@ Problems are explicit lines, with `proxyProblem` naming the case:
 
 | `proxyProblem` | Line |
 | --- | --- |
+| `reading` | the first read of the proxy has not finished yet |
 | `unreachable` | the proxy did not answer its health check |
 | `key_missing` | no key reference on this host; add one with `agenthail proxies key` |
 | `key_unreadable` | the file, keychain item, variable or command could not be read, or the file is readable by others |
@@ -139,8 +147,9 @@ says so and when the first frees up.
 
 Several hosts that share a proxy each report it. The daemon, and the iPhone
 across the computers it is paired with, keep one copy per `id`: one read with a
-working key when any host has one. When none has a key the line says the
-accounts are not readable from any host.
+working key when any host has one, and otherwise one from a host that has a
+key over one that has none. When none has a key the line says the accounts are
+not readable from any host.
 
 ## Preferring an account
 

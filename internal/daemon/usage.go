@@ -61,7 +61,7 @@ func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usageSet {
 	var wait sync.WaitGroup
 	wait.Go(func() { claude = d.claudeUsageSets(ctx, now) })
 	wait.Go(func() { codex = d.codexUsageSet(ctx, now) })
-	wait.Go(func() { proxies = d.proxyUsageSets(ctx, now) })
+	wait.Go(func() { proxies = d.proxyUsageSets(now) })
 	wait.Wait()
 	sets := []usageSet{}
 	if len(claude) > 0 {

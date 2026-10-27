@@ -57,6 +57,18 @@ func newProxyUsageFixture(t *testing.T, management string) proxyUsageFixture {
 
 func (f proxyUsageFixture) usage(t *testing.T) (usageBody, string) {
 	t.Helper()
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		body, raw := f.usageOnce(t)
+		if !strings.Contains(raw, `"proxyProblem":"reading"`) || time.Now().After(deadline) {
+			return body, raw
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (f proxyUsageFixture) usageOnce(t *testing.T) (usageBody, string) {
+	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/usage?scope=local", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()

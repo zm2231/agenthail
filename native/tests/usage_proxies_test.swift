@@ -28,6 +28,11 @@ struct UsageProxiesTest {
         let merged = UsageAccounts.merged([report.sets, server.sets])
         check(merged.filter { $0.provider == "proxy" }.count == 2, "a proxy two computers report shows once; two proxies on one host both show: \(merged.map { $0.name ?? "" })")
         check(merged.first { $0.proxy?.id == "http://proxy.example:8317" && $0.provider == "proxy" }?.host == "server", "the copy read with a working key wins")
+        let reading = try JSONDecoder().decode(UsageReport.self, from: Data(#"""
+        {"sets":[{"host":"server","hostId":"h2","provider":"proxy","name":"shared","proxy":{"name":"shared","id":"http://proxy.example:8317"},"meters":[],"proxyProblem":"reading","problem":"Reading the shared proxy's accounts."}]}
+        """#.utf8))
+        let first = UsageAccounts.merged([report.sets, reading.sets]).first { $0.provider == "proxy" && $0.proxy?.id == "http://proxy.example:8317" }
+        check(first?.host == "server" && first?.problem == "Reading the shared proxy's accounts.", "a computer reading the proxy outranks one without a key")
 
         let accounts = UsageAccounts.make(merged, now: now)
         check(accounts.map(\.title) == ["dev", "dev · shared", "team", "dev (Codex)", "local (proxy)"], "proxy accounts are named like others, told apart by proxy: \(accounts.map(\.title))")

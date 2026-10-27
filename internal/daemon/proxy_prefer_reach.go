@@ -12,7 +12,7 @@ import (
 func (d *Daemon) proxySetsEverywhere(ctx context.Context, now time.Time) []usageSet {
 	var proxies, remote []usageSet
 	var wait sync.WaitGroup
-	wait.Go(func() { proxies = d.proxyUsageSets(ctx, now) })
+	wait.Go(func() { proxies = d.proxyUsageSets(now) })
 	wait.Go(func() { remote = d.remoteUsageSets(ctx) })
 	wait.Wait()
 	local := d.localHost()

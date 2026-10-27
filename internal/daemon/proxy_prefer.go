@@ -53,7 +53,7 @@ func (d *Daemon) proxyPreferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	set := sets[index]
-	if set.ProxyProblem != "" {
+	if set.ProxyProblem != "" && set.ProxyProblem != proxyReadingProblem {
 		writeAPIError(w, http.StatusConflict, "proxy_unreadable", set.Problem+" Changing its preference needs a host that can read it.")
 		return
 	}
