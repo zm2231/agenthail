@@ -88,13 +88,91 @@ func TestUsageKeepsTheLastReadingWhenClaudeAIFails(t *testing.T) {
 	}
 }
 
-func TestUsageNamesARootWithoutAClaudeAILogin(t *testing.T) {
+func TestUsageNamesHowARootWithoutAClaudeAILoginSignsIn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	keys, out := filepath.Join(home, ".keys"), filepath.Join(home, ".out")
+	writeUsageFixture(t, map[string]string{
+		filepath.Join(keys, "settings.json"): `{"apiKeyHelper":"print-key"}`,
+		filepath.Join(out, "settings.json"):  `{}`,
+	})
 	d := &Daemon{}
 	reader := &scriptedRootReader{}
-	set := d.claudeUsageSet(context.Background(), reader, surface.ClaudeConfigRoot{Name: "keys", Root: "/srv/claude"}, time.Now())
-	if set.Problem != claudeNoLoginProblem || set.Name != "keys" || set.Meters != nil || reader.calls != 0 {
-		t.Fatalf("an API-key root says why it has no usage without asking claude.ai: %+v calls=%d", set, reader.calls)
+	for _, c := range []struct {
+		root   string
+		login  string
+		prefix string
+	}{{keys, surface.ClaudeLoginAPIKey, "Signed in with an API key"}, {out, surface.ClaudeLoginSignedOut, "Not signed in"}} {
+		set := d.claudeUsageSet(context.Background(), reader, surface.ClaudeConfigRoot{Name: "keys", Root: c.root}, time.Now())
+		if set.Login != c.login || !strings.HasPrefix(set.Problem, c.prefix) || set.Detail == "" || set.Account != "" || set.Meters != nil {
+			t.Fatalf("a root without a claude.ai login says how it signs in: %+v", set)
+		}
 	}
+	if reader.calls != 0 {
+		t.Fatalf("a root without a claude.ai login never asks claude.ai: %d calls", reader.calls)
+	}
+}
+
+func TestAScopedWeeklyMeterIsLabelledByItsModel(t *testing.T) {
+	now := time.Now()
+	usage := &surface.Usage{FetchedAt: now, Limits: []surface.UsageWindow{{Kind: "weekly_scoped", Scope: "Fable", Percent: 40}, {Kind: "weekly_scoped", Percent: 10}}}
+	meters := usageMeters("claude", usage, now)
+	if len(meters) != 2 || meters[0].Label != "Claude week, Fable" || meters[0].Scope != "Fable" || meters[1].Label != "Claude week, one model" {
+		t.Fatalf("scoped meters: %+v", meters)
+	}
+}
+
+func TestACancelledPollDoesNotFailTheReadAnotherPollWaitsOn(t *testing.T) {
+	reader := &blockingRootReader{started: make(chan struct{}), release: make(chan struct{})}
+	root := surface.ClaudeConfigRoot{Root: "/r", SignedInAs: &surface.ClaudeLogin{AccountID: "a"}}
+	var cache claudeUsageCache
+	now := time.Now()
+	first, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, _, err := cache.read(first, reader, root, now)
+		firstDone <- err
+	}()
+	<-reader.started
+	secondDone := make(chan *surface.Usage, 1)
+	go func() {
+		_, usage, _ := cache.read(context.Background(), reader, root, now)
+		secondDone <- usage
+	}()
+	cancel()
+	close(reader.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("the read outlives the poll that started it: %v", err)
+	}
+	if usage := <-secondDone; usage == nil || len(usage.Limits) != 1 {
+		t.Fatalf("the waiting poll gets the finished reading: %+v", usage)
+	}
+	if got := reader.calls.Load(); got != 1 {
+		t.Fatalf("claude.ai read %d times, want 1", got)
+	}
+}
+
+type blockingRootReader struct {
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (r *blockingRootReader) ClaudeConfigRoots(context.Context) ([]surface.ClaudeConfigRoot, error) {
+	return nil, nil
+}
+
+func (r *blockingRootReader) ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error) {
+	if r.calls.Add(1) == 1 {
+		close(r.started)
+	}
+	<-r.release
+	if err := ctx.Err(); err != nil {
+		return surface.ClaudeConfigRoot{}, err
+	}
+	return surface.ClaudeConfigRoot{Root: path, Usage: &surface.Usage{Limits: []surface.UsageWindow{{Kind: "session", Percent: 30}}}}, nil
 }
 
 type scriptedRootAnswer struct {

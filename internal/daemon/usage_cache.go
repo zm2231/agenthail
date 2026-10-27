@@ -48,7 +48,7 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 		entry.login, entry.readAt, entry.live, entry.err, entry.lastGot = login, time.Time{}, surface.ClaudeConfigRoot{}, nil, nil
 	}
 	if entry.readAt.IsZero() || now.Sub(entry.readAt) >= claudeUsageTTL {
-		ctx, cancel := context.WithTimeout(ctx, claudeRootUsageTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeRootUsageTimeout)
 		entry.live, entry.err = reader.ClaudeConfigRoot(ctx, root.Root)
 		cancel()
 		entry.readAt = now

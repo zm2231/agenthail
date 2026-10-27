@@ -14,7 +14,7 @@ final class UsageMetersUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(usage.frame.minY, chips.frame.maxY, "usage is below the chips")
         XCTAssertLessThanOrEqual(usage.frame.maxY, firstRow.frame.minY, "usage comes before the sessions")
         XCTAssertLessThanOrEqual(usage.frame.maxX, app.windows.firstMatch.frame.maxX, "the line stays on screen")
-        for login in ["demo@example.com: Claude usage 38 percent", "team@example.com", "default on build-box: This config root has no claude.ai login"] {
+        for login in ["demo@example.com: Claude usage 38 percent", "team@example.com", "API key on build-box: Signed in with an API key"] {
             XCTAssertTrue(usage.label.contains(login), "every account reads out, including one without usage: \(usage.label)")
         }
         let line = XCTAttachment(screenshot: app.screenshot())
@@ -32,7 +32,7 @@ final class UsageMetersUITests: XCTestCase {
         let host = app.staticTexts["build-box"]
         for _ in 0..<4 where !host.exists { app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(host.exists, "accounts group by host")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'This config root has no claude.ai login'")).firstMatch.exists, "an API-key root shows its problem in the detail")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Signed in with an API key'")).firstMatch.exists, "an API-key root shows its problem in the detail")
         let lower = XCTAttachment(screenshot: app.screenshot())
         lower.name = "usage accounts sheet, other host"
         lower.lifetime = .keepAlways

@@ -16,7 +16,7 @@ enum UsageMeterText {
         switch meter.kind {
         case "session", "5h": return "Session"
         case "weekly", "weekly_all": return "Week"
-        case "weekly_scoped": return "Week, model"
+        case "weekly_scoped": return "Week, " + (meter.scope.flatMap { $0.isEmpty ? nil : $0 } ?? "one model")
         default: return meter.label
         }
     }

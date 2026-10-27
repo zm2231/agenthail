@@ -159,6 +159,7 @@ struct UsageReport: Decodable, Hashable {
         let provider: String
         let kind: String
         let label: String
+        var scope: String? = nil
         let percent: Double
         var severity: String? = nil
         var resetsAt: String? = nil
@@ -173,11 +174,13 @@ struct UsageReport: Decodable, Hashable {
         var provider: String? = nil
         var name: String? = nil
         var account: String? = nil
+        var login: String? = nil
         var root: String? = nil
         var primary: Bool? = nil
         var meters: [Meter]? = nil
         var asOf: String? = nil
         var problem: String? = nil
+        var problemDetail: String? = nil
     }
     var sets: [Set]? = nil
 }

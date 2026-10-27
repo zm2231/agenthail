@@ -16,7 +16,7 @@ func TestUsagePrintsEveryAccountWithItsSessions(t *testing.T) {
 	    {"kind":"session","label":"Claude","percent":40,"resetsAt":"2026-10-23T16:12:00Z","until":"2026-10-23T16:12:00Z"},
 	    {"kind":"weekly_all","label":"Claude week","percent":93,"resetsAt":"2026-10-26T16:00:00Z"}]},
 	  {"host":"studio","hostId":"h1","local":true,"provider":"codex","meters":[{"kind":"weekly","label":"Codex week","percent":5,"until":"2026-10-23T13:00:00Z"}]},
-	  {"host":"vps","hostId":"h2","provider":"claude","name":"default","account":"default","root":"/srv/claude","meters":[],"problem":"This config root has no claude.ai login (it may use an API key), so claude.ai reports no usage for it."}
+	  {"host":"vps","hostId":"h2","provider":"claude","name":"default","login":"api_key","root":"/srv/claude","meters":[{"kind":"weekly_scoped","label":"Claude week, Fable","scope":"Fable","percent":0,"resetsAt":"2026-10-26T16:00:00Z"}],"problem":"Signed in with an API key; no usage reported."}
 	]`), &sets); err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +48,9 @@ func TestUsagePrintsEveryAccountWithItsSessions(t *testing.T) {
   Codex
     sessions: Codex run
 vps
-  default
-    This config root has no claude.ai login (it may use an API key), so claude.ai reports no usage for it.
+  API key (default)
+    week, Fable    0%  resets in 3d 2h
+    Signed in with an API key; no usage reported.
 `
 	if out.String() != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)

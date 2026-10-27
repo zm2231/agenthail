@@ -12,10 +12,11 @@ struct UsageAccount: Equatable, Identifiable {
     let root: String?
     let meters: [UsageReport.Meter]
     let problem: String?
+    let problemDetail: String?
     let asOf: Date?
 
     var fullTitle: String { local || provider == nil ? login : login + " on " + host }
-    var worst: UsageReport.Meter?{ meters.max { $0.percent < $1.percent } }
+    var worst: UsageReport.Meter? { meters.max { $0.percent < $1.percent } }
     var critical: Bool { meters.contains { $0.severity == "critical" || $0.percent >= 90 } }
 
     func spoken(now: Date) -> String {
@@ -24,7 +25,7 @@ struct UsageAccount: Equatable, Identifiable {
     }
 
     func subtitle(now: Date) -> String? {
-        let parts = [provider == "claude" && rootName != login ? rootName : nil,asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
+        let parts = [provider == "claude" && rootName != login ? rootName : nil, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -61,14 +62,11 @@ enum UsageAccounts {
     }
 
     static func make(_ sets: [UsageReport.Set], now: Date) -> [UsageAccount] {
-        let names = sets.map(baseName)
-        var hostsByName: [String: Swift.Set<String>] = [:]
-        for (set, name) in zip(sets, names) { hostsByName[name, default: []].insert(set.hostId) }
-        return zip(sets, names).map { set, name in
-            let shared = (hostsByName[name]?.count ?? 0) > 1
-            return UsageAccount(
+        let titles = self.titles(sets)
+        return zip(sets, titles).map { set, title in
+            UsageAccount(
                 id: key(set),
-                title: shared && set.provider != nil ? set.host + " · " + name : name,
+                title: title,
                 login: fullName(set),
                 host: set.host,
                 hostId: set.hostId,
@@ -78,6 +76,7 @@ enum UsageAccounts {
                 root: set.root,
                 meters: UsageMeterText.visible(set.meters ?? [], now: now),
                 problem: set.problem.flatMap { $0.isEmpty ? nil : $0 },
+                problemDetail: set.problemDetail.flatMap { $0.isEmpty ? nil : $0 },
                 asOf: set.asOf.flatMap(UsageMeterText.date)
             )
         }
@@ -99,13 +98,41 @@ enum UsageAccounts {
         set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? "")
     }
 
+    static func loginLabel(_ login: String?) -> String? {
+        switch login {
+        case "api_key": return "API key"
+        case "signed_out": return "signed out"
+        default: return nil
+        }
+    }
+
+    private static func titles(_ sets: [UsageReport.Set]) -> [String] {
+        let names = sets.map(baseName)
+        var hostsByName: [String: Swift.Set<String>] = [:]
+        for (set, name) in zip(sets, names) where set.provider != nil && loginLabel(set.login) == nil {
+            hostsByName[name, default: []].insert(set.hostId)
+        }
+        let titles = zip(sets, names).map { set, name in
+            (hostsByName[name]?.count ?? 0) > 1 ? set.host + " · " + name : name
+        }
+        var counts: [String: Int] = [:]
+        for (set, title) in zip(sets, titles) { counts[set.hostId + "|" + title, default: 0] += 1 }
+        return zip(sets, titles).map { set, title in
+            guard (counts[set.hostId + "|" + title] ?? 0) > 1, let name = set.name else { return title }
+            return title + " · " + name
+        }
+    }
+
     private static func baseName(_ set: UsageReport.Set) -> String {
         switch set.provider {
         case nil: return set.host
         case "codex": return "Codex"
         default:
-            if let account = set.account, account.contains("@") { return String(account.split(separator: "@")[0]) }
-            return set.name ?? set.account ?? "Claude"
+            if let account = set.account, !account.isEmpty {
+                return account.contains("@") ? String(account.split(separator: "@")[0]) : account
+            }
+            if let kind = loginLabel(set.login) { return "\(set.host) (\(kind))" }
+            return set.name ?? "Claude"
         }
     }
 
@@ -113,7 +140,10 @@ enum UsageAccounts {
         switch set.provider {
         case nil: return set.host
         case "codex": return "Codex"
-        default: return set.account ?? set.name ?? "Claude"
+        default:
+            if let account = set.account, !account.isEmpty { return account }
+            if let kind = loginLabel(set.login) { return kind.prefix(1).uppercased() + kind.dropFirst() }
+            return set.name ?? "Claude"
         }
     }
 }

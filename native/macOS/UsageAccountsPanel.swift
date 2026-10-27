@@ -70,6 +70,7 @@ private struct UsageAccountRow: View {
                 Text(problem)
                     .foregroundStyle(account.meters.isEmpty ? DesktopPalette.failed : DesktopPalette.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                    .help(account.problemDetail ?? problem)
             } else if account.meters.isEmpty {
                 Text("No current reading").foregroundStyle(DesktopPalette.muted)
             }

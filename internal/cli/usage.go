@@ -13,6 +13,7 @@ import (
 type usageMeterView struct {
 	Kind     string    `json:"kind"`
 	Label    string    `json:"label"`
+	Scope    string    `json:"scope,omitempty"`
 	Percent  float64   `json:"percent"`
 	Severity string    `json:"severity,omitempty"`
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
@@ -33,11 +34,13 @@ type usageSetView struct {
 	Provider string             `json:"provider,omitempty"`
 	Name     string             `json:"name,omitempty"`
 	Account  string             `json:"account,omitempty"`
+	Login    string             `json:"login,omitempty"`
 	Root     string             `json:"root,omitempty"`
 	Primary  bool               `json:"primary,omitempty"`
 	Meters   []usageMeterView   `json:"meters"`
 	AsOf     time.Time          `json:"asOf,omitzero"`
 	Problem  string             `json:"problem,omitempty"`
+	Detail   string             `json:"problemDetail,omitempty"`
 	Sessions []usageSessionView `json:"sessions"`
 }
 
@@ -153,7 +156,12 @@ func usageSetTitle(set usageSetView, now time.Time) string {
 		return "Codex"
 	}
 	title := set.Account
-	if set.Name != "" && set.Name != set.Account {
+	if title == "" {
+		title = map[string]string{"api_key": "API key", "signed_out": "signed out"}[set.Login]
+	}
+	if title == "" {
+		title = set.Name
+	} else if set.Name != "" && set.Name != set.Account {
 		title += " (" + set.Name + ")"
 	}
 	if !set.AsOf.IsZero() {
@@ -169,7 +177,10 @@ func usageKindLabel(meter usageMeterView) string {
 	case "weekly", "weekly_all":
 		return "week"
 	case "weekly_scoped":
-		return "week, model"
+		if meter.Scope != "" {
+			return "week, " + meter.Scope
+		}
+		return "week, one model"
 	}
 	return meter.Label
 }

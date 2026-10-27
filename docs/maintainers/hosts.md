@@ -228,13 +228,14 @@ session in the chosen project's root; a typed folder is still accepted.
 
 `GET /api/v1/usage` is every account's limits on this machine and on every
 connected paired host, as `sets[{host, hostId, local, provider, name, account,
-root, primary, meters, asOf, problem}]`. Each machine lists its primary Claude
+login, root, primary, meters, asOf, problem, problemDetail}]`. Each machine lists its primary Claude
 account first, then Codex while it is healthy, then its other Claude accounts.
-A Claude set's `name` is its root's name and `account` the email the root is
-signed in with, or the root's name when it has none. `asOf` is when its usage
-was read. Each meter has a `provider`, a `kind` (`session`, `5h`, `weekly`,
-`weekly_all`, `weekly_scoped` or `<n>m`), a `label`, `percent`, `asOf` and
-`aged`, and when known a `severity`, `resetsAt` and `until`. A client hides a
+A Claude set's `name` is its root's name, `account` the email the root is
+signed in with, and `login` how the root signs in: `claude.ai`, `api_key` or
+`signed_out`. `asOf` is when its usage was read. Each meter has a `provider`, a
+`kind` (`session`, `5h`, `weekly`, `weekly_all`, `weekly_scoped` or `<n>m`), a
+`label`, `percent`, `asOf` and `aged`, and when known a `severity`, `resetsAt`,
+`until` and, for `weekly_scoped`, the `scope` model's name. A client hides a
 meter once `until` passes and shows the reading's age instead of its reset when
 `aged` is true. Fields that do not apply are left out.
 
@@ -242,9 +243,11 @@ A Claude root's usage is claude.ai's answer for the root's login, read with the
 browser sign-in profile signed into that login. The daemon reads it at most
 once a minute per root and shares the read across every client and poll; a
 login change starts a fresh read. A read that fails keeps the last reading for
-that login, with its `asOf` and the `problem`. A root with no claude.ai login,
-such as one that uses an API key, is a set with no meters and a `problem` that
-says so; it never asks claude.ai.
+that login, with its `asOf` and the `problem`. A root that uses an API key or holds
+no login is a set with no meters, a short `problem` that says which, and a
+`problemDetail` that explains it; it never asks claude.ai. The daemon learns an
+API key only from its presence in the environment, the root's `settings.json`
+or `.claude.json`, never its value.
 
 The daemon asks each connected host with `scope=local`, so a host never asks
 its own peers in turn, and waits at most a few seconds for each. A host that
@@ -253,12 +256,14 @@ provider and a `problem` that names it.
 
 Every client shows every set. The Mac status strip, the web dashboard's top
 bar and the iPhone's line under the session filters show one chip per account:
-its login's name (the email before the `@`, `Codex`, or the root's name), the
-host's name in front only when the same name is on more than one host, small
+its login's name (the email before the `@`, `Codex`, or the host and how the
+root signs in, as in `build-box (API key)`), the host's name in front only when
+the same name is on more than one host, the root's name after it when one host
+would show two accounts alike, small
 bars for its limits, and its highest limit. An account with only a problem
 shows a mark instead of a number; one whose readings have all passed shows a
 dash. Opening the line lists every account by host with each limit, its reset,
-when it was read, its problem and the sessions working or open on it, which
+when it was read, its problem with its detail as help text, and the sessions working or open on it, which
 open on click. A session belongs to the account of its host and, for Claude,
 its `claudeConfigRoot`. When the Mac strip narrows it drops the bars first. The
 dashboard drops the bars first, then accounts that are neither near a limit nor

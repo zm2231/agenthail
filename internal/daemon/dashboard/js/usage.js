@@ -61,43 +61,61 @@ export function spoken(meter, now) {
 export function shortLabel(meter) {
   if (meter.kind === "session" || meter.kind === "5h") return "Session";
   if (meter.kind === "weekly" || meter.kind === "weekly_all") return "Week";
-  if (meter.kind === "weekly_scoped") return "Week, model";
+  if (meter.kind === "weekly_scoped") return `Week, ${meter.scope || "one model"}`;
   return meter.label;
 }
 
 const critical = (meter) => meter.severity === "critical" || meter.percent >= 90;
 
+export function loginLabel(login) {
+  return { api_key: "API key", signed_out: "signed out" }[login] || null;
+}
+
 function baseName(set) {
   if (!set.provider) return set.host;
   if (set.provider === "codex") return "Codex";
-  if (set.account && set.account.includes("@")) return set.account.split("@")[0];
-  return set.name || set.account || "Claude";
+  if (set.account) return set.account.includes("@") ? set.account.split("@")[0] : set.account;
+  const kind = loginLabel(set.login);
+  if (kind) return `${set.host} (${kind})`;
+  return set.name || "Claude";
 }
 
 function login(set) {
   if (!set.provider) return set.host;
   if (set.provider === "codex") return "Codex";
-  return set.account || set.name || "Claude";
+  if (set.account) return set.account;
+  const kind = loginLabel(set.login);
+  if (kind) return kind[0].toUpperCase() + kind.slice(1);
+  return set.name || "Claude";
 }
 
-export function accounts(sets, now) {
-  const names = (sets || []).map(baseName);
+export function titles(sets) {
+  const names = sets.map(baseName);
   const hostsByName = new Map();
-  (sets || []).forEach((set, index) => {
+  sets.forEach((set, index) => {
+    if (!set.provider || loginLabel(set.login)) return;
     const hosts = hostsByName.get(names[index]) || new Set();
     hosts.add(set.hostId);
     hostsByName.set(names[index], hosts);
   });
-  return (sets || []).map((set, index) => {
+  const prefixed = sets.map((set, index) => ((hostsByName.get(names[index])?.size || 0) > 1 ? `${set.host} · ${names[index]}` : names[index]));
+  const counts = new Map();
+  sets.forEach((set, index) => counts.set(`${set.hostId}|${prefixed[index]}`, (counts.get(`${set.hostId}|${prefixed[index]}`) || 0) + 1));
+  return sets.map((set, index) => (counts.get(`${set.hostId}|${prefixed[index]}`) > 1 && set.name ? `${prefixed[index]} · ${set.name}` : prefixed[index]));
+}
+
+export function accounts(sets, now) {
+  const list = sets || [];
+  const chipTitles = titles(list);
+  return list.map((set, index) => {
     const meters = visible(set.meters, now);
-    const shared = hostsByName.get(names[index]).size > 1 && set.provider;
     const name = login(set);
     const fullTitle = set.local === true || !set.provider ? name : `${name} on ${set.host}`;
     const parts = meters.map((meter) => spoken(meter, now)).concat(set.problem ? [set.problem] : []);
     const asOf = time(set.asOf);
     return {
       id: `${set.hostId}|${set.provider || ""}|${set.root || ""}`,
-      title: shared ? `${set.host} · ${names[index]}` : names[index],
+      title: chipTitles[index],
       login: name,
       fullTitle,
       host: set.host,
@@ -109,6 +127,7 @@ export function accounts(sets, now) {
       worst: meters.reduce((top, meter) => (!top || meter.percent > top.percent ? meter : top), null),
       critical: meters.some(critical),
       problem: set.problem || null,
+      problemDetail: set.problemDetail || null,
       subtitle: [set.provider === "claude" && set.name !== name ? set.name : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
@@ -189,7 +208,11 @@ function accountCard(document, account, sessions, now, open) {
     row.setAttribute("aria-label", spoken(meter, now));
     card.append(row);
   }
-  if (account.problem) card.append(node(document, "p", account.meters.length ? "usage-note" : "usage-note bad", account.problem));
+  if (account.problem) {
+    const problem = node(document, "p", account.meters.length ? "usage-note" : "usage-note bad", account.problem);
+    if (account.problemDetail) problem.title = account.problemDetail;
+    card.append(problem);
+  }
   else if (!account.meters.length) card.append(node(document, "p", "usage-note", "No current reading"));
   if (sessions.length) {
     const list = node(document, "div", "usage-sessions");

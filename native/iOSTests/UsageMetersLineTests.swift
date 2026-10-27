@@ -19,7 +19,7 @@ final class UsageMetersLineTests: XCTestCase {
 
     func testTheLineNeverOverflowsAPhoneWidth() {
         let many = accounts + accounts.map { account in
-            UsageAccount(id: account.id + "-2", title: account.title + " spare", login: account.login, host: account.host, hostId: account.hostId + "-2", local: false, provider: account.provider, rootName: account.rootName, root: account.root, meters: account.meters, problem: account.problem, asOf: account.asOf)
+            UsageAccount(id: account.id + "-2", title: account.title + " spare", login: account.login, host: account.host, hostId: account.hostId + "-2", local: false, provider: account.provider, rootName: account.rootName, root: account.root, meters: account.meters, problem: account.problem, problemDetail: account.problemDetail, asOf: account.asOf)
         }
         for available in [320.0, 375, 393, 430] as [CGFloat] {
             XCTAssertLessThanOrEqual(width(many, at: available), available, "at \(available)pt the usage line must fall back rather than overflow")
@@ -46,6 +46,8 @@ final class UsageMetersLineTests: XCTestCase {
         let spoken = accounts.map { $0.spoken(now: now) }
         XCTAssertTrue(spoken[0].hasPrefix("demo@example.com: Claude usage 38 percent"))
         XCTAssertTrue(spoken[2].contains("92 percent"))
-        XCTAssertTrue(spoken[3].hasPrefix("default on build-box: This config root has no claude.ai login"))
+        XCTAssertTrue(spoken[3].hasPrefix("API key on build-box: Signed in with an API key"), spoken[3])
+        XCTAssertEqual(accounts.map(\.title), ["demo", "Codex", "team", "build-box (API key)"])
+        XCTAssertEqual(UsageMeterText.shortLabel(accounts[2].meters[2]), "Week, Fable")
     }
 }

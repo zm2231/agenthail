@@ -60,6 +60,7 @@ private struct PhoneUsageAccountRow: View {
             }
             if let problem = account.problem {
                 Text(problem).font(.footnote).foregroundStyle(account.meters.isEmpty ? PhonePalette.failed : PhonePalette.muted)
+                    .accessibilityHint(account.problemDetail ?? "")
             } else if account.meters.isEmpty {
                 Text("No current reading").font(.footnote).foregroundStyle(PhonePalette.muted)
             }

@@ -1,27 +1,40 @@
 import assert from "node:assert/strict";
-import { POLL_MS, accounts, activeSessions, byHost, render, renderPanel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
+import { POLL_MS, accounts, activeSessions, byHost, render, renderPanel, shortLabel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
 import { dropOrder, fit } from "../internal/daemon/dashboard/js/usage-fit.js";
 
 const now = Date.parse("2026-10-23T14:00:00Z");
 const meter = (label, percent, until, extra = {}) => ({ provider: "claude", kind: "session", label, percent, asOf: "2026-10-23T13:59:00Z", aged: false, until, resetsAt: until, ...extra });
-const noLogin = "This config root has no claude.ai login (it may use an API key), so claude.ai reports no usage for it.";
+const noLogin = "Signed in with an API key; no usage reported.";
 const sets = [
   { host: "studio", hostId: "h1", local: true, provider: "claude", name: "default", account: "work@example.com", root: "/a", primary: true, asOf: "2026-10-23T13:57:00Z", meters: [meter("Claude", 40, "2026-10-23T16:12:00Z")] },
   { host: "studio", hostId: "h1", local: true, provider: "codex", meters: [meter("Codex week", 19, "2026-10-26T16:00:00Z", { provider: "codex", kind: "weekly" })] },
-  { host: "studio", hostId: "h1", local: true, provider: "claude", name: "team", account: "team@example.com", root: "/b", meters: [meter("Claude", 12, "2026-10-23T16:00:00Z"), meter("Claude week", 91, "2026-10-26T16:00:00Z", { kind: "weekly_all", severity: "critical" })] },
-  { host: "vps", hostId: "h2", local: false, provider: "claude", name: "default", account: "default", root: "/srv/claude", primary: true, meters: [], problem: noLogin },
+  { host: "studio", hostId: "h1", local: true, provider: "claude", name: "team", account: "team@example.com", root: "/b", meters: [meter("Claude", 12, "2026-10-23T16:00:00Z"), meter("Claude week", 91, "2026-10-26T16:00:00Z", { kind: "weekly_all", severity: "critical" }), meter("Claude week, Fable", 40, "2026-10-26T16:00:00Z", { kind: "weekly_scoped", scope: "Fable" })] },
+  { host: "vps", hostId: "h2", local: false, provider: "claude", name: "default", login: "api_key", root: "/srv/claude", primary: true, meters: [], problem: noLogin, problemDetail: "claude.ai reports usage only for a claude.ai login." },
   { host: "vps", hostId: "h2", local: false, provider: "codex", meters: [meter("Codex week", 5, "2026-10-23T13:30:00Z", { provider: "codex", kind: "weekly" })] },
   { host: "old", hostId: "h3", local: false, meters: [], problem: "old runs an older Agenthail. Update it to see its usage." },
 ];
 
 const list = accounts(sets, now);
-assert.deepEqual(list.map((a) => a.title), ["work", "studio · Codex", "team", "default", "vps · Codex", "old"], "every account gets a chip; a host prefix only when a name repeats across hosts");
+assert.deepEqual(list.map((a) => a.title), ["work", "studio · Codex", "team", "vps (API key)", "vps · Codex", "old"], "every account gets a chip; a host prefix only when a name repeats across hosts");
+const sameLocal = accounts([
+  { host: "studio", hostId: "h1", provider: "claude", name: "default", account: "work@company-a.example", root: "/a" },
+  { host: "studio", hostId: "h1", provider: "claude", name: "second", account: "work@company-b.example", root: "/b" },
+  { host: "vps", hostId: "h2", provider: "claude", name: "default", account: "work@company-c.example", root: "/c" },
+  { host: "vps", hostId: "h2", provider: "claude", name: "x", login: "api_key", root: "/x" },
+  { host: "vps", hostId: "h2", provider: "claude", name: "y", login: "api_key", root: "/y" },
+], now).map((a) => a.title);
+assert.deepEqual(sameLocal, ["studio · work · default", "studio · work · second", "vps · work", "vps (API key) · x", "vps (API key) · y"], "accounts one host would name alike are told apart by root");
+assert.equal(new Set(sameLocal).size, sameLocal.length, "every chip title is distinct");
+assert.equal(shortLabel(sets[2].meters[2]), "Week, Fable");
+assert.equal(shortLabel({ kind: "weekly_scoped", label: "x" }), "Week, one model");
+assert.equal(list[3].login, "API key");
+assert.equal(list[3].problemDetail, "claude.ai reports usage only for a claude.ai login.");
 assert.equal(list[0].subtitle, "default · read 3m ago");
 assert.equal(list[2].worst.percent, 91);
 assert.equal(list[2].critical, true);
 assert.ok(list[2].spoken.startsWith("team@example.com: Claude usage 12 percent"), list[2].spoken);
 assert.equal(list[3].problem, noLogin, "an API-key root keeps its problem");
-assert.equal(list[3].fullTitle, "default on vps");
+assert.equal(list[3].fullTitle, "API key on vps");
 assert.deepEqual(list[4].meters, [], "a reading past its window keeps the account with no meters");
 assert.deepEqual(byHost(list).map((g) => [g.name, g.accounts.length]), [["studio", 3], ["vps", 2], ["old", 1]]);
 assert.equal(text(sets[0].meters[0], now), "40% · resets 2h 12m");
@@ -69,7 +82,7 @@ assert.equal(line.hidden, false);
 assert.deepEqual(line.children.map((c) => c.className), ["usage-chip", "usage-chip", "usage-chip critical", "usage-chip problem", "usage-chip", "usage-chip problem", "usage-more"]);
 assert.deepEqual(texts(line.children[0]), ["work", "40%"]);
 assert.equal(line.children[0].children[1].children[0].tagName, "meter");
-assert.deepEqual(texts(line.children[3]), ["default", "!"], "an account with only a problem still shows");
+assert.deepEqual(texts(line.children[3]), ["vps (API key)", "!"], "an account with only a problem still shows");
 assert.equal(line.children[2].attributes["aria-label"], list[2].spoken, "every chip reads out its full text");
 render(document, line, []);
 assert.equal(line.hidden, true, "nothing to show hides the line");
