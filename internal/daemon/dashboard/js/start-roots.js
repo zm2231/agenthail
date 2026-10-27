@@ -12,12 +12,13 @@ export function renderStartConfigRoots(roots, pick = null) {
   )].join("");
   if (roots.some(root => root.root === current)) select.value = current;
   select.closest("[data-claude-root]").dataset.single = roots.length < 2 ? "true" : "";
+  $("#new-conversation-config-root-detail").textContent = pick ? `Automatic picks ${pick.name}: ${pick.reason}` : "";
   syncStartForm();
 }
 
 export function automaticOption(pick) {
   if (!pick) return "Automatic";
-  return `Automatic · ${pick.name}${pick.account ? ` (${pick.account})` : ""}: ${pick.reason}`;
+  return `Automatic · ${pick.name}${pick.account ? ` (${pick.account})` : ""}`;
 }
 
 export function loadStartRootPick(options, host) {
