@@ -60,7 +60,7 @@ struct CompletionMenu: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(DesktopPalette.selection.when(highlighted))
+            .selectionMark(highlighted, in: Rectangle())
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

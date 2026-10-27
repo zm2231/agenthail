@@ -34,7 +34,7 @@ struct DesktopStyle: ShapeStyle {
         }
         switch use {
         case .fill: return choice.color
-        case .selection: return choice.color.opacity(0.18)
+        case .selection: return choice.color.opacity(Double(BackdropSpec.selectionStrength))
         case .onAccent: return AccentContrast.foreground(on: choice).color
         case .text:
             if let served = colors.accentText(dark: dark, increased: increased) { return Color(hex: served) }
@@ -48,7 +48,7 @@ struct DesktopStyle: ShapeStyle {
             let accent = AccentContrast.rgb(.controlAccentColor, in: appearance)
             switch use {
             case .fill: return accent.nsColor
-            case .selection: return accent.nsColor.withAlphaComponent(0.18)
+            case .selection: return accent.nsColor.withAlphaComponent(CGFloat(BackdropSpec.selectionStrength))
             case .onAccent: return AccentContrast.foreground(on: accent).nsColor
             case .text: return DesktopPalette.readable(accent, dark: dark, target: target(colors, increased: increased)).nsColor
             }

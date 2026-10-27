@@ -306,7 +306,7 @@ extension SessionSidebar {
                         .padding(.vertical, 6)
                         .padding(.horizontal, 14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DesktopPalette.selection.when(pane.selectedSessionID == result.session.id), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                        .selectionMark(pane.selectedSessionID == result.session.id, bar: true)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -413,7 +413,8 @@ extension SessionSidebar {
                 .padding(.vertical, DesktopSpace.xs)
                 .padding(.horizontal, DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(selected ? AnyShapeStyle(DesktopPalette.selection) : DesktopPalette.attentionBackground.when(needsYou), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                .background(DesktopPalette.attentionBackground.when(needsYou && !selected), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                .selectionMark(selected, bar: true)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -853,7 +854,7 @@ struct ConversationHeader: View {
             } label: {
                 Image(systemName: "sidebar.right")
                     .frame(width: 28, height: 28)
-                    .background(DesktopPalette.selection.when(inspectorVisible), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                    .selectionMark(inspectorVisible)
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)

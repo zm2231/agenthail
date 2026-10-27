@@ -161,7 +161,7 @@ struct CommandPalette: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(DesktopPalette.selection.when(highlighted), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+        .selectionMark(highlighted)
         .contentShape(Rectangle())
     }
 

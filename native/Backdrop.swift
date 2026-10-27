@@ -79,6 +79,14 @@ struct BackdropSpec: Equatable, Sendable {
     /// False when the person turned the readability tint off: panes keep
     /// their minimum tint and open areas get no scrim.
     var readability = true
+    var selection: Selection?
+
+    static let selectionStrength: Float = 0.18
+
+    struct Selection: Equatable, Sendable {
+        var color: BackdropRGB
+        var roles: [BackdropRGB]
+    }
 }
 
 struct BackdropStop: Equatable, Sendable {

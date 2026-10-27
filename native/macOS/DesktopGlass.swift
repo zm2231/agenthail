@@ -8,6 +8,13 @@ enum DesktopGlass {
             + [DesktopPalette.readableAccent(colors, in: appearance, increased: increased)]
     }
 
+    static let selectedRowRoles: [TextRole] = [.body, .muted, .working]
+
+    static func selectedRowRoles(_ config: UIConfig, dark: Bool, increased: Bool) -> [AccentContrast.RGB] {
+        let colors = TextColors(config)
+        return selectedRowRoles.compactMap { colors.hex($0, dark: dark, increased: increased) }.map(AccentContrast.RGB.init(hex:))
+    }
+
     static func floatingOpacity(_ config: UIConfig, dark: Bool, increaseContrast: Bool) -> Double {
         guard config.readability || increaseContrast else { return config.composerOpacity }
         let normal = config.readability ? solve(config, dark: dark, increased: false) : config.composerOpacity

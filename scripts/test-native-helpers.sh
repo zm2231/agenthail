@@ -68,6 +68,7 @@ SOURCES=(
   macOS/AgenthailProcess.swift
   macOS/AuditFacts.swift
   macOS/DesktopPalette.swift
+  macOS/SelectionMark.swift
   macOS/InterfaceStore.swift
   Backdrop.swift
   BackdropLayers.swift
