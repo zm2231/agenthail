@@ -274,7 +274,8 @@ showing a warning or error, last one first, and counts what it dropped; narrower
 760px it shows no usage. The iPhone drops the bars, then accounts from the end,
 counting them. The iPhone asks each computer it is paired with and lists a host
 two computers both report once. `agenthail usage [--json]` prints the same
-sets with their sessions.
+sets with their sessions. Accounts behind an account proxy are described in
+[account proxies](proxies.md).
 
 ## Unreachable hosts and delivery
 
