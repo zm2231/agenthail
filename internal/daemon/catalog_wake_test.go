@@ -109,10 +109,19 @@ func awaitCatalogRow(t *testing.T, d *Daemon, id string, firstTick time.Time) {
 func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	records, rollouts := t.TempDir(), t.TempDir()
-	claude := newWatchingSurface(surface.KindClaude, func() []string { return []string{records} })
+	var holding atomic.Bool
+	held := make(chan struct{})
+	release := sync.OnceFunc(func() { close(held) })
+	claude := newWatchingSurface(surface.KindClaude, func() []string {
+		if holding.Load() {
+			<-held
+		}
+		return []string{records}
+	})
 	codex := newWatchingSurface(surface.KindCodex, func() []string { return []string{rollouts} })
 	d.Surfaces = []surface.Surface{claude, codex}
 	firstTick := runCatalogLoop(t, d)
+	t.Cleanup(release)
 	testkit.Eventually(t, "the first discovery pass", 10*time.Second, func() bool { return claude.lists.Load() == 1 && codex.lists.Load() == 1 })
 
 	claude.start(t, "outside", records)
@@ -121,13 +130,42 @@ func TestASessionStartedOutsideReachesTheCatalogWhenItsRecordAppears(t *testing.
 		t.Fatalf("a new Claude session listed Codex too: %d Codex lists", codex.lists.Load())
 	}
 
+	// Holding the folder sync that forwards a wake lands the whole burst
+	// before any of it is forwarded, however the scheduler spreads the writes.
 	before := claude.lists.Load()
+	holding.Store(true)
 	for index := range 40 {
 		claude.start(t, "burst-"+strconv.Itoa(index), records)
 	}
+	awaitWatcherCaughtUp(t)
+	release()
 	awaitCatalogRow(t, d, "burst-39", firstTick)
-	if passes := claude.lists.Load() - before; passes < 1 || passes > 3 {
+	// The held sync forwards the burst as two requests at most, so waiting
+	// longer cannot raise the count; it gives extra passes time to show.
+	time.Sleep(250 * time.Millisecond)
+	if passes := claude.lists.Load() - before; passes < 1 || passes > 2 {
 		t.Fatalf("40 sessions starting at once took %d discovery passes; they coalesce into a pass and at most one more", passes)
+	}
+}
+
+// awaitWatcherCaughtUp returns once the shared file watcher has delivered
+// every event before it: it delivers in order, so a new entry in a folder
+// followed now wakes only after them.
+func awaitWatcherCaughtUp(t *testing.T) {
+	t.Helper()
+	marker := t.TempDir()
+	wake := filewake.FollowDir(marker)
+	defer wake.Release()
+	if wake.C() == nil {
+		t.Fatal("the shared file watcher refused to follow a marker folder")
+	}
+	if err := os.WriteFile(filepath.Join(marker, "marker"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-wake.C():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the shared file watcher never delivered the marker")
 	}
 }
 
