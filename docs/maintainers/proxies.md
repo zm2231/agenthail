@@ -131,15 +131,17 @@ accounts are not readable from any host.
 ## In the apps and the CLI
 
 The Mac status strip, the dashboard's top bar and the iPhone's usage line give
-every proxy account a chip named like any other account, followed by the
-proxy's name when another chip has the same name. Opening the line shows each
-proxy as a group after the hosts, titled `shared (proxy)` and `read from <host>`
-when another host read it, with each account's limits, its ceiling beside when
-it was read, its cooling or disabled state, the group's problem, and the
-sessions on every root through the proxy on any host. The proxy does not say
-which account each session is on.
+each proxy one chip, `shared · lead 64%`: the proxy's name and its fullest
+account, with that account's fullest window in its tone. Opening the line
+shows each proxy as a group after the hosts, titled `shared (proxy)` and
+`read from <host>` when another host read it, with each account named like any
+other account (followed by the proxy's name when another account has the same
+name), its limits, its ceiling beside when it was read and `over cap` when a
+window has reached it, its cooling or disabled state, the group's problem, and
+the sessions on every root through the proxy on any host. The proxy does not
+say which account each session is on.
 
 `agenthail usage` prints the same groups. `agenthail proxies [--json]` lists
 each proxy with its accounts, problems and the roots that use it.
 `agenthail roots` says when a root goes through a proxy. New-session forms name
-such a root `shared (proxy)`.
+such a root `shared via proxy`.
