@@ -104,9 +104,9 @@ private struct PhoneUsageAccountRow: View {
                             .buttonStyle(.bordered)
                             .accessibilityIdentifier("proxy-prefer-only")
                     }
-                    if let note = reference.setNote { Text(note).font(.footnote).foregroundStyle(PhonePalette.muted) }
                 }
                 .font(.subheadline)
+                if let note = reference.setNote { Text(note).font(.footnote).foregroundStyle(PhonePalette.muted) }
             }
             PhoneUsageSessions(sessions: sessions, open: open)
         }

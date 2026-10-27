@@ -58,7 +58,7 @@ struct ProxyPreferSheet: View {
             plan = try await api.proxyPreferPlan(reference, set: request.set, now: moveNow)
             problem = nil
         } catch {
-            if error.isCancellation { return }
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
             problem = AgenthailAPIError.userMessage(error)
         }
     }
