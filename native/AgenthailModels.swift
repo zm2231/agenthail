@@ -23,8 +23,8 @@ struct ClaudeCreationSettings {
     }
 }
 
-/// A Claude config directory and the login it holds now. The primary
-/// directory is chosen by sending no config root.
+/// A Claude config directory and the login it holds now. Sending no config
+/// root lets the host's policy choose one.
 struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     struct Login: Decodable, Hashable {
         var email: String? = nil
