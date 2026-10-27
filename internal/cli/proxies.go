@@ -15,12 +15,15 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const proxiesUsage = "usage: agenthail proxies [--json] | add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account>] | key <name> <key reference> | rm <name>"
+const proxiesUsage = "usage: agenthail proxies [--json] | add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account>] | key <name> <key reference> | rm <name> | prefer <name> <account> on|off|--only [--now]"
 
 func (a *App) cmdProxies(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) == 0 {
 		return a.listProxies(args)
+	}
+	if positional[0] == "prefer" {
+		return a.cmdProxiesPrefer(args, positional)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -157,6 +160,12 @@ func writeProxyAccounts(w io.Writer, set usageSetView, now time.Time, indent str
 		}
 		if !account.AsOf.IsZero() {
 			line += "  read " + usageDuration(now.Sub(account.AsOf)) + " ago"
+		}
+		if account.Preferred {
+			line += "  preferred"
+		}
+		if account.SetOn != "" && !account.SetAt.IsZero() {
+			line += fmt.Sprintf(" (set on %s at %s)", account.SetOn, account.SetAt.Local().Format("15:04"))
 		}
 		fmt.Fprintln(w, line)
 	}
