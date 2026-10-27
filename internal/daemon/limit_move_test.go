@@ -86,6 +86,20 @@ func stopAtLimit(t *testing.T, node *moveNode, session *surface.Session, account
 	node.daemon.limitResumes.moves.forget()
 }
 
+func turnOnAutoMove(t *testing.T, node *moveNode) {
+	t.Helper()
+	policy := claudepick.DefaultPolicy()
+	policy.AutoMove = true
+	data, _ := json.Marshal(map[string]any{"action": "claude-accounts", "claudeAccounts": policy})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/settings", bytes.NewReader(data))
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	response := httptest.NewRecorder()
+	node.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !node.daemon.claudeAccountPolicy().AutoMove {
+		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func limitStopState(t *testing.T, node *moveNode, sessionID string) registry.LimitResumeState {
 	t.Helper()
 	stop, found, err := node.reg.LimitResumeFor(sessionID)
@@ -134,6 +148,35 @@ func TestNoMoveIsOfferedWhenNoOtherAccountHasRoom(t *testing.T) {
 	}
 }
 
+func TestACanceledStopIsNotMovedOrReleasedByAMove(t *testing.T) {
+	node, second, _ := limitMoveNode(t, "10")
+	session := startMovable(t, node)
+	primary := filepath.Join(node.host.Home, ".claude")
+	stopAtLimit(t, node, session, primary, "u1", time.Now().Add(-time.Minute))
+	readClaudeUsage(t, node.daemon)
+	if response := postAction(t, node.handler, map[string]any{"action": "limit-resume-cancel", "sessionId": session.ID}); response.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
+	}
+	response := postAction(t, node.handler, map[string]any{"action": "limit-move", "sessionId": session.ID, "configRoot": "work"})
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "not waiting") {
+		t.Fatalf("limit-move status=%d body=%s", response.Code, response.Body.String())
+	}
+	if transcriptUnder(primary, session.ID) == "" {
+		t.Fatal("a canceled stop was moved")
+	}
+	turnOnAutoMove(t, node)
+	node.daemon.autoMoveLimitStops(context.Background(), time.Now())
+	if transcriptUnder(primary, session.ID) == "" {
+		t.Fatal("a canceled stop was moved automatically")
+	}
+	if _, err := node.daemon.moveSessionToRoot(context.Background(), sessionMoveRequest{SessionID: session.ID, Root: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptUnder(second, session.ID) == "" || limitStopState(t, node, session.ID) != registry.LimitResumeCanceled {
+		t.Fatal("a move by hand released a canceled stop")
+	}
+}
+
 func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
 	node, second, pool := limitMoveNode(t, "10")
 	primary := filepath.Join(node.host.Home, ".claude")
@@ -148,16 +191,7 @@ func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
 	if transcriptUnder(second, first.ID) != "" {
 		t.Fatal("a session moved with the setting off")
 	}
-	policy := claudepick.DefaultPolicy()
-	policy.AutoMove = true
-	data, _ := json.Marshal(map[string]any{"action": "claude-accounts", "claudeAccounts": policy})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/settings", bytes.NewReader(data))
-	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
-	response := httptest.NewRecorder()
-	node.handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !node.daemon.claudeAccountPolicy().AutoMove {
-		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
-	}
+	turnOnAutoMove(t, node)
 	node.daemon.autoMoveLimitStops(context.Background(), now)
 	if transcriptUnder(second, first.ID) == "" || transcriptUnder(second, next.ID) != "" {
 		t.Fatal("one pass moves the oldest stop and only it")
@@ -176,5 +210,11 @@ func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
 	node.daemon.autoMoveLimitStops(context.Background(), now.Add(2*limitResumeSpacing))
 	if transcriptUnder(primary, proxied.ID) == "" || limitStopState(t, node, proxied.ID) != registry.LimitResumeWaiting {
 		t.Fatal("a session on a proxy account was moved")
+	}
+	moves := node.daemon.limitResumes.moves
+	moves.mu.Lock()
+	defer moves.mu.Unlock()
+	if moves.tried[first.ID+":u1"] || moves.tried[next.ID+":u2"] || len(moves.movedAt) != 0 {
+		t.Fatalf("released stops and spaced-out roots are still tracked: tried=%v movedAt=%v", moves.tried, moves.movedAt)
 	}
 }

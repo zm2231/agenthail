@@ -15,13 +15,22 @@ const limitAutoMoveTimeout = 2 * time.Minute
 
 func (d *Daemon) releaseMovedLimitStop(sessionID string) {
 	stop, found, err := d.Registry.LimitResumeFor(sessionID)
-	if err != nil || !found || stop.State == registry.LimitResumeReleased {
+	if err != nil || !found || stop.State != registry.LimitResumeWaiting {
 		return
 	}
-	d.logLimitResume(d.releaseLimitStop(stop, limitHeld, true, time.Now()))
+	d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, time.Now()))
+}
+
+func (d *Daemon) waitingLimitStop(sessionID, turnID string) bool {
+	stop, found, err := d.Registry.LimitResumeFor(sessionID)
+	return err == nil && found && stop.State == registry.LimitResumeWaiting && (turnID == "" || stop.TurnID == turnID)
 }
 
 func (d *Daemon) limitMoveAction(w http.ResponseWriter, r *http.Request, sessionID, root string, stopTerminal bool) {
+	if !d.waitingLimitStop(sessionID, "") {
+		writeAPIError(w, http.StatusConflict, "move_refused", "this session is not waiting on a usage limit")
+		return
+	}
 	if root == "" {
 		if offer := d.limitMoveOffer(sessionID, time.Now()); offer != nil {
 			root = offer.Root
@@ -53,12 +62,14 @@ func (d *Daemon) autoMoveLimitStops(ctx context.Context, now time.Time) {
 	if !d.claudeAccountPolicy().AutoMove {
 		return
 	}
-	offers := d.cachedLimitMoveOffers(now)
-	if len(offers) == 0 {
-		return
-	}
 	stops, err := d.Registry.LimitResumes()
 	if err != nil {
+		return
+	}
+	moves := d.limitResumes.moves
+	moves.prune(stops, now)
+	offers := d.cachedLimitMoveOffers(now)
+	if len(offers) == 0 {
 		return
 	}
 	sort.SliceStable(stops, func(i, j int) bool { return stops[i].RefusedAt.Before(stops[j].RefusedAt) })
@@ -66,13 +77,12 @@ func (d *Daemon) autoMoveLimitStops(ctx context.Context, now time.Time) {
 	for _, root := range d.currentClaudeConfigRoots() {
 		proxied[root.Root] = root.Proxy != ""
 	}
-	moves := d.limitResumes.moves
 	for _, stop := range stops {
 		offer := offers[stop.SessionID]
 		if offer == nil || stop.State != registry.LimitResumeWaiting || proxied[stop.AccountKey] {
 			continue
 		}
-		key := stop.SessionID + ":" + stop.TurnID
+		key := limitMoveKey(stop)
 		moves.mu.Lock()
 		last, spaced := moves.movedAt[offer.Root]
 		if moves.tried[key] || spaced && now.Sub(last) < limitResumeSpacing {
@@ -81,6 +91,9 @@ func (d *Daemon) autoMoveLimitStops(ctx context.Context, now time.Time) {
 		}
 		moves.tried[key], moves.movedAt[offer.Root] = true, now
 		moves.mu.Unlock()
+		if !d.waitingLimitStop(stop.SessionID, stop.TurnID) {
+			continue
+		}
 		moveCtx, cancel := context.WithTimeout(ctx, limitAutoMoveTimeout)
 		_, err := d.moveSessionToRoot(moveCtx, sessionMoveRequest{SessionID: stop.SessionID, Root: offer.Root})
 		cancel()

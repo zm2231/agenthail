@@ -153,6 +153,7 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 			}
 		}
 	}
+	d.limitResumes.moves.forget()
 }
 
 // resumeAccount resumes the sessions waiting on one account. Every session
