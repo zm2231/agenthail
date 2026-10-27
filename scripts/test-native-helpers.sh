@@ -27,6 +27,9 @@ SOURCES=(
   HolderPins.swift
   OperationsRefreshPolicy.swift
   RequestAnswer.swift
+  QuestionPager.swift
+  QuestionPagerDrafts.swift
+  QuestionPagerView.swift
   RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift

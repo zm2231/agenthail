@@ -38,6 +38,7 @@ RESPONSES = {
     },
 }
 HELD_STREAMS = set()
+ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
 
 
 class Server(ThreadingHTTPServer):
@@ -69,6 +70,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if ACTIONS_LOG and self.path.split("?", 1)[0] == "/api/v1/actions":
+            with open(ACTIONS_LOG, "ab") as log:
+                log.write(body + b"\n")
+        data = json.dumps({"ok": True, "result": {"outcome": "answered"}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def log_message(self, format, *args):
         pass
 
@@ -89,6 +102,19 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/snapshot"]["deliveryProblems"] = [
             {"deliveryId": 1, "sessionId": SESSION["id"], "message": message, "reason": "session_waiting_on_you", "status": "failed", "at": NOW}
         ]
+    if sys.argv[1:2] == ["questions"]:
+        SESSION["waitingOn"] = {"kind": "question", "id": "fixture-questions", "since": NOW, "answerable": True}
+        SESSION["capabilities"] = {**CAPABILITIES, "respond": True}
+        with open(os.path.join(os.path.dirname(__file__), "question-pager-requests.json")) as requests:
+            RESPONSES["/api/v1/requests"] = json.load(requests)
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd", "waitingOn")},
+            "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
+        }
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.add("/api/v1/events")
     if sys.argv[1:2] == ["agents"]:
         # An idle session whose transcript holds agent messages, sends and a fold, in the given theme.
         SESSION["status"] = "idle"

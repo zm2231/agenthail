@@ -58,6 +58,7 @@ jobs:
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-dashboard-waiting.mjs
+          node scripts/test-dashboard-question-pager.mjs
           node scripts/test-dashboard-activity.mjs
           node scripts/test-dashboard-plan.mjs
           node scripts/test-dashboard-ui.mjs
