@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -135,15 +134,7 @@ func writeUsage(w io.Writer, sets []usageSetView, now time.Time) {
 			fmt.Fprintf(w, "    %s\n", set.Problem)
 		}
 		if len(set.Sessions) > 0 {
-			names := make([]string, 0, len(set.Sessions))
-			for _, session := range set.Sessions {
-				if session.Working {
-					names = append(names, session.Name+" (working)")
-				} else {
-					names = append(names, session.Name)
-				}
-			}
-			fmt.Fprintf(w, "    sessions: %s\n", strings.Join(names, ", "))
+			fmt.Fprintf(w, "    sessions: %s\n", usageSessionLine(set.Sessions))
 		}
 	}
 }

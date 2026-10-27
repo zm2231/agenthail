@@ -59,3 +59,15 @@ vps
 		t.Fatal("a meter past its window is not printed")
 	}
 }
+
+func TestUsageListsWorkingSessionsFirstWithShortTitles(t *testing.T) {
+	sessions := []usageSessionView{
+		{Name: "Review every open pull request and summarise what is left to do"},
+		{Name: "idle-2"}, {Name: "idle-3"}, {Name: "idle-4"}, {Name: "idle-5"}, {Name: "idle-6"},
+		{Name: "@builder", Working: true},
+	}
+	want := "@builder (working), Review every open pull request and summ…, idle-2, idle-3, idle-4, +2 more"
+	if got := usageSessionLine(sessions); got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
