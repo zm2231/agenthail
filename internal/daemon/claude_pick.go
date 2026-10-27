@@ -18,6 +18,17 @@ func (d *Daemon) claudeRootPick(ctx context.Context) (claudepick.Pick, claudepic
 		policy = claudepick.DefaultPolicy()
 	}
 	now := time.Now()
+	if roots := d.claudeConfigRoots(); len(roots) < 2 || !policy.Auto {
+		candidates := make([]claudepick.Candidate, 0, len(roots))
+		for _, root := range roots {
+			candidate := claudepick.Candidate{Name: root.Name, Root: root.Root, Primary: root.Primary}
+			if root.SignedInAs != nil {
+				candidate.Account = root.SignedInAs.Email
+			}
+			candidates = append(candidates, candidate)
+		}
+		return claudepick.Choose(candidates, policy, now), policy
+	}
 	sets := d.claudeUsageSets(ctx, now)
 	return claudepick.Choose(claudePickCandidates(sets, now), policy, now), policy
 }

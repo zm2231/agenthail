@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type pickFixture struct {
 	host    *claudehosttest.Fixture
 	second  string
 	handler http.Handler
+	reads   *atomic.Int32
 }
 
 func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
@@ -43,7 +45,9 @@ func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
 	resets := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
 	percent := map[string]string{"org-a": "80", "org-b": "10"}
 	profiles := []signin.Source{{ProfileID: "sp_a", Label: "a", Browser: signin.Chrome, Dir: "/a"}, {ProfileID: "sp_b", Label: "b", Browser: signin.Chrome, Dir: "/b"}}
+	reads := &atomic.Int32{}
 	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, cookies surfaces.CookieSource, _ time.Duration) (int, string, error) {
+		reads.Add(1)
 		if strings.HasSuffix(url, "/api/account") {
 			return 200, `{"uuid":"acct` + strings.ReplaceAll(cookies.Signin.Dir, "/", "-") + `"}`, nil
 		}
@@ -54,7 +58,7 @@ func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
 		}
 		return 404, "{}", nil
 	})
-	return pickFixture{t: t, host: host, second: second, handler: dashboardRouter(newTestDaemon(t, registry, []surface.Surface{claude}))}
+	return pickFixture{t: t, host: host, second: second, handler: dashboardRouter(newTestDaemon(t, registry, []surface.Surface{claude})), reads: reads}
 }
 
 func (f pickFixture) call(method, path string, body any, into any) int {
@@ -137,7 +141,10 @@ func TestAPreferredRootIsChosenWhileUnderItsCeilings(t *testing.T) {
 func TestASingleRootStartsAsItAlwaysHas(t *testing.T) {
 	f := newPickFixture(t, false)
 	pick, dir := f.create("")
-	if dir != nil || pick.Name != "default" || pick.Reason != "the only account" {
+	if dir != nil || pick.Name != "default" || pick.Account != "me@example.com" || pick.Reason != "the only account" {
 		t.Fatalf("pick=%+v dir=%v", pick, dir)
+	}
+	if n := f.reads.Load(); n != 0 {
+		t.Fatalf("a single root waited on %d claude.ai reads before starting", n)
 	}
 }
