@@ -4,7 +4,8 @@ Some setups send Claude Code and Codex through a proxy that holds several
 subscription logins and picks one for each request. Agenthail supports
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI). It shows which
 accounts a proxy has, how much of each is used and whether each can take
-work. It only reads; it never changes the proxy's choice.
+work, and it can change which accounts the proxy prefers when you ask it to.
+It never changes a preference on its own.
 
 ## Configure a proxy
 
@@ -101,8 +102,8 @@ polling never adds to the proxy's failed-attempt count.
 
 `GET /api/v1/usage` adds one set per proxy, after the host's own accounts:
 `{provider: "proxy", name, proxy: {name, id, url}, accounts[{id, provider,
-label, status, nextRetry, preference, meters, asOf}], problem, problemDetail,
-proxyProblem}`. Account meters are the same as other meters, with the proxy's
+label, status, nextRetry, preference, preferred, setOn, setAt, meters, asOf}],
+problem, problemDetail, proxyProblem}`. Account meters are the same as other meters, with the proxy's
 `ceiling`; a meter at its ceiling is `critical`. A root set through a proxy has
 `login: "proxy"` and `proxy: {name, id}`. `id` is the proxy's scheme, host and
 port; for a loopback proxy it also names the host, so two machines' own local
@@ -128,6 +129,50 @@ across the computers it is paired with, keep one copy per `id`: one read with a
 working key when any host has one. When none has a key the line says the
 accounts are not readable from any host.
 
+## Preferring an account
+
+CLIProxyAPI sends work to the accounts under their ceilings first, and among
+those to the ones with the higher `quota_preference`. A ceiling always wins
+over a preference. Agenthail changes the preference in two ways:
+
+- **Preferred**, a toggle on each account, sets only that account's
+  preference: 10 when on, 0 when off. Other accounts are not changed, so a
+  proxy can prefer several accounts at once.
+- **Prefer only this** sets the account to 10 and every other account of the
+  same provider on the proxy to 0. Accounts of other providers and disabled
+  accounts are not changed. With "move running sessions" (`--now`, off by
+  default) it also releases the sessions on the accounts it turns off: each
+  moves on its next request and rebuilds its prompt cache on the new account.
+  An account that was already not preferred is not released. The proxy does
+  not say which account a session is on, so the plan names the sessions that
+  may move.
+
+Every change is previewed first. `GET /api/v1/proxies/prefer?proxy=<id>&account=<id>&set=on|off|only&now=<bool>`
+returns the plan: each account it changes with its preference before and
+after, the accounts whose sessions it releases, every host with a root through
+the proxy and that host's running sessions on it, and a `planId` covering the
+proxy's current preferences. `POST /api/v1/proxies/prefer {proxy, account,
+set, now, planId}` reads the proxy again and refuses with `plan_stale` when
+anything changed since the preview; nothing is written then. Both need the
+`settings` scope.
+
+The change runs on the host that reads the proxy with its key. Any other host
+forwards the request over its pairing, so the key never leaves the machine it
+is on; the host holding the key accepts the forwarded request only from a
+paired host's token. A toggle is one write. Prefer only writes the chosen
+account first, then the others, then releases. A failed step stops the
+sequence and the answer says what changed and what did not, for example
+`ops set to 10; lead not changed: …; run it again to finish`. Nothing is
+rolled back, because undoing would mean more writes to a proxy that just
+failed one. A refused key stops writes and reads alike until the key changes.
+A key that can read the proxy but not change it gets its own message. Each
+change is logged on the host without the key.
+
+An account whose preference is the highest of its provider, and above at
+least one other account's, is marked `preferred`. After Agenthail sets a
+preference the account adds `set on <host> at <time>`, for as long as the
+proxy still has that value.
+
 ## In the apps and the CLI
 
 The Mac status strip, the dashboard's top bar and the iPhone's usage line give
@@ -141,7 +186,19 @@ window has reached it, its cooling or disabled state, the group's problem, and
 the sessions on every root through the proxy on any host. The proxy does not
 say which account each session is on.
 
+Each account row of a proxy group has the Preferred toggle and, when its
+provider has another account on the proxy, Prefer only this. Both open the
+plan: each account it changes in words (`lead: not preferred → preferred`,
+with the raw values in the help text), then under Affects the hosts, roots
+and running sessions, and a confirm button named for the effect: `Prefer
+ops`, `Stop preferring ops`, `Prefer only ops (turns off lead)`.
+
 `agenthail usage` prints the same groups. `agenthail proxies [--json]` lists
 each proxy with its accounts, problems and the roots that use it.
+`agenthail proxies prefer <proxy> <account> on|off` toggles one account and
+`agenthail proxies prefer <proxy> <account> --only [--now]` prefers it alone.
+Both print the plan and ask before writing; `--yes` skips the question and
+`--json` prints the plan without writing, so it refuses `--yes`. A proxy's
+own error text is passed on with the key replaced by `[key]`.
 `agenthail roots` says when a root goes through a proxy. New-session forms name
 such a root `shared via proxy`.

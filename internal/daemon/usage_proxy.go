@@ -24,6 +24,9 @@ type usageAccount struct {
 	Status     string       `json:"status"`
 	NextRetry  time.Time    `json:"nextRetry,omitzero"`
 	Preference float64      `json:"preference"`
+	Preferred  bool         `json:"preferred,omitempty"`
+	SetOn      string       `json:"setOn,omitempty"`
+	SetAt      time.Time    `json:"setAt,omitzero"`
 	Meters     []usageMeter `json:"meters"`
 	AsOf       time.Time    `json:"asOf,omitzero"`
 }
@@ -64,8 +67,14 @@ func (d *Daemon) proxyUsageSet(ctx context.Context, config proxyacct.Config, now
 		return set
 	}
 	set.AsOf = reading.readAt
+	entry := d.proxyUsage.entry(config)
 	for _, account := range reading.accounts {
-		set.Accounts = append(set.Accounts, proxyUsageAccount(account, now))
+		view := proxyUsageAccount(account, now)
+		view.Preferred = proxyPreferred(reading.accounts, account)
+		if mark, ok := entry.markFor(account.ID, account.Preference); ok {
+			view.SetOn, view.SetAt = mark.host, mark.at
+		}
+		set.Accounts = append(set.Accounts, view)
 	}
 	if frees, ok := proxyAccountsFull(reading.accounts, now); ok {
 		set.Problem = fmt.Sprintf("Every %s Claude account is over its ceiling; the first frees up in %s.", config.Name, proxyWait(frees.Sub(now)))
@@ -90,6 +99,23 @@ func proxyUsageAccount(account proxyacct.Account, now time.Time) usageAccount {
 		}
 	}
 	return view
+}
+
+func proxyPreferred(accounts []proxyacct.Account, account proxyacct.Account) bool {
+	if account.Status == proxyacct.StatusDisabled {
+		return false
+	}
+	below := false
+	for _, other := range accounts {
+		if other.Provider != account.Provider || other.Status == proxyacct.StatusDisabled {
+			continue
+		}
+		if other.Preference > account.Preference {
+			return false
+		}
+		below = below || other.Preference < account.Preference
+	}
+	return below
 }
 
 // Full means the proxy would skip it: cooling, or a window at its own ceiling.

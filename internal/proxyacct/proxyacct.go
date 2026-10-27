@@ -9,7 +9,14 @@ import (
 type Proxy interface {
 	Health(ctx context.Context) error
 	Accounts(ctx context.Context) ([]Account, error)
+	SetPreference(ctx context.Context, account string, preference float64) error
+	ReleaseSessions(ctx context.Context, account string) error
 }
+
+const (
+	Preferred    float64 = 10
+	NotPreferred float64 = 0
+)
 
 const (
 	StatusActive      = "active"
@@ -52,6 +59,8 @@ const (
 	Banned        Problem = "banned"
 	RemoteOff     Problem = "remote_off"
 	NoManagement  Problem = "no_management"
+	ReadOnly      Problem = "read_only"
+	NoAccount     Problem = "no_account"
 	UnknownAnswer Problem = "unknown_answer"
 )
 

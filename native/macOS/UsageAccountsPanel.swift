@@ -5,6 +5,7 @@ struct UsageAccountsPanel: View {
     let sessions: [SessionState]
     let now: Date
     let select: (String) -> Void
+    var prefer: ((UsageAccount, ProxyPreferSet) -> Void)? = nil
 
     var body: some View {
         let hosts = UsageAccounts.byHost(accounts.filter { $0.group == nil })
@@ -23,7 +24,7 @@ struct UsageAccountsPanel: View {
                     VStack(alignment: .leading, spacing: DesktopSpace.m) {
                         UsageGroupHeading(title: proxy.group.title, detail: proxy.group.local ? nil : "read from " + proxy.group.host)
                         ForEach(proxy.accounts) { account in
-                            UsageAccountRow(account: account, sessions: [], now: now, select: select)
+                            UsageAccountRow(account: account, sessions: [], now: now, select: select, prefer: prefer.map { prefer in { prefer(account, $0) } }, only: proxy.hasPeers(account))
                         }
                         if proxy.readable, let problem = proxy.group.problem {
                             Text(problem)
@@ -65,6 +66,8 @@ private struct UsageAccountRow: View {
     let sessions: [SessionState]
     let now: Date
     let select: (String) -> Void
+    var prefer: ((ProxyPreferSet) -> Void)? = nil
+    var only = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -101,6 +104,24 @@ private struct UsageAccountRow: View {
                     .help(account.problemDetail ?? problem)
             } else if account.meters.isEmpty {
                 Text("No current reading").foregroundStyle(DesktopPalette.muted)
+            }
+            if let prefer, let reference = account.proxyAccount {
+                HStack(spacing: DesktopSpace.s) {
+                    Toggle(isOn: Binding(get: { reference.preferred }, set: { prefer($0 ? .on : .off) })) {
+                        if reference.preferred { Label("Preferred", systemImage: "checkmark") } else { Text("Preferred") }
+                    }
+                        .toggleStyle(.button)
+                        .tint(DesktopPalette.accentText)
+                        .help("Changes only this account's preference")
+                        .accessibilityIdentifier("proxy-prefer-toggle")
+                    if only {
+                        Button("Prefer only this") { prefer(.only) }
+                            .help("Prefers this account and turns off the other " + (account.provider ?? "") + " accounts on this proxy")
+                            .accessibilityIdentifier("proxy-prefer-only")
+                    }
+                    if let note = reference.setNote { Text(note).foregroundStyle(DesktopPalette.muted) }
+                }
+                .controlSize(.small)
             }
             UsageSessionList(sessions: sessions, select: select)
         }

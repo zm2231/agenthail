@@ -186,6 +186,9 @@ struct UsageReport: Decodable, Hashable {
         let label: String
         let status: String
         var nextRetry: String? = nil
+        var preferred: Bool? = nil
+        var setOn: String? = nil
+        var setAt: String? = nil
         var meters: [Meter]? = nil
         var asOf: String? = nil
     }

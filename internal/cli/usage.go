@@ -34,6 +34,9 @@ type usageAccountView struct {
 	Status     string           `json:"status"`
 	NextRetry  time.Time        `json:"nextRetry,omitzero"`
 	Preference float64          `json:"preference"`
+	Preferred  bool             `json:"preferred,omitempty"`
+	SetOn      string           `json:"setOn,omitempty"`
+	SetAt      time.Time        `json:"setAt,omitzero"`
 	Meters     []usageMeterView `json:"meters"`
 	AsOf       time.Time        `json:"asOf,omitzero"`
 }

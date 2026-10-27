@@ -1,11 +1,15 @@
 package proxyaccttest
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -25,42 +29,98 @@ const AuthFiles = `{"observed_at":"2026-10-26T12:00:00Z","files":[
  {"name":"meta.json","provider":"meta"}
 ]}`
 
-// Proxy answers like CLIProxyAPI: healthz without a key, auth-files with Key.
+// Proxy answers like CLIProxyAPI: healthz without a key, the management
+// routes with Key. Writes change Files and are recorded in order. FailWrite
+// "<name> <status> <body>" answers writes to one account with that refusal.
 type Proxy struct {
-	Server   *httptest.Server
-	Attempts atomic.Int32
-	Files    atomic.Value
-	Forced   atomic.Value
+	Server    *httptest.Server
+	Attempts  atomic.Int32
+	Files     atomic.Value
+	Forced    atomic.Value
+	FailWrite atomic.Value
+
+	mu     sync.Mutex
+	writes []string
 }
 
 func New(t *testing.T) *Proxy {
 	proxy := &Proxy{}
 	proxy.Files.Store(AuthFiles)
 	proxy.Forced.Store("")
+	proxy.FailWrite.Store("")
 	proxy.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/healthz":
+		if r.URL.Path == "/healthz" {
 			w.Write([]byte(`{"status":"ok"}`))
-		case "/v0/management/auth-files":
-			proxy.Attempts.Add(1)
-			if forced := proxy.Forced.Load().(string); forced != "" {
-				code, body, _ := strings.Cut(forced, " ")
-				w.WriteHeader(map[string]int{"401": 401, "403": 403, "404": 404}[code])
-				w.Write([]byte(body))
-				return
-			}
-			if r.Header.Get("Authorization") != "Bearer "+Key {
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(`{"error":"invalid management key"}`))
-				return
-			}
-			w.Write([]byte(proxy.Files.Load().(string)))
-		default:
-			http.NotFound(w, r)
+			return
 		}
+		route := map[string]string{"GET /v0/management/auth-files": "read", "PATCH /v0/management/auth-files/fields": "fields", "POST /v0/management/auth-files/release-sessions": "release"}[r.Method+" "+r.URL.Path]
+		if route == "" {
+			http.NotFound(w, r)
+			return
+		}
+		proxy.Attempts.Add(1)
+		if forced := proxy.Forced.Load().(string); forced != "" {
+			code, body, _ := strings.Cut(forced, " ")
+			w.WriteHeader(map[string]int{"401": 401, "403": 403, "404": 404}[code])
+			w.Write([]byte(body))
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+Key {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"invalid management key"}`))
+			return
+		}
+		if route == "read" {
+			w.Write([]byte(proxy.Files.Load().(string)))
+			return
+		}
+		proxy.write(w, r, route)
 	}))
 	t.Cleanup(proxy.Server.Close)
 	return proxy
+}
+
+func (p *Proxy) write(w http.ResponseWriter, r *http.Request, route string) {
+	body, _ := io.ReadAll(r.Body)
+	var request map[string]any
+	if json.Unmarshal(body, &request) != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid request body"}`))
+		return
+	}
+	name, _ := request["name"].(string)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.writes = append(p.writes, route+" "+string(body))
+	if failing, answer, _ := strings.Cut(p.FailWrite.Load().(string), " "); failing != "" && failing == name {
+		code, body, _ := strings.Cut(answer, " ")
+		status, _ := strconv.Atoi(code)
+		w.WriteHeader(status)
+		w.Write([]byte(body))
+		return
+	}
+	var files map[string][]map[string]any
+	json.Unmarshal([]byte(p.Files.Load().(string)), &files)
+	for _, file := range files["files"] {
+		if file["name"] != name {
+			continue
+		}
+		if route == "fields" {
+			file["quota_preference"] = request["quota_preference"]
+			encoded, _ := json.Marshal(files)
+			p.Files.Store(string(encoded))
+		}
+		w.Write([]byte(`{"status":"ok"}`))
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+	w.Write([]byte(`{"error":"auth file not found"}`))
+}
+
+func (p *Proxy) Writes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string{}, p.writes...)
 }
 
 func KeyFile(t *testing.T, dir, key string, mode os.FileMode) string {
