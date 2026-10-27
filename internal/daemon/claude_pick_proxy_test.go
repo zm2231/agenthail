@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/proxyacct/proxyaccttest"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (f proxyUsageFixture) get(t *testing.T, path string, into any) string {
@@ -80,6 +81,28 @@ func TestAPreferredProxyRootSticksWhenEveryAccountIsFull(t *testing.T) {
 	f.get(t, "/api/v1/session-options/claude-usage?root="+url.QueryEscape(f.team), &usage)
 	if usage.Best != "dev@example.com" || !strings.HasPrefix(usage.Problem, "every shared account is near its limit; the first frees up in 2d") {
 		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestASessionStartNeverWaitsOnTheProxy(t *testing.T) {
+	f := newProxyUsageFixture(t, "file")
+	configs, err := surface.ConfiguredProxies(f.home)
+	if err != nil || len(configs) != 1 {
+		t.Fatalf("configs=%+v err=%v", configs, err)
+	}
+	if reading := f.daemon.proxyUsage.cached(configs[0], time.Now()); reading != nil {
+		t.Fatalf("with no reading yet the start goes on without one: %+v", reading)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for f.daemon.proxyUsage.cached(configs[0], time.Now()) == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	reading := f.daemon.proxyUsage.cached(configs[0], time.Now())
+	if reading == nil || reading.err != nil || len(reading.accounts) != 2 {
+		t.Fatalf("the background read fills the next start: %+v", reading)
+	}
+	if attempts := f.proxy.Attempts.Load(); attempts != 1 {
+		t.Fatalf("repeated starts within a minute read the proxy once: %d", attempts)
 	}
 }
 
