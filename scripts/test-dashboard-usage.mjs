@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { POLL_MS, accounts, activeSessions, byHost, problemTone, render, renderPanel, shortLabel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";
 import { dropOrder, fit } from "../internal/daemon/dashboard/js/usage-fit.js";
 
@@ -85,6 +86,15 @@ assert.equal(problemTone(list[3], sessions), "quiet");
 assert.equal(problemTone(list[5], sessions), "failed");
 assert.equal(problemTone(signedOut, []), "quiet", "a signed-out root with nothing running is a normal state");
 assert.equal(problemTone(signedOut, [session("s9", "claude", "h4", "/c", "busy")]), "warning", "a signed-out root with running sessions warns");
+const css = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
+const colour = (...selectors) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+  .filter(([, list]) => list.split(",").some((s) => selectors.includes(s.trim())))
+  .map(([, , body]) => body.match(/(?:^|;|\s)color:\s*([^;]+)/)?.[1]?.trim())
+  .filter(Boolean)
+  .at(-1);
+assert.equal(colour(".usage-chip.note .usage-value"), "var(--muted)", "a quiet chip's mark is secondary text");
+assert.equal(colour(".usage-chip.problem .usage-value", ".usage-chip.warning .usage-value"), "var(--warn)", "a warning chip's mark is the warning colour");
+assert.equal(colour(".usage-chip.problem .usage-value"), "var(--bad)", "a failed chip's mark is the error colour");
 render(document, line, [signedOut], [session("s9", "claude", "h4", "/c", "busy")]);
 assert.equal(line.children[0].className, "usage-chip problem warning");
 render(document, line, list);

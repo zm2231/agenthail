@@ -67,7 +67,7 @@ private struct UsageChip: View {
                 .monospacedDigit()
                 .foregroundStyle(account.critical ? DesktopPalette.failed : DesktopPalette.text2)
         } else if let tone = account.problemTone(sessions) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(tone == .quiet ? DesktopPalette.muted : tone.desktopStyle)
+            Image(systemName: "exclamationmark.circle").foregroundStyle(tone.desktopStyle)
         } else {
             Text("–").foregroundStyle(DesktopPalette.muted)
         }

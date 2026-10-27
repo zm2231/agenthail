@@ -289,13 +289,15 @@ textarea:focus-visible {
 }
 .usage-chip.critical .usage-value,
 .usage-row.critical .usage-value,
+.usage-chip.problem .usage-value,
 .usage-note.bad {
   color: var(--bad);
 }
-.usage-chip.problem .usage-value,
-.usage-chip.note .usage-value,
 .usage-more {
   color: var(--quiet);
+}
+.usage-chip.note .usage-value {
+  color: var(--muted);
 }
 .usage-chip.warning .usage-value,
 .usage-note.warn {
