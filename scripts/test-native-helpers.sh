@@ -76,6 +76,7 @@ SOURCES=(
   macOS/BoundedDock.swift
   UsageMeterText.swift
   UsageAccounts.swift
+  UsageProxies.swift
   macOS/ContextRingGauge.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift

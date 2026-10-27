@@ -12,12 +12,16 @@ const (
 	ClaudeLoginClaudeAI  = "claude.ai"
 	ClaudeLoginAPIKey    = "api_key"
 	ClaudeLoginSignedOut = "signed_out"
+	ClaudeLoginProxy     = "proxy"
 )
 
 var claudeAPIKeyEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
 
 // Only the presence of key names is read; no secret value leaves the file.
 func ClaudeRootLogin(home string, root ClaudeConfigRoot) string {
+	if root.Proxy != "" {
+		return ClaudeLoginProxy
+	}
 	if root.SignedInAs != nil && root.SignedInAs.AccountID != "" {
 		return ClaudeLoginClaudeAI
 	}

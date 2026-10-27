@@ -48,6 +48,7 @@ let package = Package(
                 "ClaudeRootLabels.swift",
                 "UsageMeterText.swift",
                 "UsageAccounts.swift",
+                "UsageProxies.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",

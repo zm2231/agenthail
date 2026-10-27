@@ -10,7 +10,7 @@ export function renderStartConfigRoots(roots, pick = null) {
   const current = select.value;
   const titles = rootTitles(roots, app.startOptions?.host?.name);
   select.innerHTML = [`<option value="">${escape(automaticOption(pick, roots, titles))}</option>`, ...roots.map((root, index) =>
-    `<option value="${escape(root.root)}"${root.signedInAs || root.login === "api_key" ? "" : " disabled"}>${escape(claudeConfigRootOption(root, titles[index]))}</option>`,
+    `<option value="${escape(root.root)}"${root.signedInAs || root.login === "api_key" || root.login === "proxy" ? "" : " disabled"}>${escape(claudeConfigRootOption(root, titles[index]))}</option>`,
   )].join("");
   if (roots.some(root => root.root === current)) select.value = current;
   select.closest("[data-claude-root]").dataset.single = roots.length < 2 ? "true" : "";

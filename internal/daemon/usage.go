@@ -28,6 +28,10 @@ type usageSet struct {
 	AsOf     time.Time    `json:"asOf,omitzero"`
 	Problem  string       `json:"problem,omitempty"`
 	Detail   string       `json:"problemDetail,omitempty"`
+
+	Proxy        *usageProxy    `json:"proxy,omitempty"`
+	Accounts     []usageAccount `json:"accounts,omitempty"`
+	ProxyProblem string         `json:"proxyProblem,omitempty"`
 }
 
 func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +46,7 @@ func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
 		wait.Go(func() { remote = d.remoteUsageSets(r.Context()) })
 	}
 	wait.Wait()
-	sets = append(sets, remote...)
+	sets = mergeProxySets(append(sets, remote...))
 	for i := range sets {
 		if sets[i].Meters == nil {
 			sets[i].Meters = []usageMeter{}
@@ -52,11 +56,12 @@ func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usageSet {
-	var claude []usageSet
+	var claude, proxies []usageSet
 	var codex *usageSet
 	var wait sync.WaitGroup
 	wait.Go(func() { claude = d.claudeUsageSets(ctx, now) })
 	wait.Go(func() { codex = d.codexUsageSet(ctx, now) })
+	wait.Go(func() { proxies = d.proxyUsageSets(ctx, now) })
 	wait.Wait()
 	sets := []usageSet{}
 	if len(claude) > 0 {
@@ -68,6 +73,7 @@ func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usageSet {
 	if len(claude) > 1 {
 		sets = append(sets, claude[1:]...)
 	}
+	sets = append(sets, proxies...)
 	local := d.localHost()
 	for i := range sets {
 		sets[i].Host, sets[i].HostID, sets[i].Local = local.Name, local.ID, true
@@ -107,6 +113,10 @@ func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootRead
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		set.Login = surface.ClaudeRootLogin(home, root)
+	}
+	if set.Login == surface.ClaudeLoginProxy {
+		set.Proxy = d.rootProxy(root.Proxy)
+		return set
 	}
 	if problem, ok := claudeNoUsageProblems[set.Login]; ok {
 		set.Problem, set.Detail = problem[0], problem[1]

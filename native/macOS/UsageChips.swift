@@ -15,7 +15,7 @@ struct UsageChips: View {
             } else {
                 Button { showing.toggle() } label: {
                     HStack(spacing: DesktopSpace.m) {
-                        ForEach(accounts) { UsageChip(account: $0, sessions: model.knownSessions, bars: bars, now: context.date) }
+                        ForEach(UsageProxies.strip(accounts)) { UsageChip(account: $0, sessions: model.knownSessions, bars: bars, now: context.date) }
                     }
                 }
                 .buttonStyle(ReadableButtonStyle())

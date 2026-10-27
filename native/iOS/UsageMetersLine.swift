@@ -33,12 +33,13 @@ struct UsageMetersLine: View {
     let now: Date
 
     var body: some View {
+        let chips = UsageProxies.strip(accounts)
         ViewThatFits(in: .horizontal) {
-            row(accounts, bars: true, hidden: 0)
-            ForEach((1...accounts.count).reversed(), id: \.self) { shown in
-                row(Array(accounts.prefix(shown)), bars: false, hidden: accounts.count - shown)
+            row(chips, bars: true, hidden: 0)
+            ForEach((1...chips.count).reversed(), id: \.self) { shown in
+                row(Array(chips.prefix(shown)), bars: false, hidden: chips.count - shown)
             }
-            row([], bars: false, hidden: accounts.count)
+            row([], bars: false, hidden: chips.count)
         }
         .font(.footnote)
         .lineLimit(1)

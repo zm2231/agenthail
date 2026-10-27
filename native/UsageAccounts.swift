@@ -19,9 +19,19 @@ struct UsageAccount: Equatable, Identifiable {
     let problem: String?
     let problemDetail: String?
     let asOf: Date?
+    var group: UsageProxyGroup? = nil
 
-    var fullTitle: String { local || provider == nil ? login : login + " on " + host }
+    var fullTitle: String {
+        if let group, provider != "proxy" { return login + " via the " + group.name + " proxy" }
+        return local || provider == nil ? login : login + " on " + host
+    }
     var worst: UsageReport.Meter? { meters.max { $0.percent < $1.percent } }
+    var caps: [Double] { Array(Swift.Set(meters.compactMap(\.ceiling))).sorted() }
+
+    func rowLabel(_ meter: UsageReport.Meter) -> String {
+        guard caps.count > 1, let ceiling = meter.ceiling else { return UsageMeterText.shortLabel(meter) }
+        return UsageMeterText.shortLabel(meter) + ", cap " + UsageMeterText.percent(ceiling)
+    }
     var critical: Bool { meters.contains { $0.severity == "critical" || $0.percent >= 90 } }
 
     func spoken(now: Date) -> String {
@@ -30,11 +40,17 @@ struct UsageAccount: Equatable, Identifiable {
     }
 
     func subtitle(now: Date) -> String? {
-        let parts = [provider == "claude" && rootName != login ? rootName : nil, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
+        let cap = caps.count == 1 ? caps.first.map { "cap " + UsageMeterText.percent($0) } : nil
+        let over = meters.contains { meter in meter.ceiling.map { $0 > 0 && meter.percent >= $0 } ?? false } ? "over cap" : nil
+        let parts = [provider == "claude" && group == nil && rootName != login ? rootName : nil, cap, over, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     func owns(_ session: SessionState) -> Bool {
+        if let group {
+            guard session.archived != true, session.surface == "claude" else { return false }
+            return group.roots.contains { $0.hostId == session.host?.id && $0.root == session.claudeConfigRoot?.root }
+        }
         guard session.archived != true, session.host?.id == hostId else { return false }
         switch provider {
         case "claude": return session.surface == "claude" && session.claudeConfigRoot?.root == root
@@ -50,6 +66,8 @@ struct UsageAccount: Equatable, Identifiable {
 
     func problemTone(_ sessions: [SessionState]) -> UsageProblemTone? {
         guard problem != nil else { return nil }
+        if provider == "proxy" { return .warning }
+        if group != nil { return .quiet }
         switch signIn {
         case "api_key": return .quiet
         case "signed_out": return activeSessions(sessions).isEmpty ? .quiet : .warning
@@ -75,13 +93,15 @@ enum UsageAccounts {
         return order.map { id in UsageHostGroup(id: id, name: grouped[id]?.first?.host ?? id, accounts: grouped[id] ?? []) }
     }
 
-    static func make(_ sets: [UsageReport.Set], now: Date) -> [UsageAccount] {
-        let titles = self.titles(sets)
-        return zip(sets, titles).map { set, title in
-            UsageAccount(
+    static func make(_ reported: [UsageReport.Set], now: Date) -> [UsageAccount] {
+        let expanded = UsageProxies.expand(reported, now: now)
+        let titles = self.titles(expanded)
+        return zip(expanded, titles).map { entry, title in
+            let (set, group) = entry
+            return UsageAccount(
                 id: key(set),
                 title: title,
-                login: fullName(set),
+                login: fullName(set, group: group),
                 signIn: set.login,
                 host: set.host,
                 hostId: set.hostId,
@@ -92,7 +112,8 @@ enum UsageAccounts {
                 meters: UsageMeterText.visible(set.meters ?? [], now: now),
                 problem: set.problem.flatMap { $0.isEmpty ? nil : $0 },
                 problemDetail: set.problemDetail.flatMap { $0.isEmpty ? nil : $0 },
-                asOf: set.asOf.flatMap(UsageMeterText.date)
+                asOf: set.asOf.flatMap(UsageMeterText.date),
+                group: group
             )
         }
     }
@@ -106,11 +127,11 @@ enum UsageAccounts {
                 sets.append(set)
             }
         }
-        return sets
+        return UsageProxies.merged(sets)
     }
 
     static func key(_ set: UsageReport.Set) -> String {
-        set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? "")
+        set.hostId + "|" + (set.provider ?? "") + "|" + (set.root ?? set.proxy?.id ?? "")
     }
 
     static func loginLabel(_ login: String?) -> String? {
@@ -121,42 +142,51 @@ enum UsageAccounts {
         }
     }
 
-    private static func titles(_ sets: [UsageReport.Set]) -> [String] {
-        let names = sets.map(baseName)
+    private static func titles(_ entries: [(UsageReport.Set, UsageProxyGroup?)]) -> [String] {
+        let names = entries.map { baseName($0.0, group: $0.1) }
         var hostsByName: [String: Swift.Set<String>] = [:]
-        for (set, name) in zip(sets, names) where set.provider != nil && loginLabel(set.login) == nil {
+        for ((set, group), name) in zip(entries, names) where set.provider != nil && group == nil && loginLabel(set.login) == nil {
             hostsByName[name, default: []].insert(set.hostId)
         }
-        let titles = zip(sets, names).map { set, name in
-            (hostsByName[name]?.count ?? 0) > 1 ? set.host + " · " + name : name
+        let titles = zip(entries, names).map { entry, name in
+            entry.1 == nil && (hostsByName[name]?.count ?? 0) > 1 ? entry.0.host + " · " + name : name
         }
         var counts: [String: Int] = [:]
-        for (set, title) in zip(sets, titles) { counts[set.hostId + "|" + title, default: 0] += 1 }
-        return zip(sets, titles).map { set, title in
+        for (entry, title) in zip(entries, titles) where entry.1 == nil { counts[entry.0.hostId + "|" + title, default: 0] += 1 }
+        return zip(entries, titles).enumerated().map { index, pair in
+            let ((set, group), title) = pair
+            if let group {
+                let repeated = set.provider != "proxy" && names.enumerated().contains { $0.offset != index && $0.element == names[index] }
+                return repeated ? title + " · " + group.name : title
+            }
             guard (counts[set.hostId + "|" + title] ?? 0) > 1, let name = set.name else { return title }
             return title + " · " + name
         }
     }
 
-    private static func baseName(_ set: UsageReport.Set) -> String {
+    private static func baseName(_ set: UsageReport.Set, group: UsageProxyGroup?) -> String {
+        if let group, set.provider == "proxy" { return group.title }
+        let codex = group != nil && set.provider == "codex" ? " (Codex)" : ""
         switch set.provider {
         case nil: return set.host
-        case "codex": return "Codex"
+        case "codex" where group == nil: return "Codex"
         default:
             if let account = set.account, !account.isEmpty {
-                return account.contains("@") ? String(account.split(separator: "@")[0]) : account
+                return (account.contains("@") ? String(account.split(separator: "@")[0]) : account) + codex
             }
             if let kind = loginLabel(set.login) { return "\(set.host) (\(kind))" }
             return set.name ?? "Claude"
         }
     }
 
-    private static func fullName(_ set: UsageReport.Set) -> String {
+    private static func fullName(_ set: UsageReport.Set, group: UsageProxyGroup?) -> String {
+        if let group, set.provider == "proxy" { return group.title }
+        let codex = group != nil && set.provider == "codex" ? " (Codex)" : ""
         switch set.provider {
         case nil: return set.host
-        case "codex": return "Codex"
+        case "codex" where group == nil: return "Codex"
         default:
-            if let account = set.account, !account.isEmpty { return account }
+            if let account = set.account, !account.isEmpty { return account + codex }
             if let kind = loginLabel(set.login) { return kind.prefix(1).uppercased() + kind.dropFirst() }
             return set.name ?? "Claude"
         }

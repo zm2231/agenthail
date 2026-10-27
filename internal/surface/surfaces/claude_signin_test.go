@@ -130,6 +130,35 @@ func TestClaudeConfigRootsReportTheSigninAndLiveUsage(t *testing.T) {
 	}
 }
 
+func TestARootThroughAProxyIsNeverReadFromClaudeAI(t *testing.T) {
+	fixture := newClaudeRootFixture(t, "b", "b@example.com")
+	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317")
+	config := filepath.Join(fixture.home, ".agenthail", "config.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte(`{"proxies":[{"name":"shared","url":"http://localhost:8317"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, fixture.request)
+	roots, err := claude.ClaudeConfigRoots(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := claude.ClaudeConfigRoot(context.Background(), roots[0].Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, described := range []surface.ClaudeConfigRoot{roots[0], root} {
+		if described.Proxy != "shared" || described.Signin != "" || described.Usage != nil || described.UsageProblem != "" {
+			t.Fatalf("root=%+v", described)
+		}
+	}
+	if calls := fixture.callList(); len(calls) != 0 {
+		t.Fatalf("the proxy chooses the account, so its stored login is not read: %q", calls)
+	}
+}
+
 func TestClaudeRemoteControlForALiveSessionWithoutATranscriptUsesItsRootsAccount(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "b", "b@example.com")
 	record, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "sessionId": "fresh", "bridgeSessionId": "session_fresh"})

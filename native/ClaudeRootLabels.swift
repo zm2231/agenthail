@@ -8,6 +8,7 @@ enum ClaudeRootLabels {
 
     static func titles(_ roots: [ClaudeConfigRootOption], host: String) -> [String] {
         let names = roots.map { root -> String in
+            if let proxy = root.proxy, !proxy.isEmpty { return "\(proxy) (proxy)" }
             if let email = root.signedInAs?.email, !email.isEmpty { return String(email.split(separator: "@")[0]) }
             return "\(host) (\(root.login == "api_key" ? "API key" : "signed out"))"
         }

@@ -1,5 +1,7 @@
 import { $ } from "./dom.js";
 import { fit, wrapped } from "./usage-fit.js";
+import { expandProxies, ownsByProxy } from "./usage-proxy.js";
+import { critical, strip } from "./usage-strip.js";
 
 export const POLL_MS = 120_000;
 const REDRAW_MS = 60_000;
@@ -66,16 +68,17 @@ export function shortLabel(meter) {
   return meter.label;
 }
 
-const critical = (meter) => meter.severity === "critical" || meter.percent >= 90;
-
 export function loginLabel(login) {
   return { api_key: "API key", signed_out: "signed out" }[login] || null;
 }
 
+const proxyCodex = (set) => (set.group && set.provider === "codex" ? " (Codex)" : "");
+
 function baseName(set) {
   if (!set.provider) return set.host;
-  if (set.provider === "codex") return "Codex";
-  if (set.account) return set.account.includes("@") ? set.account.split("@")[0] : set.account;
+  if (set.provider === "proxy") return set.group.title;
+  if (set.provider === "codex" && !set.group) return "Codex";
+  if (set.account) return (set.account.includes("@") ? set.account.split("@")[0] : set.account) + proxyCodex(set);
   const kind = loginLabel(set.login);
   if (kind) return `${set.host} (${kind})`;
   return set.name || "Claude";
@@ -83,8 +86,9 @@ function baseName(set) {
 
 function login(set) {
   if (!set.provider) return set.host;
-  if (set.provider === "codex") return "Codex";
-  if (set.account) return set.account;
+  if (set.provider === "proxy") return set.group.title;
+  if (set.provider === "codex" && !set.group) return "Codex";
+  if (set.account) return set.account + proxyCodex(set);
   const kind = loginLabel(set.login);
   if (kind) return kind[0].toUpperCase() + kind.slice(1);
   return set.name || "Claude";
@@ -94,26 +98,30 @@ export function titles(sets) {
   const names = sets.map(baseName);
   const hostsByName = new Map();
   sets.forEach((set, index) => {
-    if (!set.provider || loginLabel(set.login)) return;
+    if (!set.provider || set.group || loginLabel(set.login)) return;
     const hosts = hostsByName.get(names[index]) || new Set();
     hosts.add(set.hostId);
     hostsByName.set(names[index], hosts);
   });
-  const prefixed = sets.map((set, index) => ((hostsByName.get(names[index])?.size || 0) > 1 ? `${set.host} · ${names[index]}` : names[index]));
+  const prefixed = sets.map((set, index) => (!set.group && (hostsByName.get(names[index])?.size || 0) > 1 ? `${set.host} · ${names[index]}` : names[index]));
   const counts = new Map();
-  sets.forEach((set, index) => counts.set(`${set.hostId}|${prefixed[index]}`, (counts.get(`${set.hostId}|${prefixed[index]}`) || 0) + 1));
-  return sets.map((set, index) => (counts.get(`${set.hostId}|${prefixed[index]}`) > 1 && set.name ? `${prefixed[index]} · ${set.name}` : prefixed[index]));
+  sets.forEach((set, index) => {
+    if (!set.group) counts.set(`${set.hostId}|${prefixed[index]}`, (counts.get(`${set.hostId}|${prefixed[index]}`) || 0) + 1);
+  });
+  const direct = sets.map((set, index) => (!set.group && counts.get(`${set.hostId}|${prefixed[index]}`) > 1 && set.name ? `${prefixed[index]} · ${set.name}` : prefixed[index]));
+  return sets.map((set, index) => (set.group && set.provider !== "proxy" && names.some((name, other) => other !== index && name === names[index]) ? `${names[index]} · ${set.group.name}` : direct[index]));
 }
 
 export function accounts(sets, now) {
-  const list = sets || [];
+  const list = expandProxies(sets, now);
   const chipTitles = titles(list);
   return list.map((set, index) => {
     const meters = visible(set.meters, now);
     const name = login(set);
-    const fullTitle = set.local === true || !set.provider ? name : `${name} on ${set.host}`;
+    const fullTitle = set.group && set.provider !== "proxy" ? `${name} via the ${set.group.name} proxy` : set.local === true || !set.provider ? name : `${name} on ${set.host}`;
     const parts = meters.map((meter) => spoken(meter, now)).concat(set.problem ? [set.problem] : []);
     const asOf = time(set.asOf);
+    const caps = [...new Set(meters.map((meter) => meter.ceiling).filter(Boolean))];
     return {
       id: `${set.hostId}|${set.provider || ""}|${set.root || ""}`,
       title: chipTitles[index],
@@ -130,7 +138,9 @@ export function accounts(sets, now) {
       problem: set.problem || null,
       problemDetail: set.problemDetail || null,
       signIn: set.login || null,
-      subtitle: [set.provider === "claude" && set.name !== name ? set.name : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      group: set.group || null,
+      capsDiffer: caps.length > 1,
+      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
   });
@@ -146,6 +156,7 @@ export function byHost(list) {
 }
 
 export function owns(account, session) {
+  if (account.group) return ownsByProxy(account.group, session);
   if (session.archived || session.host?.id !== account.hostId) return false;
   if (account.provider === "claude") return session.surface === "claude" && session.claudeConfigRoot?.root === account.root;
   if (account.provider === "codex") return session.surface === "codex";
@@ -162,7 +173,8 @@ export function activeSessions(account, sessions) {
 
 export function problemTone(account, sessions) {
   if (!account.problem) return null;
-  if (account.signIn === "api_key") return "quiet";
+  if (account.provider === "proxy") return "warning";
+  if (account.group || account.signIn === "api_key") return "quiet";
   if (account.signIn === "signed_out") return activeSessions(account, sessions).length ? "warning" : "quiet";
   return account.meters.length ? "quiet" : "failed";
 }
@@ -218,7 +230,8 @@ function accountCard(document, account, sessions, now, open) {
   for (const meter of account.meters) {
     const row = node(document, "div", critical(meter) ? "usage-row critical" : "usage-row");
     const resets = time(meter.resetsAt);
-    row.append(node(document, "span", "usage-row-label", shortLabel(meter)), bar(document, meter), node(document, "span", "usage-value", percent(meter.percent)), node(document, "span", "usage-row-reset", resets === null ? "" : reset(resets - now)));
+    const label = account.capsDiffer && meter.ceiling ? `${shortLabel(meter)}, cap ${percent(meter.ceiling)}` : shortLabel(meter);
+    row.append(node(document, "span", "usage-row-label", label), bar(document, meter), node(document, "span", "usage-value", percent(meter.percent)), node(document, "span", "usage-row-reset", resets === null ? "" : reset(resets - now)));
     row.setAttribute("aria-label", spoken(meter, now));
     card.append(row);
   }
@@ -228,28 +241,58 @@ function accountCard(document, account, sessions, now, open) {
     card.append(problem);
   }
   else if (!account.meters.length) card.append(node(document, "p", "usage-note", "No current reading"));
-  if (sessions.length) {
-    const list = node(document, "div", "usage-sessions");
-    for (const session of sessions.slice(0, 5)) {
-      const button = node(document, "button", working(session) ? "usage-session working" : "usage-session");
-      button.type = "button";
-      button.append(node(document, "i"), node(document, "span", "", session.alias ? `@${session.alias}` : session.name || session.id));
-      button.addEventListener("click", () => open(session.id));
-      list.append(button);
-    }
-    if (sessions.length > 5) list.append(node(document, "span", "usage-note", `and ${sessions.length - 5} more`));
-    card.append(list);
-  }
+  if (sessions.length) card.append(sessionList(document, sessions, open));
   return card;
 }
 
+function sessionList(document, sessions, open) {
+  const list = node(document, "div", "usage-sessions");
+  for (const session of sessions.slice(0, 5)) {
+    const button = node(document, "button", working(session) ? "usage-session working" : "usage-session");
+    button.type = "button";
+    button.append(node(document, "i"), node(document, "span", "", session.alias ? `@${session.alias}` : session.name || session.id));
+    button.addEventListener("click", () => open(session.id));
+    list.append(button);
+  }
+  if (sessions.length > 5) list.append(node(document, "span", "usage-note", `and ${sessions.length - 5} more`));
+  return list;
+}
+
+export function byProxy(list) {
+  const groups = new Map();
+  for (const account of list.filter((item) => item.group)) {
+    if (!groups.has(account.group.id)) groups.set(account.group.id, { ...account.group, accounts: [] });
+    groups.get(account.group.id).accounts.push(account);
+  }
+  return [...groups.values()];
+}
+
+function proxySection(document, group, sessions, now, open) {
+  const children = [];
+  const head = node(document, "h3", "usage-host usage-proxy", group.title);
+  if (!group.local) head.append(node(document, "span", "usage-account-sub", ` read from ${group.host}`));
+  children.push(head);
+  const readable = group.accounts.some((account) => account.provider !== "proxy");
+  for (const account of group.accounts) children.push(accountCard(document, account, [], now, open));
+  if (readable && group.problem) {
+    const problem = node(document, "p", "usage-note warn", group.problem);
+    if (group.problemDetail) problem.title = group.problemDetail;
+    children.push(problem);
+  }
+  const owned = activeSessions(group.accounts[0], sessions);
+  if (owned.length) children.push(sessionList(document, owned, open));
+  return children;
+}
+
 export function renderPanel(document, panel, list, sessions, now, open) {
-  const groups = byHost(list);
+  const groups = byHost(list.filter((account) => !account.group));
+  const proxies = byProxy(list);
   const children = [node(document, "h2", "usage-panel-title", "Accounts")];
   for (const group of groups) {
-    if (groups.length > 1) children.push(node(document, "h3", "usage-host", group.name));
+    if (groups.length > 1 || proxies.length) children.push(node(document, "h3", "usage-host", group.name));
     for (const account of group.accounts) children.push(accountCard(document, account, activeSessions(account, sessions), now, open));
   }
+  for (const group of proxies) children.push(...proxySection(document, group, sessions, now, open));
   panel.replaceChildren(...children);
 }
 
@@ -268,7 +311,7 @@ export function start({ document, fetch = (...args) => globalThis.fetch(...args)
     drawPanel();
   };
   const draw = () => {
-    render(document, element, accounts(sets, now()), sessions());
+    render(document, element, strip(accounts(sets, now())), sessions());
     fit(element, wrapped);
     drawPanel();
   };

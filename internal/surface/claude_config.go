@@ -69,10 +69,48 @@ func ClaudeConfigRoots(home string) ([]string, error) {
 }
 
 func configuredClaudeRoots(home string) ([]string, error) {
+	entries, err := configuredClaudeRootEntries(home)
+	roots := make([]string, len(entries))
+	for i, entry := range entries {
+		roots[i] = entry.Path
+	}
+	return roots, err
+}
+
+type claudeRootEntry struct {
+	Path  string `json:"path"`
+	Proxy string `json:"proxy,omitempty"`
+}
+
+func (e *claudeRootEntry) UnmarshalJSON(data []byte) error {
+	if json.Unmarshal(data, &e.Path) == nil {
+		return nil
+	}
+	type plain claudeRootEntry
+	return json.Unmarshal(data, (*plain)(e))
+}
+
+func configuredClaudeRootEntries(home string) ([]claudeRootEntry, error) {
+	config, err := ReadAgenthailConfig(home)
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := config["claudeConfigDirs"]
+	if !ok {
+		return nil, nil
+	}
+	var entries []claudeRootEntry
+	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
+		return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs must be a list of absolute paths or {\"path\", \"proxy\"} entries", AgenthailConfigPath(home))
+	}
+	return entries, nil
+}
+
+func ReadAgenthailConfig(home string) (map[string]json.RawMessage, error) {
 	path := AgenthailConfigPath(home)
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return map[string]json.RawMessage{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read Agenthail config %s: %w", path, err)
@@ -89,15 +127,7 @@ func configuredClaudeRoots(home string) ([]string, error) {
 	if err := json.Unmarshal(data, &config); err != nil || config == nil {
 		return nil, fmt.Errorf("Agenthail config %s must be a JSON object", path)
 	}
-	raw, ok := config["claudeConfigDirs"]
-	if !ok {
-		return nil, nil
-	}
-	var roots []string
-	if err := json.Unmarshal(raw, &roots); err != nil || roots == nil {
-		return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs must be a list of absolute paths", path)
-	}
-	return roots, nil
+	return config, nil
 }
 
 func claudeRootIdentity(root string) string {

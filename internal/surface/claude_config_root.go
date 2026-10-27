@@ -24,6 +24,7 @@ type ClaudeConfigRoot struct {
 	Primary       bool         `json:"primary"`
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
 	Login         string       `json:"login,omitempty"`
+	Proxy         string       `json:"proxy,omitempty"`
 	Signin        string       `json:"signin,omitempty"`
 	SigninProblem string       `json:"signinProblem,omitempty"`
 	Usage         *Usage       `json:"usage,omitempty"`
@@ -98,6 +99,7 @@ func DescribeClaudeConfigRoots(home string) ([]ClaudeConfigRoot, error) {
 		roots = append(roots, root)
 	}
 	uniqueClaudeRootNames(roots)
+	claudeRootProxies(home, roots)
 	return roots, nil
 }
 

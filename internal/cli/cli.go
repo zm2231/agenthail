@@ -131,6 +131,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdRoots(rest)
 	case "usage":
 		return a.cmdUsage(rest)
+	case "proxies":
+		return a.cmdProxies(rest)
 	case "claude":
 		return a.cmdClaude(rest)
 	case "search":

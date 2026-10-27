@@ -22,6 +22,7 @@ type usageMeter struct {
 	AsOf     time.Time `json:"asOf"`
 	Aged     bool      `json:"aged"`
 	Until    time.Time `json:"until,omitzero"`
+	Ceiling  float64   `json:"ceiling,omitempty"`
 }
 
 func usageMeters(provider string, usage *surface.Usage, now time.Time) []usageMeter {

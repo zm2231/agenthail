@@ -201,7 +201,9 @@ func (a *App) signinList(ctx context.Context, jsonOut bool) error {
 				continue
 			}
 			profile := root.Signin
-			if root.SigninProblem != "" {
+			if root.Proxy != "" {
+				profile = "via the " + root.Proxy + " proxy"
+			} else if root.SigninProblem != "" {
 				profile = "no profile: " + root.SigninProblem
 			}
 			fmt.Printf("  %s  %s  %s\n", root.Name, root.SignedInAs.Email, profile)
