@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { accounts, renderPanel } from "../internal/daemon/dashboard/js/usage.js";
-import { openPrefer, planLines, planQuery } from "../internal/daemon/dashboard/js/usage-prefer.js";
+import { openPrefer, planQuery, planSections, preferenceWord } from "../internal/daemon/dashboard/js/usage-prefer.js";
 
 const now = Date.parse("2026-10-26T12:00:00Z");
 const shared = { name: "shared", id: "http://proxy.example:8317", url: "http://proxy.example:8317" };
@@ -67,16 +67,18 @@ const plan = {
   hosts: [{ host: "laptop", roots: ["/home/dev/.work/.claude"], sessions: [{ id: "s6", name: "migrator" }] }, { host: "server", roots: ["/srv/claude"], sessions: [] }],
   warnings: ["The proxy does not say which account each session is on."],
 };
-assert.deepEqual(planLines(plan), [
-  "spare@example.com: preference 0 → 10",
-  "ops@example.com: preference 10 → 0",
-  "Releases the sessions on ops@example.com.",
-  "laptop: /home/dev/.work/.claude · running: migrator",
-  "server: /srv/claude · no running sessions",
-  "The proxy does not say which account each session is on.",
-]);
-assert.deepEqual(planLines({ ...plan, set: "on", changes: plan.changes.slice(0, 1), release: [], hosts: [], warnings: [] }), ["spare@example.com: preference 0 → 10", "Other accounts are not changed."]);
-assert.deepEqual(planLines({ nothing: "ops@example.com is already preferred." }), ["ops@example.com is already preferred."]);
+assert.deepEqual(planSections(plan), {
+  changes: [
+    { text: "spare@example.com: not preferred → preferred", help: "quota_preference 0 → 10" },
+    { text: "ops@example.com: preferred → not preferred", help: "quota_preference 10 → 0" },
+    { text: "Releases the sessions on ops@example.com, so they move on their next request." },
+  ],
+  affects: ["laptop: /home/dev/.work/.claude · running: migrator", "server: /srv/claude · no running sessions"],
+  notes: ["The proxy does not say which account each session is on."],
+}, "plain words, the raw value only in the help text, then what it affects");
+assert.deepEqual(planSections({ ...plan, set: "on", changes: plan.changes.slice(0, 1), release: [], hosts: [], warnings: [] }).changes.map((change) => change.text), ["spare@example.com: not preferred → preferred", "Other accounts are not changed."]);
+assert.deepEqual(planSections({ nothing: "ops@example.com is already preferred." }).changes, [{ text: "ops@example.com is already preferred." }]);
+assert.equal(preferenceWord(5), "preference 5", "a value Agenthail did not set is shown as it is");
 
 const spare = list.find((account) => account.login === "spare@example.com");
 const calls = [];
@@ -96,8 +98,14 @@ let reloads = 0;
 await openPrefer({ document, fetch, account: spare, set: "only", notify: (text) => notes.push(text), reload: () => reloads++ });
 assert.equal(ids["prefer-dialog"].open, true);
 assert.equal(ids["prefer-now-row"].hidden, false, "prefer only offers moving running sessions");
+assert.equal(ids["prefer-now"].checked, false, "moving sessions costs a prompt-cache rebuild, so it starts off");
+assert.equal(calls.at(-1)[1], `/api/v1/proxies/prefer?${planQuery(spare.proxyAccount, "only", false)}`);
 assert.equal(ids["prefer-confirm"].textContent, plan.confirm, "the button is named for the effect");
-assert.equal(ids["prefer-plan"].children.length, 6);
+assert.deepEqual(ids["prefer-plan"].children.map((item) => item.className), ["", "", "", "prefer-plan-heading", "", "", "prefer-plan-note"], "the account lines, then Affects with the hosts, then the notes");
+assert.equal(ids["prefer-plan"].children[0].title, "quota_preference 0 → 10");
+ids["prefer-cancel"].onclick();
+assert.equal(ids["prefer-dialog"].open, false, "Cancel closes without writing");
+ids["prefer-dialog"].showModal();
 ids["prefer-now"].checked = true;
 await ids["prefer-now"].onchange();
 assert.equal(calls.at(-1)[1], `/api/v1/proxies/prefer?${planQuery(spare.proxyAccount, "only", true)}`, "moving sessions re-reads the plan");

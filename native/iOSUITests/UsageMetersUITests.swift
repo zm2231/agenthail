@@ -69,8 +69,9 @@ final class UsageMetersUITests: XCTestCase {
         rows.lifetime = .keepAlways
         add(rows)
         toggles.element(boundBy: 1).tap()
-        XCTAssertTrue(app.staticTexts["lead@example.com: preference 0 → 10"].waitForExistence(timeout: 5), "the plan shows the before and after")
+        XCTAssertTrue(app.staticTexts["lead@example.com: not preferred → preferred"].waitForExistence(timeout: 5), "the plan shows the before and after")
         XCTAssertTrue(app.staticTexts["Other accounts are not changed."].exists)
+        XCTAssertTrue(app.staticTexts["Affects"].exists, "the hosts and sessions come under Affects")
         let confirm = app.buttons["proxy-prefer-confirm"]
         XCTAssertEqual(confirm.label, "Prefer lead@example.com", "the button is named for the effect")
         let plan = XCTAttachment(screenshot: app.screenshot())
@@ -83,7 +84,8 @@ final class UsageMetersUITests: XCTestCase {
         let only = app.buttons.matching(identifier: "proxy-prefer-only")
         XCTAssertEqual(only.count, 3, "prefer only is offered where the provider has other accounts")
         only.element(boundBy: 1).tap()
-        XCTAssertTrue(app.staticTexts["ops@example.com: preference 10 → 0"].waitForExistence(timeout: 5), "prefer only names every account it turns off")
+        XCTAssertTrue(app.staticTexts["ops@example.com: preferred → not preferred"].waitForExistence(timeout: 5), "prefer only names every account it turns off")
+        XCTAssertEqual(app.switches.firstMatch.value as? String, "0", "moving running sessions starts off")
         XCTAssertEqual(app.buttons["proxy-prefer-confirm"].label, "Prefer only lead@example.com (turns off ops@example.com)")
         let exclusive = XCTAttachment(screenshot: app.screenshot())
         exclusive.name = "proxy prefer only plan"

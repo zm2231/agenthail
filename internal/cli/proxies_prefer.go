@@ -152,14 +152,20 @@ func writePreferPlan(w io.Writer, plan preferPlanView) {
 		return
 	}
 	for _, change := range plan.Changes {
-		fmt.Fprintf(w, "  %-24s preference %g -> %g\n", change.Label, change.Before, change.After)
+		fmt.Fprintf(w, "  %-24s %s -> %s\n", change.Label, preferenceWord(change.Before), preferenceWord(change.After))
+	}
+	if plan.Set != "only" {
+		fmt.Fprintln(w, "  other accounts are not changed")
 	}
 	if len(plan.Release) > 0 {
 		labels := []string{}
 		for _, account := range plan.Release {
 			labels = append(labels, account.Label)
 		}
-		fmt.Fprintf(w, "  releases the sessions on %s\n", strings.Join(labels, ", "))
+		fmt.Fprintf(w, "  releases the sessions on %s, so they move on their next request\n", strings.Join(labels, ", "))
+	}
+	if len(plan.Hosts) > 0 {
+		fmt.Fprintln(w, "affects")
 	}
 	for _, host := range plan.Hosts {
 		sessions := []string{}
@@ -173,11 +179,18 @@ func writePreferPlan(w io.Writer, plan preferPlanView) {
 		fmt.Fprintln(w, line)
 	}
 	for _, warning := range plan.Warnings {
-		fmt.Fprintf(w, "  %s\n", warning)
+		fmt.Fprintln(w, warning)
 	}
-	if plan.Set != "only" {
-		fmt.Fprintln(w, "  other accounts are not changed")
+}
+
+func preferenceWord(value float64) string {
+	switch {
+	case value == 0:
+		return "not preferred"
+	case value >= 10:
+		return "preferred"
 	}
+	return fmt.Sprintf("preference %g", value)
 }
 
 func confirmLine(in io.Reader, out io.Writer, prompt string) bool {

@@ -47,16 +47,31 @@ struct ProxyPreferPlan: Decodable, Equatable {
     var warnings: [String]? = nil
     let planId: String
 
-    var lines: [String] {
-        if let nothing { return [nothing] }
-        var lines = changes.map { "\($0.label): preference \(Self.number($0.before)) → \(Self.number($0.after))" }
-        if set != ProxyPreferSet.only.rawValue { lines.append("Other accounts are not changed.") }
-        if !release.isEmpty { lines.append("Releases the sessions on " + release.map(\.label).joined(separator: ", ") + ".") }
-        for host in hosts {
+    struct Line: Equatable {
+        let text: String
+        var help: String? = nil
+    }
+
+    var changeLines: [Line] {
+        if let nothing { return [Line(text: nothing)] }
+        var lines = changes.map { Line(text: "\($0.label): \(Self.word($0.before)) → \(Self.word($0.after))", help: "quota_preference \(Self.number($0.before)) → \(Self.number($0.after))") }
+        if set != ProxyPreferSet.only.rawValue { lines.append(Line(text: "Other accounts are not changed.")) }
+        if !release.isEmpty { lines.append(Line(text: "Releases the sessions on " + release.map(\.label).joined(separator: ", ") + ", so they move on their next request.")) }
+        return lines
+    }
+
+    var affectLines: [String] {
+        guard nothing == nil else { return [] }
+        return hosts.map { host in
             let running = host.sessions.map(\.name)
-            lines.append(host.host + ": " + host.roots.joined(separator: ", ") + (running.isEmpty ? " · no running sessions" : " · running: " + running.joined(separator: ", ")))
+            return host.host + ": " + host.roots.joined(separator: ", ") + (running.isEmpty ? " · no running sessions" : " · running: " + running.joined(separator: ", "))
         }
-        return lines + (warnings ?? [])
+    }
+
+    var notes: [String] { nothing == nil ? warnings ?? [] : [] }
+
+    static func word(_ value: Double) -> String {
+        value == 0 ? "not preferred" : value >= 10 ? "preferred" : "preference " + number(value)
     }
 
     private static func number(_ value: Double) -> String {

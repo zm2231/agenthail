@@ -40,11 +40,12 @@ func TestThePreferPlanShowsEveryChangeAndWhatItReaches(t *testing.T) {
 	var out bytes.Buffer
 	writePreferPlan(&out, plan)
 	want := `shared proxy, read from server
-  spare@example.com        preference 0 -> 10
-  lead@example.com         preference 10 -> 0
-  releases the sessions on lead@example.com
+  spare@example.com        not preferred -> preferred
+  lead@example.com         preferred -> not preferred
+  releases the sessions on lead@example.com, so they move on their next request
+affects
   laptop: /home/dev/.work/.claude; running: migrator
-  The proxy does not say which account each session is on.
+The proxy does not say which account each session is on.
 `
 	if out.String() != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)

@@ -140,11 +140,12 @@ over a preference. Agenthail changes the preference in two ways:
   proxy can prefer several accounts at once.
 - **Prefer only this** sets the account to 10 and every other account of the
   same provider on the proxy to 0. Accounts of other providers and disabled
-  accounts are not changed. With "move running sessions" (`--now`) it also
-  releases the sessions on the other accounts: each moves on its next request
-  and rebuilds its prompt cache on the new account. The proxy does not say
-  which account a session is on, so the plan names the sessions that may
-  move.
+  accounts are not changed. With "move running sessions" (`--now`, off by
+  default) it also releases the sessions on the accounts it turns off: each
+  moves on its next request and rebuilds its prompt cache on the new account.
+  An account that was already not preferred is not released. The proxy does
+  not say which account a session is on, so the plan names the sessions that
+  may move.
 
 Every change is previewed first. `GET /api/v1/proxies/prefer?proxy=<id>&account=<id>&set=on|off|only&now=<bool>`
 returns the plan: each account it changes with its preference before and
@@ -187,8 +188,10 @@ say which account each session is on.
 
 Each account row of a proxy group has the Preferred toggle and, when its
 provider has another account on the proxy, Prefer only this. Both open the
-plan, with the confirm button named for the effect: `Prefer ops`, `Stop
-preferring ops`, `Prefer only ops (turns off lead)`.
+plan: each account it changes in words (`lead: not preferred → preferred`,
+with the raw values in the help text), then under Affects the hosts, roots
+and running sessions, and a confirm button named for the effect: `Prefer
+ops`, `Stop preferring ops`, `Prefer only ops (turns off lead)`.
 
 `agenthail usage` prints the same groups. `agenthail proxies [--json]` lists
 each proxy with its accounts, problems and the roots that use it.

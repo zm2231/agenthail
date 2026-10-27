@@ -97,9 +97,10 @@ func planProxyPrefer(accounts []proxyacct.Account, request proxyPreferRequest) (
 			if other.ID == target.ID || other.Provider != target.Provider || other.Status == proxyacct.StatusDisabled {
 				continue
 			}
-			if other.Preference != proxyacct.NotPreferred {
-				plan.Changes = append(plan.Changes, proxyPreferChange{ID: other.ID, Label: other.Label, Provider: other.Provider, Before: other.Preference, After: proxyacct.NotPreferred})
+			if other.Preference == proxyacct.NotPreferred {
+				continue
 			}
+			plan.Changes = append(plan.Changes, proxyPreferChange{ID: other.ID, Label: other.Label, Provider: other.Provider, Before: other.Preference, After: proxyacct.NotPreferred})
 			if request.Now {
 				plan.Release = append(plan.Release, proxyPreferAccount{ID: other.ID, Label: other.Label})
 			}

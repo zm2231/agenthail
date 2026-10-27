@@ -113,6 +113,14 @@ func TestPreferOnlyNamesEveryAccountItTurnsOffAndWritesTheChosenFirst(t *testing
 	}
 }
 
+func TestPreferOnlyReleasesOnlyTheAccountsItTurnsOff(t *testing.T) {
+	f, proxy := newPreferFixture(t)
+	plan := f.plan(t, proxy, "claude-ops.json", preferOnly, true)
+	if len(plan.Changes) != 1 || plan.Changes[0].ID != "claude-lead.json" || len(plan.Release) != 1 || plan.Release[0].ID != "claude-lead.json" {
+		t.Fatalf("spare is already not preferred, so its sessions stay: %+v", plan)
+	}
+}
+
 func TestAPlanThatWentStaleWritesNothing(t *testing.T) {
 	f, proxy := newPreferFixture(t)
 	plan := f.plan(t, proxy, "claude-spare.json", preferOn, false)

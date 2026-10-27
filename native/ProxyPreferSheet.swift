@@ -20,8 +20,18 @@ struct ProxyPreferSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(request.account.login + " on the " + (request.account.group?.name ?? "") + " proxy").font(.headline)
             if let plan {
-                ForEach(Array(plan.lines.enumerated()), id: \.offset) { line in
-                    Text(line.element).fixedSize(horizontal: false, vertical: true)
+                ForEach(Array(plan.changeLines.enumerated()), id: \.offset) { line in
+                    Text(line.element.text).fixedSize(horizontal: false, vertical: true)
+                        .help(line.element.help ?? "")
+                }
+                if !plan.affectLines.isEmpty {
+                    Text("Affects").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                    ForEach(Array(plan.affectLines.enumerated()), id: \.offset) { line in
+                        Text(line.element).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                ForEach(Array(plan.notes.enumerated()), id: \.offset) { line in
+                    Text(line.element).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             } else if problem == nil {
                 ProgressView("Reading the proxy…")

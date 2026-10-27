@@ -26,18 +26,18 @@ struct ProxyPreferTest {
          "hosts":[{"host":"laptop","hostId":"h1","roots":["/home/dev/.work/.claude"],"sessions":[{"id":"s6","name":"migrator"}]},{"host":"server","hostId":"h2","roots":["/srv/claude"],"sessions":[]}],
          "warnings":["The proxy does not say which account each session is on."]}
         """#.utf8))
-        check(plan.lines == [
-            "spare@example.com: preference 0 → 10",
-            "ops@example.com: preference 10 → 0",
-            "Releases the sessions on ops@example.com.",
-            "laptop: /home/dev/.work/.claude · running: migrator",
-            "server: /srv/claude · no running sessions",
-            "The proxy does not say which account each session is on.",
-        ], "the plan names every change and what it reaches, as the web does: \(plan.lines)")
+        check(plan.changeLines == [
+            ProxyPreferPlan.Line(text: "spare@example.com: not preferred → preferred", help: "quota_preference 0 → 10"),
+            ProxyPreferPlan.Line(text: "ops@example.com: preferred → not preferred", help: "quota_preference 10 → 0"),
+            ProxyPreferPlan.Line(text: "Releases the sessions on ops@example.com, so they move on their next request."),
+        ], "plain words, the raw value only in the help, as the web does: \(plan.changeLines)")
+        check(plan.affectLines == ["laptop: /home/dev/.work/.claude · running: migrator", "server: /srv/claude · no running sessions"], "what it affects: \(plan.affectLines)")
+        check(plan.notes == ["The proxy does not say which account each session is on."], "notes come last")
+        check(ProxyPreferPlan.word(5) == "preference 5", "a value Agenthail did not set is shown as it is")
         let toggle = try JSONDecoder().decode(ProxyPreferPlan.self, from: Data(#"""
         {"set":"on","planId":"p2","changes":[{"id":"claude-spare.json","label":"spare@example.com","before":0,"after":10}],"release":[],"hosts":[]}
         """#.utf8))
-        check(toggle.lines == ["spare@example.com: preference 0 → 10", "Other accounts are not changed."], "a toggle says it leaves the others: \(toggle.lines)")
+        check(toggle.changeLines.map(\.text) == ["spare@example.com: not preferred → preferred", "Other accounts are not changed."], "a toggle says it leaves the others: \(toggle.changeLines)")
 
         let readers = UsageProxies.readers([
             [UsageReport.Set(host: "laptop", hostId: "h1", provider: "proxy", name: "shared", proxy: UsageReport.Proxy(name: "shared", id: "http://proxy.example:8317"), proxyProblem: "key_missing")],

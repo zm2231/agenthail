@@ -415,6 +415,19 @@ textarea:focus-visible {
   color: var(--ink);
   font-size: 13px;
 }
+.prefer-plan .prefer-plan-heading {
+  margin: 6px 0 0 -18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+}
+.prefer-plan .prefer-plan-note {
+  color: var(--muted);
+}
+#prefer-form .voice-actions {
+  justify-content: flex-end;
+}
 .prefer-now {
   display: flex;
   align-items: center;
