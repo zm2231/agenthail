@@ -243,7 +243,7 @@ function accountCard(document, account, sessions, now, open, prefer) {
     card.append(problem);
   }
   else if (!account.meters.length) card.append(node(document, "p", "usage-note", "No current reading"));
-  if (prefer && account.proxyAccount) card.append(preferActions(document, account, prefer));
+  if (prefer && account.proxyAccount) card.append(preferActions(document, account, prefer, (account.group?.peers?.[account.provider] || 0) > 1));
   if (sessions.length) card.append(sessionList(document, sessions, open));
   return card;
 }

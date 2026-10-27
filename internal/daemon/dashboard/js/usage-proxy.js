@@ -22,7 +22,9 @@ export function accountState(account, now) {
 export function proxyGroup(set, sets) {
   const id = set.proxy?.id || `${set.hostId}|${set.name}`;
   const roots = sets.filter((other) => other.provider === "claude" && other.proxy?.id && other.proxy.id === set.proxy?.id).map((other) => ({ hostId: other.hostId, host: other.host, root: other.root, name: other.name }));
-  return { id, name: set.name, title: `${set.name} (proxy)`, url: set.proxy?.url || null, host: set.host, hostId: set.hostId, local: set.local === true, problem: set.problem || null, problemDetail: set.problemDetail || null, roots };
+  const peers = {};
+  for (const account of set.accounts || []) if (account.status !== "disabled") peers[account.provider] = (peers[account.provider] || 0) + 1;
+  return { id, name: set.name, title: `${set.name} (proxy)`, peers, url: set.proxy?.url || null, host: set.host, hostId: set.hostId, local: set.local === true, problem: set.problem || null, problemDetail: set.problemDetail || null, roots };
 }
 
 export function expandProxies(sets, now) {

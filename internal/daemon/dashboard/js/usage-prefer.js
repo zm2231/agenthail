@@ -7,7 +7,7 @@ function el(document, tag, className, text) {
   return element;
 }
 
-export function preferActions(document, account, prefer) {
+export function preferActions(document, account, prefer, peers = true) {
   const proxied = account.proxyAccount;
   const row = el(document, "div", "usage-prefer");
   const toggle = el(document, "button", proxied.preferred ? "usage-prefer-toggle on" : "usage-prefer-toggle", "Preferred");
@@ -19,7 +19,8 @@ export function preferActions(document, account, prefer) {
   only.type = "button";
   only.title = `Prefer ${account.login} and turn off the other ${account.provider} accounts on this proxy`;
   only.addEventListener("click", () => prefer(account, "only"));
-  row.append(toggle, only);
+  row.append(toggle);
+  if (peers) row.append(only);
   if (proxied.setOn && proxied.setAt) row.append(el(document, "span", "usage-account-sub", `set on ${proxied.setOn} at ${clock(proxied.setAt)}`));
   return row;
 }

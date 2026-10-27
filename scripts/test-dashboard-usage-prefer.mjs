@@ -8,6 +8,7 @@ const sets = [
   { host: "server", hostId: "h2", local: false, provider: "proxy", name: "shared", proxy: shared, meters: [], accounts: [
     { id: "claude-ops.json", provider: "claude", label: "ops@example.com", status: "active", preference: 10, preferred: true, setOn: "server", setAt: "2026-10-26T11:20:00Z", meters: [] },
     { id: "claude-spare.json", provider: "claude", label: "spare@example.com", status: "active", preference: 0, meters: [] },
+    { id: "codex-ops.json", provider: "codex", label: "ops@example.com", status: "active", preference: 0, meters: [] },
   ] },
 ];
 
@@ -39,7 +40,14 @@ const collect = (node) => {
   node.children.forEach(collect);
 };
 collect(panel);
-assert.equal(toggles.length, 2, "every proxy account row has the toggle");
+assert.equal(toggles.length, 3, "every proxy account row has the toggle");
+const onlies = [];
+const collectOnly = (node) => {
+  if (node.className === "usage-prefer-only") onlies.push(node);
+  node.children.forEach(collectOnly);
+};
+collectOnly(panel);
+assert.equal(onlies.length, 2, "prefer only is offered where the provider has another account to turn off");
 assert.equal(toggles[0].attributes["aria-pressed"], "true");
 toggles[0].listeners.click();
 toggles[1].listeners.click();
