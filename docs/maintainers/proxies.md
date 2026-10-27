@@ -74,9 +74,11 @@ preferred proxy root is kept even when every account is full, because the
 proxy waits for an account itself and leaving it would route the session
 around the proxy; the reason says when the first account frees up. Disabled
 and unavailable accounts never count. The new-session forms read such a root
-as `shared (proxy) · best: team · session 18%, week 41%`, from
+as `shared via proxy · next: team · session 18%, week 41%`: the account with
+the most headroom, the one the proxy would use next, where the status strip
+names the fullest. The readings come from
 `GET /api/v1/session-options/claude-usage?root=<path>`, which answers a proxy
-root with its best account as `best` and that account's windows as `usage`.
+root with that account as `best` and its windows as `usage`.
 The pick only reads what the proxy reports; the proxy still chooses the
 account for each request.
 

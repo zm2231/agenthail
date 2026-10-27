@@ -182,7 +182,7 @@ func frees(c Candidate, policy Policy) time.Time {
 func readings(c Candidate) string {
 	parts := []string{}
 	if c.Best != "" {
-		parts = append(parts, "best: "+c.Best)
+		parts = append(parts, "next: "+c.Best)
 	}
 	if c.Session != nil {
 		parts = append(parts, fmt.Sprintf("session %.0f%%", c.Session.Percent))

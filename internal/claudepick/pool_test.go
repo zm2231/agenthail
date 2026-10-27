@@ -23,7 +23,7 @@ func TestAProxyRootCompetesWithItsFreestAccount(t *testing.T) {
 		Member{Account: "spare@example.com", Session: capped(1, 60, time.Hour), RetryAt: now.Add(time.Hour)},
 	)
 	got := Choose(append(roots(), proxy), DefaultPolicy(), now)
-	if got.Root != "/home/dev/.work" || got.Account != "lead@example.com" || got.Reason != "most headroom, best: lead@example.com, session 6%, week 9%" {
+	if got.Root != "/home/dev/.work" || got.Account != "lead@example.com" || got.Reason != "most headroom, next: lead@example.com, session 6%, week 9%" {
 		t.Fatalf("the proxy root is eligible with its freest open account, never a cooling one: %+v", got)
 	}
 }
@@ -59,7 +59,7 @@ func TestAPreferredProxySticksEvenWhenEveryAccountIsFull(t *testing.T) {
 		t.Fatalf("leaving a preferred proxy would break its single egress: %+v", got)
 	}
 	open := viaProxy(Member{Account: "ops@example.com", Session: capped(20, 60, time.Hour)})
-	if got := Choose(append(roots(), open), policy, now); got.Reason != "preferred, best: ops@example.com, session 20%" {
+	if got := Choose(append(roots(), open), policy, now); got.Reason != "preferred, next: ops@example.com, session 20%" {
 		t.Fatalf("%+v", got)
 	}
 	if got := Choose(append(roots(), viaProxy()), policy, now); got.Name != "work" || got.Reason != "preferred; the proxy chooses the account" {

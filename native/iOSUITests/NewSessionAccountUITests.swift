@@ -16,7 +16,7 @@ final class NewSessionAccountUITests: XCTestCase {
         add(closed)
         picker.tap()
         XCTAssertTrue(app.buttons["demo · session 40%, week 93%, over limit"].waitForExistence(timeout: 5), "each account shows its usage, and one over a ceiling says so")
-        XCTAssertTrue(app.buttons["shared (proxy) · best: ops · session 18%, week 41%"].exists, "a root through a proxy reads as its best account")
+        XCTAssertTrue(app.buttons["shared via proxy · next: ops · session 18%, week 41%"].exists, "a root through a proxy reads as the account the proxy would use next")
         let open = XCTAttachment(screenshot: app.screenshot())
         open.name = "new session account menu"
         open.lifetime = .keepAlways

@@ -45,7 +45,7 @@ func TestAProxyRootIsPickedWithItsFreestAccount(t *testing.T) {
  {"name":"claude-ops.json","provider":"claude","email":"ops@example.com","status":"active","quota_ceiling":{"5h":60,"7d":60},
   "quota":{"observed_at":%q,"signals":{"Anthropic-Ratelimit-Unified-5h-Utilization":"0.12","Anthropic-Ratelimit-Unified-5h-Reset":"%d","Anthropic-Ratelimit-Unified-7d-Utilization":"0.30","Anthropic-Ratelimit-Unified-7d-Reset":"%d"}}}]}`,
 		now.Format(time.RFC3339), now.Add(3*time.Hour).Unix(), now.Add(50*time.Hour).Unix()))
-	if got := f.pick(t); got.Name != "team" || got.Account != "ops@example.com" || got.Reason != "most headroom, best: ops@example.com, session 12%, week 30%" {
+	if got := f.pick(t); got.Name != "team" || got.Account != "ops@example.com" || got.Reason != "most headroom, next: ops@example.com, session 12%, week 30%" {
 		t.Fatalf("a root through the proxy competes with its freest account: %+v", got)
 	}
 	var usage struct {
