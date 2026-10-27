@@ -111,10 +111,13 @@ func TestWithNoReadingsAnUnchosenAPIKeyOrSignedOutPrimaryIsPassedOver(t *testing
 	}
 }
 
-func TestWithNoClaudeAILoginThePrimaryStays(t *testing.T) {
-	candidates := roots()[2:]
-	candidates[0].Primary = true
-	if got := Choose(candidates, DefaultPolicy(), now); got.Root != "" || got.Name != "keys" {
-		t.Fatalf("%+v", got)
+func TestWithNoClaudeAILoginThePrimaryStartsAsBefore(t *testing.T) {
+	for _, primary := range []int{0, 1} {
+		candidates := roots()[2:]
+		candidates[primary].Primary = true
+		got := Choose(candidates, DefaultPolicy(), now)
+		if got.Root != "" || got.Name != candidates[primary].Name {
+			t.Fatalf("automatic choice never moves a start onto another API-key or signed-out root: %+v", got)
+		}
 	}
 }
