@@ -3,6 +3,7 @@ package surface
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -10,8 +11,9 @@ import (
 )
 
 type claudeCarryAdd struct {
-	path string
-	item gjson.Result
+	path    string
+	item    gjson.Result
+	created bool
 }
 
 func CarryClaudeProject(home, from, to, cwd string) (func() error, error) {
@@ -40,19 +42,22 @@ func CarryClaudeProject(home, from, to, cwd string) (func() error, error) {
 }
 
 func mergeClaudeProject(data []byte, entryPath string, entry gjson.Result) ([]byte, []claudeCarryAdd, error) {
-	target := gjson.GetBytes(data, entryPath)
-	if !target.Exists() {
-		added := entryPath
-		if !gjson.GetBytes(data, "projects").Exists() {
-			added = "projects"
-		}
-		updated, err := sjson.SetRawBytes(data, entryPath, []byte(entry.Raw))
-		return updated, []claudeCarryAdd{{path: added}}, err
-	}
-	if !target.IsObject() {
-		return data, nil, nil
-	}
+	original := data
 	var adds []claudeCarryAdd
+	for _, container := range []string{"projects", entryPath} {
+		have := gjson.GetBytes(data, container)
+		if have.Exists() && !have.IsObject() {
+			return original, nil, nil
+		}
+		if have.Exists() {
+			continue
+		}
+		var err error
+		if data, err = sjson.SetRawBytes(data, container, []byte("{}")); err != nil {
+			return original, nil, err
+		}
+		adds = append(adds, claudeCarryAdd{path: container, created: true})
+	}
 	var err error
 	entry.ForEach(func(key, value gjson.Result) bool {
 		path := entryPath + "." + escapeSettingsPath(key.String())
@@ -84,13 +89,25 @@ func mergeClaudeProject(data []byte, entryPath string, entry gjson.Result) ([]by
 		}
 		return err == nil
 	})
-	return data, adds, err
+	if err != nil {
+		return original, nil, err
+	}
+	if !slices.ContainsFunc(adds, func(add claudeCarryAdd) bool { return !add.created }) {
+		return original, nil, nil
+	}
+	return data, adds, nil
 }
 
 func unmergeClaudeProject(data []byte, added []claudeCarryAdd) ([]byte, error) {
 	var err error
 	for i := len(added) - 1; i >= 0 && err == nil; i-- {
 		add := added[i]
+		if add.created {
+			if have := gjson.GetBytes(data, add.path); have.IsObject() && len(have.Map()) == 0 {
+				data, err = sjson.DeleteBytes(data, add.path)
+			}
+			continue
+		}
 		if !add.item.Exists() {
 			data, err = sjson.DeleteBytes(data, add.path)
 			continue

@@ -48,8 +48,15 @@ func newRootMoveFixture(t *testing.T) rootMoveFixture {
 
 func (f rootMoveFixture) transcriptIn(t *testing.T, root string) bool {
 	t.Helper()
-	_, err := os.Stat(filepath.Join(root, "projects", claudeProjectDirName(f.cwd), f.session.ID+".jsonl"))
-	return err == nil
+	return f.projectIn(root) != ""
+}
+
+func (f rootMoveFixture) projectIn(root string) string {
+	found, _ := filepath.Glob(filepath.Join(root, "projects", "*", f.session.ID+".jsonl"))
+	if len(found) != 1 {
+		return ""
+	}
+	return filepath.Base(filepath.Dir(found[0]))
 }
 
 func (f rootMoveFixture) prepare(t *testing.T) *surface.MoveOut {
@@ -123,7 +130,7 @@ func TestARootMoveTheTargetCannotTakeLeavesEverythingWhereItWas(t *testing.T) {
 func TestRecoveringARootMoveFinishesAPlacedOneAndReturnsAnUnplacedOne(t *testing.T) {
 	f := newRootMoveFixture(t)
 	primary := filepath.Join(f.host.Home, ".claude")
-	project := claudeProjectDirName(f.cwd)
+	project := f.projectIn(primary)
 	writeFixtureFile(t, filepath.Join(primary, "projects", project, f.session.ID, "subagents", "a.jsonl"), "{}\n")
 	out, err := f.c.PrepareMove(context.Background(), f.session, surface.AdoptRequest{Wait: claudeAdoptStopTimeout})
 	if err != nil {

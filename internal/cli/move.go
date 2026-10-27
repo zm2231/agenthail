@@ -148,7 +148,7 @@ func (a *App) cmdMoveList(args []string) error {
 			PeerHost     string    `json:"peerHost"`
 			PeerHostName string    `json:"peerHostName"`
 			Root         string    `json:"root"`
-			Role        string    `json:"role"`
+			Role         string    `json:"role"`
 			State        string    `json:"state"`
 			Detail       string    `json:"detail"`
 			UpdatedAt    time.Time `json:"updatedAt"`
