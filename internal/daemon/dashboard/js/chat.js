@@ -16,6 +16,7 @@ import { renderTimeline, timelineSignature } from "./timeline.js";
 import { exchangePrompt, renderMessage } from "./messages.js";
 import { alignTranscriptTop } from "./transcript-scroll.js";
 import { expandAgentsPreference, markClampedAgentRows } from "./agent-messages.js";
+import { limitMoveButton } from "./limit-move.js";
 
 export function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents, claudeSubagentsTotal } = app.history || {};
@@ -37,6 +38,8 @@ export function renderChat() {
     controls.push('<button data-action="limit-resume" type="button">Resume now</button>');
     if (session.limitResume.state === "waiting")
       controls.push('<button data-action="limit-resume-cancel" type="button">Don\'t resume</button>');
+    if (session.limitResume.moveTo)
+      controls.push(limitMoveButton(session.limitResume.moveTo));
   }
   const expandAgents = expandAgentsPreference();
   controls.push(`<button data-expand-agents aria-pressed="${expandAgents}" type="button">${expandAgents ? "Collapse agent messages" : "Expand agent messages"}</button>`);

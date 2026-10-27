@@ -30,6 +30,7 @@ export function renderClaudeAccounts(policy, roots) {
   $("#settings-claude-preferred").value = policy.preferred || "";
   $("#settings-claude-session").value = String(policy.sessionCeiling);
   $("#settings-claude-weekly").value = String(policy.weeklyCeiling);
+  $("#settings-claude-automove").value = policy.autoMove ? "on" : "off";
 }
 
 export function renderSettings() {

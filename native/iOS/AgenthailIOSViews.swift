@@ -1330,6 +1330,7 @@ struct SessionInspector: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
     @State private var renamingClaude = false
+    @State private var movingTo: LimitResumeState.MoveOffer?
     @State private var claudeName = ""
     @State private var adopting = false
     private var detail: SessionDetail {
@@ -1510,6 +1511,7 @@ struct SessionInspector: View {
                         if let stop = detail.limitResume, !detail.readOnly {
                             Button("Resume now", systemImage: "play.fill") { model.action("limit-resume", session: session); dismiss() }
                             if stop.isWaiting { Button("Don't resume", systemImage: "pause.circle") { model.action("limit-resume-cancel", session: session) } }
+                            if let offer = stop.moveTo { Button("Move to \(offer.name)", systemImage: "person.crop.circle.badge.checkmark") { movingTo = offer } }
                         }
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
@@ -1528,6 +1530,12 @@ struct SessionInspector: View {
                 Button("Rename") { model.action("rename", session: session, message: claudeName) }
                     .disabled(claudeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } message: { Text("Changes the Claude session name, not its Agenthail alias.") }
+            .confirmationDialog(movingTo.map { "Move this session to \($0.name)?" } ?? "", isPresented: Binding(get: { movingTo != nil }, set: { if !$0 { movingTo = nil } }), titleVisibility: .visible, presenting: movingTo) { offer in
+                Button("Move to \(offer.name)") { model.moveToAccount(session, root: offer.root); dismiss() }
+                Button("Cancel", role: .cancel) {}
+            } message: { offer in
+                Text(["It stops here and continues under that account.", offer.reason.map { "Chosen for \($0)." }].compactMap { $0 }.joined(separator: " "))
+            }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: model.routedSession(liveSession) ?? liveSession, sessionID: liveSession.id) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }

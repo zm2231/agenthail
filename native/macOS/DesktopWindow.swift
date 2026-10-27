@@ -2087,6 +2087,9 @@ struct DetailsTab: View {
                         Button("Don't resume") { pane.resumeAfterLimit(false) }
                             .help("Keep the session stopped when its usage limit resets")
                     }
+                    if let offer = stop.moveTo {
+                        LimitMoveButton(offer: offer) { pane.moveAfterLimit(to: $0) }
+                    }
                 }
                 .disabled(pane.controlPending)
             }

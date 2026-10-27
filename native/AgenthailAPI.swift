@@ -593,6 +593,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.result
     }
 
+    func moveToAccount(sessionID: String, root: String) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "limit-move", "sessionId": sessionID, "configRoot": root])
+    }
+
     func requests(sessionID: String) async throws -> SessionRequests {
         var components = URLComponents()
         components.path = "/api/v1/requests"

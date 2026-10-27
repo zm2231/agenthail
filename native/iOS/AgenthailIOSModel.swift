@@ -1429,6 +1429,27 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
 
+    func moveToAccount(_ session: SessionState, root: String) {
+        guard !pendingControls.contains(session.id) else { return }
+        let api: AgenthailAPI
+        let route: SessionRoute
+        do { (api, route) = try self.resolve(session.id) } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return
+        }
+        pendingControls.insert(session.id)
+        Task {
+            defer { pendingControls.remove(session.id) }
+            do {
+                try await api.moveToAccount(sessionID: route.sessionID, root: root)
+                await refresh(host: route.hostID)
+                await refreshSession(session.id)
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     func setArchived(sessionID: String, _ archived: Bool) async {
         do {
             let (api, route) = try resolve(sessionID)
