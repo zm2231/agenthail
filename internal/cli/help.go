@@ -30,7 +30,7 @@ Session commands:
                                  Show or set how new Claude sessions choose a config directory
   usage [--json]                 Show every account's usage limits, resets and running sessions on each host
   proxies [--json]               List account proxies, their health and the accounts behind them
-  proxies add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <s> --keychain-account <a>]
+  proxies add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <s> --keychain-account <a> | --key-command -- <argv...>]
   proxies key <name> <key reference> | proxies rm <name>
                                  Configure a proxy and where its management key is kept (never the key)
   search codex <query>           Search older Codex conversation history on demand

@@ -59,7 +59,7 @@ func (c *Config) normalize() error {
 			c.Management = nil
 		case 1:
 		default:
-			return fmt.Errorf("proxy %s: management must name one of file, keychain or env", c.Name)
+			return fmt.Errorf("proxy %s: management must name one of file, keychain, env or command", c.Name)
 		}
 	}
 	if m := c.Management; m != nil {
@@ -68,6 +68,9 @@ func (c *Config) normalize() error {
 		}
 		if m.Keychain != nil && (m.Keychain.Service == "" || m.Keychain.Account == "") {
 			return fmt.Errorf("proxy %s: management keychain needs service and account", c.Name)
+		}
+		if len(m.Command) > 0 && !filepath.IsAbs(m.Command[0]) {
+			return fmt.Errorf("proxy %s: management command must start with an absolute path", c.Name)
 		}
 	}
 	return nil

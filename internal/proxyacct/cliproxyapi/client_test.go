@@ -15,6 +15,14 @@ func keyFile(t *testing.T, key string, mode os.FileMode) *proxyacct.KeyRef {
 	return &proxyacct.KeyRef{File: proxyaccttest.KeyFile(t, t.TempDir(), key, mode)}
 }
 
+func TestAKeyFromACommandReadsTheProxy(t *testing.T) {
+	proxy := proxyaccttest.New(t)
+	key := &proxyacct.KeyRef{Command: []string{"/bin/sh", "-c", `printf '%s\n' "$0"`, proxyaccttest.Key}}
+	if _, err := New(proxy.Server.URL, key, nil).Accounts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAccountsReadEveryClaudeAndCodexCredential(t *testing.T) {
 	proxy := proxyaccttest.New(t)
 	client := New(proxy.Server.URL, keyFile(t, proxyaccttest.Key, 0o600), nil)

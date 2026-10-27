@@ -57,6 +57,26 @@ func TestProxiesAddKeyAndRemoveStoreOnlyTheKeyReference(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%v", info.Mode())
 	}
+	for _, args := range [][]string{
+		{"key", "shared", "--key-command"},
+		{"key", "shared", "--key-command", "--"},
+		{"key", "shared", "--key-command", "--", "no-such-key-command-here"},
+		{"key", "shared", "--key-env", "A", "--key-command", "--", "sh"},
+	} {
+		if err := run(args...); err == nil {
+			t.Fatalf("%v was accepted", args)
+		}
+	}
+	if err := run("key", "shared", "--key-command", "--", "sh", "-c", "--key-env"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	json.Unmarshal(data, &config)
+	proxy.Management = nil
+	json.Unmarshal(config.Proxies[0], &proxy)
+	if command, _ := proxy.Management["command"].([]any); len(proxy.Management) != 1 || len(command) != 3 || !strings.HasPrefix(command[0].(string), "/") || command[2] != "--key-env" {
+		t.Fatalf("the command is stored as argv with an absolute path: %s", config.Proxies[0])
+	}
 	if err := run("rm", "shared"); err != nil {
 		t.Fatal(err)
 	}

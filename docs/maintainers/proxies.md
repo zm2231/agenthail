@@ -32,6 +32,19 @@ where the key is kept, and `agenthail proxies rm shared` removes the proxy.
   read with `security find-generic-password`. `--keychain-service` with
   `--keychain-account` on the command line.
 - `{"env": "NAME"}`: an environment variable of the daemon. `--key-env`.
+- `{"command": ["/abs/path", "arg", ...]}`: a command whose output is the
+  key, for a password manager such as `setec get NAME`, `op read ...` or
+  `pass show ...`. `--key-command -- <argv...>`.
+
+A key command runs without a shell, with no input, and has 10 seconds to
+finish. Its trimmed output is the key, read the same way as the other
+references: for each request and held only for that request. Its error output
+is discarded. A command that fails, takes too long or prints nothing is a
+`key_unreadable` problem that names the command and its exit status, never
+its output. The command and its arguments are stored as given, so they name
+where the key is kept, not the key. `agenthail proxies key` resolves a bare
+command name to its full path when it saves the reference, because the daemon
+may not have the same `PATH`.
 
 The key is read when the proxy is asked, held only for that request, and never
 logged, returned by the API or printed. Problems name the reference, not the
@@ -115,7 +128,7 @@ Problems are explicit lines, with `proxyProblem` naming the case:
 | --- | --- |
 | `unreachable` | the proxy did not answer its health check |
 | `key_missing` | no key reference on this host; add one with `agenthail proxies key` |
-| `key_unreadable` | the file, keychain item or variable could not be read, or the file is readable by others |
+| `key_unreadable` | the file, keychain item, variable or command could not be read, or the file is readable by others |
 | `key_refused` | the proxy refused the key; Agenthail stops asking until the key changes; the detail gives the command that sets a new reference |
 | `banned` | the proxy blocked this host after failed attempts; retried after the block ends |
 | `remote_off` | the proxy does not allow management from other machines |
