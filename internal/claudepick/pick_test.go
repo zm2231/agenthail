@@ -97,3 +97,24 @@ func TestARootWithNoReadingRanksAfterKnownOnes(t *testing.T) {
 		t.Fatalf("a known root, even a full one, ranks before an unread one: %+v", got)
 	}
 }
+
+func TestWithNoReadingsAnUnchosenAPIKeyOrSignedOutPrimaryIsPassedOver(t *testing.T) {
+	for _, login := range []string{surface.ClaudeLoginAPIKey, surface.ClaudeLoginSignedOut} {
+		candidates := roots()
+		candidates[0].Login = login
+		for i := range candidates {
+			candidates[i].Session, candidates[i].Weekly = nil, nil
+		}
+		if got := Choose(candidates, DefaultPolicy(), now); got.Name != "team" || got.Reason != "no usage reading" {
+			t.Fatalf("%s primary: %+v", login, got)
+		}
+	}
+}
+
+func TestWithNoClaudeAILoginThePrimaryStays(t *testing.T) {
+	candidates := roots()[2:]
+	candidates[0].Primary = true
+	if got := Choose(candidates, DefaultPolicy(), now); got.Root != "" || got.Name != "keys" {
+		t.Fatalf("%+v", got)
+	}
+}

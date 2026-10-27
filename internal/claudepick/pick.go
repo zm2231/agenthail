@@ -102,7 +102,15 @@ func Choose(candidates []Candidate, policy Policy, now time.Time) Pick {
 	if preferred != nil {
 		return pick(*preferred, "preferred; no usage reading")
 	}
-	return pick(primary, "no usage reading")
+	if len(eligible) == 0 {
+		return pick(primary, "no account is signed in to claude.ai")
+	}
+	for _, candidate := range eligible {
+		if candidate.Primary {
+			return pick(candidate, "no usage reading")
+		}
+	}
+	return pick(eligible[0], "no usage reading")
 }
 
 func pick(candidate Candidate, reason string) Pick {
