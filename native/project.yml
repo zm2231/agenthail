@@ -46,6 +46,7 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: HostNames.swift
+      - path: ClaudeRootLabels.swift
       - path: SessionTree.swift
       - path: UsageMeterText.swift
       - path: UsageAccounts.swift

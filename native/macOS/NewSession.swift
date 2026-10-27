@@ -49,16 +49,19 @@ struct NewSessionView: View {
     }
 
     @ViewBuilder private var options: some View {
-        chip(agentLabel, symbol: "sparkle", help: "Agent, account and model") {
+        chip(agentLabel, symbol: "sparkle", help: accountHelp) {
             Picker("Agent", selection: Binding(get: { draft.form.agent }, set: { draft.form.switchAgent(to: $0) })) {
                 ForEach(draft.agents, id: \.self) { Text($0.capitalized).tag($0) }
             }
             .pickerStyle(.inline)
             if draft.claudeConfigRoots.count > 1 {
+                let roots = draft.claudeConfigRoots
+                let titles = ClaudeRootLabels.titles(roots, host: draft.hostName)
                 Divider()
                 Picker("Account", selection: $draft.form.configRoot) {
-                    ForEach(draft.claudeConfigRoots) { root in
-                        Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
+                    Text(ClaudeRootLabels.automatic(draft.hosts.claudePick, roots: roots, titles: titles)).tag("")
+                    ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
+                        Text(ClaudeRootLabels.option(root, title: title, pick: draft.hosts.claudePick)).tag(root.root).selectionDisabled(!root.selectable)
                     }
                 }
                 .pickerStyle(.inline)
@@ -213,8 +216,14 @@ struct NewSessionView: View {
 
     private var agentLabel: String {
         let chosen = draft.form.model.isEmpty ? nil : draft.agentModels.first { $0.id == draft.form.model }?.displayName ?? draft.form.model
-        let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot)
+        let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot, pick: draft.hosts.claudePick, host: draft.hostName)
         return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen : nil, effort: draft.form.effort, account: account)
+    }
+
+    private var accountHelp: String {
+        let roots = draft.claudeConfigRoots
+        guard draft.form.agent == "claude", draft.form.configRoot.isEmpty, roots.count > 1, let pick = draft.hosts.claudePick else { return "Agent, account and model" }
+        return "Agent, account and model. " + ClaudeRootLabels.reason(pick, roots: roots, titles: ClaudeRootLabels.titles(roots, host: draft.hostName))
     }
 
     private var placeLabel: String {

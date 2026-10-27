@@ -84,7 +84,13 @@ each root. A conversation present in two roots is refused rather than guessed.
 sign-in profile signed into it and its current usage from claude.ai; a root is
 a config folder, not an account, and `/login` moves every session of the root,
 running ones included, to the new login. `thread create claude
---root <name|dir>` starts the session in that root; `list --wide` shows the
+--root <name|dir>` starts the session in that root. Without `--root` the host
+chooses: the preferred root while it is under both usage ceilings, otherwise
+the claude.ai root with the most headroom, otherwise the one that frees up
+first; an API-key root only when it is preferred. The create output's `account`
+names the root and why. `agenthail roots policy` shows that choice and the next
+pick; `roots policy auto off|on`, `prefer <root>|none` and `ceilings <session>
+<week>` change it on this host. `list --wide` shows the
 config folder each Claude session lives in. `agenthail usage [--json]` shows
 every account's limits and resets on this host and its paired hosts, with the
 sessions working on each.

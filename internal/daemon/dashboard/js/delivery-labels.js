@@ -8,7 +8,8 @@ export function deliveryStatusLabel(result) {
 
 export function creationNotice(response, values) {
   const target = sessionTarget(response.session || { surface: values.surface, id: response.sessionId, alias: values.alias });
-  return response.detail || response.warning || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`;
+  const notice = response.detail || response.warning || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`;
+  return response.account ? `${notice} Started in ${response.account.name}: ${response.account.reason}.` : notice;
 }
 
 export function creationFailureMessage(error) {

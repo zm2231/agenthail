@@ -45,6 +45,7 @@ let package = Package(
                 "SessionSelection.swift",
                 "ProjectActions.swift",
                 "HostNames.swift",
+                "ClaudeRootLabels.swift",
                 "UsageMeterText.swift",
                 "UsageAccounts.swift",
                 "SessionTree.swift",

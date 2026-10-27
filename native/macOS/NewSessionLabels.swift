@@ -9,8 +9,10 @@ enum NewSessionLabels {
         [host, folder].compactMap { $0 }.joined(separator: " · ")
     }
 
-    static func account(_ roots: [ClaudeConfigRootOption], choice: String) -> String? {
-        guard roots.count > 1, !choice.isEmpty else { return nil }
-        return roots.first { $0.choice == choice }?.name
+    static func account(_ roots: [ClaudeConfigRootOption], choice: String, pick: ClaudeRootPick?, host: String) -> String? {
+        guard roots.count > 1 else { return nil }
+        let titles = ClaudeRootLabels.titles(roots, host: host)
+        if choice.isEmpty { return pick.map { "\(ClaudeRootLabels.picked($0, roots: roots, titles: titles)) (auto)" } }
+        return roots.firstIndex { $0.root == choice }.map { titles[$0] }
     }
 }

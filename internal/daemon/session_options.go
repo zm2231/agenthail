@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -55,9 +56,11 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	if d.transportResolver != nil {
 		launchers = d.transportResolver.Options(r.Context())
 	}
-	claudeConfigRoots := []surface.ClaudeConfigRoot{}
-	if roots := d.claudeConfigRoots(); roots != nil {
-		claudeConfigRoots = roots
+	claudeConfigRoots := append([]surface.ClaudeConfigRoot{}, d.claudeConfigRoots()...)
+	if home, err := os.UserHomeDir(); err == nil {
+		for i := range claudeConfigRoots {
+			claudeConfigRoots[i].Login = surface.ClaudeRootLogin(home, claudeConfigRoots[i])
+		}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost(), "surfaces": options, "projects": projects, "folders": folders, "launchers": launchers, "claudeConfigRoots": claudeConfigRoots})
 }

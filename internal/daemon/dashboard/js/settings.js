@@ -23,12 +23,22 @@ export async function loadSettings() {
   }
 }
 
+export function renderClaudeAccounts(policy, roots) {
+  if (!policy) return;
+  $("#settings-claude-auto").value = policy.auto ? "on" : "off";
+  $("#settings-claude-preferred").innerHTML = [`<option value="">None</option>`, ...roots.map(name => `<option value="${escape(name)}">${escape(name)}</option>`)].join("");
+  $("#settings-claude-preferred").value = policy.preferred || "";
+  $("#settings-claude-session").value = String(policy.sessionCeiling);
+  $("#settings-claude-weekly").value = String(policy.weeklyCeiling);
+}
+
 export function renderSettings() {
   if (!app.settings) return;
   const { dashboard, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
   $("#settings-resume-after-limit").checked = dashboard.resumeAfterLimit !== false;
+  renderClaudeAccounts(app.settings.claudeAccounts, app.settings.claudeRoots || []);
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible

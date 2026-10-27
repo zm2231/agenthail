@@ -23,8 +23,8 @@ struct ClaudeCreationSettings {
     }
 }
 
-/// A Claude config directory and the login it holds now. The primary
-/// directory is chosen by sending no config root.
+/// A Claude config directory and the login it holds now. Sending no config
+/// root lets the host's policy choose one.
 struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     struct Login: Decodable, Hashable {
         var email: String? = nil
@@ -33,10 +33,11 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     let root: String
     let primary: Bool
     var signedInAs: Login? = nil
+    var login: String? = nil
     var usage: ProviderUsage? = nil
     var id: String { root }
-    var choice: String { primary ? "" : root }
     var signedIn: Bool { signedInAs != nil }
+    var selectable: Bool { signedIn || login == "api_key" }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
@@ -45,13 +46,6 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
         return resets.max()
     }
 
-    var menuLabel: String {
-        var parts = [name, signedInAs.map { "signed in as \($0.email ?? "unknown")" } ?? "signed out"]
-        if let until = exhaustedUntil() {
-            parts.append("out of usage until \(until.formatted(date: .abbreviated, time: .shortened))")
-        }
-        return parts.joined(separator: " · ")
-    }
 }
 
 struct SessionAdoptResult: Decodable, Hashable {
@@ -148,6 +142,15 @@ struct ProviderUsage: Decodable, Hashable {
     var limits: [Limit]? = nil
 }
 
+struct ClaudeRootPick: Decodable, Hashable {
+    let root: String
+    let name: String
+    var account: String? = nil
+    let reason: String
+    var sessionCeiling: Double? = nil
+    var weeklyCeiling: Double? = nil
+}
+
 struct ClaudeRootUsage: Decodable {
     let root: String
     var usage: ProviderUsage? = nil
@@ -193,6 +196,7 @@ struct SessionCreationOptions: Decodable {
     var launchers: [LauncherOption]? = nil
     var claudeConfigRoots: [ClaudeConfigRootOption]? = nil
     var folders: [String]? = nil
+    var claudePick: ClaudeRootPick? = nil
 }
 
 /// A project a new session can start in, most recently active first. The
@@ -239,6 +243,7 @@ struct CreationHostPicker {
     var canStart: Bool { options != nil && (selected.isEmpty || selectedHost?.isAvailable == true) }
     var projects: [LaunchProject] { options?.projects ?? [] }
     var claudeConfigRoots: [ClaudeConfigRootOption] { options?.claudeConfigRoots ?? [] }
+    var claudePick: ClaudeRootPick? { options?.claudePick }
 
     init(hosts: [CreationHost], selectedSession: SessionState?) {
         update(hosts: hosts)
@@ -299,6 +304,11 @@ struct CreationHostPicker {
     mutating func receive(usage next: ClaudeRootUsage, for loaded: Int) {
         guard loaded == generation, let index = options?.claudeConfigRoots?.firstIndex(where: { $0.root == next.root }) else { return }
         options?.claudeConfigRoots?[index].usage = next.usage
+    }
+
+    mutating func receive(pick next: ClaudeRootPick, for loaded: Int) {
+        guard loaded == generation else { return }
+        options?.claudePick = next
     }
 
     mutating func receive(models next: [ModelOption], agent: String, for loaded: Int) {

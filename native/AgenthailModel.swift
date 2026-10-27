@@ -316,6 +316,11 @@ final class AgenthailModel: ObservableObject {
         return try await api.claudeRootUsage(root: root, host: host)
     }
 
+    func creationRootPick(host: String?) async throws -> ClaudeRootPick {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.claudeRootPick(host: host)
+    }
+
     func creationModels(for agent: String, host: String?) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
         return try await api.creationModels(surface: agent, host: host)

@@ -70,6 +70,21 @@ export function bindSettingsEvents() {
       toast(error.message);
     }
   });
+  $("#claude-accounts-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await updateSettings({ action: "claude-accounts", claudeAccounts: {
+        auto: $("#settings-claude-auto").value === "on",
+        preferred: $("#settings-claude-preferred").value,
+        sessionCeiling: Number($("#settings-claude-session").value),
+        weeklyCeiling: Number($("#settings-claude-weekly").value),
+      } });
+      await load(true);
+      toast("New Claude sessions follow the saved account choice.");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
   $("#settings-resume-after-limit").addEventListener("change", async (event) => {
     try {
       await updateSettings({ action: "resume-after-limit", resumeAfterLimit: event.target.checked });

@@ -89,11 +89,18 @@ struct NewSessionSheet: View {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
+                            let roots = hosts.claudeConfigRoots
+                            let titles = ClaudeRootLabels.titles(roots, host: hostName)
                             Section {
-                                Picker("Config folder", selection: $claude.configRoot) {
-                                    ForEach(hosts.claudeConfigRoots) { root in
-                                        Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
+                                Picker("Account", selection: $claude.configRoot) {
+                                    Text(ClaudeRootLabels.automatic(hosts.claudePick, roots: roots, titles: titles)).tag("")
+                                    ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
+                                        Text(ClaudeRootLabels.option(root, title: title, pick: hosts.claudePick)).tag(root.root).selectionDisabled(!root.selectable)
                                     }
+                                }
+                            } footer: {
+                                if claude.configRoot.isEmpty, let pick = hosts.claudePick {
+                                    Text(ClaudeRootLabels.reason(pick, roots: roots, titles: titles))
                                 }
                             }
                         }
@@ -219,6 +226,9 @@ struct NewSessionSheet: View {
             }
             loading = false
             let host = hosts.hostQuery
+            if (loaded.claudeConfigRoots ?? []).count > 1, let pick = try? await model.creationRootPick(host: host) {
+                hosts.receive(pick: pick, for: generation)
+            }
             await withTaskGroup(of: ClaudeRootUsage?.self) { group in
                 for root in loaded.claudeConfigRoots ?? [] where root.signedIn {
                     group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }

@@ -80,7 +80,7 @@ func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usageSet 
 	if !ok {
 		return nil
 	}
-	roots := d.claudeConfigRoots()
+	roots := d.currentClaudeConfigRoots()
 	sets := make([]usageSet, len(roots))
 	var wait sync.WaitGroup
 	for i, root := range roots {

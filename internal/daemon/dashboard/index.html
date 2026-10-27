@@ -167,7 +167,7 @@
                   <option value="never">Never ask</option>
                 </select>
               </label>
-              <label data-claude-start data-claude-root data-single="true"><span>Config folder</span><select name="configRoot" id="new-conversation-config-root"></select></label>
+              <label data-claude-start data-claude-root data-single="true"><span>Account</span><select name="configRoot" id="new-conversation-config-root"></select><small id="new-conversation-config-root-detail"></small></label>
               <label data-claude-start><span>Claude model (optional)</span><input name="model" placeholder="Use Claude default" /></label>
               <label data-claude-start data-launch-option><span>Claude agent (optional)</span><input name="agent" /></label>
               <label data-claude-start data-launch-option><span>Worktree name (optional)</span><input name="worktree" /></label>
@@ -541,6 +541,14 @@
                 <button class="soft-button" type="submit">Save</button>
               </form>
               <label class="setting-row"><div><strong>Resume after usage limits</strong><p>When a usage limit stops a Claude session, send its queued messages, or ask it to continue, once the limit resets.</p></div><input id="settings-resume-after-limit" type="checkbox"></label>
+              <div class="setting-row"><div><strong>Claude account for new sessions</strong><p>When a new Claude session names no account, start it in the preferred one while it is under both ceilings, otherwise in the one with the most headroom.</p></div></div>
+              <form class="settings-form" id="claude-accounts-form">
+                <label><span>Choose</span><select id="settings-claude-auto"><option value="on">Automatically, by usage</option><option value="off">Always the primary</option></select></label>
+                <label><span>Preferred account</span><select id="settings-claude-preferred"></select></label>
+                <label><span>Session ceiling (%)</span><input id="settings-claude-session" type="number" min="1" max="100" step="1"></label>
+                <label><span>Week ceiling (%)</span><input id="settings-claude-weekly" type="number" min="1" max="100" step="1"></label>
+                <button class="soft-button" type="submit">Save</button>
+              </form>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
             <section data-pane="content" class="settings-card">

@@ -311,7 +311,13 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = captured == nil ? 503 : 200
         } else {
         switch request.url?.path {
-        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}]}"#
+        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}],"claudeConfigRoots":[{"name":"default","root":"/Users/demo/.claude","primary":true,"signedInAs":{"email":"demo@example.com"}},{"name":"team","root":"/Users/demo/.team/.claude","primary":false,"signedInAs":{"email":"team@example.com"}}]}"#
+        case "/api/v1/session-options/claude-pick":
+            body = #"{"pick":{"root":"/Users/demo/.team/.claude","name":"team","account":"team@example.com","reason":"most headroom, session 12%, week 30%"},"policy":{"auto":true,"sessionCeiling":90,"weeklyCeiling":90}}"#
+        case "/api/v1/session-options/claude-usage":
+            let root = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "root" })?.value ?? ""
+            let (session, week) = root.hasSuffix(".team/.claude") ? (12, 30) : (40, 93)
+            body = #"{"root":"\#(root)","usage":{"limits":[{"kind":"session","percent":\#(session)},{"kind":"weekly_all","percent":\#(week)}]}}"#
         case "/api/v1/models":
             body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
         case "/api/v1/session-commands":

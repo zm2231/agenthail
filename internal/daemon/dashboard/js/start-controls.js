@@ -8,6 +8,7 @@ import { action, clearLogicalRequest, logicalAction } from "./actions.js";
 import { load } from "./dashboard-state.js";
 import { creationFailureMessage, creationNotice } from "./delivery-labels.js";
 import { selectSession } from "./session-selection.js";
+import { syncStartRootDetail } from "./start-roots.js";
 
 export function bindStartEvents() {
   $("#new-conversation-toggle").addEventListener("click", () => toggleNewConversationForm(true));
@@ -17,6 +18,7 @@ export function bindStartEvents() {
     loadStartModels().catch((error) => toast(friendlyError(error)));
   });
   $("#new-conversation-launcher").addEventListener("change", syncStartForm);
+  $("#new-conversation-config-root").addEventListener("change", () => syncStartRootDetail());
   $("#new-conversation-project").addEventListener("change", (event) => {
     const folder = $("#new-conversation-form").querySelector('input[name="cwd"]');
     folder.value = event.target.value || "~";

@@ -44,8 +44,27 @@ assert.deepEqual(pending.map((call) => call.url), [
 ], "each signed-in root is asked once, at once");
 pending[1].resolve(answer(exhausted));
 await settle();
-assert(select.innerHTML.includes("work · signed in as work@example.com · out of usage until"), "a root's usage fills in when it arrives");
+assert(select.innerHTML.includes(">work · out of usage until"), "a root's usage fills in when it arrives, named by its login");
 assert.equal(select.value, "/home/me/.work/.claude", "filling in usage keeps the chosen root");
+
+assert.equal(firstOption(select.innerHTML), "", "Automatic is the first choice and sends no root");
+assert(select.innerHTML.includes('value="/home/me/.claude">me<'), "the primary root is chosen by its path, not by leaving the root out");
+const before = pending.length;
+context.loadStartRootPick(options, "");
+assert.deepEqual(pending.slice(before).map((call) => call.url), ["/api/v1/session-options/claude-pick"]);
+options.claudeConfigRoots[0].usage = { limits: [{ kind: "session", percent: 95 }, { kind: "weekly_all", percent: 40 }] };
+pending[before].resolve({ ok: true, json: async () => ({ pick: { root: "/home/me/.work/.claude", name: "work", account: "work@example.com", reason: "most headroom, session 10%" }, policy: { sessionCeiling: 90, weeklyCeiling: 90 } }) });
+await settle();
+assert(select.innerHTML.includes(">Automatic (work, most headroom)</option>"), select.innerHTML);
+assert(select.innerHTML.includes(">me · session 95%, week 40%, over limit</option>"), "each account shows its usage and whether it is over a ceiling");
+assert.equal(select.textContent, "", "a root chosen by hand shows no automatic reason");
+select.value = "";
+context.syncStartRootDetail();
+assert.equal(select.textContent, "Automatic picks work: most headroom, session 10%", "the reason shows under the picker, not cut off inside it");
+select.value = "/home/me/.work/.claude";
+assert.equal(select.value, "/home/me/.work/.claude", "the preview keeps the chosen root");
+context.loadStartRootPick({ claudeConfigRoots: roots().slice(0, 1) }, "");
+assert.equal(pending.length, before + 1, "one root needs no preview");
 
 context.app.startHost = "server";
 context.app.startOptions = { claudeConfigRoots: roots() };

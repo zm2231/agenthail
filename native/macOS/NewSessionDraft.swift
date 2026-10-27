@@ -97,11 +97,18 @@ final class NewSessionDraft: ObservableObject {
             hosts.receive(options: options, for: generation)
             if !agents.contains(form.agent), let first = agents.first { form.switchAgent(to: first) }
             if form.folder.isEmpty { form.folder = hosts.defaultFolder(selected: origin) }
+            async let pick: Void = loadRootPick(options, for: generation)
             await loadRootUsage(options, for: generation)
+            await pick
         } catch is CancellationError {
         } catch {
             if !error.isCancellation { hosts.fail("Couldn't load what \(hostName) can start: \(AgenthailAPIError.userMessage(error))", for: generation) }
         }
+    }
+
+    private func loadRootPick(_ options: SessionCreationOptions, for generation: Int) async {
+        guard (options.claudeConfigRoots ?? []).count > 1, let pick = try? await model.creationRootPick(host: hosts.hostQuery) else { return }
+        hosts.receive(pick: pick, for: generation)
     }
 
     /// Fills in each signed-in root's usage as it arrives; the roots are
