@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	proxyUsageTTL     = time.Minute
-	proxyUsageTimeout = proxyacct.KeyReadLimit + 8*time.Second
+	proxyUsageTTL       = time.Minute
+	proxyRequestTimeout = 10 * time.Second
+	proxyKeyedTimeout   = proxyacct.KeyReadLimit + proxyRequestTimeout
 )
 
 type proxyUsageCache struct {
@@ -87,12 +88,15 @@ func (c *proxyUsageCache) read(ctx context.Context, config proxyacct.Config, now
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if entry.readAt.IsZero() || now.Sub(entry.readAt) >= proxyUsageTTL {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), proxyUsageTimeout)
-		entry.accounts, entry.err = nil, entry.client.Health(ctx)
-		if entry.err == nil {
-			entry.accounts, entry.err = entry.client.Accounts(ctx)
-		}
+		base := context.WithoutCancel(ctx)
+		health, cancel := context.WithTimeout(base, proxyRequestTimeout)
+		entry.accounts, entry.err = nil, entry.client.Health(health)
 		cancel()
+		if entry.err == nil {
+			keyed, cancel := context.WithTimeout(base, proxyKeyedTimeout)
+			entry.accounts, entry.err = entry.client.Accounts(keyed)
+			cancel()
+		}
 		entry.readAt = now
 		entry.last.Store(&proxyReading{accounts: entry.accounts, readAt: entry.readAt, err: entry.err})
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const Key = "fixture-management-key"
@@ -33,11 +34,12 @@ const AuthFiles = `{"observed_at":"2026-10-26T12:00:00Z","files":[
 // routes with Key. Writes change Files and are recorded in order. FailWrite
 // "<name> <status> <body>" answers writes to one account with that refusal.
 type Proxy struct {
-	Server    *httptest.Server
-	Attempts  atomic.Int32
-	Files     atomic.Value
-	Forced    atomic.Value
-	FailWrite atomic.Value
+	Server     *httptest.Server
+	Attempts   atomic.Int32
+	Files      atomic.Value
+	Forced     atomic.Value
+	FailWrite  atomic.Value
+	SlowHealth atomic.Int64
 
 	mu     sync.Mutex
 	writes []string
@@ -50,6 +52,7 @@ func New(t *testing.T) *Proxy {
 	proxy.FailWrite.Store("")
 	proxy.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
+			time.Sleep(time.Duration(proxy.SlowHealth.Load()))
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
