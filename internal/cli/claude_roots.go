@@ -70,6 +70,9 @@ func describeClaudeConfigRoot(root surface.ClaudeConfigRoot, now time.Time) stri
 	if root.Error != "" {
 		return "unreadable: " + root.Error
 	}
+	if root.Proxy != "" {
+		return "via the " + root.Proxy + " proxy; agenthail proxies shows its accounts"
+	}
 	if root.SignedInAs == nil {
 		return "signed out"
 	}

@@ -118,7 +118,7 @@ func proxyAccountsFull(accounts []proxyacct.Account, now time.Time) (time.Time, 
 }
 
 func proxyProblemText(config proxyacct.Config, err error) (string, string) {
-	keyFix := fmt.Sprintf("Update the key reference with `agenthail proxies key %s --key-file <path>` (or --keychain <service> <account>, or --key-env <name>).", config.Name)
+	keyFix := fmt.Sprintf("Update the key reference with `agenthail proxies key %s --key-file <path>` (or --keychain-service <service> --keychain-account <account>, or --key-env <name>).", config.Name)
 	switch proxyacct.ProblemOf(err) {
 	case proxyacct.Unreachable:
 		return fmt.Sprintf("%s proxy unreachable at %s: %v", config.Name, config.URL, err), ""
