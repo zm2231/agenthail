@@ -7,20 +7,35 @@ struct UsageAccountsPanel: View {
     let select: (String) -> Void
 
     var body: some View {
-        let hosts = UsageAccounts.byHost(accounts)
+        let hosts = UsageAccounts.byHost(accounts.filter { $0.group == nil })
+        let proxies = UsageProxies.byProxy(accounts)
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 ForEach(hosts) { host in
                     VStack(alignment: .leading, spacing: DesktopSpace.m) {
-                        if hosts.count > 1 {
-                            Text(host.name)
-                                .font(.system(size: DesktopType.caption, weight: .semibold))
-                                .foregroundStyle(DesktopPalette.muted)
-                        }
+                        if hosts.count > 1 || !proxies.isEmpty { UsageGroupHeading(title: host.name, detail: nil) }
                         ForEach(host.accounts) { account in
                             UsageAccountRow(account: account, sessions: account.activeSessions(sessions), now: now, select: select)
                         }
                     }
+                }
+                ForEach(proxies) { proxy in
+                    VStack(alignment: .leading, spacing: DesktopSpace.m) {
+                        UsageGroupHeading(title: proxy.group.title, detail: proxy.group.local ? nil : "read from " + proxy.group.host)
+                        ForEach(proxy.accounts) { account in
+                            UsageAccountRow(account: account, sessions: [], now: now, select: select)
+                        }
+                        if proxy.readable, let problem = proxy.group.problem {
+                            Text(problem)
+                                .foregroundStyle(UsageProblemTone.warning.desktopStyle)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .help(proxy.group.problemDetail ?? problem)
+                        }
+                        if let first = proxy.accounts.first {
+                            UsageSessionList(sessions: first.activeSessions(sessions), select: select)
+                        }
+                    }
+                    .font(.system(size: DesktopType.secondary))
                 }
             }
             .padding(DesktopSpace.l)
@@ -29,6 +44,19 @@ struct UsageAccountsPanel: View {
         .frame(width: 380)
         .frame(maxHeight: 560)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct UsageGroupHeading: View {
+    let title: String
+    let detail: String?
+
+    var body: some View {
+        HStack(spacing: DesktopSpace.s) {
+            Text(title).font(.system(size: DesktopType.caption, weight: .semibold))
+            if let detail { Text(detail).font(.system(size: DesktopType.caption)) }
+        }
+        .foregroundStyle(DesktopPalette.muted)
     }
 }
 
@@ -51,7 +79,7 @@ private struct UsageAccountRow: View {
             }
             ForEach(account.meters, id: \.self) { meter in
                 HStack(spacing: DesktopSpace.s) {
-                    Text(UsageMeterText.shortLabel(meter))
+                    Text(account.rowLabel(meter))
                         .frame(width: 78, alignment: .leading)
                     UsageBar(meter: meter).frame(height: 4)
                     Text(UsageMeterText.percent(meter.percent))
@@ -74,26 +102,7 @@ private struct UsageAccountRow: View {
             } else if account.meters.isEmpty {
                 Text("No current reading").foregroundStyle(DesktopPalette.muted)
             }
-            if !sessions.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(sessions.prefix(5)) { session in
-                        Button { select(session.id) } label: {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(session.isWorking ? DesktopPalette.working : DesktopPalette.muted)
-                                    .frame(width: 6, height: 6)
-                                Text(session.displayName).lineLimit(1).truncationMode(.tail)
-                            }
-                        }
-                        .buttonStyle(ReadableButtonStyle())
-                        .accessibilityLabel("\(session.displayName), \(session.isWorking ? "working" : "open")")
-                    }
-                    if sessions.count > 5 {
-                        Text("and \(sessions.count - 5) more").foregroundStyle(DesktopPalette.muted)
-                    }
-                }
-                .padding(.top, 2)
-            }
+            UsageSessionList(sessions: sessions, select: select)
         }
         .font(.system(size: DesktopType.secondary))
         .foregroundStyle(DesktopPalette.text2)
@@ -101,5 +110,33 @@ private struct UsageAccountRow: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(DesktopPalette.fill))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(account.fullTitle)
+    }
+}
+
+private struct UsageSessionList: View {
+    let sessions: [SessionState]
+    let select: (String) -> Void
+
+    var body: some View {
+        if !sessions.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(sessions.prefix(5)) { session in
+                    Button { select(session.id) } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(session.isWorking ? DesktopPalette.working : DesktopPalette.muted)
+                                .frame(width: 6, height: 6)
+                            Text(session.displayName).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    .buttonStyle(ReadableButtonStyle())
+                    .accessibilityLabel("\(session.displayName), \(session.isWorking ? "working" : "open")")
+                }
+                if sessions.count > 5 {
+                    Text("and \(sessions.count - 5) more").foregroundStyle(DesktopPalette.muted)
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 }

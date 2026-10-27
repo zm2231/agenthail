@@ -34,10 +34,11 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     let primary: Bool
     var signedInAs: Login? = nil
     var login: String? = nil
+    var proxy: String? = nil
     var usage: ProviderUsage? = nil
     var id: String { root }
     var signedIn: Bool { signedInAs != nil }
-    var selectable: Bool { signedIn || login == "api_key" }
+    var selectable: Bool { signedIn || login == "api_key" || login == "proxy" }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
@@ -169,6 +170,21 @@ struct UsageReport: Decodable, Hashable {
         let asOf: String
         let aged: Bool
         var until: String? = nil
+        var ceiling: Double? = nil
+    }
+    struct Proxy: Decodable, Hashable {
+        let name: String
+        let id: String
+        var url: String? = nil
+    }
+    struct ProxyAccount: Decodable, Hashable {
+        let id: String
+        let provider: String
+        let label: String
+        let status: String
+        var nextRetry: String? = nil
+        var meters: [Meter]? = nil
+        var asOf: String? = nil
     }
     struct Set: Decodable, Hashable {
         let host: String
@@ -184,6 +200,9 @@ struct UsageReport: Decodable, Hashable {
         var asOf: String? = nil
         var problem: String? = nil
         var problemDetail: String? = nil
+        var proxy: Proxy? = nil
+        var accounts: [ProxyAccount]? = nil
+        var proxyProblem: String? = nil
     }
     var sets: [Set]? = nil
 }

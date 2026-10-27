@@ -9,11 +9,27 @@ struct UsageAccountsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(UsageAccounts.byHost(feed.accounts)) { host in
+                ForEach(UsageAccounts.byHost(feed.accounts.filter { $0.group == nil })) { host in
                     Section(host.name) {
                         ForEach(host.accounts) { account in
                             PhoneUsageAccountRow(account: account, sessions: account.activeSessions(sessions), now: feed.now, open: open)
                         }
+                    }
+                }
+                ForEach(UsageProxies.byProxy(feed.accounts)) { proxy in
+                    Section {
+                        ForEach(proxy.accounts) { account in
+                            PhoneUsageAccountRow(account: account, sessions: [], now: feed.now, open: open)
+                        }
+                        if proxy.readable, let problem = proxy.group.problem {
+                            Text(problem).font(.footnote).foregroundStyle(UsageProblemTone.warning.phoneStyle)
+                                .accessibilityHint(proxy.group.problemDetail ?? "")
+                        }
+                        if let first = proxy.accounts.first {
+                            PhoneUsageSessions(sessions: first.activeSessions(sessions), open: open)
+                        }
+                    } header: {
+                        Text(proxy.group.local ? proxy.group.title : proxy.group.title + " · read from " + proxy.group.host)
                     }
                 }
             }
@@ -43,7 +59,7 @@ private struct PhoneUsageAccountRow: View {
             ForEach(account.meters, id: \.self) { meter in
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
-                        Text(UsageMeterText.shortLabel(meter))
+                        Text(account.rowLabel(meter))
                         Spacer()
                         Text(UsageMeterText.percent(meter.percent))
                             .monospacedDigit()
@@ -64,21 +80,30 @@ private struct PhoneUsageAccountRow: View {
             } else if account.meters.isEmpty {
                 Text("No current reading").font(.footnote).foregroundStyle(PhonePalette.muted)
             }
-            ForEach(sessions.prefix(5)) { session in
-                Button { open(session.id) } label: {
-                    HStack(spacing: 8) {
-                        Circle().fill(session.isWorking ? PhonePalette.working : PhonePalette.muted).frame(width: 7, height: 7)
-                        Text(session.displayName).lineLimit(1)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(RoleStyle(.body))
-                }
-                .buttonStyle(.borderless)
-            }
-            if sessions.count > 5 {
-                Text("and \(sessions.count - 5) more").font(.footnote).foregroundStyle(PhonePalette.muted)
-            }
+            PhoneUsageSessions(sessions: sessions, open: open)
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct PhoneUsageSessions: View {
+    let sessions: [SessionState]
+    let open: (String) -> Void
+
+    var body: some View {
+        ForEach(sessions.prefix(5)) { session in
+            Button { open(session.id) } label: {
+                HStack(spacing: 8) {
+                    Circle().fill(session.isWorking ? PhonePalette.working : PhonePalette.muted).frame(width: 7, height: 7)
+                    Text(session.displayName).lineLimit(1)
+                }
+                .font(.subheadline)
+                .foregroundStyle(RoleStyle(.body))
+            }
+            .buttonStyle(.borderless)
+        }
+        if sessions.count > 5 {
+            Text("and \(sessions.count - 5) more").font(.footnote).foregroundStyle(PhonePalette.muted)
+        }
     }
 }

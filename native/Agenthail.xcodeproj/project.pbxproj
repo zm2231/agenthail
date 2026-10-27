@@ -14,6 +14,7 @@
 		099165D1DD05E11819B5E106 /* HostCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA795678500D6988089B512 /* HostCatalog.swift */; };
 		0FAECDD6138BD5C0909D10AC /* ActivityCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09A07A373E592786676A4E6 /* ActivityCollapseTests.swift */; };
 		1173F957401A01ED3BC23E60 /* CompactActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FA2A30098E1DF73419A954 /* CompactActivity.swift */; };
+		124FBA2EE553AE1315E10390 /* UsageProxies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743359F716127981C139936B /* UsageProxies.swift */; };
 		14444A5A7280E6DCE1836F46 /* SessionScopeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E544A356E8BB25131FFEBB /* SessionScopeUITests.swift */; };
 		16BEC587028859F8D4264925 /* PreviewVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = F837954350613F6F72854AAC /* PreviewVoice.swift */; };
 		1848D31E51AC4C2EC9A08CE5 /* DiffView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 863060175315DE04E5E368FE /* DiffView.swift */; };
@@ -280,6 +281,7 @@
 		71ABFF321D6A090191C0C9C1 /* SessionListChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListChrome.swift; sourceTree = "<group>"; };
 		72BFF73DD0C99D981A3A7666 /* ComposerReceiptUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerReceiptUITests.swift; sourceTree = "<group>"; };
 		72CFB9B3A032677BE34153EF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		743359F716127981C139936B /* UsageProxies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageProxies.swift; sourceTree = "<group>"; };
 		7434EA1A39BCF717A5712C36 /* UsagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePreview.swift; sourceTree = "<group>"; };
 		74D671F0DB0275E3CDC13160 /* SessionListChromeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListChromeTests.swift; sourceTree = "<group>"; };
 		755ACDEEAE225AD8953528AF /* ComposerCompletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerCompletion.swift; sourceTree = "<group>"; };
@@ -546,6 +548,7 @@
 				39165C9FB624F0AFA9B6A590 /* UIConfig.swift */,
 				66C823A3E6D08A4782876813 /* UsageAccounts.swift */,
 				C8516C306D080301311FC122 /* UsageMeterText.swift */,
+				743359F716127981C139936B /* UsageProxies.swift */,
 				70F31C89F20967C2A9D6B5BC /* VoiceAPI.swift */,
 				1BE85140BFF4D3D8B996F2AD /* VoiceAudioBridge.swift */,
 				C8E82B270A0825F319A10EBD /* VoiceCallDiagnostics.swift */,
@@ -834,6 +837,7 @@
 				D9ABCA6991BC57D15D71A64A /* UsageMeterText.swift in Sources */,
 				843ADC1E668251BE4B62E0A9 /* UsageMetersLine.swift in Sources */,
 				26D24C93105FDAE09D6C4643 /* UsagePreview.swift in Sources */,
+				124FBA2EE553AE1315E10390 /* UsageProxies.swift in Sources */,
 				2F390DCA359AD2E249947755 /* VoiceAPI.swift in Sources */,
 				CF8F58BBB065D68EA89FDB74 /* VoiceAudioBridge.swift in Sources */,
 				71E1B11E844EB9A03D8BCCC4 /* VoiceCallCoordinator.swift in Sources */,

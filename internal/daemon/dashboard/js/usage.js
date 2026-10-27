@@ -122,6 +122,7 @@ export function accounts(sets, now) {
     const fullTitle = set.group && set.provider !== "proxy" ? `${name} via the ${set.group.name} proxy` : set.local === true || !set.provider ? name : `${name} on ${set.host}`;
     const parts = meters.map((meter) => spoken(meter, now)).concat(set.problem ? [set.problem] : []);
     const asOf = time(set.asOf);
+    const caps = [...new Set(meters.map((meter) => meter.ceiling).filter(Boolean))];
     return {
       id: `${set.hostId}|${set.provider || ""}|${set.root || ""}`,
       title: chipTitles[index],
@@ -139,7 +140,8 @@ export function accounts(sets, now) {
       problemDetail: set.problemDetail || null,
       signIn: set.login || null,
       group: set.group || null,
-      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      capsDiffer: caps.length > 1,
+      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
   });
@@ -229,8 +231,8 @@ function accountCard(document, account, sessions, now, open) {
   for (const meter of account.meters) {
     const row = node(document, "div", critical(meter) ? "usage-row critical" : "usage-row");
     const resets = time(meter.resetsAt);
-    const note = [resets === null ? null : reset(resets - now), meter.ceiling ? `cap ${percent(meter.ceiling)}` : null].filter(Boolean).join(" · ");
-    row.append(node(document, "span", "usage-row-label", shortLabel(meter)), bar(document, meter), node(document, "span", "usage-value", percent(meter.percent)), node(document, "span", "usage-row-reset", note));
+    const label = account.capsDiffer && meter.ceiling ? `${shortLabel(meter)}, cap ${percent(meter.ceiling)}` : shortLabel(meter);
+    row.append(node(document, "span", "usage-row-label", label), bar(document, meter), node(document, "span", "usage-value", percent(meter.percent)), node(document, "span", "usage-row-reset", resets === null ? "" : reset(resets - now)));
     row.setAttribute("aria-label", spoken(meter, now));
     card.append(row);
   }

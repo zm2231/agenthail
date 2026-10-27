@@ -50,6 +50,7 @@ targets:
       - path: SessionTree.swift
       - path: UsageMeterText.swift
       - path: UsageAccounts.swift
+      - path: UsageProxies.swift
       - path: MetadataOverlay.swift
       - path: ClaudeSubagentList.swift
       - path: SessionStore.swift
