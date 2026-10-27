@@ -147,6 +147,15 @@ func TestAPreferredRootIsChosenWhileUnderItsCeilings(t *testing.T) {
 	}
 }
 
+func TestAReadingNeverFollowsARootToItsNextLogin(t *testing.T) {
+	f := newPickFixture(t, true)
+	f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, nil)
+	writeUsageFixture(t, map[string]string{filepath.Join(f.second, ".claude.json"): `{"oauthAccount":{"accountUuid":"acct-c","emailAddress":"new@example.com","organizationUuid":"org-c"}}`})
+	if pick, dir := f.create(""); dir != nil || pick.Name != "default" || pick.Reason != "most headroom, session 80%" {
+		t.Fatalf("the new login starts unknown, not with the old login's 10%%: pick=%+v dir=%v", pick, dir)
+	}
+}
+
 func TestACreateNeverWaitsOnClaudeAIForUsage(t *testing.T) {
 	f := newPickFixture(t, true)
 	f.delay.Store(int64(3 * time.Second))

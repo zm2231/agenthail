@@ -15,9 +15,18 @@ const claudeConfigRootsTTL = 5 * time.Second
 // row: a catalog pass projects every session, and each read re-parses the
 // Agenthail config.
 func (d *Daemon) claudeConfigRoots() []surface.ClaudeConfigRoot {
+	return d.claudeConfigRootsWithin(claudeConfigRootsTTL)
+}
+
+// Usage is matched to the login a root holds now, so its readers never take a description older than this read.
+func (d *Daemon) currentClaudeConfigRoots() []surface.ClaudeConfigRoot {
+	return d.claudeConfigRootsWithin(0)
+}
+
+func (d *Daemon) claudeConfigRootsWithin(age time.Duration) []surface.ClaudeConfigRoot {
 	d.claudeConfigRootsMu.Lock()
 	defer d.claudeConfigRootsMu.Unlock()
-	if d.claudeConfigRootList != nil && time.Since(d.claudeConfigRootsAt) < claudeConfigRootsTTL {
+	if d.claudeConfigRootList != nil && time.Since(d.claudeConfigRootsAt) < age {
 		return d.claudeConfigRootList
 	}
 	home, err := os.UserHomeDir()

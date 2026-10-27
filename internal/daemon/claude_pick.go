@@ -19,7 +19,8 @@ func (d *Daemon) claudeRootPick(ctx context.Context, fresh bool) (claudepick.Pic
 		policy = claudepick.DefaultPolicy()
 	}
 	now := time.Now()
-	if roots := d.claudeConfigRoots(); len(roots) < 2 || !policy.Auto {
+	roots := d.currentClaudeConfigRoots()
+	if len(roots) < 2 || !policy.Auto {
 		candidates := make([]claudepick.Candidate, 0, len(roots))
 		for _, root := range roots {
 			candidate := claudepick.Candidate{Name: root.Name, Root: root.Root, Primary: root.Primary}
@@ -34,19 +35,19 @@ func (d *Daemon) claudeRootPick(ctx context.Context, fresh bool) (claudepick.Pic
 	if fresh {
 		sets = d.claudeUsageSets(ctx, now)
 	} else {
-		sets = d.claudeCachedUsageSets(now)
+		sets = d.claudeCachedUsageSets(roots, now)
 	}
 	return claudepick.Choose(claudePickCandidates(sets, now), policy, now), policy
 }
 
-func (d *Daemon) claudeCachedUsageSets(now time.Time) []usageSet {
+func (d *Daemon) claudeCachedUsageSets(roots []surface.ClaudeConfigRoot, now time.Time) []usageSet {
 	reader, ok := d.adapters().ForSurface(surface.KindClaude).(claudeConfigRootReader)
 	home, err := os.UserHomeDir()
 	if !ok || err != nil {
 		return nil
 	}
 	sets := []usageSet{}
-	for _, root := range d.claudeConfigRoots() {
+	for _, root := range roots {
 		set := usageSet{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary, Login: surface.ClaudeRootLogin(home, root)}
 		if root.SignedInAs != nil {
 			set.Account = root.SignedInAs.Email
