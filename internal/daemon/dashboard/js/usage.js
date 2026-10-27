@@ -1,3 +1,4 @@
+import { $ } from "./dom.js";
 import { fit, wrapped } from "./usage-fit.js";
 
 export const POLL_MS = 120_000;
@@ -252,9 +253,9 @@ export function renderPanel(document, panel, list, sessions, now, open) {
   panel.replaceChildren(...children);
 }
 
-export function start({ document, fetch, setInterval, now = Date.now, sessions = () => [], open = () => {} }) {
-  const element = document.getElementById("usage-line");
-  const panel = document.getElementById("usage-panel");
+export function start({ document, fetch = (...args) => globalThis.fetch(...args), setInterval = (...args) => globalThis.setInterval(...args), now = Date.now, sessions = () => [], open = () => {} }) {
+  const element = $("#usage-line");
+  const panel = $("#usage-panel");
   if (!element) return null;
   let sets = [];
   const drawPanel = () => {
@@ -282,7 +283,10 @@ export function start({ document, fetch, setInterval, now = Date.now, sessions =
       const response = await fetch("/api/v1/usage", { headers: { accept: "application/json" } });
       if (response.status === 404) sets = [];
       else if (response.ok) sets = (await response.json()).sets || [];
-    } catch {}
+      else return;
+    } catch {
+      return;
+    }
     draw();
   };
   const ready = load();

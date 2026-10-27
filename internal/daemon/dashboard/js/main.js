@@ -39,7 +39,7 @@ bindDeviceEvents();
 bindAuditEvents();
 bindProjectEvents();
 bindSessionOperationEvents();
-startUsage({ document, fetch: window.fetch.bind(window), setInterval: window.setInterval.bind(window), sessions: () => app.state.sessions, open: (id) => selectSession(id, true) });
+startUsage({ document, sessions: () => app.state.sessions, open: (id) => selectSession(id, true) });
 
 $("#refresh").addEventListener("click", async () => {
   await load(true);

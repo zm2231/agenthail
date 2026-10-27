@@ -75,7 +75,8 @@ class Node {
 const line = new Node("button");
 const panel = new Node("div");
 panel.hidden = true;
-const document = { createElement: (tag) => new Node(tag), getElementById: (id) => ({ "usage-line": line, "usage-panel": panel })[id] || null, addEventListener() {} };
+const document = { createElement: (tag) => new Node(tag), querySelector: (selector) => ({ "#usage-line": line, "#usage-panel": panel })[selector] || null, addEventListener() {} };
+globalThis.document = document;
 const texts = (node) => [node.textContent, ...node.children.flatMap(texts)].filter(Boolean);
 
 render(document, line, list);
@@ -149,8 +150,16 @@ assert.equal(line.attributes["aria-expanded"], "true");
 assert.equal(panel.children.filter((c) => c.tagName === "section").length, list.length);
 started.toggle(false);
 assert.equal(panel.hidden, true);
+answer = { status: 503, ok: false };
+await started.load();
+assert.equal(line.hidden, false, "a failed read keeps the last reading on screen");
+answer = Promise.reject(new TypeError("offline"));
+answer.catch(() => {});
+await started.load();
+assert.equal(line.hidden, false);
 answer = { status: 404, ok: false };
 await started.load();
 assert.equal(line.hidden, true, "an older daemon with no usage route shows nothing");
-assert.equal(start({ document: { getElementById: () => null }, fetch, setInterval }), null, "a page without the line does nothing");
+globalThis.document = { querySelector: () => null };
+assert.equal(start({ document: globalThis.document, fetch, setInterval }), null, "a page without the line does nothing");
 console.log("ok");
