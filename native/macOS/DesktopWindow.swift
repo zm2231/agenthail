@@ -2080,12 +2080,14 @@ struct DetailsTab: View {
                     .help("Ask the agent to compact its context")
             }
             if canControl, let stop = session.limitResume {
-                HStack {
-                    Button("Resume now") { pane.resumeAfterLimit(true) }
-                        .help("Send the session its queued messages, or ask it to continue, now")
-                    if stop.isWaiting {
-                        Button("Don't resume") { pane.resumeAfterLimit(false) }
-                            .help("Keep the session stopped when its usage limit resets")
+                VStack(alignment: .leading) {
+                    HStack {
+                        Button("Resume now") { pane.resumeAfterLimit(true) }
+                            .help("Send the session its queued messages, or ask it to continue, now")
+                        if stop.isWaiting {
+                            Button("Don't resume") { pane.resumeAfterLimit(false) }
+                                .help("Keep the session stopped when its usage limit resets")
+                        }
                     }
                     if let offer = stop.moveTo {
                         LimitMoveButton(offer: offer) { pane.moveAfterLimit(to: $0) }

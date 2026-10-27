@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00F92DB59444246FA2964047 /* ComposerPaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = A160D34C998AF53E561672D0 /* ComposerPaste.swift */; };
+		0210F7FD1211B8AA1C997E25 /* LimitMoveUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8F8F98385798C30F464214 /* LimitMoveUITests.swift */; };
 		070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */; };
 		07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F97182BB6B3E031BAE4D18C /* SessionControls.swift */; };
 		09008EACA9626B0CA9628068 /* SessionListChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74D671F0DB0275E3CDC13160 /* SessionListChromeTests.swift */; };
@@ -218,6 +219,7 @@
 		0864D478BAA6B9611ABCBF30 /* AgenthailIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgenthailIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0B076C97F3E9777192BE7445 /* TapWhenReady.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapWhenReady.swift; sourceTree = "<group>"; };
 		0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExperienceTests.swift; sourceTree = "<group>"; };
+		0B8F8F98385798C30F464214 /* LimitMoveUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitMoveUITests.swift; sourceTree = "<group>"; };
 		0CFE91E33D1EA213BA5DA47A /* PhoneInlineStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneInlineStyle.swift; sourceTree = "<group>"; };
 		0E782347BC048EE03E6B10D1 /* AgenthailIOSModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSModel.swift; sourceTree = "<group>"; };
 		0EBFE61CC399105A1DE63886 /* SessionTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTree.swift; sourceTree = "<group>"; };
@@ -471,6 +473,7 @@
 				72BFF73DD0C99D981A3A7666 /* ComposerReceiptUITests.swift */,
 				7A65688305EB3C5F6866CCBF /* GoalStatusUITests.swift */,
 				82CF227CB7E6B02B97811F14 /* HolderPickerUITests.swift */,
+				0B8F8F98385798C30F464214 /* LimitMoveUITests.swift */,
 				5823A988D3C400FB16E2EB6A /* NeedsYouUITests.swift */,
 				4F2FC22575C3B3708B76AC49 /* NewSessionAccountUITests.swift */,
 				03103026DE77A01C066ECE19 /* QuestionPagerUITests.swift */,
@@ -869,6 +872,7 @@
 				2522816762BA313D6DAE4C40 /* ComposerReceiptUITests.swift in Sources */,
 				D228ECC8541A3BCD7512D4A3 /* GoalStatusUITests.swift in Sources */,
 				3E9810790B94455AAC3A00A5 /* HolderPickerUITests.swift in Sources */,
+				0210F7FD1211B8AA1C997E25 /* LimitMoveUITests.swift in Sources */,
 				65BD86F3827C034C03B23A9A /* NeedsYouUITests.swift in Sources */,
 				6F35D2EAA8846CCCA9714844 /* NewSessionAccountUITests.swift in Sources */,
 				6467738FBD0484083AB72E89 /* QuestionPagerUITests.swift in Sources */,
