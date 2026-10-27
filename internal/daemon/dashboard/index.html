@@ -611,6 +611,18 @@
         <div class="voice-actions"><button class="primary-button" type="submit">Save</button></div>
       </form>
     </dialog>
+    <dialog class="voice-dialog" id="prefer-dialog" data-pane="float" aria-labelledby="prefer-dialog-title">
+      <form class="voice-dialog-card" id="prefer-form">
+        <header>
+          <h2 id="prefer-dialog-title">Prefer</h2>
+          <button class="icon-button" type="button" id="prefer-dialog-close" aria-label="Close">×</button>
+        </header>
+        <ul class="prefer-plan" id="prefer-plan"></ul>
+        <label class="prefer-now" id="prefer-now-row" hidden><input type="checkbox" id="prefer-now" /> Also move the running sessions on the accounts it turns off</label>
+        <p class="project-dialog-error" id="prefer-error" role="alert" hidden></p>
+        <div class="voice-actions"><button class="primary-button" type="submit" id="prefer-confirm">Confirm</button></div>
+      </form>
+    </dialog>
     <div class="toast" id="toast" data-pane="float" role="status" hidden></div>
     <script type="module" src="/js/main.js"></script>
     <script type="module" src="/js/ui.js"></script>

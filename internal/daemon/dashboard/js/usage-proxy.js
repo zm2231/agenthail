@@ -39,7 +39,8 @@ export function expandProxies(sets, now) {
       continue;
     }
     for (const account of set.accounts) {
-      expanded.push({ host: set.host, hostId: set.hostId, local: set.local, provider: account.provider, account: account.label, name: set.name, root: `proxy:${group.id}:${account.id}`, meters: account.meters || [], asOf: account.asOf, problem: accountState(account, now), group });
+      const proxyAccount = set.proxy?.id ? { proxyId: set.proxy.id, id: account.id, preferred: account.preferred === true, setOn: account.setOn || null, setAt: account.setAt || null } : null;
+      expanded.push({ host: set.host, hostId: set.hostId, local: set.local, provider: account.provider, account: account.label, name: set.name, root: `proxy:${group.id}:${account.id}`, meters: account.meters || [], asOf: account.asOf, problem: accountState(account, now), group, proxyAccount });
     }
   }
   return expanded;

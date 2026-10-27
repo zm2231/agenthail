@@ -382,6 +382,46 @@ textarea:focus-visible {
   display: grid;
   gap: 2px;
 }
+.usage-prefer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.usage-prefer button {
+  padding: 3px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.usage-prefer button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.usage-prefer .usage-prefer-toggle.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.prefer-plan {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.prefer-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
 .usage-session {
   display: flex;
   align-items: center;

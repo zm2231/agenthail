@@ -1,5 +1,6 @@
 import { $ } from "./dom.js";
 import { fit, wrapped } from "./usage-fit.js";
+import { openPrefer, preferActions } from "./usage-prefer.js";
 import { expandProxies, ownsByProxy } from "./usage-proxy.js";
 import { critical, strip } from "./usage-strip.js";
 
@@ -139,8 +140,9 @@ export function accounts(sets, now) {
       problemDetail: set.problemDetail || null,
       signIn: set.login || null,
       group: set.group || null,
+      proxyAccount: set.proxyAccount || null,
       capsDiffer: caps.length > 1,
-      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      subtitle: [set.proxyAccount?.preferred ? "preferred" : null, set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
   });
@@ -220,7 +222,7 @@ export function render(document, element, list, sessions = []) {
   element.setAttribute("aria-label", list.length ? `Usage of ${list.length} account${list.length === 1 ? "" : "s"}. ${list.map((a) => a.spoken).join(". ")}` : "Usage limits");
 }
 
-function accountCard(document, account, sessions, now, open) {
+function accountCard(document, account, sessions, now, open, prefer) {
   const tone = problemTone(account, sessions);
   const card = node(document, "section", "usage-account");
   const head = node(document, "div", "usage-account-head");
@@ -241,6 +243,7 @@ function accountCard(document, account, sessions, now, open) {
     card.append(problem);
   }
   else if (!account.meters.length) card.append(node(document, "p", "usage-note", "No current reading"));
+  if (prefer && account.proxyAccount) card.append(preferActions(document, account, prefer));
   if (sessions.length) card.append(sessionList(document, sessions, open));
   return card;
 }
@@ -267,13 +270,13 @@ export function byProxy(list) {
   return [...groups.values()];
 }
 
-function proxySection(document, group, sessions, now, open) {
+function proxySection(document, group, sessions, now, open, prefer) {
   const children = [];
   const head = node(document, "h3", "usage-host usage-proxy", group.title);
   if (!group.local) head.append(node(document, "span", "usage-account-sub", ` read from ${group.host}`));
   children.push(head);
   const readable = group.accounts.some((account) => account.provider !== "proxy");
-  for (const account of group.accounts) children.push(accountCard(document, account, [], now, open));
+  for (const account of group.accounts) children.push(accountCard(document, account, [], now, open, prefer));
   if (readable && group.problem) {
     const problem = node(document, "p", "usage-note warn", group.problem);
     if (group.problemDetail) problem.title = group.problemDetail;
@@ -284,7 +287,7 @@ function proxySection(document, group, sessions, now, open) {
   return children;
 }
 
-export function renderPanel(document, panel, list, sessions, now, open) {
+export function renderPanel(document, panel, list, sessions, now, open, prefer) {
   const groups = byHost(list.filter((account) => !account.group));
   const proxies = byProxy(list);
   const children = [node(document, "h2", "usage-panel-title", "Accounts")];
@@ -292,17 +295,21 @@ export function renderPanel(document, panel, list, sessions, now, open) {
     if (groups.length > 1 || proxies.length) children.push(node(document, "h3", "usage-host", group.name));
     for (const account of group.accounts) children.push(accountCard(document, account, activeSessions(account, sessions), now, open));
   }
-  for (const group of proxies) children.push(...proxySection(document, group, sessions, now, open));
+  for (const group of proxies) children.push(...proxySection(document, group, sessions, now, open, prefer));
   panel.replaceChildren(...children);
 }
 
-export function start({ document, fetch = (...args) => globalThis.fetch(...args), setInterval = (...args) => globalThis.setInterval(...args), now = Date.now, sessions = () => [], open = () => {} }) {
+export function start({ document, fetch = (...args) => globalThis.fetch(...args), setInterval = (...args) => globalThis.setInterval(...args), now = Date.now, sessions = () => [], open = () => {}, notify = () => {} }) {
   const element = $("#usage-line");
   const panel = $("#usage-panel");
   if (!element) return null;
   let sets = [];
+  const prefer = (account, set) => {
+    toggle(false);
+    openPrefer({ document, fetch, account, set, notify, reload: () => load() });
+  };
   const drawPanel = () => {
-    if (panel && !panel.hidden) renderPanel(document, panel, accounts(sets, now()), sessions(), now(), (id) => { toggle(false); open(id); });
+    if (panel && !panel.hidden) renderPanel(document, panel, accounts(sets, now()), sessions(), now(), (id) => { toggle(false); open(id); }, prefer);
   };
   const toggle = (show) => {
     if (!panel) return;
