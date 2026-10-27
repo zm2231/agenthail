@@ -47,7 +47,8 @@ final class UsageMetersLineTests: XCTestCase {
         XCTAssertTrue(spoken[0].hasPrefix("demo@example.com: Claude usage 38 percent"))
         XCTAssertTrue(spoken[2].contains("92 percent"))
         XCTAssertTrue(spoken[3].hasPrefix("API key on build-box: Signed in with an API key"), spoken[3])
-        XCTAssertEqual(accounts.map(\.title), ["demo", "Codex", "team", "build-box (API key)"])
+        XCTAssertEqual(accounts.map(\.title), ["demo", "Codex", "team", "build-box (API key)", "ops", "lead", "spare"])
+        XCTAssertTrue(spoken[6].hasPrefix("spare@example.com via the shared proxy: cooling for"), spoken[6])
         XCTAssertEqual(UsageMeterText.shortLabel(accounts[2].meters[2]), "Week, Fable")
     }
 }

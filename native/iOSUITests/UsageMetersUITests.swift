@@ -37,5 +37,13 @@ final class UsageMetersUITests: XCTestCase {
         lower.name = "usage accounts sheet, other host"
         lower.lifetime = .keepAlways
         add(lower)
+        let cooling = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'cooling for'")).firstMatch
+        for _ in 0..<4 where !cooling.exists { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(app.staticTexts["ops@example.com"].exists && cooling.exists, "a proxy's accounts show as their own group, with a cooling account's wait")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'shared (proxy)'")).firstMatch.exists, "the group is titled for its proxy")
+        let proxy = XCTAttachment(screenshot: app.screenshot())
+        proxy.name = "usage accounts sheet, proxy group"
+        proxy.lifetime = .keepAlways
+        add(proxy)
     }
 }
