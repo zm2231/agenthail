@@ -341,6 +341,16 @@ final class AgenthailAPI: @unchecked Sendable {
     func usage() async throws -> UsageReport {
         try await get("/api/v1/usage")
     }
+    func proxyPreferPlan(_ account: UsageProxyAccountRef, set: ProxyPreferSet, now: Bool) async throws -> ProxyPreferPlan {
+        var components = URLComponents()
+        components.path = "/api/v1/proxies/prefer"
+        components.queryItems = [URLQueryItem(name: "proxy", value: account.proxyId), URLQueryItem(name: "account", value: account.id), URLQueryItem(name: "set", value: set.rawValue), URLQueryItem(name: "now", value: String(now))]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await request(path, method: "GET", body: nil, timeout: 40)
+    }
+    func proxyPrefer(_ account: UsageProxyAccountRef, set: ProxyPreferSet, now: Bool, planId: String) async throws -> ProxyPreferResult {
+        try await request("/api/v1/proxies/prefer", method: "POST", body: ["proxy": account.proxyId, "account": account.id, "set": set.rawValue, "now": now, "planId": planId], timeout: 40)
+    }
     /// Opens a Claude session that runs in a terminal or background job in
     /// Agenthail's host. A refusal the person can act on (busy, or a terminal
     /// process to stop) is an outcome, not an error.

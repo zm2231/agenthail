@@ -77,6 +77,7 @@ SOURCES=(
   UsageMeterText.swift
   UsageAccounts.swift
   UsageProxies.swift
+  ProxyPrefer.swift
   macOS/ContextRingGauge.swift
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift

@@ -16,7 +16,7 @@ final class UsageMonitor: ObservableObject {
         UsageAccounts.make(sets, now: now)
     }
 
-    private func load(_ model: AgenthailModel) async {
+    func load(_ model: AgenthailModel) async {
         guard let api = model.api else { return }
         do {
             sets = try await api.usage().sets ?? []

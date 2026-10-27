@@ -5,14 +5,17 @@ final class UsageFeed: ObservableObject {
     @Published private(set) var accounts: [UsageAccount] = []
     @Published private(set) var now = Date()
     private var sets: [UsageReport.Set] = []
+    private var readers: [AgenthailAPI] = []
+    private var proxyReaders: [String: Int] = [:]
 
     func run(_ readers: [AgenthailAPI]) async {
+        self.readers = readers
         var minutes = 0
         while !Task.isCancelled {
             if minutes % 2 == 0 {
                 let answers = await Self.read(readers)
                 if Task.isCancelled { return }
-                sets = UsageAccounts.merged(answers)
+                ingest(answers, at: Date())
             }
             show(at: Date())
             minutes += 1
@@ -20,8 +23,13 @@ final class UsageFeed: ObservableObject {
         }
     }
 
+    func refresh() async {
+        ingest(await Self.read(readers), at: Date())
+    }
+
     func ingest(_ answers: [[UsageReport.Set]?], at date: Date) {
         sets = UsageAccounts.merged(answers)
+        proxyReaders = UsageProxies.readers(answers)
         show(at: date)
     }
 
@@ -29,6 +37,11 @@ final class UsageFeed: ObservableObject {
         now = date
         let next = UsageAccounts.make(sets, now: date)
         if next != accounts { accounts = next }
+    }
+
+    func api(for account: UsageAccount) -> AgenthailAPI? {
+        guard let proxy = account.proxyAccount?.proxyId, let index = proxyReaders[proxy], readers.indices.contains(index) else { return nil }
+        return readers[index]
     }
 
     private static func read(_ readers: [AgenthailAPI]) async -> [[UsageReport.Set]?] {

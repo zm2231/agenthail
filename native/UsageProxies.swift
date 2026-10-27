@@ -21,6 +21,10 @@ struct UsageProxyGroupView: Identifiable {
     let accounts: [UsageAccount]
     var id: String { group.id }
     var readable: Bool { accounts.contains { $0.provider != "proxy" } }
+
+    func hasPeers(_ account: UsageAccount) -> Bool {
+        accounts.filter { $0.provider == account.provider && $0.problem != "disabled" }.count > 1
+    }
 }
 
 enum UsageProxies {
@@ -50,6 +54,28 @@ enum UsageProxies {
             }
         }
         return expanded
+    }
+
+    static func references(_ sets: [UsageReport.Set]) -> [String: UsageProxyAccountRef] {
+        var references: [String: UsageProxyAccountRef] = [:]
+        for set in sets where set.provider == "proxy" {
+            guard let proxy = set.proxy?.id else { continue }
+            for account in set.accounts ?? [] {
+                references["proxy:" + proxy + ":" + account.id] = account.reference(proxy: proxy)
+            }
+        }
+        return references
+    }
+
+    // The computer that reported a readable proxy routes a change to the host holding its key.
+    static func readers(_ answers: [[UsageReport.Set]?]) -> [String: Int] {
+        var readers: [String: Int] = [:]
+        for (index, answer) in answers.enumerated() {
+            for set in answer ?? [] where set.provider == "proxy" && set.proxyProblem == nil && !(set.accounts ?? []).isEmpty {
+                if let id = set.proxy?.id, readers[id] == nil { readers[id] = index }
+            }
+        }
+        return readers
     }
 
     static func state(_ account: UsageReport.ProxyAccount, now: Date) -> String? {

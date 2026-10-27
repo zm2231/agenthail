@@ -20,6 +20,7 @@ struct UsageAccount: Equatable, Identifiable {
     let problemDetail: String?
     let asOf: Date?
     var group: UsageProxyGroup? = nil
+    var proxyAccount: UsageProxyAccountRef? = nil
 
     var fullTitle: String {
         if let group, provider != "proxy" { return login + " via the " + group.name + " proxy" }
@@ -42,7 +43,7 @@ struct UsageAccount: Equatable, Identifiable {
     func subtitle(now: Date) -> String? {
         let cap = caps.count == 1 ? caps.first.map { "cap " + UsageMeterText.percent($0) } : nil
         let over = meters.contains { meter in meter.ceiling.map { $0 > 0 && meter.percent >= $0 } ?? false } ? "over cap" : nil
-        let parts = [provider == "claude" && group == nil && rootName != login ? rootName : nil, cap, over, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
+        let parts = [proxyAccount?.preferred == true ? "preferred" : nil, provider == "claude" && group == nil && rootName != login ? rootName : nil, cap, over, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -96,6 +97,7 @@ enum UsageAccounts {
     static func make(_ reported: [UsageReport.Set], now: Date) -> [UsageAccount] {
         let expanded = UsageProxies.expand(reported, now: now)
         let titles = self.titles(expanded)
+        let references = UsageProxies.references(reported)
         return zip(expanded, titles).map { entry, title in
             let (set, group) = entry
             return UsageAccount(
@@ -113,7 +115,8 @@ enum UsageAccounts {
                 problem: set.problem.flatMap { $0.isEmpty ? nil : $0 },
                 problemDetail: set.problemDetail.flatMap { $0.isEmpty ? nil : $0 },
                 asOf: set.asOf.flatMap(UsageMeterText.date),
-                group: group
+                group: group,
+                proxyAccount: set.root.flatMap { references[$0] }
             )
         }
     }

@@ -49,6 +49,8 @@ let package = Package(
                 "UsageMeterText.swift",
                 "UsageAccounts.swift",
                 "UsageProxies.swift",
+                "ProxyPrefer.swift",
+                "ProxyPreferSheet.swift",
                 "SessionTree.swift",
                 "MetadataOverlay.swift",
                 "ClaudeSubagentList.swift",

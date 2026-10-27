@@ -49,4 +49,45 @@ final class UsageMetersUITests: XCTestCase {
         proxy.lifetime = .keepAlways
         add(proxy)
     }
+
+    func testAProxyAccountsPreferenceIsChangedOnlyAfterItsPlan() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app"]
+        app.launch()
+        let usage = app.descendants(matching: .any)["usage-limits"]
+        XCTAssertTrue(usage.waitForExistence(timeout: 10))
+        usage.tap()
+        XCTAssertTrue(app.navigationBars["Accounts"].waitForExistence(timeout: 5))
+        let toggles = app.buttons.matching(identifier: "proxy-prefer-toggle")
+        for _ in 0..<6 where toggles.count < 3 || !toggles.element(boundBy: 1).isHittable { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertEqual(toggles.count, 3, "every proxy account has the toggle")
+        XCTAssertEqual(toggles.element(boundBy: 0).label, "Preferred", "a preferred account says so")
+        XCTAssertEqual(toggles.element(boundBy: 1).label, "Prefer")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'set on build-box at '")).firstMatch.exists, "a value Agenthail wrote is credited")
+        let rows = XCTAttachment(screenshot: app.screenshot())
+        rows.name = "proxy accounts with preference actions"
+        rows.lifetime = .keepAlways
+        add(rows)
+        toggles.element(boundBy: 1).tap()
+        XCTAssertTrue(app.staticTexts["lead@example.com: preference 0 → 10"].waitForExistence(timeout: 5), "the plan shows the before and after")
+        XCTAssertTrue(app.staticTexts["Other accounts are not changed."].exists)
+        let confirm = app.buttons["proxy-prefer-confirm"]
+        XCTAssertEqual(confirm.label, "Prefer lead@example.com", "the button is named for the effect")
+        let plan = XCTAttachment(screenshot: app.screenshot())
+        plan.name = "proxy preference plan"
+        plan.lifetime = .keepAlways
+        add(plan)
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["proxy-prefer-problem"].waitForExistence(timeout: 5), "a refused write is shown, not swallowed")
+        app.buttons["Cancel"].tap()
+        let only = app.buttons.matching(identifier: "proxy-prefer-only")
+        XCTAssertEqual(only.count, 3, "prefer only is offered where the provider has other accounts")
+        only.element(boundBy: 1).tap()
+        XCTAssertTrue(app.staticTexts["ops@example.com: preference 10 → 0"].waitForExistence(timeout: 5), "prefer only names every account it turns off")
+        XCTAssertEqual(app.buttons["proxy-prefer-confirm"].label, "Prefer only lead@example.com (turns off ops@example.com)")
+        let exclusive = XCTAttachment(screenshot: app.screenshot())
+        exclusive.name = "proxy prefer only plan"
+        exclusive.lifetime = .keepAlways
+        add(exclusive)
+    }
 }

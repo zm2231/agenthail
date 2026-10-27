@@ -6,6 +6,7 @@ struct UsageChips: View {
     @ObservedObject var pane: SessionPane
     let bars: Bool
     @State private var showing = false
+    @State private var preferring: ProxyPreferRequest?
 
     var body: some View {
         TimelineView(.everyMinute) { context in
@@ -24,10 +25,19 @@ struct UsageChips: View {
                 .accessibilityHint("Shows each account's limits and sessions")
                 .accessibilityIdentifier("usage-accounts")
                 .popover(isPresented: $showing, arrowEdge: .top) {
-                    UsageAccountsPanel(accounts: accounts, sessions: model.knownSessions, now: context.date) { id in
+                    UsageAccountsPanel(accounts: accounts, sessions: model.knownSessions, now: context.date, select: { id in
                         showing = false
                         pane.select(id)
+                    }, prefer: { account, set in
+                        showing = false
+                        preferring = ProxyPreferRequest(account: account, set: set)
+                    })
+                }
+                .sheet(item: $preferring) { request in
+                    ProxyPreferSheet(api: model.api, request: request) { _ in
+                        Task { await usage.load(model) }
                     }
+                    .frame(width: 460)
                 }
             }
         }

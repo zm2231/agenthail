@@ -5,6 +5,7 @@ struct UsageAccountsSheet: View {
     let sessions: [SessionState]
     let open: (String) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var preferring: ProxyPreferRequest?
 
     var body: some View {
         NavigationStack {
@@ -19,7 +20,9 @@ struct UsageAccountsSheet: View {
                 ForEach(UsageProxies.byProxy(feed.accounts)) { proxy in
                     Section {
                         ForEach(proxy.accounts) { account in
-                            PhoneUsageAccountRow(account: account, sessions: [], now: feed.now, open: open)
+                            PhoneUsageAccountRow(account: account, sessions: [], now: feed.now, open: open, prefer: { set in
+                                preferring = ProxyPreferRequest(account: account, set: set)
+                            }, only: proxy.hasPeers(account))
                         }
                         if proxy.readable, let problem = proxy.group.problem {
                             Text(problem).font(.footnote).foregroundStyle(UsageProblemTone.warning.phoneStyle)
@@ -41,6 +44,12 @@ struct UsageAccountsSheet: View {
         }
         .presentationDetents([.medium, .large])
         .accessibilityIdentifier("usage-accounts")
+        .sheet(item: $preferring) { request in
+            ProxyPreferSheet(api: feed.api(for: request.account), request: request) { _ in
+                Task { await feed.refresh() }
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 }
 
@@ -49,6 +58,8 @@ private struct PhoneUsageAccountRow: View {
     let sessions: [SessionState]
     let now: Date
     let open: (String) -> Void
+    var prefer: ((ProxyPreferSet) -> Void)? = nil
+    var only = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -79,6 +90,23 @@ private struct PhoneUsageAccountRow: View {
                     .accessibilityHint(account.problemDetail ?? "")
             } else if account.meters.isEmpty {
                 Text("No current reading").font(.footnote).foregroundStyle(PhonePalette.muted)
+            }
+            if let prefer, let reference = account.proxyAccount {
+                HStack(spacing: 8) {
+                    Button(reference.preferred ? "Preferred" : "Prefer") { prefer(reference.preferred ? .off : .on) }
+                        .buttonStyle(.bordered)
+                        .tint(reference.preferred ? PhonePalette.working : nil)
+                        .accessibilityValue(reference.preferred ? "on" : "off")
+                        .accessibilityHint("Changes only this account")
+                        .accessibilityIdentifier("proxy-prefer-toggle")
+                    if only {
+                        Button("Prefer only this") { prefer(.only) }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("proxy-prefer-only")
+                    }
+                    if let note = reference.setNote { Text(note).font(.footnote).foregroundStyle(PhonePalette.muted) }
+                }
+                .font(.subheadline)
             }
             PhoneUsageSessions(sessions: sessions, open: open)
         }
