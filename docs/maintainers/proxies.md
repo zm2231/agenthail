@@ -56,8 +56,10 @@ name the proxy with the root:
 {"claudeConfigDirs": [{"path": "/home/dev/.work/.claude", "proxy": "shared"}]}
 ```
 
-Such a root's `login` is `proxy` and it carries the proxy's `name`. It is never
-read from claude.ai and never called an API key. A base URL that matches no
+Such a root's `login` is `proxy` and it carries the proxy's `name`. Its usage
+and sign-in are never read from claude.ai and it is never called an API key.
+Remote Control messages to its sessions still use the browser sign-in of the
+login the root holds. A base URL that matches no
 configured proxy is an API key, as before. With no `proxies` entry nothing
 changes.
 

@@ -25,7 +25,7 @@ type ClaudeConfigRoot struct {
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
 	Login         string       `json:"login,omitempty"`
 	Proxy         string       `json:"proxy,omitempty"`
-	Signin      string       `json:"signin,omitempty"`
+	Signin        string       `json:"signin,omitempty"`
 	SigninProblem string       `json:"signinProblem,omitempty"`
 	Usage         *Usage       `json:"usage,omitempty"`
 	UsageProblem  string       `json:"usageProblem,omitempty"`

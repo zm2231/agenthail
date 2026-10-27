@@ -224,7 +224,7 @@ func (c *Claude) ClaudeConfigRoot(ctx context.Context, path string) (surface.Cla
 }
 
 func (c *Claude) describeLogin(ctx context.Context, root *surface.ClaudeConfigRoot) {
-	if root.SignedInAs == nil || root.SignedInAs.AccountID == "" {
+	if root.SignedInAs == nil || root.SignedInAs.AccountID == "" || root.Proxy != "" {
 		return
 	}
 	if c.localOnly {
