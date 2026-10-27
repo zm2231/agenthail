@@ -106,7 +106,7 @@ enum UsageProxies {
         let lead = top?.0 ?? view.accounts[0]
         let suffix = " · " + view.group.name
         let name = lead.title.hasSuffix(suffix) ? String(lead.title.dropLast(suffix.count)) : lead.title
-        let title = top != nil ? view.group.name + " · " + name : lead.provider == "proxy" ? lead.title : view.group.name
+        let title = lead.provider == "proxy" ? lead.title : view.group.name + " · " + name
         return UsageAccount(id: "proxy:" + view.group.id, title: title, login: lead.login, signIn: lead.signIn, host: lead.host, hostId: lead.hostId, local: lead.local, provider: lead.provider, rootName: lead.rootName, root: lead.root, meters: top.map { [$0.1] } ?? [], problem: top == nil ? lead.problem : nil, problemDetail: top == nil ? lead.problemDetail : nil, asOf: lead.asOf, group: lead.group)
     }
 

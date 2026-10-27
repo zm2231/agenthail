@@ -64,6 +64,8 @@ const line = new Node("div");
 render(document, line, chips);
 assert.equal(line.children.filter((c) => c.className.startsWith("usage-chip")).length, 3);
 assert.ok(chips[2].meters.length === 0 && chips[2].problem, "an unreadable proxy's chip still shows why");
+const unread = strip(accounts([{ ...sets[3], accounts: [{ id: "a", provider: "claude", label: "dev@example.com", status: "active", meters: [] }] }], now));
+assert.deepEqual(unread.map((a) => [a.title, a.meters.length]), [["shared · dev", 0]], "a readable proxy with no reading yet still names its account");
 const mixed = accounts([{ ...sets[3], accounts: [{ ...sets[3].accounts[0], meters: [meter("session", "Claude", 18, { ceiling: 60 }), meter("weekly", "Claude week", 41, { ceiling: 80 })] }] }], now)[0];
 assert.equal(mixed.capsDiffer, true);
 const mixedPanel = new Node("div");

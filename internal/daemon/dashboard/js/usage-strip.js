@@ -12,7 +12,7 @@ function chip(group, members) {
   return {
     ...lead,
     id: `proxy:${group.id}`,
-    title: top ? `${group.name} · ${name}` : lead.provider === "proxy" ? lead.title : group.name,
+    title: lead.provider === "proxy" ? lead.title : `${group.name} · ${name}`,
     meters: top ? [top.meter] : [],
     worst: top?.meter || null,
     critical: top ? critical(top.meter) : false,

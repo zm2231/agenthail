@@ -42,6 +42,8 @@ struct UsageProxiesTest {
         check(strip.map(\.title) == ["dev", "shared · dev", "local (proxy)"], "each proxy is one chip named for it and its fullest account: \(strip.map(\.title))")
         check(strip[1].meters.map(\.percent) == [61] && strip[1].critical, "the proxy chip carries its worst window, in its tone")
         check(strip[2].meters.isEmpty && strip[2].problemTone([]) == .warning, "an unreadable proxy's chip still warns")
+        let unread = UsageProxies.strip(accounts.filter { $0.group?.name == "shared" && $0.login == "team@example.com" })
+        check(unread.map(\.title) == ["shared · team"] && unread[0].meters.isEmpty, "a readable proxy with no reading yet still names its account: \(unread.map(\.title))")
 
         let groups = UsageProxies.byProxy(accounts)
         check(groups.map(\.group.title) == ["shared (proxy)", "local (proxy)"] && groups[0].accounts.count == 3 && groups[0].readable && !groups[1].readable, "one group per proxy")
