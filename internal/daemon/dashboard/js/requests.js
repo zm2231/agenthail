@@ -8,6 +8,8 @@ import { action } from "./actions.js";
 import { toast } from "./feedback.js";
 import { load } from "./dashboard-state.js";
 import { selectSession } from "./session-selection.js";
+import { renderQuestionCard } from "./question-pager.js";
+import { bindQuestionPager } from "./question-pager-events.js";
 
 export const permissionModes = [
   ["", "Default (Claude settings)"],
@@ -80,15 +82,7 @@ export function renderElsewhereWait(session) {
 export function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
   if (request.kind === "input" && request.elicitation) return renderInputRequest(request, created);
-  if (request.kind === "question") {
-    const questions = (request.questions || []).map((question, index) => {
-      const type = question.multiSelect ? "checkbox" : "radio";
-      const name = `answer-${index}`;
-      const options = (question.options || []).map((option) => `<label><input type="${type}" name="${name}" value="${escape(option.label)}"><span>${escape(option.label)}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</label>`).join("");
-      return `<fieldset data-question="${escape(question.question)}"><legend>${question.header ? `${escape(question.header)}: ` : ""}${escape(question.question)}</legend>${options}<label><span>Other</span><input type="text" name="${name}-other" placeholder="Your own answer"></label></fieldset>`;
-    }).join("");
-    return `<form class="request-card" data-request-question="${escape(request.id)}"><h3>Claude asks${created}</h3>${questions}<div class="request-actions"><button class="primary-button" type="submit">Answer</button><button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(request.id)}">Decline</button></div></form>`;
-  }
+  if (request.kind === "question") return renderQuestionCard(request, created);
   const title = request.title || `Claude wants to use ${request.tool}`;
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
@@ -173,24 +167,7 @@ export function bindRequestEvents() {
     const choice = button.dataset.requestRespond;
     await respondToRequest(button.dataset.requestId, choice === "deny" ? { behavior: "deny" } : { behavior: "allow", always: choice === "always" });
   });
-  document.addEventListener("submit", async (event) => {
-    const form = event.target.closest("[data-request-question]");
-    if (!form) return;
-    event.preventDefault();
-    const answers = {};
-    for (const [index, fieldset] of [...form.querySelectorAll("fieldset[data-question]")].entries()) {
-      const other = form.querySelector(`[name="answer-${index}-other"]`).value.trim();
-      const picked = [...form.querySelectorAll(`[name="answer-${index}"]:checked`)].map((input) => input.value);
-      const answer = other || picked.join(", ");
-      if (!answer) {
-        toast(`Answer: ${fieldset.dataset.question}`);
-        return;
-      }
-      answers[fieldset.dataset.question] = answer;
-    }
-    form.querySelector('[type="submit"]').disabled = true;
-    await respondToRequest(form.dataset.requestQuestion, { behavior: "allow", answers });
-  });
+  bindQuestionPager(respondToRequest);
   document.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-request-input]");
     if (!form) return;
