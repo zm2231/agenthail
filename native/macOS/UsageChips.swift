@@ -38,6 +38,7 @@ struct UsageChips: View {
                         Task { await usage.load(model) }
                     }
                     .frame(width: 460)
+                    .lineLimit(nil)
                 }
             }
         }

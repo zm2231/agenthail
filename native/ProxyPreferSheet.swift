@@ -46,7 +46,10 @@ struct ProxyPreferSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
-                Button(plan?.confirm ?? "Confirm") { Task { await apply() } }
+                Button { Task { await apply() } } label: {
+                    Text(plan?.confirm ?? "Confirm").multilineTextAlignment(.center).lineLimit(3)
+                        .frame(maxWidth: 280).fixedSize(horizontal: false, vertical: true)
+                }
                     .buttonStyle(.borderedProminent)
                     .disabled(plan == nil || plan?.nothing != nil || working)
                     .accessibilityIdentifier("proxy-prefer-confirm")
