@@ -17,13 +17,14 @@ type claudeUsageCache struct {
 }
 
 type claudeUsageEntry struct {
-	mu      sync.Mutex
-	login   string
-	readAt  time.Time
-	live    surface.ClaudeConfigRoot
-	err     error
-	lastGot *surface.Usage
-	last    atomic.Pointer[claudeUsageSnapshot]
+	mu         sync.Mutex
+	login      string
+	readAt     time.Time
+	live       surface.ClaudeConfigRoot
+	err        error
+	lastGot    *surface.Usage
+	last       atomic.Pointer[claudeUsageSnapshot]
+	refreshing atomic.Bool
 }
 
 type claudeUsageSnapshot struct {
@@ -70,10 +71,14 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 
 // Never waits on claude.ai; a missing or stale reading refreshes in the background.
 func (c *claudeUsageCache) cached(reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) *surface.Usage {
-	snapshot := c.entry(root.Root).last.Load()
+	entry := c.entry(root.Root)
+	snapshot := entry.last.Load()
 	current := snapshot != nil && snapshot.login == claudeLoginKey(root)
-	if !current || now.Sub(snapshot.readAt) >= claudeUsageTTL {
-		go c.read(context.Background(), reader, root, now)
+	if (!current || now.Sub(snapshot.readAt) >= claudeUsageTTL) && entry.refreshing.CompareAndSwap(false, true) {
+		go func() {
+			defer entry.refreshing.Store(false)
+			c.read(context.Background(), reader, root, time.Now())
+		}()
 	}
 	if !current {
 		return nil

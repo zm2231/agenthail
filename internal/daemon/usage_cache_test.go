@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -151,6 +152,33 @@ func TestACancelledPollDoesNotFailTheReadAnotherPollWaitsOn(t *testing.T) {
 	}
 	if got := reader.calls.Load(); got != 1 {
 		t.Fatalf("claude.ai read %d times, want 1", got)
+	}
+}
+
+func TestABurstOfStartsRefreshesAStaleReadingOnce(t *testing.T) {
+	var cache claudeUsageCache
+	reader := &blockingRootReader{started: make(chan struct{}), release: make(chan struct{})}
+	root := surface.ClaudeConfigRoot{Root: "/r", SignedInAs: &surface.ClaudeLogin{AccountID: "a"}}
+	before := runtime.NumGoroutine()
+	for range 100 {
+		if usage := cache.cached(reader, root, time.Now()); usage != nil {
+			t.Fatalf("a cold cache has no reading yet: %+v", usage)
+		}
+	}
+	<-reader.started
+	if grew := runtime.NumGoroutine() - before; grew > 3 {
+		t.Fatalf("100 starts queued %d refreshes behind one claude.ai read", grew)
+	}
+	close(reader.release)
+	deadline := time.Now().Add(5 * time.Second)
+	for cache.entry(root.Root).refreshing.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the refresh did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if usage := cache.cached(reader, root, time.Now()); usage == nil || reader.calls.Load() != 1 {
+		t.Fatalf("the next start reads the refreshed snapshot: usage=%+v reads=%d", usage, reader.calls.Load())
 	}
 }
 
