@@ -137,9 +137,14 @@ undone.
   It does not need to push.
 - **Its Claude host.** The target resumes the conversation in the Claude host
   its daemon runs.
-- **Its primary Claude config root**, the one its daemon's
-  `CLAUDE_CONFIG_DIR` names, `~/.claude` when unset. The conversation is
-  placed there and Claude is launched without naming a root.
+- **A Claude config root to place it in.** Without `--root` that is the
+  primary root, the one its daemon's `CLAUDE_CONFIG_DIR` names, `~/.claude`
+  when unset, and Claude is launched without naming a root. With
+  `--root <name>` it is that root of the target, which must be configured
+  there and signed in directly, not through an account proxy. The target
+  answers the prepare with the root it will use; a source whose target
+  answers without it (an Agenthail too old to choose) fails the move before
+  any file leaves, so a move never lands in another root than the one named.
 - **Its own Claude sign-in.** The move carries no account. The moved session
   uses whatever login or API configuration the target's root has, like any
   session started there.
@@ -149,6 +154,35 @@ target lists them with TaskList, because the Claude host turns on Claude's
 task tools for every session it runs. A target without Claude Remote Control
 runs the moved session without a claude.ai listing, as it runs all its
 sessions.
+
+## Moving to another account on the same host
+
+`agenthail move <session> --root <name>` moves an idle conversation to
+another Claude config root of the host it runs on, so it continues under that
+root's login. There is no transfer. The source holds and stops it as above,
+records the move in `session_moves` with this host as its peer, and the
+Claude adapter, still holding the conversation lock:
+
+1. merges the project's entry from the source root's `.claude.json` into the
+   target root's: folder trust, allowed tools and local MCP servers. Only
+   what the target lacks is added; a value it already holds is never
+   changed. The file is rewritten only if it is as it was read, since
+   running Claude processes write it too;
+2. archives the conversation's files into the source root's
+   `agenthail-moved/<id>/<move id>/`, as a host move does;
+3. renames each part into the target root, the transcript last, refusing
+   when the target already holds any of them;
+4. resumes the conversation in the Claude host under the target root.
+
+A step that fails puts the files back where they were and removes exactly
+what step 1 added. A resume whose outcome is unknown leaves the conversation
+in the target root and the move done. A daemon that stopped mid-move settles
+it when it starts: a move whose transcript reached the target finishes there,
+and any other goes back to the source root. A root behind an account proxy
+is refused as a target, because the proxy chooses the account itself.
+
+A move to another host carries no project config; the target's root starts
+without the source's trust, allowed tools or local MCP servers.
 
 ## Not in this slice
 

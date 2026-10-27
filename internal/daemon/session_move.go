@@ -37,6 +37,7 @@ type moveManifest struct {
 	Size           int64               `json:"size"`
 	SHA256         string              `json:"sha256"`
 	PartsSize      int64               `json:"partsSize"`
+	Root           string              `json:"root,omitempty"`
 	Origin         *moveOrigin         `json:"origin,omitempty"`
 }
 
@@ -54,6 +55,7 @@ type moveStatus struct {
 	Detail  string           `json:"detail,omitempty"`
 	Cwd     string           `json:"cwd,omitempty"`
 	Session *surface.Session `json:"session,omitempty"`
+	Root    string           `json:"root,omitempty"`
 }
 
 const (
@@ -78,6 +80,7 @@ type sessionMoveRequest struct {
 	Host         string `json:"host"`
 	StopTerminal bool   `json:"stopTerminal,omitempty"`
 	WaitSeconds  int    `json:"waitSeconds,omitempty"`
+	Root         string `json:"root,omitempty"`
 }
 
 type sessionMoveResult struct {
@@ -85,6 +88,7 @@ type sessionMoveResult struct {
 	Host    dashboardHost        `json:"host"`
 	Stopped string               `json:"stopped,omitempty"`
 	Alias   string               `json:"alias,omitempty"`
+	Root    string               `json:"root,omitempty"`
 }
 
 // MoveRefusedError is a move that did not happen and left the session here.
@@ -152,7 +156,7 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Origin: origin}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Root: request.Root, Origin: origin}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
@@ -195,12 +199,19 @@ func (d *Daemon) prepareMoveOnHost(ctx context.Context, host *pairedHost, manife
 	if err != nil {
 		return err
 	}
-	_, err = hosts.ReadResponse(response)
+	answer, err := hosts.ReadResponse(response)
 	var status hosts.StatusError
 	if errors.As(err, &status) && status.Status == http.StatusNotFound && status.Code == "" {
 		return fmt.Errorf("update Agenthail on %s; it cannot take moved sessions", host.record.Name)
 	}
-	return err
+	if err != nil || manifest.Root == "" {
+		return err
+	}
+	var prepared moveStatus
+	if json.Unmarshal(answer, &prepared) != nil || prepared.Root != manifest.Root {
+		return fmt.Errorf("update Agenthail on %s; it cannot place a moved session in a chosen account", host.record.Name)
+	}
+	return nil
 }
 
 // settleMoveOut drives a sent move, whose files are archived, to done or
@@ -377,6 +388,10 @@ func (d *Daemon) failInterruptedMoves() {
 		if move.Role != "out" || move.State != registry.MovePreparing {
 			continue
 		}
+		if manifest, local := localRootMove(move); local {
+			d.recoverRootMove(move, manifest)
+			continue
+		}
 		mover := d.moverOf(move)
 		if mover == nil {
 			_ = d.Registry.SetMoveState(move.ID, registry.MoveFailed, "the daemon stopped before the move was sent", registry.MovePreparing)
@@ -458,12 +473,17 @@ func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) 
 		type listedMove struct {
 			registry.SessionMove
 			PeerHostName string `json:"peerHostName,omitempty"`
+			Root         string `json:"root,omitempty"`
 		}
 		listed := make([]listedMove, 0, len(moves))
 		for _, move := range moves {
 			view := listedMove{SessionMove: move}
+			manifest, local := localRootMove(move)
+			view.Root = manifest.Root
 			if host, found := d.pairedHost(move.PeerHost); found {
 				view.PeerHostName = host.record.Name
+			} else if local {
+				view.PeerHostName = d.hostIdentity().Name
 			}
 			listed = append(listed, view)
 		}
@@ -474,11 +494,15 @@ func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		if request.SessionID == "" || request.Host == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId and host are required")
+		if request.SessionID == "" || request.Host == "" && request.Root == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId and a host or root are required")
 			return
 		}
-		result, err := d.moveSession(context.WithoutCancel(r.Context()), request)
+		move := d.moveSession
+		if request.Host == "" {
+			move = d.moveSessionToRoot
+		}
+		result, err := move(context.WithoutCancel(r.Context()), request)
 		var refused MoveRefusedError
 		var unknown MoveUnknownError
 		var busy *surface.AdoptBusyError
@@ -577,11 +601,11 @@ func (d *Daemon) apiMovePrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd})
+	writeDashboardJSON(w, http.StatusOK, moveStatus{State: move.State, Cwd: target.cwd, Root: manifest.Root})
 }
 
 func moveInOf(manifest moveManifest, cwd string) surface.MoveIn {
-	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize}
+	return surface.MoveIn{MoveID: manifest.ID, Conversation: manifest.Conversation, Cwd: cwd, Title: manifest.Title, Model: manifest.Model, PermissionMode: manifest.PermissionMode, Size: manifest.Size, SHA256: manifest.SHA256, PartsSize: manifest.PartsSize, Root: manifest.Root}
 }
 
 // moveNotResumed refuses, under the conversation's hold, to set aside the

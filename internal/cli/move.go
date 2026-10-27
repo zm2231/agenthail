@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-const moveUsage = `usage: agenthail move <target> --to <host> [--wait <duration>] [--stop-terminal] [--json]
+const moveUsage = `usage: agenthail move <target> --to <host> [--root <account>] [--wait <duration>] [--stop-terminal] [--json]
+       agenthail move <target> --root <account> [--wait <duration>] [--stop-terminal] [--json]
        agenthail move list [--unfinished] [--json]`
 
 func (a *App) cmdMove(args []string) (moveErr error) {
@@ -31,8 +32,8 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 			_ = emit(map[string]any{"ok": false, "error": moveErr.Error()})
 		}
 	}()
-	host := flagVal(args, "--to")
-	if len(positional) != 1 || host == "" {
+	host, root := flagVal(args, "--to"), flagVal(args, "--root")
+	if len(positional) != 1 || host == "" && root == "" {
 		return errors.New(moveUsage)
 	}
 	wait := time.Duration(0)
@@ -60,7 +61,7 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 	if err != nil {
 		return err
 	}
-	data, status, err := api.call(ctx, http.MethodPost, "/api/v1/session-moves", nil, map[string]any{"sessionId": session.ID, "host": host, "stopTerminal": hasFlag(args, "--stop-terminal"), "waitSeconds": int(wait / time.Second)}, nil)
+	data, status, err := api.call(ctx, http.MethodPost, "/api/v1/session-moves", nil, map[string]any{"sessionId": session.ID, "host": host, "root": root, "stopTerminal": hasFlag(args, "--stop-terminal"), "waitSeconds": int(wait / time.Second)}, nil)
 	if err != nil && len(data) == 0 {
 		var answer struct {
 			Error string `json:"error"`
@@ -91,6 +92,7 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 			} `json:"host"`
 			Stopped string `json:"stopped"`
 			Alias   string `json:"alias"`
+			Root    string `json:"root"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &answer); err != nil {
@@ -105,7 +107,14 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 		if answer.Result.Stopped != "" {
 			fmt.Printf("stopped the %s that held %s\n", answer.Result.Stopped, label)
 		}
-		fmt.Printf("moved %s to %s; it now runs there as %s::%s\n", label, answer.Result.Host.Name, answer.Result.Host.Name, session.ID)
+		switch {
+		case host == "":
+			fmt.Printf("moved %s to account %s; it now runs under it here\n", label, answer.Result.Root)
+		case answer.Result.Root != "":
+			fmt.Printf("moved %s to account %s on %s; it now runs there as %s::%s\n", label, answer.Result.Root, answer.Result.Host.Name, answer.Result.Host.Name, session.ID)
+		default:
+			fmt.Printf("moved %s to %s; it now runs there as %s::%s\n", label, answer.Result.Host.Name, answer.Result.Host.Name, session.ID)
+		}
 		return nil
 	case answer.Unknown:
 		return fmt.Errorf("%s; no host writes to %s until it settles; see agenthail move list", answer.Error, label)
@@ -138,7 +147,8 @@ func (a *App) cmdMoveList(args []string) error {
 			Conversation string    `json:"conversation"`
 			PeerHost     string    `json:"peerHost"`
 			PeerHostName string    `json:"peerHostName"`
-			Role         string    `json:"role"`
+			Root         string    `json:"root"`
+			Role        string    `json:"role"`
 			State        string    `json:"state"`
 			Detail       string    `json:"detail"`
 			UpdatedAt    time.Time `json:"updatedAt"`
@@ -162,6 +172,9 @@ func (a *App) cmdMoveList(args []string) error {
 		peer := move.PeerHostName
 		if peer == "" {
 			peer = move.PeerHost
+		}
+		if move.Root != "" {
+			peer += " (account " + move.Root + ")"
 		}
 		line := fmt.Sprintf("%s  %s %s %s  %s  %s", move.UpdatedAt.Local().Format("2006-01-02 15:04"), move.Conversation, direction, peer, move.State, move.ID)
 		if move.Detail != "" {

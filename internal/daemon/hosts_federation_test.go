@@ -156,6 +156,8 @@ type actionGate struct {
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
 	older     atomic.Bool
+	// rootlessPrepare answers a move's prepare as a host that ignores its root.
+	rootlessPrepare atomic.Bool
 	// legacyMetadata, when set, is the session metadata body a host from
 	// before subagent paging returns.
 	legacyMetadata atomic.Pointer[string]
@@ -251,6 +253,20 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			w.Header().Set(hosts.ResponseHeader, identity.ID)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, *body)
+			return
+		}
+		if n.gate.rootlessPrepare.Load() && r.URL.Path == "/api/v1/session-move/prepare" {
+			recorder := httptest.NewRecorder()
+			n.handler.ServeHTTP(recorder, r)
+			var answer map[string]any
+			_ = json.Unmarshal(recorder.Body.Bytes(), &answer)
+			delete(answer, "root")
+			for key, values := range recorder.Header() {
+				w.Header()[key] = values
+			}
+			w.Header().Del("Content-Length")
+			w.WriteHeader(recorder.Code)
+			_ = json.NewEncoder(w).Encode(answer)
 			return
 		}
 		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
