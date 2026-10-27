@@ -37,7 +37,7 @@ func (d *Daemon) claudeRootPick(ctx context.Context, fresh bool) (claudepick.Pic
 	} else {
 		sets = d.claudeCachedUsageSets(roots, now)
 	}
-	return claudepick.Choose(claudePickCandidates(sets, now), policy, now), policy
+	return claudepick.Choose(claudePickCandidates(sets, d.proxyPickPools(ctx, fresh, now), now), policy, now), policy
 }
 
 func (d *Daemon) claudeCachedUsageSets(roots []surface.ClaudeConfigRoot, now time.Time) []usageSet {
@@ -52,6 +52,9 @@ func (d *Daemon) claudeCachedUsageSets(roots []surface.ClaudeConfigRoot, now tim
 		if root.SignedInAs != nil {
 			set.Account = root.SignedInAs.Email
 		}
+		if set.Login == surface.ClaudeLoginProxy {
+			set.Proxy = &usageProxy{Name: root.Proxy}
+		}
 		if root.Error == "" && set.Login == surface.ClaudeLoginClaudeAI {
 			set.Meters = usageMeters("claude", d.claudeUsage.cached(reader, root, now), now)
 		}
@@ -60,10 +63,16 @@ func (d *Daemon) claudeCachedUsageSets(roots []surface.ClaudeConfigRoot, now tim
 	return sets
 }
 
-func claudePickCandidates(sets []usageSet, now time.Time) []claudepick.Candidate {
+func claudePickCandidates(sets []usageSet, pools map[string][]claudepick.Member, now time.Time) []claudepick.Candidate {
 	candidates := make([]claudepick.Candidate, 0, len(sets))
 	for _, set := range sets {
 		candidate := claudepick.Candidate{Name: set.Name, Root: set.Root, Account: set.Account, Login: set.Login, Primary: set.Primary}
+		if set.Login == surface.ClaudeLoginProxy {
+			candidate.Account = ""
+			if set.Proxy != nil {
+				candidate.Pool = pools[set.Proxy.Name]
+			}
+		}
 		for _, meter := range set.Meters {
 			if !meter.Until.IsZero() && !now.Before(meter.Until) {
 				continue

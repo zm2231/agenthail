@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/proxyacct"
@@ -21,11 +22,13 @@ type proxyUsageCache struct {
 }
 
 type proxyUsageEntry struct {
-	mu       sync.Mutex
-	client   proxyacct.Proxy
-	readAt   time.Time
-	accounts []proxyacct.Account
-	err      error
+	mu         sync.Mutex
+	client     proxyacct.Proxy
+	readAt     time.Time
+	accounts   []proxyacct.Account
+	err        error
+	last       atomic.Pointer[proxyReading]
+	refreshing atomic.Bool
 }
 
 type proxyReading struct {
@@ -82,6 +85,19 @@ func (c *proxyUsageCache) read(ctx context.Context, config proxyacct.Config, now
 		}
 		cancel()
 		entry.readAt = now
+		entry.last.Store(&proxyReading{accounts: entry.accounts, readAt: entry.readAt, err: entry.err})
 	}
 	return proxyReading{accounts: entry.accounts, readAt: entry.readAt, err: entry.err}
+}
+
+func (c *proxyUsageCache) cached(config proxyacct.Config, now time.Time) *proxyReading {
+	entry := c.entry(config)
+	last := entry.last.Load()
+	if (last == nil || now.Sub(last.readAt) >= proxyUsageTTL) && entry.refreshing.CompareAndSwap(false, true) {
+		go func() {
+			defer entry.refreshing.Store(false)
+			c.read(context.Background(), config, time.Now())
+		}()
+	}
+	return last
 }
