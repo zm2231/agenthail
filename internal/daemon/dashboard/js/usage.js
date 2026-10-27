@@ -1,6 +1,7 @@
 import { $ } from "./dom.js";
 import { fit, wrapped } from "./usage-fit.js";
 import { expandProxies, ownsByProxy } from "./usage-proxy.js";
+import { critical, strip } from "./usage-strip.js";
 
 export const POLL_MS = 120_000;
 const REDRAW_MS = 60_000;
@@ -66,8 +67,6 @@ export function shortLabel(meter) {
   if (meter.kind === "weekly_scoped") return `Week, ${meter.scope || "one model"}`;
   return meter.label;
 }
-
-const critical = (meter) => meter.severity === "critical" || meter.percent >= 90;
 
 export function loginLabel(login) {
   return { api_key: "API key", signed_out: "signed out" }[login] || null;
@@ -141,7 +140,7 @@ export function accounts(sets, now) {
       signIn: set.login || null,
       group: set.group || null,
       capsDiffer: caps.length > 1,
-      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      subtitle: [set.provider === "claude" && !set.group && set.name !== name ? set.name : null, caps.length === 1 ? `cap ${percent(caps[0])}` : null, meters.some((meter) => meter.ceiling && meter.percent >= meter.ceiling) ? "over cap" : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
       spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
     };
   });
@@ -312,7 +311,7 @@ export function start({ document, fetch = (...args) => globalThis.fetch(...args)
     drawPanel();
   };
   const draw = () => {
-    render(document, element, accounts(sets, now()), sessions());
+    render(document, element, strip(accounts(sets, now())), sessions());
     fit(element, wrapped);
     drawPanel();
   };

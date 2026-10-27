@@ -41,7 +41,8 @@ struct UsageAccount: Equatable, Identifiable {
 
     func subtitle(now: Date) -> String? {
         let cap = caps.count == 1 ? caps.first.map { "cap " + UsageMeterText.percent($0) } : nil
-        let parts = [provider == "claude" && group == nil && rootName != login ? rootName : nil, cap, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
+        let over = meters.contains { meter in meter.ceiling.map { $0 > 0 && meter.percent >= $0 } ?? false } ? "over cap" : nil
+        let parts = [provider == "claude" && group == nil && rootName != login ? rootName : nil, cap, over, asOf.map { UsageMeterText.read($0, now: now) }].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

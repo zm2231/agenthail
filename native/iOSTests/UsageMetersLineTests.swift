@@ -49,6 +49,7 @@ final class UsageMetersLineTests: XCTestCase {
         XCTAssertTrue(spoken[3].hasPrefix("API key on build-box: Signed in with an API key"), spoken[3])
         XCTAssertEqual(accounts.map(\.title), ["demo", "Codex", "team", "build-box (API key)", "ops", "lead", "spare"])
         XCTAssertTrue(spoken[6].hasPrefix("spare@example.com via the shared proxy: cooling for"), spoken[6])
+        XCTAssertEqual(UsageProxies.strip(accounts).map(\.title), ["demo", "Codex", "team", "build-box (API key)", "shared · lead"], "the line gives a proxy one chip")
         XCTAssertEqual(UsageMeterText.shortLabel(accounts[2].meters[2]), "Week, Fable")
     }
 }

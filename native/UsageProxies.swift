@@ -85,6 +85,31 @@ enum UsageProxies {
         }
     }
 
+    static func strip(_ accounts: [UsageAccount]) -> [UsageAccount] {
+        let groups = byProxy(accounts)
+        var placed = Swift.Set<String>()
+        return accounts.compactMap { account in
+            guard let group = account.group else { return account }
+            guard placed.insert(group.id).inserted, let view = groups.first(where: { $0.id == group.id }) else { return nil }
+            return chip(view)
+        }
+    }
+
+    private static func worse(_ a: UsageReport.Meter, _ b: UsageReport.Meter) -> Bool {
+        let rank = { (meter: UsageReport.Meter) in (meter.severity == "critical" || meter.percent >= 90 ? 1 : 0, meter.percent) }
+        return rank(a) > rank(b)
+    }
+
+    private static func chip(_ view: UsageProxyGroupView) -> UsageAccount {
+        let rated = view.accounts.compactMap { account in account.meters.max { worse($1, $0) }.map { (account, $0) } }
+        let top = rated.max { worse($1.1, $0.1) }
+        let lead = top?.0 ?? view.accounts[0]
+        let suffix = " · " + view.group.name
+        let name = lead.title.hasSuffix(suffix) ? String(lead.title.dropLast(suffix.count)) : lead.title
+        let title = top != nil ? view.group.name + " · " + name : lead.provider == "proxy" ? lead.title : view.group.name
+        return UsageAccount(id: "proxy:" + view.group.id, title: title, login: lead.login, signIn: lead.signIn, host: lead.host, hostId: lead.hostId, local: lead.local, provider: lead.provider, rootName: lead.rootName, root: lead.root, meters: top.map { [$0.1] } ?? [], problem: top == nil ? lead.problem : nil, problemDetail: top == nil ? lead.problemDetail : nil, asOf: lead.asOf, group: lead.group)
+    }
+
     static func byProxy(_ accounts: [UsageAccount]) -> [UsageProxyGroupView] {
         var order: [String] = []
         var grouped: [String: (UsageProxyGroup, [UsageAccount])] = [:]

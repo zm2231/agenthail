@@ -41,6 +41,9 @@ final class UsageMetersUITests: XCTestCase {
         for _ in 0..<4 where !cooling.exists { app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(app.staticTexts["ops@example.com"].exists && cooling.exists, "a proxy's accounts show as their own group, with a cooling account's wait")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'shared (proxy)'")).firstMatch.exists, "the group is titled for its proxy")
+        let viaProxy = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Tighten the release notes'")).firstMatch
+        for _ in 0..<3 where !viaProxy.isHittable { app.collectionViews.firstMatch.swipeUp() }
+        XCTAssertTrue(viaProxy.exists, "the group lists the sessions on roots through its proxy")
         let proxy = XCTAttachment(screenshot: app.screenshot())
         proxy.name = "usage accounts sheet, proxy group"
         proxy.lifetime = .keepAlways

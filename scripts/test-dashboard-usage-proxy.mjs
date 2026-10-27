@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { accounts, activeSessions, byProxy, renderPanel } from "../internal/daemon/dashboard/js/usage.js";
+import { accounts, activeSessions, byProxy, render, renderPanel } from "../internal/daemon/dashboard/js/usage.js";
+import { strip } from "../internal/daemon/dashboard/js/usage-strip.js";
 import { rootTitles } from "../internal/daemon/dashboard/js/start-root-labels.js";
 
 const now = Date.parse("2026-10-26T12:00:00Z");
@@ -52,8 +53,17 @@ renderPanel(document, panel, list, sessions, now, () => {});
 const heads = panel.children.filter((c) => c.tagName === "h3").map((c) => texts(c).join(""));
 assert.deepEqual(heads, ["laptop", "shared (proxy) read from server", "local (proxy) read from server"], "each proxy is its own group, after the hosts");
 const all = texts(panel);
-assert.equal(dev.subtitle, "cap 60% · read 12m ago", "an account's one proxy ceiling shows once, beside when it was read");
-assert.ok(all.includes("cap 60% · read 12m ago"));
+assert.equal(dev.subtitle, "cap 60% · over cap · read 12m ago", "an account's one proxy ceiling shows once, and says when a window is over it");
+assert.ok(all.includes("cap 60% · over cap · read 12m ago"));
+const chips = strip(list);
+assert.deepEqual(chips.map((a) => a.title), ["dev", "shared · dev", "local (proxy)"], "each proxy is one chip named for it and its fullest account");
+assert.deepEqual(chips[1].meters.map((m) => m.percent), [61]);
+assert.equal(chips[1].critical, true, "the proxy chip carries its worst window, in its tone");
+assert.ok(chips[1].spoken.includes("team@example.com via the shared proxy: cooling for 2h 20m"), "the chip still reads out every account");
+const line = new Node("div");
+render(document, line, chips);
+assert.equal(line.children.filter((c) => c.className.startsWith("usage-chip")).length, 3);
+assert.ok(chips[2].meters.length === 0 && chips[2].problem, "an unreadable proxy's chip still shows why");
 const mixed = accounts([{ ...sets[3], accounts: [{ ...sets[3].accounts[0], meters: [meter("session", "Claude", 18, { ceiling: 60 }), meter("weekly", "Claude week", 41, { ceiling: 80 })] }] }], now)[0];
 assert.equal(mixed.capsDiffer, true);
 const mixedPanel = new Node("div");

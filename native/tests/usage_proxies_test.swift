@@ -36,7 +36,12 @@ struct UsageProxiesTest {
         check(dev.critical && dev.fullTitle == "dev@example.com via the shared proxy", "an account at its proxy ceiling is critical: \(dev.fullTitle)")
         check(accounts[2].problem == "cooling for 2h 20m" && accounts[2].problemTone([]) == .quiet, "a cooling account says for how long")
         check(accounts[4].problemTone([]) == .warning, "a proxy that cannot be read warns")
-        check(dev.subtitle(now: now) == "cap 60% · read 12m ago" && dev.rowLabel(dev.meters[1]) == "Week", "one proxy ceiling shows once beside the reading: \(dev.subtitle(now: now) ?? "")")
+        check(dev.subtitle(now: now) == "cap 60% · over cap · read 12m ago" && dev.rowLabel(dev.meters[1]) == "Week", "one proxy ceiling shows once, and says when a window is over it: \(dev.subtitle(now: now) ?? "")")
+
+        let strip = UsageProxies.strip(accounts)
+        check(strip.map(\.title) == ["dev", "shared · dev", "local (proxy)"], "each proxy is one chip named for it and its fullest account: \(strip.map(\.title))")
+        check(strip[1].meters.map(\.percent) == [61] && strip[1].critical, "the proxy chip carries its worst window, in its tone")
+        check(strip[2].meters.isEmpty && strip[2].problemTone([]) == .warning, "an unreadable proxy's chip still warns")
 
         let groups = UsageProxies.byProxy(accounts)
         check(groups.map(\.group.title) == ["shared (proxy)", "local (proxy)"] && groups[0].accounts.count == 3 && groups[0].readable && !groups[1].readable, "one group per proxy")
