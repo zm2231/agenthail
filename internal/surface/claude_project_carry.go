@@ -2,6 +2,7 @@ package surface
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 type claudeCarryAdd struct {
 	path    string
+	value   gjson.Result
 	item    gjson.Result
 	created bool
 }
@@ -65,7 +67,7 @@ func mergeClaudeProject(data []byte, entryPath string, entry gjson.Result) ([]by
 		switch {
 		case !have.Exists():
 			data, err = sjson.SetRawBytes(data, path, []byte(value.Raw))
-			adds = append(adds, claudeCarryAdd{path: path})
+			adds = append(adds, claudeCarryAdd{path: path, value: value})
 		case value.IsObject() && have.IsObject():
 			value.ForEach(func(member, config gjson.Result) bool {
 				memberPath := path + "." + escapeSettingsPath(member.String())
@@ -73,7 +75,7 @@ func mergeClaudeProject(data []byte, entryPath string, entry gjson.Result) ([]by
 					return true
 				}
 				data, err = sjson.SetRawBytes(data, memberPath, []byte(config.Raw))
-				adds = append(adds, claudeCarryAdd{path: memberPath})
+				adds = append(adds, claudeCarryAdd{path: memberPath, value: config})
 				return err == nil
 			})
 		case value.IsArray() && have.IsArray():
@@ -109,12 +111,14 @@ func unmergeClaudeProject(data []byte, added []claudeCarryAdd) ([]byte, error) {
 			continue
 		}
 		if !add.item.Exists() {
-			data, err = sjson.DeleteBytes(data, add.path)
+			if sameJSON(gjson.GetBytes(data, add.path), add.value) {
+				data, err = sjson.DeleteBytes(data, add.path)
+			}
 			continue
 		}
 		items := gjson.GetBytes(data, add.path).Array()
 		for index := len(items) - 1; index >= 0; index-- {
-			if items[index].Raw == add.item.Raw {
+			if sameJSON(items[index], add.item) {
 				data, err = sjson.DeleteBytes(data, fmt.Sprintf("%s.%d", add.path, index))
 				break
 			}
@@ -125,11 +129,22 @@ func unmergeClaudeProject(data []byte, added []claudeCarryAdd) ([]byte, error) {
 
 func claudeArrayHas(array, item gjson.Result) bool {
 	for _, have := range array.Array() {
-		if have.Raw == item.Raw {
+		if sameJSON(have, item) {
 			return true
 		}
 	}
 	return false
+}
+
+func sameJSON(a, b gjson.Result) bool {
+	if !a.Exists() || !b.Exists() {
+		return false
+	}
+	var left, right bytes.Buffer
+	if json.Compact(&left, []byte(a.Raw)) != nil || json.Compact(&right, []byte(b.Raw)) != nil {
+		return false
+	}
+	return bytes.Equal(left.Bytes(), right.Bytes())
 }
 
 // Running Claude processes rewrite .claude.json too, so a change lands only on the bytes it read.

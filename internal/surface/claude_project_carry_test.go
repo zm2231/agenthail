@@ -108,6 +108,34 @@ func TestUndoingACarryKeepsWhatClaudeWroteAfterIt(t *testing.T) {
 	}
 }
 
+func TestUndoingACarryKeepsAValueClaudeRewroteAfterIt(t *testing.T) {
+	home := t.TempDir()
+	from, to := filepath.Join(home, ".claude-one"), filepath.Join(home, ".claude-two")
+	writeClaudeJSON(t, from, `{"projects":{"/work/app":{"allowedTools":["Bash"],"mcpServers":{"docs":{"command":"docs-mcp"},"search":{"command":"search-mcp"}},"hasTrustDialogAccepted":true}}}`)
+	target := writeClaudeJSON(t, to, `{"projects":{"/work/app":{"allowedTools":["Edit"],"mcpServers":{}}}}`)
+	undo, err := CarryClaudeProject(home, from, to, "/work/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(target)
+	data, _ = sjson.SetBytes(data, "projects./work/app.mcpServers.docs.command", "docs-mcp-v2")
+	data, _ = sjson.SetBytes(data, "projects./work/app.hasTrustDialogAccepted", false)
+	if err := os.WriteFile(target, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(target)
+	entry := gjson.GetBytes(data, "projects./work/app")
+	if entry.Get("mcpServers.docs.command").String() != "docs-mcp-v2" || !entry.Get("hasTrustDialogAccepted").Exists() {
+		t.Fatalf("undo removed values Claude rewrote: %s", data)
+	}
+	if entry.Get("mcpServers.search").Exists() || entry.Get("allowedTools").Raw != `["Edit"]` {
+		t.Fatalf("undo left carried values Claude did not touch: %s", data)
+	}
+}
+
 func TestCarryClaudeProjectLeavesNonObjectEntriesAlone(t *testing.T) {
 	home := t.TempDir()
 	from, to := filepath.Join(home, ".claude-one"), filepath.Join(home, ".claude-two")
