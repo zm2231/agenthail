@@ -147,23 +147,71 @@ enum ScrimField {
         }
     }
 
-    /// Window layers blend between linear and sRGB-encoded results (measured), so a layered floor takes the larger.
-    static func floor(image: Raster, tint: Raster, in rect: Rect, polarity: Polarity, boundary: Float, layered: Bool = false) -> [Float] {
+    struct Wash: Equatable, Sendable {
+        var color: (Float, Float, Float)
+        var strength: Float
+        var boundary: Float
+
+        static func == (a: Wash, b: Wash) -> Bool {
+            a.color == b.color && a.strength == b.strength && a.boundary == b.boundary
+        }
+
+        func over(_ c: (Float, Float, Float)) -> (Float, Float, Float) {
+            (c.0 + (color.0 - c.0) * strength, c.1 + (color.1 - c.1) * strength, c.2 + (color.2 - c.2) * strength)
+        }
+    }
+
+    /// Window layers blend between linear and sRGB-encoded results (measured), so a layered floor takes the larger; a wash composites encoded over either.
+    static func floor(image: Raster, tint: Raster, in rect: Rect, polarity: Polarity, boundary: Float, layered: Bool = false, wash: Wash? = nil) -> [Float] {
         var out = [Float](repeating: 0, count: rect.width * rect.height)
         for y in 0..<rect.height {
             for x in 0..<rect.width {
                 let i = ((rect.y + y) * image.width + rect.x + x) * 3
-                let lb = luminance(image.rgb[i], image.rgb[i + 1], image.rgb[i + 2])
-                guard !passes(lb, boundary: boundary, polarity: polarity) else { continue }
-                let lt = luminance(tint.rgb[i], tint.rgb[i + 1], tint.rgb[i + 2])
-                var a = lb == lt ? 1 : (lb - boundary) / (lb - lt)
-                if layered {
-                    a = max(a, encodedFloor(base: (image.rgb[i], image.rgb[i + 1], image.rgb[i + 2]), tint: (tint.rgb[i], tint.rgb[i + 1], tint.rgb[i + 2]), polarity: polarity, boundary: boundary))
+                let base = (image.rgb[i], image.rgb[i + 1], image.rgb[i + 2])
+                let shade = (tint.rgb[i], tint.rgb[i + 1], tint.rgb[i + 2])
+                var a: Float = 0
+                let lb = luminance(base.0, base.1, base.2)
+                if !passes(lb, boundary: boundary, polarity: polarity) {
+                    let lt = luminance(shade.0, shade.1, shade.2)
+                    a = lb == lt ? 1 : (lb - boundary) / (lb - lt)
+                    if layered {
+                        a = max(a, encodedFloor(base: base, tint: shade, polarity: polarity, boundary: boundary))
+                    }
+                }
+                if let wash {
+                    a = max(a, washedFloor(base: base, tint: shade, wash: wash, polarity: polarity, layered: layered))
                 }
                 out[y * rect.width + x] = (min(max(a, 0), 1) * 255).rounded(.up) / 255
             }
         }
         return out
+    }
+
+    static func washedFloor(base: (Float, Float, Float), tint: (Float, Float, Float), wash: Wash, polarity: Polarity, layered: Bool) -> Float {
+        let boundary = wash.boundary
+        let lb = (linear(base.0), linear(base.1), linear(base.2)), lt = (linear(tint.0), linear(tint.1), linear(tint.2))
+        func shown(_ a: Float) -> Float {
+            let blended = (gamma(lb.0 + (lt.0 - lb.0) * a), gamma(lb.1 + (lt.1 - lb.1) * a), gamma(lb.2 + (lt.2 - lb.2) * a))
+            let washed = wash.over(blended)
+            return luminance(washed.0, washed.1, washed.2)
+        }
+        var floor: Float
+        if passes(shown(0), boundary: boundary, polarity: polarity) {
+            floor = 0
+        } else if !passes(shown(1), boundary: boundary, polarity: polarity) {
+            floor = 1
+        } else {
+            var low: Float = 0, high: Float = 1
+            for _ in 0..<12 {
+                let mid = (low + high) / 2
+                if passes(shown(mid), boundary: boundary, polarity: polarity) { high = mid } else { low = mid }
+            }
+            floor = high
+        }
+        if layered {
+            floor = max(floor, encodedFloor(base: wash.over(base), tint: wash.over(tint), polarity: polarity, boundary: boundary))
+        }
+        return floor
     }
 
     static func encodedFloor(base: (Float, Float, Float), tint: (Float, Float, Float), polarity: Polarity, boundary: Float) -> Float {
@@ -179,11 +227,11 @@ enum ScrimField {
         return high
     }
 
-    static func needs(image: Raster, tint: Raster, texts: [Rect], polarity: Polarity, boundary: Float, layered: Bool = false) -> [Float] {
+    static func needs(image: Raster, tint: Raster, texts: [Rect], polarity: Polarity, boundary: Float, layered: Bool = false, wash: Wash? = nil) -> [Float] {
         var need = [Float](repeating: 0, count: image.width * image.height)
         for text in texts {
             let rect = text.clamped(width: image.width, height: image.height)
-            let local = floor(image: image, tint: tint, in: rect, polarity: polarity, boundary: boundary, layered: layered)
+            let local = floor(image: image, tint: tint, in: rect, polarity: polarity, boundary: boundary, layered: layered, wash: wash)
             for y in 0..<rect.height {
                 for x in 0..<rect.width {
                     let i = (rect.y + y) * image.width + rect.x + x

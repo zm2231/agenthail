@@ -12,6 +12,7 @@ struct BackdropLayers: @unchecked Sendable {
         let minimum: Float
         let scrim: CGImage?
         let scrimPeak: Float
+        var plate: CGImage? = nil
     }
 
     let size: CGSize
@@ -22,6 +23,7 @@ struct BackdropLayers: @unchecked Sendable {
     let scrimColor: BackdropRGB
     let paneTint: BackdropRGB
     let panes: [BackdropRole: Pane]
+    var selectionReadable = true
 }
 
 extension BackdropRenderer {
@@ -51,9 +53,14 @@ extension BackdropRenderer {
         }
         let scrimTint = ScrimField.tint(for: open, mode: scrimMode, polarity: spec.polarity, boundary: boundary)
         let whole = [ScrimField.Rect(x: 0, y: 0, width: pw, height: ph)]
-        func field(_ behind: ScrimField.Raster, _ tint: ScrimField.Raster) -> [Float] {
-            let need = ScrimField.needs(image: behind, tint: tint, texts: whole, polarity: spec.polarity, boundary: boundary, layered: true)
+        func field(_ behind: ScrimField.Raster, _ tint: ScrimField.Raster, wash: ScrimField.Wash? = nil) -> [Float] {
+            let need = ScrimField.needs(image: behind, tint: tint, texts: whole, polarity: spec.polarity, boundary: boundary, layered: true, wash: wash)
             return ScrimField.fieldOpacity(need: need, width: pw, height: ph)
+        }
+        let selection = spec.selection.map { selection in
+            let rows = selection.roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }
+            return ScrimField.Wash(color: (selection.color.x, selection.color.y, selection.color.z), strength: BackdropSpec.selectionStrength,
+                                   boundary: ScrimField.boundary(roles: rows, polarity: spec.polarity, target: spec.target))
         }
 
         let scrim = spec.readability ? layerImage(scrimTint, alpha: field(open, scrimTint)) : nil
@@ -66,14 +73,28 @@ extension BackdropRenderer {
             }
             let behind = transparent ? nil : bases[style.strength]
             var above: (image: CGImage, peak: Float)?
+            var plate: CGImage?
             if spec.readability, !spec.solidPanes, style.minimum < 1, let raster = analysis(behind) {
                 let minimum = style.minimum
-                above = layerImage(flatTint, alpha: field(raster, flatTint).map { max(($0 - minimum) / (1 - minimum), 0) })
+                let bare = field(raster, flatTint)
+                above = layerImage(flatTint, alpha: bare.map { max(($0 - minimum) / (1 - minimum), 0) })
+                if let selection {
+                    let washed = field(raster, flatTint, wash: selection)
+                    plate = layerImage(flatTint, alpha: zip(bare, washed).map { bare, washed in
+                        let b = max(bare, minimum), w = max(washed, minimum)
+                        return w > b && b < 1 ? (w - b) / (1 - b) : 0
+                    })?.image
+                }
             }
-            panes[role] = BackdropLayers.Pane(base: behind, minimum: style.minimum, scrim: above?.image, scrimPeak: above?.peak ?? 0)
+            panes[role] = BackdropLayers.Pane(base: behind, minimum: style.minimum, scrim: above?.image, scrimPeak: above?.peak ?? 0, plate: plate)
+        }
+        var readable = true
+        if let selection {
+            let washed = selection.over(paneTint)
+            readable = ScrimField.passes(ScrimField.luminance(washed.0, washed.1, washed.2), boundary: selection.boundary, polarity: spec.polarity)
         }
         return BackdropLayers(size: spec.size, polarity: spec.polarity, base: sharp, scrim: scrim?.image, scrimPeak: scrim?.peak ?? 0, scrimColor: mean(scrimTint),
-                              paneTint: BackdropRGB(paneTint.0, paneTint.1, paneTint.2), panes: panes)
+                              paneTint: BackdropRGB(paneTint.0, paneTint.1, paneTint.2), panes: panes, selectionReadable: readable)
     }
 
     /// A blur of at least 4 points hides the difference, so blurred bases render at one pixel per point.

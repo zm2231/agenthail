@@ -13,6 +13,7 @@ struct BackdropLayerStyle: Equatable {
     enum Kind: Equatable {
         case surface
         case card
+        case plate
     }
 
     var kind: Kind
@@ -126,6 +127,20 @@ final class BackdropLayerView: NSView {
         let pane = style.role.flatMap { layers?.panes[$0] }
         let stale = layers.map { $0.size != content.bounds.size } ?? true
 
+        if style.kind == .plate {
+            base.isHidden = true
+            tint.isHidden = true
+            scrim.frame = box.bounds
+            scrim.mask = nil
+            scrim.isHidden = stale || pane?.plate == nil
+            scrimImage.frame = window
+            scrimImage.contents = pane?.plate
+            scrimImage.isHidden = false
+            scrimFlat.isHidden = true
+            box.mask = nil
+            clip.mask = nil
+            return
+        }
         base.isHidden = style.kind == .card
         base.frame = window
         base.contents = style.role == nil ? layers?.base : pane?.base
