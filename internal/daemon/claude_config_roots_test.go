@@ -50,7 +50,7 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 	if err := json.Unmarshal(response.Body.Bytes(), &options); err != nil || len(options.ClaudeConfigRoots) != 2 {
 		t.Fatalf("options=%s err=%v", response.Body.String(), err)
 	}
-	if work := options.ClaudeConfigRoots[1]; work.Name != "work" || work.SignedInAs == nil || work.SignedInAs.Email != "work@example.com" || work.Primary {
+	if work := options.ClaudeConfigRoots[1]; work.Name != "work" || work.SignedInAs == nil || work.SignedInAs.Email != "work@example.com" || work.Primary || work.Login != surface.ClaudeLoginClaudeAI {
 		t.Fatalf("work=%+v", work)
 	}
 

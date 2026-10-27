@@ -33,9 +33,11 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
     let root: String
     let primary: Bool
     var signedInAs: Login? = nil
+    var login: String? = nil
     var usage: ProviderUsage? = nil
     var id: String { root }
     var signedIn: Bool { signedInAs != nil }
+    var selectable: Bool { signedIn || login == "api_key" }
 
     func exhaustedUntil(now: Date = Date()) -> Date? {
         let resets = (usage?.limits ?? []).filter { $0.percent >= 100 }.compactMap { limit in
@@ -44,13 +46,6 @@ struct ClaudeConfigRootOption: Decodable, Hashable, Identifiable {
         return resets.max()
     }
 
-    var menuLabel: String {
-        var parts = [name, signedInAs.map { "signed in as \($0.email ?? "unknown")" } ?? "signed out"]
-        if let until = exhaustedUntil() {
-            parts.append("out of usage until \(until.formatted(date: .abbreviated, time: .shortened))")
-        }
-        return parts.joined(separator: " · ")
-    }
 }
 
 struct SessionAdoptResult: Decodable, Hashable {
@@ -152,8 +147,8 @@ struct ClaudeRootPick: Decodable, Hashable {
     let name: String
     var account: String? = nil
     let reason: String
-
-    var menuLabel: String { "Automatic · \(name)\(account.map { " (\($0))" } ?? ""): \(reason)" }
+    var sessionCeiling: Double? = nil
+    var weeklyCeiling: Double? = nil
 }
 
 struct ClaudeRootUsage: Decodable {

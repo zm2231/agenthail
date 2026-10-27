@@ -89,16 +89,18 @@ struct NewSessionSheet: View {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
+                            let roots = hosts.claudeConfigRoots
+                            let titles = ClaudeRootLabels.titles(roots, host: hostName)
                             Section {
-                                Picker("Config folder", selection: $claude.configRoot) {
-                                    Text(hosts.claudePick.map { "Automatic · \($0.name)" } ?? "Automatic").tag("")
-                                    ForEach(hosts.claudeConfigRoots) { root in
-                                        Text(root.menuLabel).tag(root.root).selectionDisabled(!root.signedIn)
+                                Picker("Account", selection: $claude.configRoot) {
+                                    Text(ClaudeRootLabels.automatic(hosts.claudePick, roots: roots, titles: titles)).tag("")
+                                    ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
+                                        Text(ClaudeRootLabels.option(root, title: title, pick: hosts.claudePick)).tag(root.root).selectionDisabled(!root.selectable)
                                     }
                                 }
                             } footer: {
                                 if claude.configRoot.isEmpty, let pick = hosts.claudePick {
-                                    Text(pick.menuLabel)
+                                    Text(ClaudeRootLabels.reason(pick, roots: roots, titles: titles))
                                 }
                             }
                         }

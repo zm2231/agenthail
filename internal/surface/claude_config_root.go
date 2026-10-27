@@ -23,6 +23,7 @@ type ClaudeConfigRoot struct {
 	Root          string       `json:"root"`
 	Primary       bool         `json:"primary"`
 	SignedInAs    *ClaudeLogin `json:"signedInAs,omitempty"`
+	Login         string       `json:"login,omitempty"`
 	Signin        string       `json:"signin,omitempty"`
 	SigninProblem string       `json:"signinProblem,omitempty"`
 	Usage         *Usage       `json:"usage,omitempty"`

@@ -42,10 +42,10 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		}
 	}()
 	var request struct {
-		Action           string `json:"action"`
-		CodexRecentHours int    `json:"codexRecentHours"`
-		BusyDelivery     string `json:"busyDelivery"`
-		PersonName       string `json:"personName"`
+		Action           string            `json:"action"`
+		CodexRecentHours int               `json:"codexRecentHours"`
+		BusyDelivery     string            `json:"busyDelivery"`
+		PersonName       string            `json:"personName"`
 		ResumeAfterLimit bool              `json:"resumeAfterLimit"`
 		ClaudeAccounts   claudepick.Policy `json:"claudeAccounts"`
 	}
