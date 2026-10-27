@@ -65,7 +65,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 				}
 			}
 			if limit, ok := read.Limits[record.ID]; ok {
-				row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt}
+				row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
 			} else if record.HostID == "" {
 				row.LimitResume = nil
 			}

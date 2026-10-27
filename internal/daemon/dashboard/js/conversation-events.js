@@ -20,6 +20,7 @@ import { loadSessionMetadata } from "./session-metadata.js";
 import { expandAgentsPreference, holdAgentRow, setExpandAgentsPreference } from "./agent-messages.js";
 import { renderChat } from "./chat.js";
 import { renderContextUsage } from "./context-usage.js";
+import { limitMoveQuestion } from "./limit-move.js";
 
 export function bindConversationEvents() {
   document.addEventListener("click", async (event) => {
@@ -241,6 +242,22 @@ export function bindConversationEvents() {
     if (event.target.closest("[data-subagents-all]") && app.selected && app.history) {
       app.allSubagents = true;
       loadSessionMetadata(app.selected.id, app.history);
+      return;
+    }
+    const move = event.target.closest("[data-limit-move]");
+    if (move) {
+      if (!window.confirm(limitMoveQuestion(move))) return;
+      move.disabled = true;
+      try {
+        await action("limit-move", { configRoot: move.dataset.limitMove });
+        toast(`Moved to ${move.dataset.limitMoveName}.`);
+        await load();
+        await selectSession(app.selected.id);
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        move.disabled = false;
+      }
       return;
     }
     const control = event.target.closest("[data-action]");

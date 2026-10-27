@@ -184,7 +184,34 @@ is refused as a target, because the proxy chooses the account itself.
 A move to another host carries no project config; the target's root starts
 without the source's trust, allowed tools or local MCP servers.
 
+A move that succeeds releases the session's usage-limit stop, if it is
+still waiting, with the resume notice, so the session continues at once
+under its new root. A canceled or lapsed stop stays held.
+
+### Moving at a usage limit
+
+While a limit stop waits and the host has two or more roots, the dashboard
+projection's `limitResume.moveTo{root, account, reason}` names the target
+`claudepick.MoveTarget` chooses from the cached usage readings: a claude.ai
+root other than the stop's, with a reading, under both ceilings, the least
+loaded first. Proxy, API-key, signed-out and unread roots are never
+offered. The offers are computed for every waiting stop at once and kept
+five seconds, or until a stop changes. The `limit-move` action
+(`configRoot` optional, defaulting to the offer) runs the move above, and
+refuses a session whose stop is not waiting. It and the automatic move
+claim the waiting stop first; while the claim holds, `limit-resume` and
+`limit-resume-cancel` on that session are refused, so a cancel either
+lands before the move starts or after it finishes.
+
+With the policy's `autoMove` on, each limit pass makes at most one move:
+the oldest waiting stop with an offer, not on a proxy root, not tried
+before and still waiting when the move starts, whose target has not taken
+a move in the last 30 seconds. The move runs inside the pass, so the
+pass's own resumes never interleave with it. It never
+waits for a busy session or stops a terminal, so those are refused and the
+stop stays.
+
 ## Not in this slice
 
-A working tree with uncommitted changes is refused. Moving one, move
-controls in the Mac and iPhone apps, and Codex sessions come later.
+A working tree with uncommitted changes is refused. Moving one, Mac and
+iPhone controls for a move to another host, and Codex sessions come later.

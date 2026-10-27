@@ -483,6 +483,19 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func moveToAccount(sessionID: String, root: String) async -> Bool {
+        guard let api else { return false }
+        do {
+            try await api.moveToAccount(sessionID: sessionID, root: root)
+            operationError = nil
+            _ = await refresh(fresh: true)
+            return true
+        } catch {
+            operationError = AgenthailAPIError.userMessage(error)
+            return false
+        }
+    }
+
     func loadDevices() async {
         guard let api else { return }
         do {

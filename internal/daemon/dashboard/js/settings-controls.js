@@ -78,6 +78,7 @@ export function bindSettingsEvents() {
         preferred: $("#settings-claude-preferred").value,
         sessionCeiling: Number($("#settings-claude-session").value),
         weeklyCeiling: Number($("#settings-claude-weekly").value),
+        autoMove: $("#settings-claude-automove").value === "on",
       } });
       await load(true);
       toast("New Claude sessions follow the saved account choice.");

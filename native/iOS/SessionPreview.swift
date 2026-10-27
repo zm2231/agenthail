@@ -101,8 +101,11 @@ struct SessionPreview: View {
     /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        if arguments.contains("--preview-limit-move") {
+            detail["limitResume"] = ["state": "waiting", "resetsAt": "2026-09-12T18:20:00Z", "moveTo": ["root": "team", "account": "team@example.com", "reason": "most headroom, session 18%, week 40%"]]
+        }
         if arguments.contains("--preview-questions") {
             var session = detail["session"] as! [String: Any]
             session["waitingOn"] = previewQuestions

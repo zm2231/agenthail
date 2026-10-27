@@ -592,6 +592,16 @@ final class SessionPane: ObservableObject, Identifiable {
         runControl(action: resume ? "limit-resume" : "limit-resume-cancel", sessionID: sessionID, modelID: nil)
     }
 
+    func moveAfterLimit(to root: String) {
+        guard let sessionID = selectedSessionID, !controlPending, removedSession == nil else { return }
+        controlPending = true
+        Task {
+            let succeeded = await model.moveToAccount(sessionID: sessionID, root: root)
+            controlPending = false
+            if succeeded, !closed, selectedSessionID == sessionID, removedSession == nil { startMetadataLoad(sessionID) }
+        }
+    }
+
     private func runControl(action: String, sessionID: String, modelID: String?) {
         guard !controlPending, removedSession == nil else { return }
         controlPending = true

@@ -41,10 +41,12 @@ type limitResumer struct {
 	seen        map[string]time.Time
 	settled     map[string]time.Time
 	lastRelease map[string]time.Time
+	moves       *limitMoves
+	claims      limitMoveClaims
 }
 
 func newLimitResumer() *limitResumer {
-	return &limitResumer{seen: map[string]time.Time{}, settled: map[string]time.Time{}, lastRelease: map[string]time.Time{}}
+	return &limitResumer{seen: map[string]time.Time{}, settled: map[string]time.Time{}, lastRelease: map[string]time.Time{}, moves: newLimitMoves()}
 }
 
 func (d *Daemon) runLimitResumes(ctx context.Context) {
@@ -79,6 +81,7 @@ func (d *Daemon) resumeAfterLimitEnabled() bool {
 // resumes it; a paired host shows what this one publishes.
 func (d *Daemon) resumeAfterLimits(ctx context.Context, now time.Time) {
 	d.sweepLimitStops(ctx, now)
+	d.autoMoveLimitStops(ctx, now)
 	resumes, err := d.Registry.LimitResumes()
 	if err != nil {
 		d.log.Printf("read usage-limit stops: %s", err)
@@ -151,6 +154,7 @@ func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
 			}
 		}
 	}
+	d.limitResumes.moves.forget()
 }
 
 // resumeAccount resumes the sessions waiting on one account. Every session
@@ -251,6 +255,7 @@ func (d *Daemon) setLimitResume(stop registry.LimitResume, from []registry.Limit
 }
 
 func (d *Daemon) limitResumeChanged(sessionID string) {
+	d.limitResumes.moves.forget()
 	d.publishEvent("state.changed", sessionID, map[string]string{"source": "limit-resume"})
 	d.requestObservation()
 }
@@ -325,13 +330,14 @@ type dashboardLimitResume struct {
 	State     registry.LimitResumeState `json:"state"`
 	RefusedAt time.Time                 `json:"refusedAt"`
 	ResetsAt  time.Time                 `json:"resetsAt,omitzero"`
+	MoveTo    *limitMoveOffer           `json:"moveTo,omitempty"`
 }
 
 func sameLimitResume(a, b *dashboardLimitResume) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.State == b.State && a.RefusedAt.Equal(b.RefusedAt) && a.ResetsAt.Equal(b.ResetsAt)
+	return a.State == b.State && a.RefusedAt.Equal(b.RefusedAt) && a.ResetsAt.Equal(b.ResetsAt) && sameLimitMoveOffer(a.MoveTo, b.MoveTo)
 }
 
 func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
@@ -342,7 +348,7 @@ func (d *Daemon) limitResumeRow(sessionID string) *dashboardLimitResume {
 	if err != nil || !found || resume.State == registry.LimitResumeReleased {
 		return nil
 	}
-	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt}
+	return &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, MoveTo: d.limitMoveOffer(sessionID, time.Now())}
 }
 
 // limitResumeRows reads every shown stop at once, so a catalog pass reads
@@ -356,11 +362,12 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 		return nil, err
 	}
 	rows := map[string]*dashboardLimitResume{}
+	offers := d.cachedLimitMoveOffers(time.Now())
 	for _, resume := range resumes {
 		if resume.State == registry.LimitResumeReleased {
 			continue
 		}
-		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt}
+		rows[resume.SessionID] = &dashboardLimitResume{State: resume.State, RefusedAt: resume.RefusedAt, ResetsAt: resume.ResetsAt, MoveTo: offers[resume.SessionID]}
 	}
 	return rows, nil
 }
@@ -378,10 +385,15 @@ func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resu
 		return
 	}
 	var moved bool
-	if resume {
-		moved, err = d.releaseLimitStop(stop, limitHeld, true, time.Now())
-	} else {
-		moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
+	if !d.unlessLimitMoving(sessionID, func() {
+		if resume {
+			moved, err = d.releaseLimitStop(stop, limitHeld, true, time.Now())
+		} else {
+			moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
+		}
+	}) {
+		writeAPIError(w, http.StatusConflict, "conflict", "this session is moving to another Claude account")
+		return
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())

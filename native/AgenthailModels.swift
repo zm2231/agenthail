@@ -749,9 +749,18 @@ struct UsageLimitState: Codable, Hashable {
 /// A session a usage limit stopped, as its computer resumes it: waiting for
 /// the reset, or kept stopped (canceled, or its reset passed long ago).
 struct LimitResumeState: Codable, Hashable {
+    struct MoveOffer: Codable, Hashable {
+        let root: String
+        var account: String? = nil
+        var reason: String? = nil
+
+        var name: String { account ?? root }
+    }
+
     var state: String
     var refusedAt: String? = nil
     var resetsAt: String? = nil
+    var moveTo: MoveOffer? = nil
 
     var isWaiting: Bool { state == "waiting" }
 
