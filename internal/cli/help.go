@@ -105,8 +105,10 @@ Hosts:
                                  Pair a host so its sessions appear here
   hosts remove <host>            Unpair a host and drop its sessions from this host
   hosts name [name]              Show or set this host's name
-  move <target> --to <host> [--wait <duration>] [--stop-terminal] [--json]
+  move <target> --to <host> [--root <account>] [--wait <duration>] [--stop-terminal] [--json]
                                  Move an idle Claude session to a paired host
+  move <target> --root <account> [--wait <duration>] [--stop-terminal] [--json]
+                                 Move an idle Claude session to another account here
   move list [--unfinished] [--json]
                                  Show moves to and from this host
 

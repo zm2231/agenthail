@@ -371,14 +371,18 @@ func (c *Claude) WriteMoveArchive(w io.Writer, conversation, moveID string) erro
 	return archive.Close()
 }
 
-// moveInRoot is the config root a moving conversation is placed in: this
-// machine's primary root.
-func (c *Claude) moveInRoot() (string, []string, error) {
+// moveInRoot is the config root a moving conversation is placed in: the
+// named one, or this machine's primary root.
+func (c *Claude) moveInRoot(name string) (string, []string, error) {
 	roots, err := surface.ClaudeConfigRoots(c.home)
 	if err != nil {
 		return "", nil, err
 	}
-	return roots[0], roots, nil
+	if name == "" {
+		return roots[0], roots, nil
+	}
+	root, err := surface.ResolveClaudeMoveRoot(c.home, name)
+	return root, roots, err
 }
 
 // CheckMoveIn refuses a conversation this machine cannot take: a working
@@ -388,7 +392,7 @@ func (c *Claude) CheckMoveIn(in surface.MoveIn) error {
 	if err := checkMoveInPlace(in); err != nil {
 		return err
 	}
-	root, roots, err := c.moveInRoot()
+	root, roots, err := c.moveInRoot(in.Root)
 	if err != nil {
 		return err
 	}
@@ -446,7 +450,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err := admit(); err != nil {
 		return nil, err
 	}
-	root, roots, err := c.moveInRoot()
+	root, roots, err := c.moveInRoot(in.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -551,7 +555,7 @@ func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, ad
 	if err := admit(); err != nil {
 		return err
 	}
-	_, roots, err := c.moveInRoot()
+	_, roots, err := c.moveInRoot("")
 	if err != nil {
 		return err
 	}

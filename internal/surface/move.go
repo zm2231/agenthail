@@ -18,6 +18,9 @@ var ErrMoveInRefused = errors.New("the runtime here refused the conversation")
 // runtime finds them, so the outcome of the move-in is unknown.
 var ErrMoveInPlaced = errors.New("the conversation's files may still be in place here")
 
+// A failed root move whose files could not all be put back; recovery settles it.
+var ErrRootMoveUnsettled = errors.New("the conversation's files may be split between config roots")
+
 // MoveOut is an idle conversation held for a move to another host. Its
 // transcript stays unchanged until Release, which ends the hold.
 type MoveOut struct {
@@ -47,6 +50,13 @@ type MoveIn struct {
 	Size           int64
 	SHA256         string
 	PartsSize      int64
+	Root           string
+}
+
+// MoveToRoot runs under the hold PrepareMove returned.
+type RootMover interface {
+	MoveToRoot(ctx context.Context, out *MoveOut, moveID, root string) (*Session, error)
+	RecoverRootMove(ctx context.Context, conversation, moveID, root string) (bool, error)
 }
 
 // SessionMover moves an idle conversation between machines. The source holds
