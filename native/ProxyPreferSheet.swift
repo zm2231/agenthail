@@ -47,7 +47,7 @@ struct ProxyPreferSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                 Button { Task { await apply() } } label: {
-                    Text(plan?.confirm ?? "Confirm").multilineTextAlignment(.center).lineLimit(3)
+                    Text(plan?.confirm ?? "Confirm").multilineTextAlignment(.center).lineLimit(nil)
                         .frame(maxWidth: 280).fixedSize(horizontal: false, vertical: true)
                 }
                     .buttonStyle(.borderedProminent)
