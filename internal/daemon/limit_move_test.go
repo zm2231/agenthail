@@ -177,6 +177,42 @@ func TestACanceledStopIsNotMovedOrReleasedByAMove(t *testing.T) {
 	}
 }
 
+func TestAStopCannotBeCanceledOrResumedWhileItsSessionMoves(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := newLimitFixture(t, "worker")
+	refusedAt := time.Now().Add(-time.Minute).Truncate(time.Second)
+	f.refused("worker", "/roots/work", "u1", refusedAt, refusedAt.Add(time.Hour))
+	f.pass(refusedAt.Add(time.Second))
+	handler := dashboardRouter(f.d)
+	if claimed, _ := f.d.claimLimitMove("worker", "u0"); claimed {
+		t.Fatal("a move claimed a turn the stop is not on")
+	}
+	if claimed, _ := f.d.claimLimitMove("worker", "u1"); !claimed {
+		t.Fatal("a waiting stop was not claimed for its move")
+	}
+	if _, moving := f.d.claimLimitMove("worker", ""); !moving {
+		t.Fatal("a second move claimed a session already moving")
+	}
+	for _, action := range []string{"limit-resume-cancel", "limit-resume"} {
+		if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"`+action+`","sessionId":"worker"}`); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "moving") {
+			t.Fatalf("%s during a move: status=%d body=%s", action, response.Code, response.Body.String())
+		}
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-move","sessionId":"worker","configRoot":"work"}`); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "move_busy") {
+		t.Fatalf("limit-move during a move: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if state := f.state("worker"); state != registry.LimitResumeWaiting {
+		t.Fatalf("a stop changed while its session moved: %s", state)
+	}
+	f.d.unclaimLimitMove("worker")
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusOK {
+		t.Fatalf("cancel after the move: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if claimed, _ := f.d.claimLimitMove("worker", ""); claimed {
+		t.Fatal("a canceled stop was claimed for a move")
+	}
+}
+
 func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
 	node, second, pool := limitMoveNode(t, "10")
 	primary := filepath.Join(node.host.Home, ".claude")
@@ -212,9 +248,23 @@ func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
 		t.Fatal("a session on a proxy account was moved")
 	}
 	moves := node.daemon.limitResumes.moves
+	tracked := func() (int, int) {
+		moves.mu.Lock()
+		defer moves.mu.Unlock()
+		return len(moves.tried), len(moves.movedAt)
+	}
+	if tried, movedAt := tracked(); tried != 0 || movedAt != 0 {
+		t.Fatalf("released stops and spaced-out roots are still tracked: tried=%d movedAt=%d", tried, movedAt)
+	}
 	moves.mu.Lock()
-	defer moves.mu.Unlock()
-	if moves.tried[first.ID+":u1"] || moves.tried[next.ID+":u2"] || len(moves.movedAt) != 0 {
-		t.Fatalf("released stops and spaced-out roots are still tracked: tried=%v movedAt=%v", moves.tried, moves.movedAt)
+	moves.tried["gone:u9"], moves.movedAt["work"] = true, now
+	moves.mu.Unlock()
+	config, err := LoadDashboardConfig()
+	if err != nil || config.SetClaudeAccountPolicy(claudepick.DefaultPolicy()) != nil || SaveDashboardConfig(config) != nil {
+		t.Fatalf("turning the setting off: %v", err)
+	}
+	node.daemon.autoMoveLimitStops(context.Background(), now.Add(limitResumeSpacing))
+	if tried, movedAt := tracked(); tried != 0 || movedAt != 0 {
+		t.Fatalf("turning the setting off left moves tracked: tried=%d movedAt=%d", tried, movedAt)
 	}
 }

@@ -198,7 +198,10 @@ loaded first. Proxy, API-key, signed-out and unread roots are never
 offered. The offers are computed for every waiting stop at once and kept
 five seconds, or until a stop changes. The `limit-move` action
 (`configRoot` optional, defaulting to the offer) runs the move above, and
-refuses a session whose stop is not waiting.
+refuses a session whose stop is not waiting. It and the automatic move
+claim the waiting stop first; while the claim holds, `limit-resume` and
+`limit-resume-cancel` on that session are refused, so a cancel either
+lands before the move starts or after it finishes.
 
 With the policy's `autoMove` on, each limit pass makes at most one move:
 the oldest waiting stop with an offer, not on a proxy root, not tried

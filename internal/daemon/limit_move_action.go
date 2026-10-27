@@ -21,16 +21,17 @@ func (d *Daemon) releaseMovedLimitStop(sessionID string) {
 	d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, time.Now()))
 }
 
-func (d *Daemon) waitingLimitStop(sessionID, turnID string) bool {
-	stop, found, err := d.Registry.LimitResumeFor(sessionID)
-	return err == nil && found && stop.State == registry.LimitResumeWaiting && (turnID == "" || stop.TurnID == turnID)
-}
-
 func (d *Daemon) limitMoveAction(w http.ResponseWriter, r *http.Request, sessionID, root string, stopTerminal bool) {
-	if !d.waitingLimitStop(sessionID, "") {
+	claimed, moving := d.claimLimitMove(sessionID, "")
+	if moving {
+		writeAPIError(w, http.StatusConflict, "move_busy", "this session is already moving to another Claude account")
+		return
+	}
+	if !claimed {
 		writeAPIError(w, http.StatusConflict, "move_refused", "this session is not waiting on a usage limit")
 		return
 	}
+	defer d.unclaimLimitMove(sessionID)
 	if root == "" {
 		if offer := d.limitMoveOffer(sessionID, time.Now()); offer != nil {
 			root = offer.Root
@@ -59,15 +60,15 @@ func (d *Daemon) limitMoveAction(w http.ResponseWriter, r *http.Request, session
 }
 
 func (d *Daemon) autoMoveLimitStops(ctx context.Context, now time.Time) {
-	if !d.claudeAccountPolicy().AutoMove {
-		return
-	}
 	stops, err := d.Registry.LimitResumes()
 	if err != nil {
 		return
 	}
 	moves := d.limitResumes.moves
 	moves.prune(stops, now)
+	if !d.claudeAccountPolicy().AutoMove {
+		return
+	}
 	offers := d.cachedLimitMoveOffers(now)
 	if len(offers) == 0 {
 		return
@@ -91,12 +92,13 @@ func (d *Daemon) autoMoveLimitStops(ctx context.Context, now time.Time) {
 		}
 		moves.tried[key], moves.movedAt[offer.Root] = true, now
 		moves.mu.Unlock()
-		if !d.waitingLimitStop(stop.SessionID, stop.TurnID) {
+		if claimed, _ := d.claimLimitMove(stop.SessionID, stop.TurnID); !claimed {
 			continue
 		}
 		moveCtx, cancel := context.WithTimeout(ctx, limitAutoMoveTimeout)
 		_, err := d.moveSessionToRoot(moveCtx, sessionMoveRequest{SessionID: stop.SessionID, Root: offer.Root})
 		cancel()
+		d.unclaimLimitMove(stop.SessionID)
 		if err != nil {
 			d.log.Printf("move %s to account %s after its usage limit: %s", d.resolveDisplay(stop.SessionID), offer.Root, err)
 		}

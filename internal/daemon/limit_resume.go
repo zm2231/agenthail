@@ -42,6 +42,7 @@ type limitResumer struct {
 	settled     map[string]time.Time
 	lastRelease map[string]time.Time
 	moves       *limitMoves
+	claims      limitMoveClaims
 }
 
 func newLimitResumer() *limitResumer {
@@ -384,10 +385,15 @@ func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resu
 		return
 	}
 	var moved bool
-	if resume {
-		moved, err = d.releaseLimitStop(stop, limitHeld, true, time.Now())
-	} else {
-		moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
+	if !d.unlessLimitMoving(sessionID, func() {
+		if resume {
+			moved, err = d.releaseLimitStop(stop, limitHeld, true, time.Now())
+		} else {
+			moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
+		}
+	}) {
+		writeAPIError(w, http.StatusConflict, "conflict", "this session is moving to another Claude account")
+		return
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
