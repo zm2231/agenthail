@@ -55,7 +55,11 @@ assert.deepEqual(pending.slice(before).map((call) => call.url), ["/api/v1/sessio
 pending[before].resolve({ ok: true, json: async () => ({ pick: { root: "/home/me/.work/.claude", name: "work", account: "work@example.com", reason: "most headroom, session 10%" } }) });
 await settle();
 assert(select.innerHTML.includes(">Automatic · work (work@example.com)</option>"), select.innerHTML);
+assert.equal(select.textContent, "", "a root chosen by hand shows no automatic reason");
+select.value = "";
+context.syncStartRootDetail();
 assert.equal(select.textContent, "Automatic picks work: most headroom, session 10%", "the reason shows under the picker, not cut off inside it");
+select.value = "/home/me/.work/.claude";
 assert.equal(select.value, "/home/me/.work/.claude", "the preview keeps the chosen root");
 context.loadStartRootPick({ claudeConfigRoots: roots().slice(0, 1) }, "");
 assert.equal(pending.length, before + 1, "one root needs no preview");
