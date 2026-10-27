@@ -325,6 +325,15 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
+    func claudeRootPick(host: String? = nil) async throws -> ClaudeRootPick {
+        struct Answer: Decodable { let pick: ClaudeRootPick }
+        var components = URLComponents()
+        components.path = "/api/v1/session-options/claude-pick"
+        components.queryItems = host.map { [URLQueryItem(name: "host", value: $0)] }
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let answer: Answer = try await get(path)
+        return answer.pick
+    }
     func usage() async throws -> UsageReport {
         try await get("/api/v1/usage")
     }

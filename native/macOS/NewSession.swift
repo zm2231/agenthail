@@ -57,8 +57,9 @@ struct NewSessionView: View {
             if draft.claudeConfigRoots.count > 1 {
                 Divider()
                 Picker("Account", selection: $draft.form.configRoot) {
+                    Text(draft.hosts.claudePick?.menuLabel ?? "Automatic").tag("")
                     ForEach(draft.claudeConfigRoots) { root in
-                        Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
+                        Text(root.menuLabel).tag(root.root).selectionDisabled(!root.signedIn)
                     }
                 }
                 .pickerStyle(.inline)
@@ -213,7 +214,7 @@ struct NewSessionView: View {
 
     private var agentLabel: String {
         let chosen = draft.form.model.isEmpty ? nil : draft.agentModels.first { $0.id == draft.form.model }?.displayName ?? draft.form.model
-        let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot)
+        let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot, pick: draft.hosts.claudePick)
         return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen : nil, effort: draft.form.effort, account: account)
     }
 

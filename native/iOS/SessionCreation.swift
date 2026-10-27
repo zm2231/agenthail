@@ -91,9 +91,14 @@ struct NewSessionSheet: View {
                         if selectedSurface == "claude", hosts.claudeConfigRoots.count > 1 {
                             Section {
                                 Picker("Config folder", selection: $claude.configRoot) {
+                                    Text(hosts.claudePick.map { "Automatic · \($0.name)" } ?? "Automatic").tag("")
                                     ForEach(hosts.claudeConfigRoots) { root in
-                                        Text(root.menuLabel).tag(root.choice).selectionDisabled(!root.signedIn)
+                                        Text(root.menuLabel).tag(root.root).selectionDisabled(!root.signedIn)
                                     }
+                                }
+                            } footer: {
+                                if claude.configRoot.isEmpty, let pick = hosts.claudePick {
+                                    Text(pick.menuLabel)
                                 }
                             }
                         }
@@ -219,6 +224,9 @@ struct NewSessionSheet: View {
             }
             loading = false
             let host = hosts.hostQuery
+            if (loaded.claudeConfigRoots ?? []).count > 1, let pick = try? await model.creationRootPick(host: host) {
+                hosts.receive(pick: pick, for: generation)
+            }
             await withTaskGroup(of: ClaudeRootUsage?.self) { group in
                 for root in loaded.claudeConfigRoots ?? [] where root.signedIn {
                     group.addTask { try? await model.creationRootUsage(root: root.root, host: host) }

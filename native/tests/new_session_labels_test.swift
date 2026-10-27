@@ -10,9 +10,13 @@ struct NewSessionLabelsTest {
 
         let primary = ClaudeConfigRootOption(name: "default", root: "/home/a/.claude", primary: true)
         let work = ClaudeConfigRootOption(name: "work", root: "/home/a/.claude-work", primary: false)
-        check(NewSessionLabels.account([primary, work], choice: "") == nil, "the default account stays out of the label")
-        check(NewSessionLabels.account([primary, work], choice: work.choice) == "work", "another account is named")
-        check(NewSessionLabels.account([work], choice: work.choice) == nil, "a single account is never named")
+        let pick = ClaudeRootPick(root: work.root, name: "work", account: "work@example.com", reason: "most headroom, session 10%")
+        check(NewSessionLabels.account([primary, work], choice: "", pick: nil) == nil, "automatic with no preview yet names nothing")
+        check(NewSessionLabels.account([primary, work], choice: "", pick: pick) == "auto: work", "automatic names the account it would pick")
+        check(NewSessionLabels.account([primary, work], choice: primary.root, pick: pick) == "default", "a chosen primary is named")
+        check(NewSessionLabels.account([primary, work], choice: work.root, pick: pick) == "work", "another account is named")
+        check(NewSessionLabels.account([work], choice: work.root, pick: pick) == nil, "a single account is never named")
+        check(pick.menuLabel == "Automatic · work (work@example.com): most headroom, session 10%", pick.menuLabel)
 
         check(NewSessionLabels.place("agenthail", host: nil) == "agenthail", "on this Mac the place is just the project")
         check(NewSessionLabels.place("agenthail", host: "build-box") == "build-box · agenthail", "another computer is named before the project")

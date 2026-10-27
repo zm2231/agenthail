@@ -47,6 +47,18 @@ await settle();
 assert(select.innerHTML.includes("work · signed in as work@example.com · out of usage until"), "a root's usage fills in when it arrives");
 assert.equal(select.value, "/home/me/.work/.claude", "filling in usage keeps the chosen root");
 
+assert.equal(firstOption(select.innerHTML), "", "Automatic is the first choice and sends no root");
+assert(select.innerHTML.includes('value="/home/me/.claude">default'), "the primary root is chosen by its path, not by leaving the root out");
+const before = pending.length;
+context.loadStartRootPick(options, "");
+assert.deepEqual(pending.slice(before).map((call) => call.url), ["/api/v1/session-options/claude-pick"]);
+pending[before].resolve({ ok: true, json: async () => ({ pick: { root: "/home/me/.work/.claude", name: "work", account: "work@example.com", reason: "most headroom, session 10%" } }) });
+await settle();
+assert(select.innerHTML.includes("Automatic · work (work@example.com): most headroom, session 10%"), select.innerHTML);
+assert.equal(select.value, "/home/me/.work/.claude", "the preview keeps the chosen root");
+context.loadStartRootPick({ claudeConfigRoots: roots().slice(0, 1) }, "");
+assert.equal(pending.length, before + 1, "one root needs no preview");
+
 context.app.startHost = "server";
 context.app.startOptions = { claudeConfigRoots: roots() };
 context.renderStartConfigRoots(context.app.startOptions.claudeConfigRoots);

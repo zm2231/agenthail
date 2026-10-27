@@ -1,7 +1,7 @@
 import { app } from "./state.js";
 import { startHostQuery } from "./start-host.js";
 import { responseError } from "./http.js";
-import { loadStartRootUsage, renderStartConfigRoots } from "./start-roots.js";
+import { loadStartRootPick, loadStartRootUsage, renderStartConfigRoots } from "./start-roots.js";
 import { renderStartSurfaceOptions } from "./start-form.js";
 import { $ } from "./dom.js";
 import { escape } from "./format.js";
@@ -18,6 +18,7 @@ export async function loadStartOptions() {
   renderStartConfigRoots(options.claudeConfigRoots || []);
   renderStartSurfaceOptions();
   loadStartRootUsage(options, host);
+  loadStartRootPick(options, host);
 }
 
 export async function loadStartModels() {
