@@ -29,6 +29,15 @@ type proxyUsageEntry struct {
 	err        error
 	last       atomic.Pointer[proxyReading]
 	refreshing atomic.Bool
+	writing    sync.Mutex
+	marksMu    sync.Mutex
+	marks      map[string]proxyMark
+}
+
+type proxyMark struct {
+	value float64
+	host  string
+	at    time.Time
 }
 
 type proxyReading struct {
@@ -88,6 +97,31 @@ func (c *proxyUsageCache) read(ctx context.Context, config proxyacct.Config, now
 		entry.last.Store(&proxyReading{accounts: entry.accounts, readAt: entry.readAt, err: entry.err})
 	}
 	return proxyReading{accounts: entry.accounts, readAt: entry.readAt, err: entry.err}
+}
+
+func (c *proxyUsageCache) fresh(ctx context.Context, config proxyacct.Config) proxyReading {
+	entry := c.entry(config)
+	entry.mu.Lock()
+	entry.readAt = time.Time{}
+	entry.mu.Unlock()
+	return c.read(ctx, config, time.Now())
+}
+
+func (e *proxyUsageEntry) mark(account string, mark proxyMark) {
+	e.marksMu.Lock()
+	defer e.marksMu.Unlock()
+	if e.marks == nil {
+		e.marks = map[string]proxyMark{}
+	}
+	e.marks[account] = mark
+}
+
+// A mark holds only while the proxy still has the value Agenthail wrote.
+func (e *proxyUsageEntry) markFor(account string, preference float64) (proxyMark, bool) {
+	e.marksMu.Lock()
+	defer e.marksMu.Unlock()
+	mark, ok := e.marks[account]
+	return mark, ok && mark.value == preference
 }
 
 func (c *proxyUsageCache) cached(config proxyacct.Config, now time.Time) *proxyReading {
