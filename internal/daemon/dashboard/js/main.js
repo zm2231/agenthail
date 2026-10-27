@@ -20,6 +20,8 @@ import { bindDeviceEvents } from "./devices.js";
 import { bindAuditEvents } from "./audit.js";
 import { bindProjectEvents } from "./project-dialog.js";
 import { bindSessionOperationEvents } from "./session-operations.js";
+import { start as startUsage } from "./usage.js";
+import { app } from "./state.js";
 
 bindVoiceEvents();
 bindConversationEvents();
@@ -37,6 +39,7 @@ bindDeviceEvents();
 bindAuditEvents();
 bindProjectEvents();
 bindSessionOperationEvents();
+startUsage({ document, sessions: () => app.state.sessions, open: (id) => selectSession(id, true) });
 
 $("#refresh").addEventListener("click", async () => {
   await load(true);

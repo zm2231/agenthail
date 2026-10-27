@@ -2,82 +2,108 @@ import SwiftUI
 
 struct UsageMetersRow: View {
     @ObservedObject var feed: UsageFeed
+    let sessions: [SessionState]
+    let open: (String) -> Void
+    @State private var showing = false
 
     var body: some View {
-        if !feed.strip.meters.isEmpty || !feed.strip.others.isEmpty {
-            UsageMetersLine(strip: feed.strip, now: feed.now)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+        if !feed.accounts.isEmpty {
+            Button { showing = true } label: {
+                UsageMetersLine(accounts: feed.accounts, sessions: sessions, now: feed.now)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows each account's limits and sessions")
+            .accessibilityIdentifier("usage-limits")
+            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .sheet(isPresented: $showing) {
+                UsageAccountsSheet(feed: feed, sessions: sessions) { id in
+                    showing = false
+                    open(id)
+                }
+            }
         }
     }
 }
 
 struct UsageMetersLine: View {
-    let strip: UsageStrip
+    let accounts: [UsageAccount]
+    var sessions: [SessionState] = []
     let now: Date
 
     var body: some View {
-        Group {
-            if let problem = strip.problem {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(problem).foregroundStyle(PhonePalette.failed).truncationMode(.tail)
-                    ViewThatFits(in: .horizontal) {
-                        row(meters: false, details: false, others: true)
-                        row(meters: false, details: false, others: true, compact: true)
-                    }
-                }
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    row(details: true, others: true)
-                    row(details: false, others: true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        row(details: false, others: false)
-                        if !strip.others.isEmpty { row(meters: false, details: false, others: true) }
-                    }
-                    row(details: false, others: false)
-                    row(details: false, others: false, first: true)
-                }
+        ViewThatFits(in: .horizontal) {
+            row(accounts, bars: true, hidden: 0)
+            ForEach((1...accounts.count).reversed(), id: \.self) { shown in
+                row(Array(accounts.prefix(shown)), bars: false, hidden: accounts.count - shown)
             }
+            row([], bars: false, hidden: accounts.count)
         }
         .font(.footnote)
         .lineLimit(1)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Usage limits")
-        .accessibilityIdentifier("usage-limits")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accounts.map { $0.spoken(now: now) }.joined(separator: ". "))
     }
 
-    private func row(meters: Bool = true, details: Bool, others: Bool, first: Bool = false, compact: Bool = false) -> some View {
+    private func row(_ shown: [UsageAccount], bars: Bool, hidden: Int) -> some View {
         HStack(spacing: 12) {
-            ForEach(meters ? (first ? Array(strip.meters.prefix(1)) : strip.meters) : [], id: \.self) { meter in
-                let spoken = UsageMeterText.spokenLabel(meter, now: now)
-                HStack(spacing: 4) {
-                    Text(meter.label).foregroundStyle(PhonePalette.muted)
-                    value(details ? UsageMeterText.text(meter, now: now) : UsageMeterText.percent(meter.percent), critical: meter.severity == "critical")
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(spoken)
-            }
-            if others {
-                ForEach(strip.others(compact: compact)) { other in
-                    HStack(spacing: 4) {
-                        Text(other.title).foregroundStyle(PhonePalette.muted)
-                        value(UsageMeterText.percent(other.percent), critical: other.critical)
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(other.spoken)
-                }
+            ForEach(shown) { UsageChipLabel(account: $0, sessions: sessions, bars: bars) }
+            if hidden > 0 {
+                Text(shown.isEmpty ? "\(hidden) accounts" : "+\(hidden)").foregroundStyle(PhonePalette.muted)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
+}
 
-    @ViewBuilder
-    private func value(_ text: String, critical: Bool) -> some View {
-        if critical {
-            Text(text).monospacedDigit().foregroundStyle(PhonePalette.failed)
-        } else {
-            Text(text).monospacedDigit()
+extension UsageProblemTone {
+    var phoneStyle: RoleStyle {
+        switch self {
+        case .failed: PhonePalette.failed
+        case .warning: PhonePalette.attention
+        case .quiet: PhonePalette.muted
+        }
+    }
+}
+
+private struct UsageChipLabel: View {
+    let account: UsageAccount
+    let sessions: [SessionState]
+    let bars: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(account.title).foregroundStyle(PhonePalette.muted)
+            if bars && !account.meters.isEmpty {
+                VStack(spacing: 2) {
+                    ForEach(account.meters.prefix(3), id: \.self) { PhoneUsageBar(meter: $0).frame(width: 22, height: 3) }
+                }
+            }
+            if let worst = account.worst {
+                Text(UsageMeterText.percent(worst.percent))
+                    .monospacedDigit()
+                    .foregroundStyle(account.critical ? PhonePalette.failed : RoleStyle(.body))
+            } else if let tone = account.problemTone(sessions) {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(tone.phoneStyle)
+            } else {
+                Text("–").foregroundStyle(PhonePalette.muted)
+            }
+        }
+    }
+}
+
+struct PhoneUsageBar: View {
+    let meter: UsageReport.Meter
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(PhonePalette.hairline)
+                Capsule()
+                    .fill(meter.severity == "critical" || meter.percent >= 90 ? PhonePalette.failed : PhonePalette.muted)
+                    .frame(width: proxy.size.width * min(max(meter.percent / 100, 0), 1))
+            }
         }
     }
 }

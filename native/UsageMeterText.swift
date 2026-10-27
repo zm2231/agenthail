@@ -12,6 +12,22 @@ enum UsageMeterText {
         return meter.resetsAt.flatMap(date).map { reset(until: $0, now: now) }
     }
 
+    static func shortLabel(_ meter: UsageReport.Meter) -> String {
+        switch meter.kind {
+        case "session", "5h": return "Session"
+        case "weekly", "weekly_all": return "Week"
+        case "weekly_scoped": return "Week, " + (meter.scope.flatMap { $0.isEmpty ? nil : $0 } ?? "one model")
+        default: return meter.label
+        }
+    }
+
+    static func read(_ asOf: Date, now: Date) -> String {
+        let minutes = Int(now.timeIntervalSince(asOf) / 60)
+        if minutes < 1 { return "read just now" }
+        if minutes < 60 { return "read \(minutes)m ago" }
+        return "read \(ago(now.timeIntervalSince(asOf))) ago"
+    }
+
     static func percent(_ value: Double) -> String {
         "\(Int(value.rounded()))%"
     }

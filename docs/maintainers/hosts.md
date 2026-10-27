@@ -227,37 +227,54 @@ session in the chosen project's root; a typed folder is still accepted.
 ## Usage limits
 
 `GET /api/v1/usage` is every account's limits on this machine and on every
-connected paired host, as `sets[{host, hostId, local, provider, account, root,
-primary, meters, problem}]`. Each machine lists its primary Claude account
-first, then Codex while it is healthy, then its other Claude accounts. A Claude
-account is named by the email it is signed in with, or by its root's name.
-Each meter has a `provider`, a `kind` (`session`, `5h`, `weekly`,
-`weekly_all`, `weekly_scoped` or `<n>m`), a `label`, `percent`, `asOf` and
-`aged`, and when known a `severity`, `resetsAt` and `until`. A client hides a
+connected paired host, as `sets[{host, hostId, local, provider, name, account,
+login, root, primary, meters, asOf, problem, problemDetail}]`. Each machine lists its primary Claude
+account first, then Codex while it is healthy, then its other Claude accounts.
+A Claude set's `name` is its root's name, `account` the email the root is
+signed in with, and `login` how the root signs in: `claude.ai`, `api_key` or
+`signed_out`. `asOf` is when its usage was read. Each meter has a `provider`, a
+`kind` (`session`, `5h`, `weekly`, `weekly_all`, `weekly_scoped` or `<n>m`), a
+`label`, `percent`, `asOf` and `aged`, and when known a `severity`, `resetsAt`,
+`until` and, for `weekly_scoped`, the `scope` model's name. A client hides a
 meter once `until` passes and shows the reading's age instead of its reset when
-`aged` is true. `account`, `root`, `primary` and `problem` are left out when
-they do not apply.
+`aged` is true. Fields that do not apply are left out.
+
+A Claude root's usage is claude.ai's answer for the root's login, read with the
+browser sign-in profile signed into that login. The daemon reads it at most
+once a minute per root and shares the read across every client and poll; a
+login change starts a fresh read. A read that fails keeps the last reading for
+that login, with its `asOf` and the `problem`. A root that uses an API key or holds
+no login is a set with no meters, a short `problem` that says which, and a
+`problemDetail` that explains it; it never asks claude.ai. The daemon learns an
+API key only from its presence in the environment, the root's `settings.json`
+or `.claude.json`, never its value.
 
 The daemon asks each connected host with `scope=local`, so a host never asks
 its own peers in turn, and waits at most a few seconds for each. A host that
 runs an older Agenthail, does not answer in time or fails is one set with no
-provider and a `problem` that names it. The Mac status strip and the web
-dashboard's top bar show this machine's primary account and Codex in full and
-every other account or host by name and its highest limit. When this machine's
-own accounts have no meters, the line starts with the problem that explains why.
-When the Mac strip narrows, it drops the bars and keeps only the other accounts
-near their limit. The dashboard's line drops items only while they do not fit
-on one row: other accounts not near a limit go first (last one first), then
-this machine's meters not near a limit, then other accounts near a limit, then
-this machine's meters near a limit. The problem is never dropped; it shortens
-with an ellipsis instead.
-The iPhone shows
-the same line under the session filters; it asks each computer it is paired
-with, counts only the first one's own accounts as in use, and lists a host two
-computers both report once. A computer that does not answer keeps its place,
-so a later one is never taken for the first. When the line is too wide for the
-phone, the other accounts move to a second line before any of them is dropped;
-a problem with this computer's accounts takes its own line above them.
+provider and a `problem` that names it.
+
+Every client shows every set. The Mac status strip, the web dashboard's top
+bar and the iPhone's line under the session filters show one chip per account:
+its login's name (the email before the `@`, `Codex`, or the host and how the
+root signs in, as in `build-box (API key)`), the host's name in front only when
+the same name is on more than one host, the root's name after it when one host
+would show two accounts alike, small
+bars for its limits, and its highest limit. An account with only a problem
+shows a mark instead of a number; one whose readings have all passed shows a
+dash. A root that uses an API key or is signed out is a normal state, shown in
+secondary text; a signed-out root with sessions working or open on it shows as a
+warning. Only a limit near its end, or a failed read that left no reading,
+shows as an error. Opening the line lists every account by host with each limit, its reset,
+when it was read, its problem with its detail as help text, and the sessions working or open on it, which
+open on click. A session belongs to the account of its host and, for Claude,
+its `claudeConfigRoot`. When the Mac strip narrows it drops the bars first. The
+dashboard drops the bars first, then accounts that are neither near a limit nor
+showing a warning or error, last one first, and counts what it dropped; narrower than
+760px it shows no usage. The iPhone drops the bars, then accounts from the end,
+counting them. The iPhone asks each computer it is paired with and lists a host
+two computers both report once. `agenthail usage [--json]` prints the same
+sets with their sessions.
 
 ## Unreachable hosts and delivery
 

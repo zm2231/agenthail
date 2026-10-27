@@ -15,6 +15,7 @@ type usageMeter struct {
 	Provider string    `json:"provider"`
 	Kind     string    `json:"kind"`
 	Label    string    `json:"label"`
+	Scope    string    `json:"scope,omitempty"`
 	Percent  float64   `json:"percent"`
 	Severity string    `json:"severity,omitempty"`
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
@@ -42,7 +43,8 @@ func usageMeters(provider string, usage *surface.Usage, now time.Time) []usageMe
 		meter := usageMeter{
 			Provider: provider,
 			Kind:     limit.Kind,
-			Label:    usageLabel(provider, limit.Kind),
+			Label:    usageLabel(provider, limit.Kind, limit.Scope),
+			Scope:    limit.Scope,
 			Percent:  limit.Percent,
 			Severity: limit.Severity,
 			ResetsAt: limit.ResetsAt,
@@ -61,15 +63,17 @@ func usageMeters(provider string, usage *surface.Usage, now time.Time) []usageMe
 	return meters
 }
 
-func usageLabel(provider, kind string) string {
+func usageLabel(provider, kind, scope string) string {
 	name := map[string]string{"claude": "Claude", "codex": "Codex"}[provider]
 	switch {
 	case provider == "claude" && kind == "session":
 		return name
 	case kind == "weekly" || kind == "weekly_all":
 		return name + " week"
+	case kind == "weekly_scoped" && scope != "":
+		return name + " week, " + scope
 	case kind == "weekly_scoped":
-		return name + " week, model"
+		return name + " week, one model"
 	}
 	return name + " " + strings.ReplaceAll(kind, "_", " ")
 }

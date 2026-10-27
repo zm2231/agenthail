@@ -1,3 +1,4 @@
+import { $ } from "./dom.js";
 import { fit, wrapped } from "./usage-fit.js";
 
 export const POLL_MS = 120_000;
@@ -34,6 +35,13 @@ export function ago(ms) {
   return hours >= 24 ? `${Math.floor(hours / 24)}d` : `${Math.max(hours, 1)}h`;
 }
 
+export function read(ms) {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "read just now";
+  if (minutes < 60) return `read ${minutes}m ago`;
+  return `read ${ago(ms)} ago`;
+}
+
 export function detail(meter, now) {
   const asOf = time(meter.asOf);
   if (meter.aged && asOf !== null) return `as of ${ago(now - asOf)} ago`;
@@ -51,107 +59,238 @@ export function spoken(meter, now) {
   return `${meter.label} usage ${Math.round(meter.percent)} percent` + (extra ? `, ${extra}` : "");
 }
 
-export function inUse(set) {
-  return set.local === true && (set.primary === true || set.provider === "codex");
+export function shortLabel(meter) {
+  if (meter.kind === "session" || meter.kind === "5h") return "Session";
+  if (meter.kind === "weekly" || meter.kind === "weekly_all") return "Week";
+  if (meter.kind === "weekly_scoped") return `Week, ${meter.scope || "one model"}`;
+  return meter.label;
 }
 
-const providerName = (set) => (set.provider === "codex" ? "Codex" : "Claude");
+const critical = (meter) => meter.severity === "critical" || meter.percent >= 90;
 
-export function title(set) {
-  const name = set.account ? set.account.split("@")[0] : providerName(set);
-  return set.local === true ? name : `${name} · ${set.host}`;
+export function loginLabel(login) {
+  return { api_key: "API key", signed_out: "signed out" }[login] || null;
 }
 
-export function fullTitle(set) {
-  const name = set.account || providerName(set);
-  return set.local === true ? name : `${name} on ${set.host}`;
+function baseName(set) {
+  if (!set.provider) return set.host;
+  if (set.provider === "codex") return "Codex";
+  if (set.account) return set.account.includes("@") ? set.account.split("@")[0] : set.account;
+  const kind = loginLabel(set.login);
+  if (kind) return `${set.host} (${kind})`;
+  return set.name || "Claude";
 }
 
-export function usageStrip(sets, now) {
-  const strip = { meters: [], others: [], problem: null };
-  const problems = [];
-  for (const set of sets || []) {
-    const shown = visible(set.meters, now);
-    if (inUse(set)) {
-      strip.meters.push(...shown);
-      if (set.problem) problems.push(set.problem);
-      continue;
-    }
-    if (!shown.length) continue;
-    strip.others.push({
+function login(set) {
+  if (!set.provider) return set.host;
+  if (set.provider === "codex") return "Codex";
+  if (set.account) return set.account;
+  const kind = loginLabel(set.login);
+  if (kind) return kind[0].toUpperCase() + kind.slice(1);
+  return set.name || "Claude";
+}
+
+export function titles(sets) {
+  const names = sets.map(baseName);
+  const hostsByName = new Map();
+  sets.forEach((set, index) => {
+    if (!set.provider || loginLabel(set.login)) return;
+    const hosts = hostsByName.get(names[index]) || new Set();
+    hosts.add(set.hostId);
+    hostsByName.set(names[index], hosts);
+  });
+  const prefixed = sets.map((set, index) => ((hostsByName.get(names[index])?.size || 0) > 1 ? `${set.host} · ${names[index]}` : names[index]));
+  const counts = new Map();
+  sets.forEach((set, index) => counts.set(`${set.hostId}|${prefixed[index]}`, (counts.get(`${set.hostId}|${prefixed[index]}`) || 0) + 1));
+  return sets.map((set, index) => (counts.get(`${set.hostId}|${prefixed[index]}`) > 1 && set.name ? `${prefixed[index]} · ${set.name}` : prefixed[index]));
+}
+
+export function accounts(sets, now) {
+  const list = sets || [];
+  const chipTitles = titles(list);
+  return list.map((set, index) => {
+    const meters = visible(set.meters, now);
+    const name = login(set);
+    const fullTitle = set.local === true || !set.provider ? name : `${name} on ${set.host}`;
+    const parts = meters.map((meter) => spoken(meter, now)).concat(set.problem ? [set.problem] : []);
+    const asOf = time(set.asOf);
+    return {
       id: `${set.hostId}|${set.provider || ""}|${set.root || ""}`,
-      title: title(set),
-      percent: Math.max(...shown.map((meter) => meter.percent)),
-      critical: shown.some((meter) => meter.severity === "critical"),
-      spoken: `${fullTitle(set)}: ${shown.map((meter) => spoken(meter, now)).join("; ")}`,
-    });
-  }
-  if (!strip.meters.length) strip.problem = problems[0] || null;
-  return strip;
+      title: chipTitles[index],
+      login: name,
+      fullTitle,
+      host: set.host,
+      hostId: set.hostId,
+      provider: set.provider || null,
+      rootName: set.name || null,
+      root: set.root || null,
+      meters,
+      worst: meters.reduce((top, meter) => (!top || meter.percent > top.percent ? meter : top), null),
+      critical: meters.some(critical),
+      problem: set.problem || null,
+      problemDetail: set.problemDetail || null,
+      signIn: set.login || null,
+      subtitle: [set.provider === "claude" && set.name !== name ? set.name : null, asOf === null ? null : read(now - asOf)].filter(Boolean).join(" · ") || null,
+      spoken: `${fullTitle}: ${parts.length ? parts.join("; ") : "no usage reading"}`,
+    };
+  });
 }
 
-function span(document, className, content) {
-  const element = document.createElement("span");
-  element.className = className;
+export function byHost(list) {
+  const groups = new Map();
+  for (const account of list) {
+    if (!groups.has(account.hostId)) groups.set(account.hostId, { id: account.hostId, name: account.host, accounts: [] });
+    groups.get(account.hostId).accounts.push(account);
+  }
+  return [...groups.values()];
+}
+
+export function owns(account, session) {
+  if (session.archived || session.host?.id !== account.hostId) return false;
+  if (account.provider === "claude") return session.surface === "claude" && session.claudeConfigRoot?.root === account.root;
+  if (account.provider === "codex") return session.surface === "codex";
+  return false;
+}
+
+const working = (session) => session.status === "busy";
+
+export function activeSessions(account, sessions) {
+  return (sessions || [])
+    .filter((session) => owns(account, session) && (working(session) || session.current))
+    .sort((a, b) => Number(working(b)) - Number(working(a)) || String(b.lastActive || "").localeCompare(String(a.lastActive || "")));
+}
+
+export function problemTone(account, sessions) {
+  if (!account.problem) return null;
+  if (account.signIn === "api_key") return "quiet";
+  if (account.signIn === "signed_out") return activeSessions(account, sessions).length ? "warning" : "quiet";
+  return account.meters.length ? "quiet" : "failed";
+}
+
+const chipTone = { failed: "problem", warning: "problem warning", quiet: "note" };
+const noteTone = { failed: "usage-note bad", warning: "usage-note warn", quiet: "usage-note" };
+
+function node(document, tag, className, content) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
   if (content !== undefined) element.textContent = content;
   return element;
 }
 
-export function render(document, element, strip, now) {
-  const children = [];
-  if (strip.problem) {
-    const problem = span(document, "usage-problem", strip.problem);
-    problem.title = strip.problem;
-    children.push(problem);
-  }
-  for (const meter of strip.meters) {
-    const critical = meter.severity === "critical";
-    const item = span(document, critical ? "usage-meter critical" : "usage-meter");
-    const bar = document.createElement("meter");
-    bar.min = 0;
-    bar.max = 100;
-    bar.value = Math.min(Math.max(meter.percent, 0), 100);
-    const extra = detail(meter, now);
-    item.append(span(document, "usage-label", meter.label), bar, span(document, "usage-value", percent(meter.percent)));
-    if (extra) item.append(span(document, "usage-detail", `· ${extra}`));
-    item.title = spoken(meter, now);
-    item.setAttribute("aria-label", item.title);
-    children.push(item);
-  }
-  for (const other of strip.others) {
-    const item = span(document, other.critical ? "usage-other critical" : "usage-other");
-    item.append(span(document, "usage-label", other.title), span(document, "usage-value", percent(other.percent)));
-    item.title = other.spoken;
-    item.setAttribute("aria-label", other.spoken);
-    children.push(item);
-  }
-  element.replaceChildren(...children);
-  element.hidden = children.length === 0;
+function bar(document, meter) {
+  const element = document.createElement("meter");
+  element.min = 0;
+  element.max = 100;
+  element.value = Math.min(Math.max(meter.percent, 0), 100);
+  if (critical(meter)) element.className = "critical";
+  return element;
 }
 
-export function start({ document, fetch, setInterval, now = Date.now }) {
-  const element = document.getElementById("usage-line");
+export function render(document, element, list, sessions = []) {
+  const chips = list.map((account) => {
+    const tone = !account.meters.length && problemTone(account, sessions);
+    const chip = node(document, "span", ["usage-chip", account.critical ? "critical" : "", tone ? chipTone[tone] : ""].filter(Boolean).join(" "));
+    chip.append(node(document, "span", "usage-label", account.title));
+    if (account.meters.length) {
+      const bars = node(document, "span", "usage-bars");
+      bars.append(...account.meters.slice(0, 3).map((meter) => bar(document, meter)));
+      chip.append(bars);
+    }
+    chip.append(node(document, "span", "usage-value", account.worst ? percent(account.worst.percent) : account.problem ? "!" : "–"));
+    chip.title = account.spoken;
+    chip.setAttribute("aria-label", account.spoken);
+    return chip;
+  });
+  const more = node(document, "span", "usage-more");
+  more.hidden = true;
+  element.replaceChildren(...chips, more);
+  element.hidden = chips.length === 0;
+  element.setAttribute("aria-label", list.length ? `Usage of ${list.length} account${list.length === 1 ? "" : "s"}. ${list.map((a) => a.spoken).join(". ")}` : "Usage limits");
+}
+
+function accountCard(document, account, sessions, now, open) {
+  const tone = problemTone(account, sessions);
+  const card = node(document, "section", "usage-account");
+  const head = node(document, "div", "usage-account-head");
+  head.append(node(document, "strong", "", account.login));
+  if (account.subtitle) head.append(node(document, "span", "usage-account-sub", account.subtitle));
+  card.append(head);
+  for (const meter of account.meters) {
+    const row = node(document, "div", critical(meter) ? "usage-row critical" : "usage-row");
+    const resets = time(meter.resetsAt);
+    row.append(node(document, "span", "usage-row-label", shortLabel(meter)), bar(document, meter), node(document, "span", "usage-value", percent(meter.percent)), node(document, "span", "usage-row-reset", resets === null ? "" : reset(resets - now)));
+    row.setAttribute("aria-label", spoken(meter, now));
+    card.append(row);
+  }
+  if (account.problem) {
+    const problem = node(document, "p", noteTone[tone], account.problem);
+    if (account.problemDetail) problem.title = account.problemDetail;
+    card.append(problem);
+  }
+  else if (!account.meters.length) card.append(node(document, "p", "usage-note", "No current reading"));
+  if (sessions.length) {
+    const list = node(document, "div", "usage-sessions");
+    for (const session of sessions.slice(0, 5)) {
+      const button = node(document, "button", working(session) ? "usage-session working" : "usage-session");
+      button.type = "button";
+      button.append(node(document, "i"), node(document, "span", "", session.alias ? `@${session.alias}` : session.name || session.id));
+      button.addEventListener("click", () => open(session.id));
+      list.append(button);
+    }
+    if (sessions.length > 5) list.append(node(document, "span", "usage-note", `and ${sessions.length - 5} more`));
+    card.append(list);
+  }
+  return card;
+}
+
+export function renderPanel(document, panel, list, sessions, now, open) {
+  const groups = byHost(list);
+  const children = [node(document, "h2", "usage-panel-title", "Accounts")];
+  for (const group of groups) {
+    if (groups.length > 1) children.push(node(document, "h3", "usage-host", group.name));
+    for (const account of group.accounts) children.push(accountCard(document, account, activeSessions(account, sessions), now, open));
+  }
+  panel.replaceChildren(...children);
+}
+
+export function start({ document, fetch = (...args) => globalThis.fetch(...args), setInterval = (...args) => globalThis.setInterval(...args), now = Date.now, sessions = () => [], open = () => {} }) {
+  const element = $("#usage-line");
+  const panel = $("#usage-panel");
   if (!element) return null;
   let sets = [];
-  const draw = () => {
-    render(document, element, usageStrip(sets, now()), now());
-    fit(element, wrapped);
+  const drawPanel = () => {
+    if (panel && !panel.hidden) renderPanel(document, panel, accounts(sets, now()), sessions(), now(), (id) => { toggle(false); open(id); });
   };
+  const toggle = (show) => {
+    if (!panel) return;
+    panel.hidden = !show;
+    element.setAttribute("aria-expanded", String(show));
+    drawPanel();
+  };
+  const draw = () => {
+    render(document, element, accounts(sets, now()), sessions());
+    fit(element, wrapped);
+    drawPanel();
+  };
+  element.addEventListener?.("click", () => toggle(Boolean(panel?.hidden)));
+  document.addEventListener?.("keydown", (event) => { if (event.key === "Escape" && panel && !panel.hidden) toggle(false); });
+  document.addEventListener?.("click", (event) => {
+    if (panel && !panel.hidden && !panel.contains(event.target) && !element.contains(event.target)) toggle(false);
+  });
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => fit(element, wrapped)).observe(element);
   const load = async () => {
     try {
       const response = await fetch("/api/v1/usage", { headers: { accept: "application/json" } });
       if (response.status === 404) sets = [];
       else if (response.ok) sets = (await response.json()).sets || [];
-    } catch {}
+      else return;
+    } catch {
+      return;
+    }
     draw();
   };
   const ready = load();
   setInterval(load, POLL_MS);
   setInterval(draw, REDRAW_MS);
-  return { ready, load, current: () => sets };
-}
-
-if (typeof window !== "undefined" && window.document) {
-  start({ document: window.document, fetch: window.fetch.bind(window), setInterval: window.setInterval.bind(window) });
+  return { ready, load, toggle, current: () => sets };
 }
