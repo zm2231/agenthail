@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -26,6 +27,7 @@ type threadCreateOutput struct {
 	Session    *surface.Session    `json:"session,omitempty"`
 	Delivery   *surface.SendResult `json:"delivery,omitempty"`
 	Alias      string              `json:"alias,omitempty"`
+	Account    *claudepick.Pick    `json:"account,omitempty"`
 	Error      string              `json:"error,omitempty"`
 }
 
@@ -102,6 +104,14 @@ func (a *App) cmdThread(args []string) error {
 	if err != nil {
 		return err
 	}
+	var pick *claudepick.Pick
+	if request.surface == surface.KindClaude && request.options.ConfigRoot == "" {
+		chosen, err := a.claudeRootPick(context.Background())
+		if err != nil {
+			return err
+		}
+		request.options.ConfigRoot, pick = chosen.Root, &chosen
+	}
 	reservation, err := a.registry().ReserveAlias(request.alias, time.Now().Add(timeout+threadNameMargin))
 	if err != nil {
 		return fmt.Errorf("reserve thread alias: %w", err)
@@ -125,7 +135,7 @@ func (a *App) cmdThread(args []string) error {
 		}
 	}
 
-	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias}
+	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias, Account: pick}
 	if startErr != nil {
 		if session != nil {
 			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator}.Sender(), messageUUID, request.message)
@@ -189,7 +199,14 @@ func (a *App) cmdThread(args []string) error {
 	} else {
 		fmt.Printf("created %s in %s and started turn %s\n", target, session.Cwd, result)
 	}
+	printPickedAccount(output.Account)
 	return nil
+}
+
+func printPickedAccount(pick *claudepick.Pick) {
+	if pick != nil {
+		fmt.Printf("account: %s (%s)\n", pickTitle(*pick), pick.Reason)
+	}
 }
 
 func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateOutput) error {

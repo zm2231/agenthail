@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
@@ -26,7 +27,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method == http.MethodGet {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": GetNotificationStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "claudeAccounts": config.ClaudeAccountPolicy(), "claudeRoots": d.claudeRootNames(), "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": GetNotificationStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -45,7 +46,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		CodexRecentHours int    `json:"codexRecentHours"`
 		BusyDelivery     string `json:"busyDelivery"`
 		PersonName       string `json:"personName"`
-		ResumeAfterLimit bool   `json:"resumeAfterLimit"`
+		ResumeAfterLimit bool              `json:"resumeAfterLimit"`
+		ClaudeAccounts   claudepick.Policy `json:"claudeAccounts"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid settings request")
@@ -67,6 +69,12 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "resume-after-limit":
 		config.ResumeAfterLimit = &request.ResumeAfterLimit
 		err = SaveDashboardConfig(config)
+	case "claude-accounts":
+		if err = d.knownClaudeRoot(request.ClaudeAccounts.Preferred); err == nil {
+			if err = config.SetClaudeAccountPolicy(request.ClaudeAccounts); err == nil {
+				err = SaveDashboardConfig(config)
+			}
+		}
 	case "person-name":
 		err = d.Registry.SetPersonName(request.PersonName)
 	case "notifications-enable":

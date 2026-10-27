@@ -26,7 +26,8 @@ type DashboardConfig struct {
 	RemoteAccess     RemoteAccessConfig  `json:"remoteAccess"`
 	// ResumeAfterLimit turns off resuming sessions a usage limit stopped
 	// when it is false; unset leaves it on.
-	ResumeAfterLimit *bool `json:"resumeAfterLimit,omitempty"`
+	ResumeAfterLimit *bool                 `json:"resumeAfterLimit,omitempty"`
+	ClaudeAccounts   *ClaudeAccountsConfig `json:"claudeAccounts,omitempty"`
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume

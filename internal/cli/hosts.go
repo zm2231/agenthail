@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -417,6 +418,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		DeliveryID int64               `json:"deliveryId"`
 		Session    *surface.Session    `json:"session"`
 		Result     *surface.SendResult `json:"result"`
+		Account    *claudepick.Pick    `json:"account"`
 		Error      string              `json:"error"`
 	}
 	if err != nil {
@@ -428,7 +430,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	} else if decodeErr := json.Unmarshal(data, &response); decodeErr != nil {
 		return fmt.Errorf("decode create response (HTTP %d): %w", status, decodeErr)
 	}
-	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Error: response.Error}
+	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Error: response.Error}
 	output.Unknown = output.Status == string(registry.DeliveryIntentSubmitted)
 	if !output.OK {
 		if output.Error == "" {
@@ -455,6 +457,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	default:
 		fmt.Printf("created %s in %s\n", label, output.Session.Cwd)
 	}
+	printPickedAccount(output.Account)
 	return nil
 }
 

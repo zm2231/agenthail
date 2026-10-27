@@ -12,8 +12,11 @@ import (
 )
 
 func (a *App) cmdRoots(args []string) error {
+	if positional := stripFlags(args); len(positional) > 0 && positional[0] == "policy" {
+		return a.cmdRootsPolicy(args)
+	}
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail roots [--json]")
+		return fmt.Errorf("usage: agenthail roots [--json] | roots policy")
 	}
 	roots, err := a.claudeConfigRoots(context.Background())
 	if err != nil {

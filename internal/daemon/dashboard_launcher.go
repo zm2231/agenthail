@@ -98,7 +98,9 @@ func (d *Daemon) dashboardSessionCreate(w http.ResponseWriter, r *http.Request, 
 			}
 			writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
 		}
-		launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: startOptions(cwd)})
+		options := startOptions(cwd)
+		pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options)
+		launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: options})
 		startErr := launchErr
 		if launchErr != nil && launchResult.Session == nil {
 			var acceptedErr surface.LaunchAcceptedError
@@ -146,6 +148,9 @@ func (d *Daemon) dashboardSessionCreate(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
+		if pick != nil {
+			launchFields["account"] = pick
+		}
 		if launchResult.Session != nil {
 			d.writeStartedSessionOutcome(w, session, creator, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
 			return
@@ -179,7 +184,12 @@ func (d *Daemon) dashboardSessionCreate(w http.ResponseWriter, r *http.Request, 
 	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
-	session, sent, startErr := starter.StartSession(ctx, startOptions(cwd))
+	options := startOptions(cwd)
+	var extra map[string]any
+	if pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options); pick != nil {
+		extra = map[string]any{"account": pick}
+	}
+	session, sent, startErr := starter.StartSession(ctx, options)
 	if session != nil {
 		session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 		if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -194,7 +204,7 @@ func (d *Daemon) dashboardSessionCreate(w http.ResponseWriter, r *http.Request, 
 			writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but who started it could not be recorded: %s; do not retry automatically", originErr), nil)
 			return
 		}
-		d.writeStartedSessionOutcome(w, session, creator, alias, messageUUID, request.Message, sent, startErr, nil)
+		d.writeStartedSessionOutcome(w, session, creator, alias, messageUUID, request.Message, sent, startErr, extra)
 		return
 	}
 	if startErr == nil {

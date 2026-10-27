@@ -23,6 +23,7 @@ type Service struct {
 	Registry   *registry.Registry
 	Adapters   surface.Adapters
 	Dispatcher delivery.Dispatcher
+	ClaudeRoot func(context.Context) string
 }
 
 type Outcome struct {
@@ -270,6 +271,9 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	options := surface.SessionStartOptions{Message: first, Cwd: spec.Cwd, Model: spec.Model}
 	if spec.Surface == string(surface.KindClaude) {
 		options.Name, options.PermissionMode = spec.Name, spec.PermissionMode
+		if s.ClaudeRoot != nil {
+			options.ConfigRoot = s.ClaudeRoot(ctx)
+		}
 	}
 	messageUUID := uuid.NewString()
 	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)

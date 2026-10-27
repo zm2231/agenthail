@@ -27,7 +27,10 @@ const coordinatorUsage = `usage:
   agenthail coordinator clear [--cwd <path>]`
 
 func (a *App) coordinator() coordinator.Service {
-	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}}
+	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}, ClaudeRoot: func(ctx context.Context) string {
+		pick, _ := a.claudeRootPick(ctx)
+		return pick.Root
+	}}
 }
 
 func (a *App) cmdCoordinator(args []string) error {
