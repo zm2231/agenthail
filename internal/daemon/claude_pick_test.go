@@ -25,6 +25,8 @@ type pickFixture struct {
 	second  string
 	handler http.Handler
 	reads   *atomic.Int32
+	delay   *atomic.Int64
+	daemon  *Daemon
 }
 
 func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
@@ -45,9 +47,14 @@ func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
 	resets := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
 	percent := map[string]string{"org-a": "80", "org-b": "10"}
 	profiles := []signin.Source{{ProfileID: "sp_a", Label: "a", Browser: signin.Chrome, Dir: "/a"}, {ProfileID: "sp_b", Label: "b", Browser: signin.Chrome, Dir: "/b"}}
-	reads := &atomic.Int32{}
-	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, cookies surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	reads, delay := &atomic.Int32{}, &atomic.Int64{}
+	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(ctx context.Context, _ string, url string, _ map[string]string, _ string, cookies surfaces.CookieSource, _ time.Duration) (int, string, error) {
 		reads.Add(1)
+		select {
+		case <-time.After(time.Duration(delay.Load())):
+		case <-ctx.Done():
+			return 0, "", ctx.Err()
+		}
 		if strings.HasSuffix(url, "/api/account") {
 			return 200, `{"uuid":"acct` + strings.ReplaceAll(cookies.Signin.Dir, "/", "-") + `"}`, nil
 		}
@@ -58,7 +65,8 @@ func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
 		}
 		return 404, "{}", nil
 	})
-	return pickFixture{t: t, host: host, second: second, handler: dashboardRouter(newTestDaemon(t, registry, []surface.Surface{claude})), reads: reads}
+	d := newTestDaemon(t, registry, []surface.Surface{claude})
+	return pickFixture{t: t, host: host, second: second, handler: dashboardRouter(d), reads: reads, delay: delay, daemon: d}
 }
 
 func (f pickFixture) call(method, path string, body any, into any) int {
@@ -132,9 +140,31 @@ func TestAPreferredRootIsChosenWhileUnderItsCeilings(t *testing.T) {
 	if f.call(http.MethodGet, "/api/v1/settings", nil, &settings); settings.ClaudeAccounts != policy {
 		t.Fatalf("settings=%+v", settings.ClaudeAccounts)
 	}
+	f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, nil)
 	pick, dir := f.create("")
 	if dir != nil || pick.Name != "default" || pick.Reason != "preferred, session 80%" {
 		t.Fatalf("pick=%+v dir=%v", pick, dir)
+	}
+}
+
+func TestACreateNeverWaitsOnClaudeAIForUsage(t *testing.T) {
+	f := newPickFixture(t, true)
+	f.delay.Store(int64(3 * time.Second))
+	started := time.Now()
+	pick, dir := f.create("")
+	if took := time.Since(started); took > time.Second || dir != nil || pick.Reason != "no usage reading" {
+		t.Fatalf("a cold cache starts in the primary at once: took=%v pick=%+v dir=%v", took, pick, dir)
+	}
+	f.delay.Store(0)
+	deadline := time.Now().Add(10 * time.Second)
+	for f.daemon.claudeUsage.entry(f.second).last.Load() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the stale reading was not refreshed in the background")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if pick, dir := f.create(""); dir == nil || *dir != f.second || pick.Reason != "most headroom, session 10%" {
+		t.Fatalf("the refreshed readings decide the next start: pick=%+v dir=%v", pick, dir)
 	}
 }
 

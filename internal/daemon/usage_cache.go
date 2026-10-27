@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -22,6 +23,13 @@ type claudeUsageEntry struct {
 	live    surface.ClaudeConfigRoot
 	err     error
 	lastGot *surface.Usage
+	last    atomic.Pointer[claudeUsageSnapshot]
+}
+
+type claudeUsageSnapshot struct {
+	login  string
+	readAt time.Time
+	usage  *surface.Usage
 }
 
 func (c *claudeUsageCache) entry(root string) *claudeUsageEntry {
@@ -55,8 +63,22 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 		if entry.err == nil && entry.live.Usage != nil {
 			entry.lastGot = entry.live.Usage
 		}
+		entry.last.Store(&claudeUsageSnapshot{login: login, readAt: now, usage: entry.lastGot})
 	}
 	return entry.live, entry.lastGot, entry.err
+}
+
+// Never waits on claude.ai; a missing or stale reading refreshes in the background.
+func (c *claudeUsageCache) cached(reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) *surface.Usage {
+	snapshot := c.entry(root.Root).last.Load()
+	current := snapshot != nil && snapshot.login == claudeLoginKey(root)
+	if !current || now.Sub(snapshot.readAt) >= claudeUsageTTL {
+		go c.read(context.Background(), reader, root, now)
+	}
+	if !current {
+		return nil
+	}
+	return snapshot.usage
 }
 
 func claudeLoginKey(root surface.ClaudeConfigRoot) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) claudeRootPick(ctx context.Context) (claudepick.Pick, claudepick.Policy) {
+func (d *Daemon) claudeRootPick(ctx context.Context, fresh bool) (claudepick.Pick, claudepick.Policy) {
 	config, err := LoadDashboardConfig()
 	policy := config.ClaudeAccountPolicy()
 	if err != nil {
@@ -29,8 +30,33 @@ func (d *Daemon) claudeRootPick(ctx context.Context) (claudepick.Pick, claudepic
 		}
 		return claudepick.Choose(candidates, policy, now), policy
 	}
-	sets := d.claudeUsageSets(ctx, now)
+	var sets []usageSet
+	if fresh {
+		sets = d.claudeUsageSets(ctx, now)
+	} else {
+		sets = d.claudeCachedUsageSets(now)
+	}
 	return claudepick.Choose(claudePickCandidates(sets, now), policy, now), policy
+}
+
+func (d *Daemon) claudeCachedUsageSets(now time.Time) []usageSet {
+	reader, ok := d.adapters().ForSurface(surface.KindClaude).(claudeConfigRootReader)
+	home, err := os.UserHomeDir()
+	if !ok || err != nil {
+		return nil
+	}
+	sets := []usageSet{}
+	for _, root := range d.claudeConfigRoots() {
+		set := usageSet{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary, Login: surface.ClaudeRootLogin(home, root)}
+		if root.SignedInAs != nil {
+			set.Account = root.SignedInAs.Email
+		}
+		if root.Error == "" && set.Login == surface.ClaudeLoginClaudeAI {
+			set.Meters = usageMeters("claude", d.claudeUsage.cached(reader, root, now), now)
+		}
+		sets = append(sets, set)
+	}
+	return sets
 }
 
 func claudePickCandidates(sets []usageSet, now time.Time) []claudepick.Candidate {
@@ -58,7 +84,7 @@ func (d *Daemon) resolveClaudeStart(ctx context.Context, kind surface.SurfaceKin
 	if kind != surface.KindClaude || options.ConfigRoot != "" {
 		return nil
 	}
-	pick, _ := d.claudeRootPick(ctx)
+	pick, _ := d.claudeRootPick(ctx, false)
 	options.ConfigRoot = pick.Root
 	return &pick
 }
@@ -83,6 +109,6 @@ func (d *Daemon) claudeRootPickHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	pick, policy := d.claudeRootPick(r.Context())
+	pick, policy := d.claudeRootPick(r.Context(), true)
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"pick": pick, "policy": policy})
 }
