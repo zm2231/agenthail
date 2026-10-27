@@ -53,21 +53,18 @@ func (c *Config) normalize() error {
 		return fmt.Errorf("proxy %s: %w", c.Name, err)
 	}
 	c.URL = strings.TrimRight(c.URL, "/")
-	if c.Management != nil {
-		switch c.Management.set() {
-		case 0:
-			c.Management = nil
-		case 1:
-		default:
-			return fmt.Errorf("proxy %s: management must name one of file, keychain or env", c.Name)
-		}
-	}
 	if m := c.Management; m != nil {
+		if m.set() != 1 {
+			return fmt.Errorf("proxy %s: management must name one of file, keychain, env or command", c.Name)
+		}
 		if m.File != "" && !filepath.IsAbs(m.File) {
 			return fmt.Errorf("proxy %s: management file must be an absolute path", c.Name)
 		}
 		if m.Keychain != nil && (m.Keychain.Service == "" || m.Keychain.Account == "") {
 			return fmt.Errorf("proxy %s: management keychain needs service and account", c.Name)
+		}
+		if len(m.Command) > 0 && !filepath.IsAbs(m.Command[0]) {
+			return fmt.Errorf("proxy %s: management command must start with an absolute path", c.Name)
 		}
 	}
 	return nil

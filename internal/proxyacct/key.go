@@ -21,6 +21,7 @@ type KeyRef struct {
 	File     string    `json:"file,omitempty"`
 	Keychain *Keychain `json:"keychain,omitempty"`
 	Env      string    `json:"env,omitempty"`
+	Command  []string  `json:"command,omitempty"`
 }
 
 func (r *KeyRef) set() int {
@@ -28,7 +29,7 @@ func (r *KeyRef) set() int {
 		return 0
 	}
 	count := 0
-	for _, set := range []bool{r.File != "", r.Keychain != nil, r.Env != ""} {
+	for _, set := range []bool{r.File != "", r.Keychain != nil, r.Env != "", len(r.Command) > 0} {
 		if set {
 			count++
 		}
@@ -44,6 +45,8 @@ func (r *KeyRef) Describe() string {
 		return "the key file " + r.File
 	case r.Keychain != nil:
 		return fmt.Sprintf("the keychain item %s/%s", r.Keychain.Service, r.Keychain.Account)
+	case len(r.Command) > 0:
+		return "the key command " + strings.Join(r.Command, " ")
 	}
 	return "the environment variable " + r.Env
 }
@@ -86,6 +89,8 @@ func (r *KeyRef) read(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("security find-generic-password: %w", err)
 		}
 		return stdout.String(), nil
+	case len(r.Command) > 0:
+		return readKeyCommand(ctx, r.Command)
 	}
 	return os.Getenv(r.Env), nil
 }

@@ -25,11 +25,16 @@ func TestProxiesConfigIsValidated(t *testing.T) {
 		`{}`:                                "must be a list",
 		`[{"name":"a b","url":"http://x"}]`: "proxy name",
 		`[{"name":"a","url":"ftp://x"}]`:    "http or https",
-		`[{"name":"a","url":"http://x","kind":"other"}]`:                            "not supported",
-		`[{"name":"a","url":"http://x"},{"name":"a","url":"http://y"}]`:             "listed twice",
-		`[{"name":"a","url":"http://x","management":{"env":"A","file":"/k"}}]`:      "one of file",
-		`[{"name":"a","url":"http://x","management":{"file":"k"}}]`:                 "absolute",
-		`[{"name":"a","url":"http://x","management":{"keychain":{"service":"s"}}}]`: "service and account",
+		`[{"name":"a","url":"http://x","kind":"other"}]`:                                "not supported",
+		`[{"name":"a","url":"http://x"},{"name":"a","url":"http://y"}]`:                 "listed twice",
+		`[{"name":"a","url":"http://x","management":{"env":"A","file":"/k"}}]`:          "one of file",
+		`[{"name":"a","url":"http://x","management":{"file":"k"}}]`:                     "absolute",
+		`[{"name":"a","url":"http://x","management":{"keychain":{"service":"s"}}}]`:     "service and account",
+		`[{"name":"a","url":"http://x","management":{"command":["setec","get","k"]}}]`:  "absolute path",
+		`[{"name":"a","url":"http://x","management":{"command":["/bin/k"],"env":"A"}}]`: "one of file",
+		`[{"name":"a","url":"http://x","management":{"command":[]}}]`:                   "one of file",
+		`[{"name":"a","url":"http://x","management":{"file":""}}]`:                      "one of file",
+		`[{"name":"a","url":"http://x","management":{}}]`:                               "one of file",
 	} {
 		if _, err := ParseConfigs([]byte(raw)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("%s: %v", raw, err)

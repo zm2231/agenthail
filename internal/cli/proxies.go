@@ -15,9 +15,13 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const proxiesUsage = "usage: agenthail proxies [--json] | add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account>] | key <name> <key reference> | rm <name> | prefer <name> <account> on|off|--only [--now]"
+const proxiesUsage = "usage: agenthail proxies [--json] | add <name> <url> [--key-file <path> | --key-env <name> | --keychain-service <service> --keychain-account <account> | --key-command -- <argv...>] | key <name> <key reference> | rm <name> | prefer <name> <account> on|off|--only [--now]"
 
 func (a *App) cmdProxies(args []string) error {
+	args, keyCommand, err := splitKeyCommand(args)
+	if err != nil {
+		return err
+	}
 	positional := stripFlags(args)
 	if len(positional) == 0 {
 		return a.listProxies(args)
@@ -34,7 +38,7 @@ func (a *App) cmdProxies(args []string) error {
 		return err
 	}
 	index := slices.IndexFunc(proxies, func(proxy proxyacct.Config) bool { return len(positional) > 1 && proxy.Name == positional[1] })
-	ref, err := keyRefFromFlags(args)
+	ref, err := keyRefFromFlags(args, keyCommand)
 	if err != nil {
 		return err
 	}
