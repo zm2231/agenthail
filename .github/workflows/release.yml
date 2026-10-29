@@ -327,12 +327,30 @@ jobs:
             fi
           done
           exit 1
+      - name: Package iOS dSYMs
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          archive="$RUNNER_TEMP/Agenthail.xcarchive"
+          app_uuids="$(xcrun dwarfdump --uuid "$archive/Products/Applications/Agenthail.app/Agenthail" | awk '{print $2}' | sort)"
+          dsym_uuids="$(xcrun dwarfdump --uuid "$archive/dSYMs/Agenthail.app.dSYM" | awk '{print $2}' | sort)"
+          printf 'App UUIDs:\n%s\n' "$app_uuids"
+          test -n "$app_uuids"
+          test "$app_uuids" = "$dsym_uuids"
+          mkdir -p "$RUNNER_TEMP/dsyms"
+          ditto -c -k --keepParent "$archive/dSYMs" "$RUNNER_TEMP/dsyms/Agenthail-iOS-${RELEASE_VERSION#v}-dSYMs.zip"
       - uses: actions/upload-artifact@v7
         with:
           name: agenthail-ios-release
           path: ${{ runner.temp }}/export/Agenthail.ipa
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-ios-dsyms
+          path: ${{ runner.temp }}/dsyms/*.zip
+          if-no-files-found: error
+          retention-days: 90
 
   publish:
     needs: [push-relay-check, macos-test, macos-package, linux-archive, ios-archive]
@@ -357,6 +375,10 @@ jobs:
         with:
           name: agenthail-ios-release
           path: ios
+      - uses: actions/download-artifact@v4
+        with:
+          name: agenthail-ios-dsyms
+          path: dsyms
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -372,6 +394,7 @@ jobs:
             dist/Agenthail-*.pkg.sha256
             dist/agenthail-*.tar.gz
             dist/agenthail-*.tar.gz.sha256
+            dsyms/Agenthail-iOS-*-dSYMs.zip
       - name: Configure App Store Connect authentication
         env:
           ASC_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
