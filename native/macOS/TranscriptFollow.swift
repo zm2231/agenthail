@@ -85,10 +85,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
-            .environment(\.revealRow) { top in
+            .environment(\.revealRow, TranscriptAction(owner: String(describing: transcript)) { top in
                 following = false
                 position.scrollTo(y: top)
-            }
+            })
             .onChange(of: transcript) {
                 generation &+= 1
                 placedLeadingRow = leadingRow

@@ -59,6 +59,21 @@ struct TranscriptRows: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.memory === rhs.memory && lhs.session == rhs.session }
 }
 
+// Rows may keep an older equal copy: `perform` must reach live state (@State, a binding, a reference), never captured values.
+struct TranscriptAction<Input>: Equatable {
+    private let owner: String
+    private let perform: @MainActor (Input) -> Void
+
+    init(owner: String, perform: @escaping @MainActor (Input) -> Void) {
+        self.owner = owner
+        self.perform = perform
+    }
+
+    @MainActor func callAsFunction(_ input: Input) { perform(input) }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.owner == rhs.owner }
+}
+
 struct RowChoice<Value> {
     fileprivate let session: String
     fileprivate let value: Value
@@ -72,7 +87,7 @@ extension EnvironmentValues {
     /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
     /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
     /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
-    @Entry var revealRow: (CGFloat) -> Void = { _ in }
+    @Entry var revealRow = TranscriptAction<CGFloat>(owner: "") { _ in }
 }
 
 extension TranscriptRows {

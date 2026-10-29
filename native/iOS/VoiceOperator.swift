@@ -107,7 +107,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 Color.clear.frame(height: 1).id("voice-bottom")
             }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
-            .environment(\.revealRow) { position.scrollTo(y: $0) }
+            .environment(\.revealRow, TranscriptAction(owner: "voice") { position.scrollTo(y: $0) })
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             }
             .scrollPosition($position)

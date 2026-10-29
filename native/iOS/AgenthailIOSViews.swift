@@ -577,8 +577,8 @@ struct SessionScreen: View {
             LazyVStack(alignment: .leading, spacing: 12) {
                 Group { transcriptRows }.transcriptScrimRow()
             }
-            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
-            .environment(\.revealRow) { position.scrollTo(y: $0) }
+            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? TranscriptAction(owner: session.id) { model.editAndResend($0) } : nil)
+            .environment(\.revealRow, TranscriptAction(owner: session.id) { position.scrollTo(y: $0) })
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
@@ -1003,7 +1003,7 @@ struct IOSComposer: View {
 }
 
 extension EnvironmentValues {
-    @Entry var editMessage: ((String) -> Void)? = nil
+    @Entry var editMessage: TranscriptAction<String>? = nil
 }
 
 struct IOSMessage: View {
