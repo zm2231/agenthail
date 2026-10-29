@@ -141,6 +141,14 @@ The iOS app declares `ITSAppUsesNonExemptEncryption: false` in both [XcodeGen co
 
 Apple agreements, two-factor authentication, first-time account/role setup, external tester onboarding/review, public links, and App Store submission are outside this internal-group workflow. Complete those through the applicable Apple flow. No workflow here accepts agreements, grants privileges, or bypasses beta review.
 
+## Symbolicate an iPhone crash report
+
+Each release attaches `Agenthail-iOS-<version>-dSYMs.zip`, the archive's dSYMs, after checking that their UUIDs match the archived app. A crash report's `usedImages` entry for `Agenthail` names the binary UUID and load address; download the zip for that release, confirm the UUID with `dwarfdump --uuid`, and resolve frames:
+
+```sh
+atos -arch arm64 -o dSYMs/Agenthail.app.dSYM/Contents/Resources/DWARF/Agenthail -l <load address> <frame address>...
+```
+
 ## Verification and maintenance
 
 After changing management scripts or workflows:
