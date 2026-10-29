@@ -496,6 +496,22 @@ struct SessionScreen: View {
         }
     }
 
+    private var jumpToLatest: some View {
+        Button {
+            followingLatest = true
+            jumps += 1
+            position.scrollTo(edge: .bottom)
+            Task { await settleAtLatest() }
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .floatingGlass(in: Circle(), interactive: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to latest")
+    }
+
     @ViewBuilder private var transcriptRows: some View {
         let connection = model.connectionState(for: session.id)
         if let error = connection.error {
@@ -613,21 +629,6 @@ struct SessionScreen: View {
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
-                if !atLatest && detail != nil {
-                    Button {
-                        followingLatest = true
-                        jumps += 1
-                        position.scrollTo(edge: .bottom)
-                        Task { await settleAtLatest() }
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.body.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .floatingGlass(in: Circle(), interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Jump to latest")
-                }
                 if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
                     ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
                                       surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(PhonePalette.accentText),
@@ -663,6 +664,10 @@ struct SessionScreen: View {
                         IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                     }
                 }
+            }
+            // Floats above the bar: growing the bar would move the transcript and flip atLatest, which hides it again.
+            .overlay(alignment: .top) {
+                if !atLatest && detail != nil { jumpToLatest.alignmentGuide(.top) { $0[.bottom] + 8 } }
             }
         }
         .toolbar(.hidden, for: .tabBar)

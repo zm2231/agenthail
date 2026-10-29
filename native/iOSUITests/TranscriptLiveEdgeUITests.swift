@@ -120,4 +120,27 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
             frame += 1
         }
     }
+
+    private func assertStill(_ app: XCUIApplication, _ context: String) {
+        let jump = app.buttons["Jump to latest"]
+        let first = jump.exists
+        for _ in 0..<8 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            XCTAssertEqual(jump.exists, first, "Jump to latest kept appearing and disappearing \(context)")
+        }
+    }
+
+    func testReopeningALongSessionLeavesTheTranscriptStill() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-follow", "--preview-theme", "dark"]
+            + (captured ? ["--preview-capture"] : ["--preview-reading"]) + ["--preview-backdrop"]
+        app.launch()
+        for round in 1...3 {
+            app.buttons[sessionID].tapWhenReady(timeout: 15)
+            XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
+            sleep(5)
+            assertStill(app, "after opening the session, round \(round)")
+            app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        }
+    }
 }
