@@ -491,9 +491,25 @@ struct SessionScreen: View {
     private func settleAtLatest() async {
         for _ in 0..<5 {
             try? await Task.sleep(for: .milliseconds(50))
-            guard followingLatest, !atLatest else { return }
+            guard followingLatest else { return }
             scrollToLatest()
         }
+    }
+
+    private var jumpToLatest: some View {
+        Button {
+            followingLatest = true
+            jumps += 1
+            position.scrollTo(edge: .bottom)
+            Task { await settleAtLatest() }
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .floatingGlass(in: Circle(), interactive: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to latest")
     }
 
     @ViewBuilder private var transcriptRows: some View {
@@ -536,6 +552,9 @@ struct SessionScreen: View {
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
+#if DEBUG
+                if let space = PreviewStream.trailingSpace { Color.clear.frame(height: space) }
+#endif
             } else {
                 if let reason = detail.timeline?.unavailableReason {
                     Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(PhonePalette.muted)
@@ -608,26 +627,15 @@ struct SessionScreen: View {
         }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
+        // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
+        .overlay(alignment: .bottom) {
+            if !atLatest && detail != nil { jumpToLatest.padding(.bottom, 8) }
+        }
         .edgeBar(.top, spacing: 0) {
             if let detail { SessionSummary(detail: detail) { showingInfo = true } }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
-                if !atLatest && detail != nil {
-                    Button {
-                        followingLatest = true
-                        jumps += 1
-                        position.scrollTo(edge: .bottom)
-                        Task { await settleAtLatest() }
-                    } label: {
-                        Image(systemName: "arrow.down")
-                            .font(.body.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .floatingGlass(in: Circle(), interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Jump to latest")
-                }
                 if let detail, let waiting = detail.session.waitingOn, ElsewhereWaitCard.shows(waiting, readOnly: detail.readOnly, respond: detail.capabilities.respond) {
                     ElsewhereWaitCard(waiting: waiting, place: detail.waitingPlace ?? .elsewhere,
                                       surface: session.surface, hostName: session.runtime?.hostName, accent: AnyShapeStyle(PhonePalette.accentText),

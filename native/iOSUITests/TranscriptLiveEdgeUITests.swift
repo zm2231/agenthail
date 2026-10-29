@@ -120,4 +120,57 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
             frame += 1
         }
     }
+
+    private func assertStill(_ app: XCUIApplication, _ context: String) {
+        let jump = app.buttons["Jump to latest"]
+        let first = jump.exists
+        for _ in 0..<8 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+            XCTAssertEqual(jump.exists, first, "Jump to latest kept appearing and disappearing \(context)")
+        }
+    }
+
+    func testOpeningJustShortOfTheEndLeavesTheTranscriptStill() {
+        continueAfterFailure = false
+        for space in stride(from: 40, through: 280, by: 30) {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-session", "--preview-stream", "--preview-theme", "dark", "--preview-trailing-space", "\(space)"]
+            app.launch()
+            XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
+            sleep(4)
+            assertStill(app, "after opening \(space) points short of the end")
+            app.terminate()
+        }
+    }
+
+    func testJumpToLatestFloatsAboveTheComposerWithTheKeyboardUp() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-reading", "--preview-reading-top", "--preview-follow", "--preview-theme", "dark"]
+        app.launch()
+        let jump = app.buttons["Jump to latest"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 10), "a session opened at its oldest row offered no way to the latest")
+        let composer = app.textViews["Message to this agent"]
+        composer.tapWhenReady()
+        composer.typeText(" ")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(jump.frame.maxY, composer.frame.minY, "Jump to latest covered the composer")
+        XCTAssertTrue(jump.isHittable)
+        jump.tap()
+        let gone = NSPredicate(format: "exists == false")
+        wait(for: [XCTNSPredicateExpectation(predicate: gone, object: jump)], timeout: 5)
+    }
+
+    func testReopeningALongSessionLeavesTheTranscriptStill() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-follow", "--preview-theme", "dark"]
+            + (captured ? ["--preview-capture"] : ["--preview-reading"]) + ["--preview-backdrop"]
+        app.launch()
+        for round in 1...3 {
+            app.buttons[sessionID].tapWhenReady(timeout: 15)
+            XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
+            sleep(5)
+            assertStill(app, "after opening the session, round \(round)")
+            app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        }
+    }
 }
