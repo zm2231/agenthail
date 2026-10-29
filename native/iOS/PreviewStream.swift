@@ -12,6 +12,12 @@ enum PreviewStream {
 
     static let paused = ProcessInfo.processInfo.arguments.contains("--preview-stream-paused")
 
+    static let trailingSpace: CGFloat? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--preview-trailing-space"), index + 1 < arguments.count else { return nil }
+        return Double(arguments[index + 1]).map { CGFloat($0) }
+    }()
+
     static var now: Int { history + (paused ? 0 : Int(Date().timeIntervalSince(started) / interval)) }
 
     static func event(_ k: Int, session: String) -> [String: Any] {
