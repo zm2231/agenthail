@@ -332,8 +332,8 @@ jobs:
           RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           archive="$RUNNER_TEMP/Agenthail.xcarchive"
-          app_uuids="$(dwarfdump --uuid "$archive/Products/Applications/Agenthail.app/Agenthail" | awk '{print $2}' | sort)"
-          dsym_uuids="$(dwarfdump --uuid "$archive/dSYMs/Agenthail.app.dSYM" | awk '{print $2}' | sort)"
+          app_uuids="$(xcrun dwarfdump --uuid "$archive/Products/Applications/Agenthail.app/Agenthail" | awk '{print $2}' | sort)"
+          dsym_uuids="$(xcrun dwarfdump --uuid "$archive/dSYMs/Agenthail.app.dSYM" | awk '{print $2}' | sort)"
           printf 'App UUIDs:\n%s\n' "$app_uuids"
           test -n "$app_uuids"
           test "$app_uuids" = "$dsym_uuids"

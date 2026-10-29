@@ -143,10 +143,10 @@ Apple agreements, two-factor authentication, first-time account/role setup, exte
 
 ## Symbolicate an iPhone crash report
 
-Each release attaches `Agenthail-iOS-<version>-dSYMs.zip`, the archive's dSYMs, after checking that their UUIDs match the archived app. A crash report's `usedImages` entry for `Agenthail` names the binary UUID and load address; download the zip for that release, confirm the UUID with `dwarfdump --uuid`, and resolve frames:
+Each release attaches `Agenthail-iOS-<version>-dSYMs.zip`, the archive's dSYMs, after checking that their UUIDs match the archived app. In a JSON `.ips` report, the `usedImages` entry named `Agenthail` gives the binary's `uuid`, `arch` and load address `base`; each frame in that image gives its `imageIndex` (the entry's position in `usedImages`) and `imageOffset`. Download the zip for the report's version, confirm `xcrun dwarfdump --uuid` prints the same UUID, and pass each frame's address, `base + imageOffset`:
 
 ```sh
-atos -arch arm64 -o dSYMs/Agenthail.app.dSYM/Contents/Resources/DWARF/Agenthail -l <load address> <frame address>...
+atos -arch arm64 -o dSYMs/Agenthail.app.dSYM/Contents/Resources/DWARF/Agenthail -l <base> <base + imageOffset>...
 ```
 
 ## Verification and maintenance
