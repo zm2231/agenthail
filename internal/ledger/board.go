@@ -6,10 +6,11 @@ import (
 )
 
 type Goal struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	ParentGoalID string   `json:"parentGoalId,omitempty"`
-	Asks         []string `json:"asks,omitempty"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	ParentGoalID string    `json:"parentGoalId,omitempty"`
+	Asks         []string  `json:"asks,omitempty"`
+	Constraints  []*Clause `json:"constraints,omitempty"`
 }
 
 type Ask struct {
@@ -18,20 +19,36 @@ type Ask struct {
 	Type            AskType   `json:"type"`
 	Principal       string    `json:"principal"`
 	SourceUtterance string    `json:"sourceUtteranceId"`
+	Delegates       []string  `json:"delegates,omitempty"`
 	Clauses         []*Clause `json:"clauses"`
 }
 
 type Clause struct {
 	ID             string       `json:"id"`
-	AskID          string       `json:"askId"`
+	AskID          string       `json:"askId,omitempty"`
+	GoalID         string       `json:"goalId,omitempty"`
+	Kind           string       `json:"kind,omitempty"`
 	Text           string       `json:"text"`
 	State          ClauseState  `json:"state"`
 	Source         ClauseSource `json:"source,omitempty"`
 	OwnerSessionID string       `json:"ownerSessionId,omitempty"`
+	ProposedBy     string       `json:"proposedBy,omitempty"`
+	Sources        []string     `json:"sourceUtteranceIds,omitempty"`
 	SelfReported   bool         `json:"selfReported,omitempty"`
 	ProgressRef    string       `json:"progressRef,omitempty"`
 	Cuts           []Cut        `json:"cuts,omitempty"`
 	Waits          []Wait       `json:"waits,omitempty"`
+}
+
+type UtteranceView struct {
+	ID         string   `json:"id"`
+	Text       string   `json:"text"`
+	SpeakerID  string   `json:"speakerId"`
+	TargetID   string   `json:"targetId"`
+	CapturedBy string   `json:"capturedBy"`
+	At         string   `json:"ts"`
+	GoalIDs    []string `json:"goalIds,omitempty"`
+	Attached   bool     `json:"attached"`
 }
 
 type Cut struct {
@@ -47,28 +64,41 @@ type Wait struct {
 }
 
 type Decision struct {
-	ID        string `json:"id"`
-	Version   int    `json:"version"`
-	Text      string `json:"text"`
-	Principal string `json:"principal"`
+	ID              string `json:"id"`
+	GoalID          string `json:"goalId,omitempty"`
+	Version         int    `json:"version"`
+	Text            string `json:"text"`
+	Principal       string `json:"principal"`
+	SourceUtterance string `json:"sourceUtteranceId,omitempty"`
 }
 
 type Board struct {
-	mu        sync.RWMutex
-	goals     map[string]*Goal
-	asks      map[string]*Ask
-	clauses   map[string]*Clause
-	decisions map[string]*Decision
-	applied   int64
+	mu                 sync.RWMutex
+	goals              map[string]*Goal
+	asks               map[string]*Ask
+	clauses            map[string]*Clause
+	decisions          map[string]*Decision
+	utterances         map[string]*UtteranceView
+	utteranceOrder     []string
+	projectConstraints []*Clause
+	applied            int64
 }
 
 func NewBoard() *Board {
-	return &Board{
-		goals:     map[string]*Goal{},
-		asks:      map[string]*Ask{},
-		clauses:   map[string]*Clause{},
-		decisions: map[string]*Decision{},
-	}
+	b := &Board{}
+	b.reset()
+	return b
+}
+
+func (b *Board) reset() {
+	b.goals = map[string]*Goal{}
+	b.asks = map[string]*Ask{}
+	b.clauses = map[string]*Clause{}
+	b.decisions = map[string]*Decision{}
+	b.utterances = map[string]*UtteranceView{}
+	b.utteranceOrder = nil
+	b.projectConstraints = nil
+	b.applied = 0
 }
 
 func (b *Board) Apply(event Event) error {
@@ -100,6 +130,12 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyDelegation(event.Payload)
 	case EventSupersession:
 		err = b.applySupersession(event.Payload)
+	case EventUtterance:
+		err = b.applyUtterance(event.Payload)
+	case EventAttach:
+		err = b.applyAttach(event.Payload)
+	case EventClauseSource:
+		err = b.applyClauseSource(event.Payload)
 	}
 	if err == nil {
 		b.applied = event.Seq
@@ -120,7 +156,7 @@ func (b *Board) OpenAsks() []Ask {
 	for _, ask := range b.asks {
 		hasOpen := false
 		for _, c := range ask.Clauses {
-			if c.State != StateReported && !clauseFullyCut(c) {
+			if c.State != StateReported && c.State != StateRejected && !clauseFullyCut(c) {
 				hasOpen = true
 				break
 			}
@@ -162,12 +198,32 @@ func (b *Board) Decisions() []Decision {
 	return result
 }
 
+func (b *Board) ProjectConstraints() []Clause {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	result := make([]Clause, 0, len(b.projectConstraints))
+	for _, c := range b.projectConstraints {
+		result = append(result, *c)
+	}
+	return result
+}
+
+func (b *Board) Utterances() []UtteranceView {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	result := make([]UtteranceView, 0, len(b.utteranceOrder))
+	for _, ref := range b.utteranceOrder {
+		result = append(result, *b.utterances[ref])
+	}
+	return result
+}
+
 func (b *Board) ClausesOwnedBy(sessionID string) []Clause {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	var result []Clause
 	for _, c := range b.clauses {
-		if c.OwnerSessionID == sessionID && c.State != StateReported && !clauseFullyCut(c) {
+		if c.OwnerSessionID == sessionID && c.State != StateReported && c.State != StateRejected && !clauseFullyCut(c) {
 			result = append(result, *c)
 		}
 	}
@@ -185,11 +241,7 @@ func clauseFullyCut(c *Clause) bool {
 
 func (b *Board) Rebuild(events []Event) error {
 	b.mu.Lock()
-	b.goals = map[string]*Goal{}
-	b.asks = map[string]*Ask{}
-	b.clauses = map[string]*Clause{}
-	b.decisions = map[string]*Decision{}
-	b.applied = 0
+	b.reset()
 	b.mu.Unlock()
 	for _, e := range events {
 		if err := b.Apply(e); err != nil {
@@ -239,14 +291,26 @@ func (b *Board) applyClause(data []byte) error {
 	c := &Clause{
 		ID:             p.ClauseID,
 		AskID:          p.AskID,
+		GoalID:         p.GoalID,
+		Kind:           p.Kind,
 		Text:           p.Text,
 		State:          p.State,
 		Source:         p.Source,
 		OwnerSessionID: p.OwnerSessionID,
+		ProposedBy:     p.ProposedBy,
+	}
+	if p.SourceUtteranceID != "" {
+		c.Sources = []string{p.SourceUtteranceID}
 	}
 	b.clauses[p.ClauseID] = c
-	if ask, ok := b.asks[p.AskID]; ok {
+	switch ask, ok := b.asks[p.AskID]; {
+	case ok:
 		ask.Clauses = append(ask.Clauses, c)
+	case p.Kind != ClauseKindConstraint:
+	case p.GoalID != "" && b.goals[p.GoalID] != nil:
+		b.goals[p.GoalID].Constraints = append(b.goals[p.GoalID].Constraints, c)
+	case p.GoalID == "":
+		b.projectConstraints = append(b.projectConstraints, c)
 	}
 	return nil
 }
@@ -274,10 +338,12 @@ func (b *Board) applyDecision(data []byte) error {
 		return err
 	}
 	b.decisions[p.DecisionID] = &Decision{
-		ID:        p.DecisionID,
-		Version:   p.Version,
-		Text:      p.Text,
-		Principal: p.Principal,
+		ID:              p.DecisionID,
+		GoalID:          p.GoalID,
+		Version:         p.Version,
+		Text:            p.Text,
+		Principal:       p.Principal,
+		SourceUtterance: p.SourceUtterance,
 	}
 	return nil
 }
@@ -364,7 +430,11 @@ func (b *Board) applyDelegation(data []byte) error {
 	if !ok {
 		return nil
 	}
+	ask.Delegates = append(ask.Delegates, p.DelegateSessionID)
 	for _, c := range ask.Clauses {
+		if c.Source == SourceProposed || c.State == StateRejected {
+			continue
+		}
 		if c.OwnerSessionID == p.DelegatorSessionID || c.OwnerSessionID == "" {
 			c.OwnerSessionID = p.DelegateSessionID
 		}
@@ -382,5 +452,8 @@ func (b *Board) applySupersession(data []byte) error {
 		return nil
 	}
 	c.Text = p.NewVersion
+	if p.SourceUtteranceID != "" {
+		c.Sources = append(c.Sources, p.SourceUtteranceID)
+	}
 	return nil
 }

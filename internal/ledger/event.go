@@ -26,6 +26,8 @@ const (
 	EventCorrection    EventType = "correction"
 	EventWaiver        EventType = "waiver"
 	EventRedact        EventType = "redact"
+	EventAttach        EventType = "attach"
+	EventClauseSource  EventType = "clause.source"
 )
 
 type AskType string
@@ -48,7 +50,10 @@ const (
 	StateMerged       ClauseState = "merged"
 	StateVerifiedLive ClauseState = "verified-live"
 	StateReported     ClauseState = "reported"
+	StateRejected     ClauseState = "rejected"
 )
+
+const ClauseKindConstraint = "constraint"
 
 type ClauseSource string
 

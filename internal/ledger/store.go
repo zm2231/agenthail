@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -145,52 +144,6 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 		events = append(events, e)
 	}
 	return events, rows.Err()
-}
-
-func (s *Store) RecordGoal(projectKey, goalID, name, parentGoalID, actorSessionID string) (Event, error) {
-	payload := GoalPayload{
-		GoalID:       goalID,
-		Name:         name,
-		ParentGoalID: parentGoalID,
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return Event{}, err
-	}
-	return s.AppendEvent(Event{
-		ProjectKey:     projectKey,
-		Type:           EventGoal,
-		Payload:        data,
-		ActorSessionID: actorSessionID,
-	})
-}
-
-func (s *Store) UnattachedUtterances(projectKey string) ([]Event, error) {
-	events, err := s.Events(projectKey, 0, 100000)
-	if err != nil {
-		return nil, err
-	}
-	attached := map[string]bool{}
-	var utterances []Event
-	for _, e := range events {
-		switch e.Type {
-		case EventUtterance:
-			utterances = append(utterances, e)
-		case EventAsk:
-			var p AskPayload
-			if json.Unmarshal(e.Payload, &p) == nil && p.SourceUtterance != "" {
-				attached[p.SourceUtterance] = true
-			}
-		}
-	}
-	var unattached []Event
-	for _, u := range utterances {
-		var p UtterancePayload
-		if json.Unmarshal(u.Payload, &p) == nil && !attached[p.UtteranceID] {
-			unattached = append(unattached, u)
-		}
-	}
-	return unattached, nil
 }
 
 func (s *Store) LatestSeq(projectKey string) (int64, error) {
