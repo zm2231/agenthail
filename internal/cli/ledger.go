@@ -133,10 +133,9 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		} else {
 			out["g2"] = g2
 		}
+		out["promptHookProblems"] = append([]promptHookProblem{}, hookProblems...)
 		if hookErr != nil {
 			out["promptHooksError"] = hookErr.Error()
-		} else {
-			out["promptHookProblems"] = append([]promptHookProblem{}, hookProblems...)
 		}
 		return emit(out)
 	}

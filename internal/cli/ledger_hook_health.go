@@ -13,6 +13,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+var resolveSessionProject = daemon.ResolvePathProject
+
 type promptHookProblem struct {
 	Root  string `json:"root"`
 	State string `json:"state"`
@@ -87,7 +89,7 @@ func ledgerPromptHookProblems(ctx context.Context, r *registry.Registry) ([]prom
 }
 
 func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []surface.ClaudeConfigRoot, affected map[string]bool, enabled map[string]bool) (map[string]string, []error, error) {
-	places, err := r.LocalSessionPlaces(surface.KindClaude)
+	places, err := r.LocalSessionPlaces(ctx, surface.KindClaude)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,9 +102,12 @@ func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []su
 		if root == nil || !affected[root.Root] || held[root.Root] != "" {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return held, []error{fmt.Errorf("stopped telling which projects use the Claude config roots: %w", err)}, nil
+		}
 		key, seen := keys[place.Cwd]
 		if !seen {
-			project, err := daemon.ResolvePathProject(ctx, r, place.Cwd)
+			project, err := resolveSessionProject(ctx, r, place.Cwd)
 			if err != nil {
 				resolveErrs[place.Cwd] = fmt.Errorf("project of %s: %w", place.Cwd, err)
 			} else if project != nil {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -135,5 +137,56 @@ func TestACoordinatorAloneMakesThePromptHookMatter(t *testing.T) {
 	}
 	if problems[0].EnabledProject != "" {
 		t.Fatalf("coordinator-only capture must stay a warning: %+v", problems[0])
+	}
+}
+
+func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	root := filepath.Join(home, ".claude")
+	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	dir := t.TempDir()
+	if err := store.AddProject(registry.ProjectRecord{ID: "proj-u", WorkspaceRoot: dir, Title: "proj-u", Key: "unresolved-key"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("unresolved-key"); err != nil {
+		t.Fatal(err)
+	}
+	unknown := t.TempDir()
+	if err := store.RegisterSession(surface.Session{ID: "unknown-folder", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: unknown, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "u", "unknown-folder.jsonl")}); err != nil {
+		t.Fatal(err)
+	}
+	resolve := resolveSessionProject
+	resolveSessionProject = func(ctx context.Context, r *registry.Registry, path string) (*daemon.CatalogProject, error) {
+		if path == unknown {
+			return nil, errors.New("repository identity is unavailable")
+		}
+		return resolve(ctx, r, path)
+	}
+	t.Cleanup(func() { resolveSessionProject = resolve })
+
+	var board struct {
+		Problems []promptHookProblem `json:"promptHookProblems"`
+		Err      string              `json:"promptHooksError"`
+	}
+	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"--json"}) })
+	if err != nil || json.Unmarshal([]byte(out), &board) != nil {
+		t.Fatalf("board json %q err %v", out, err)
+	}
+	if len(board.Problems) != 1 || board.Problems[0].Root != root || !strings.Contains(board.Err, "repository identity is unavailable") {
+		t.Fatalf("board json must keep the problem beside the error: %+v", board)
+	}
+	text, err := captureStdout(t, func() error { return app.cmdLedger(nil) })
+	if err != nil || !strings.Contains(text, "prompt hook missing in "+root) {
+		t.Fatalf("board text err=%v\n%s", err, text)
+	}
+	var report struct {
+		OK bool `json:"ok"`
+	}
+	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	if json.Unmarshal([]byte(output), &report) != nil || report.OK {
+		t.Fatalf("doctor was ok while a problem root's ownership is unknown: %s", output)
 	}
 }

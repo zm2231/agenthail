@@ -1,14 +1,18 @@
 package registry
 
-import "github.com/zm2231/agenthail/internal/surface"
+import (
+	"context"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
 
 type SessionPlace struct {
 	Cwd        string
 	Transcript string
 }
 
-func (r *Registry) LocalSessionPlaces(kind surface.SurfaceKind) ([]SessionPlace, error) {
-	rows, err := r.read.Query(`SELECT DISTINCT cwd,transcript FROM sessions WHERE host_id='' AND surface=? AND cwd!='' AND transcript!=''`, string(kind))
+func (r *Registry) LocalSessionPlaces(ctx context.Context, kind surface.SurfaceKind) ([]SessionPlace, error) {
+	rows, err := r.read.QueryContext(ctx, `SELECT DISTINCT cwd,transcript FROM sessions WHERE host_id='' AND surface=? AND cwd!='' AND transcript!=''`, string(kind))
 	if err != nil {
 		return nil, err
 	}
