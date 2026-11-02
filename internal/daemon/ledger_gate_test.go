@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +107,42 @@ func TestG2GatesEachProjectTheSessionWorksIn(t *testing.T) {
 	f.completeTurn(t, "turn-1")
 	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 2 {
 		t.Fatalf("gate events = %d, want one per project and turn", len(gates))
+	}
+}
+
+func TestG2CountsEveryManagedTurnItChecks(t *testing.T) {
+	f := newGateFixture(t, registry.OriginAgent, surface.RuntimeClaudeHost)
+	f.completeTurn(t, "turn-1")
+	if got := f.d.g2.project(f.project.key); got.Checked != 1 || got.Gated != 0 {
+		t.Fatalf("after a turn with nothing to gate: %+v", got)
+	}
+	f.ownClause(t, time.Now().Add(-time.Hour))
+	f.completeTurn(t, "turn-2")
+	f.completeTurn(t, "turn-2")
+	got := f.d.g2.project(f.project.key)
+	if got.Checked != 2 || got.Gated != 1 {
+		t.Fatalf("after a gated turn and its repeat: %+v", got)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ledger/g2?projectKey="+url.QueryEscape(f.project.key), nil)
+	rec := httptest.NewRecorder()
+	f.d.apiLedgerG2Handler(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"checked":2`) || !strings.Contains(rec.Body.String(), `"gated":1`) {
+		t.Fatalf("g2 endpoint = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestG2CountsArePublishedAtMostHourly(t *testing.T) {
+	start := time.Now()
+	c := newG2Counter(start)
+	if _, publish := c.record("p", false, start.Add(time.Minute)); publish {
+		t.Fatal("published within the first hour")
+	}
+	snapshot, publish := c.record("p", true, start.Add(time.Hour))
+	if !publish || len(snapshot) != 1 || snapshot[0].Checked != 2 || snapshot[0].Gated != 1 {
+		t.Fatalf("hourly snapshot = %v %+v", publish, snapshot)
+	}
+	if _, publish := c.record("p", false, start.Add(90*time.Minute)); publish {
+		t.Fatal("published twice within an hour")
 	}
 }
 

@@ -44,7 +44,11 @@ func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
 			d.log.Printf("ledger G2: gate %s in %s: %s", session.ID, target.key, err)
 			continue
 		}
-		if result.Result == "" || result.Repeat {
+		if result.Repeat {
+			continue
+		}
+		d.countG2Check(target.key, result.Result != "")
+		if result.Result == "" {
 			continue
 		}
 		d.publishEvent("ledger.gate", session.ID, result)

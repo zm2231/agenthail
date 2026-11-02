@@ -103,6 +103,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		return err
 	}
 	view := newBoardView(board)
+	g2, g2Err := a.ledgerG2(key)
 
 	if hasFlag(args, "--json") {
 		out := map[string]any{
@@ -121,10 +122,16 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		if scope.State == ledger.LedgerEnabled {
 			out["captureSince"] = scope.Since
 		}
+		if g2Err != nil {
+			out["g2Error"] = g2Err.Error()
+		} else {
+			out["g2"] = g2
+		}
 		return emit(out)
 	}
 
 	fmt.Println(coverage)
+	fmt.Println(g2Line(g2, g2Err))
 	view.print(attachment)
 	return nil
 }
