@@ -38,8 +38,12 @@ type sourceUse struct {
 	owners    map[string]string
 	delegate  string
 	fromState WorkState
-	toState   WorkState
+	seq       int64
 }
+
+func ownerKey(clauseID string) string { return "owner:" + clauseID }
+
+func stateKey(itemID string) string { return "state:" + itemID }
 
 type decisionVersion struct {
 	ref       string
@@ -50,6 +54,7 @@ type decisionVersion struct {
 
 func (b *Board) used(ref string, use sourceUse) {
 	if ref != "" {
+		use.seq = b.applying
 		b.uses[ref] = append(b.uses[ref], use)
 	}
 }
@@ -150,12 +155,12 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		r.Outward = q.Kind == QuestionOutward
 		b.restoreQuestionCuts(q.ID)
 	case RetractedReview:
+		delete(b.reviews.approvedBy, ref)
 		item := b.workItems[use.id]
-		if item == nil || item.State != use.toState {
+		if item == nil || b.setBy[stateKey(use.id)] != use.seq {
 			return false
 		}
 		item.State, item.Reviewer = use.fromState, ""
-		delete(b.reviews.approvedBy, ref)
 		r.Outward = true
 	case RetractedCutAck:
 		return b.setCut(use.id, func(c *Cut) { c.Acked = false })
@@ -177,8 +182,11 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		if i := slices.Index(ask.Delegates, use.delegate); i >= 0 {
 			ask.Delegates = slices.Delete(ask.Delegates, i, i+1)
 		}
+		if slices.Contains(ask.Delegates, use.delegate) {
+			return true
+		}
 		for id, owner := range use.owners {
-			if c := b.clauses[id]; c != nil && c.OwnerSessionID == use.delegate {
+			if c := b.clauses[id]; c != nil && b.setBy[ownerKey(id)] == use.seq {
 				c.OwnerSessionID = owner
 			}
 		}

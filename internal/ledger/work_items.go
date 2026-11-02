@@ -130,8 +130,9 @@ func (b *Board) applyWorkItemState(data []byte) error {
 	if item == nil {
 		return nil
 	}
-	b.used(p.UtteranceID, sourceUse{kind: RetractedReview, id: p.ItemID, fromState: p.FromState, toState: p.ToState})
+	b.used(p.UtteranceID, sourceUse{kind: RetractedReview, id: p.ItemID, fromState: p.FromState})
 	item.State, item.Assignee, item.Reason = p.ToState, p.Assignee, p.Reason
+	b.setBy[stateKey(p.ItemID)] = b.applying
 	if p.Reviewer != "" {
 		item.Reviewer = p.Reviewer
 	}

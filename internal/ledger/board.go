@@ -103,6 +103,8 @@ type Board struct {
 	reviews            reviewState
 	checks             checkState
 	uses               map[string][]sourceUse
+	applying           int64
+	setBy              map[string]int64
 	decisionVersions   map[string][]decisionVersion
 	attachedBy         map[string][]string
 	retractions        []Retraction
@@ -131,6 +133,7 @@ func (b *Board) reset() {
 	b.reviews = newReviewState()
 	b.checks = newCheckState()
 	b.uses = map[string][]sourceUse{}
+	b.setBy = map[string]int64{}
 	b.decisionVersions = map[string][]decisionVersion{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
@@ -140,6 +143,7 @@ func (b *Board) reset() {
 func (b *Board) Apply(event Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.applying = event.Seq
 	var err error
 	switch event.Type {
 	case EventGoal:
@@ -394,6 +398,7 @@ func (b *Board) applyClauseState(data []byte) error {
 	c.State = p.ToState
 	if p.OwnerSessionID != "" {
 		c.OwnerSessionID = p.OwnerSessionID
+		b.setBy[ownerKey(c.ID)] = b.applying
 	}
 	if p.ProgressRef != "" {
 		c.ProgressRef = p.ProgressRef
@@ -514,6 +519,7 @@ func (b *Board) applyDelegation(data []byte) error {
 		if c.OwnerSessionID == p.DelegatorSessionID || c.OwnerSessionID == "" {
 			owners[c.ID] = c.OwnerSessionID
 			c.OwnerSessionID = p.DelegateSessionID
+			b.setBy[ownerKey(c.ID)] = b.applying
 		}
 	}
 	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedDelegation, id: p.AskID, delegate: p.DelegateSessionID, owners: owners})

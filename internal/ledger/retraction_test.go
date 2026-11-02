@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -158,4 +159,71 @@ func TestADecisionKeepsTheVersionThePersonGave(t *testing.T) {
 func sortedRetractions(rs []ledger.Retraction) []ledger.Retraction {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Kind+rs[i].ID < rs[j].Kind+rs[j].ID })
 	return rs
+}
+
+func TestALaterApprovalSurvivesRetractingAnEarlierOne(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewCachedStore(db, db)
+	searchAsk(t, s)
+	items(t, s, "add the index")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W1"})
+	capture(t, s, project, "claude-prompt:wake", "approve it")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkApprove, ItemID: "widget-W1", UtteranceID: "claude-prompt:wake"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkReopen, ItemID: "widget-W1", SessionID: "reviewer", Reason: "missed a case"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W1"})
+	capture(t, s, project, "claude-prompt:typed", "now it is right, approve")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkApprove, ItemID: "widget-W1", UtteranceID: "claude-prompt:typed"})
+
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:wake", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	rebuilt, err := ledger.NewStore(db, db).Board(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string]*ledger.Board{"cached": board(t, s), "rebuilt": rebuilt} {
+		for _, item := range b.WorkItems() {
+			if item.State != ledger.WorkDone || item.Reviewer != "person" {
+				t.Fatalf("%s board: the person's later approval was taken back: %+v", name, item)
+			}
+		}
+	}
+}
+
+func TestALaterDelegationToTheSameSessionSurvives(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		again     bool
+		wantOwner string
+	}{
+		{"a later delegation to the same session stays", true, "worker"},
+		{"a lone delegation gives the clause back", false, "lead"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []ledger.Event{
+				makeEvent(1, ledger.EventAsk, ledger.AskPayload{AskID: "A1", Type: ledger.AskBuild, Principal: "person"}),
+				makeEvent(2, ledger.EventClause, ledger.ClausePayload{ClauseID: "C1", AskID: "A1", Text: "build search", State: ledger.StateOwned, OwnerSessionID: "lead"}),
+				makeEvent(3, ledger.EventUtterance, ledger.UtterancePayload{UtteranceID: "claude-prompt:wake", Text: "w", CapturedBy: ledger.CapturedByHook}),
+				makeEvent(4, ledger.EventUtterance, ledger.UtterancePayload{UtteranceID: "claude-prompt:typed", Text: "t", CapturedBy: ledger.CapturedByHook}),
+				makeEvent(5, ledger.EventDelegation, ledger.DelegationPayload{AskID: "A1", DelegatorSessionID: "lead", DelegateSessionID: "worker", SourceUtteranceID: "claude-prompt:wake"}),
+			}
+			if tc.again {
+				events = append(events, makeEvent(6, ledger.EventDelegation, ledger.DelegationPayload{AskID: "A1", DelegatorSessionID: "lead", DelegateSessionID: "worker", SourceUtteranceID: "claude-prompt:typed"}))
+			}
+			events = append(events, makeEvent(7, ledger.EventReclassified, ledger.ReclassifiedPayload{UtteranceID: "claude-prompt:wake", Reason: "scheduled"}))
+			b := ledger.NewBoard()
+			if err := b.Rebuild(events); err != nil {
+				t.Fatal(err)
+			}
+			if owned := b.ClausesOwnedBy(tc.wantOwner); len(owned) != 1 || owned[0].ID != "C1" {
+				t.Fatalf("C1 should be owned by %s: %+v", tc.wantOwner, owned)
+			}
+			asks := b.AllAsks()
+			if len(asks) != 1 || slices.Contains(asks[0].Delegates, "worker") != tc.again {
+				t.Fatalf("delegates %+v", asks)
+			}
+		})
+	}
 }

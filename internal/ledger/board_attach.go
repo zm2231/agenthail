@@ -51,6 +51,7 @@ func (b *Board) applyClauseSource(data []byte) error {
 	c.Source = p.ToSource
 	if p.OwnerSessionID != "" {
 		c.OwnerSessionID = p.OwnerSessionID
+		b.setBy[ownerKey(c.ID)] = b.applying
 	}
 	if p.UtteranceID != "" {
 		c.Sources = append(c.Sources, p.UtteranceID)
