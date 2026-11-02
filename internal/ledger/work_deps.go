@@ -89,7 +89,7 @@ func (b *Board) CriticalPath() []WorkItem {
 	}
 	out := make([]WorkItem, 0, len(best))
 	for _, id := range best {
-		out = append(out, *b.workItems[id])
+		out = append(out, b.workItems[id].snapshot())
 	}
 	return out
 }
