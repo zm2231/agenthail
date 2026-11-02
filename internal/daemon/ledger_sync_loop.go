@@ -17,7 +17,7 @@ import (
 const (
 	ledgerSyncInterval     = 5 * time.Second
 	ledgerReplayBatch      = 200
-	ledgerReplayBatchBytes = 4 << 20
+	ledgerReplayBatchBytes = ledger.MaxEventBytes
 )
 
 type ledgerSyncHealth struct {

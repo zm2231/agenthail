@@ -164,6 +164,32 @@ func TestAProxiedWriteWhoseAnswerIsLostLandsOnce(t *testing.T) {
 	sameLedgerOnBothHosts(t, mac, owner)
 }
 
+func TestTheLargestStorableWordsReplayAndLargerOnesBlockNothing(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	capturePrompt(t, mac, "local-a", "p-1", "build search")
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	sameLedgerOnBothHosts(t, mac, owner)
+
+	huge := capturePrompt(t, mac, "local-a", "p-huge", strings.Repeat("a", 2*ledger.MaxEventBytes))
+	big := capturePrompt(t, mac, "local-a", "p-big", strings.Repeat("b", ledger.MaxEventBytes-2048))
+	after := capturePrompt(t, mac, "local-a", "p-after", "and after it")
+	sameLedgerOnBothHosts(t, mac, owner)
+	for _, ref := range []string{huge, big, after} {
+		if n := countEvents(t, owner.reg, ledger.EventUtterance, ref); n != 1 {
+			t.Fatalf("%s landed %d times on the owner", ref, n)
+		}
+	}
+	board, err := ledger.NewStore(owner.reg.WriteDB(), owner.reg.ReadDB()).Board(widgetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range board.Utterances() {
+		if u.ID == huge && (u.Truncated == nil || u.Truncated.OriginalBytes != 2*ledger.MaxEventBytes) {
+			t.Fatalf("the oversized prompt reached the owner without its truncation mark: %+v", u.Truncated)
+		}
+	}
+}
+
 func TestAMacOfflineCapturesThenAttachesOnceTheOwnerIsBack(t *testing.T) {
 	mac, owner, _ := ledgerOnTwoHosts(t)
 	first := capturePrompt(t, mac, "local-a", "p-1", "build search")

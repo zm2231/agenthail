@@ -14,7 +14,7 @@ func (b *Board) applyUtterance(data []byte) error {
 	if p.UtteranceID == "" || b.utterances[p.UtteranceID] != nil {
 		return nil
 	}
-	b.utterances[p.UtteranceID] = &UtteranceView{ID: p.UtteranceID, Text: p.Text, SpeakerID: p.SessionID, TargetID: p.TargetID, CapturedBy: p.CapturedBy, At: p.TS}
+	b.utterances[p.UtteranceID] = &UtteranceView{ID: p.UtteranceID, Text: p.Text, SpeakerID: p.SessionID, TargetID: p.TargetID, CapturedBy: p.CapturedBy, At: p.TS, Truncated: p.Truncated}
 	b.utteranceOrder = append(b.utteranceOrder, p.UtteranceID)
 	return nil
 }

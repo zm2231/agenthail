@@ -43,14 +43,15 @@ type Clause struct {
 }
 
 type UtteranceView struct {
-	ID         string   `json:"id"`
-	Text       string   `json:"text"`
-	SpeakerID  string   `json:"speakerId"`
-	TargetID   string   `json:"targetId"`
-	CapturedBy string   `json:"capturedBy"`
-	At         string   `json:"ts"`
-	GoalIDs    []string `json:"goalIds,omitempty"`
-	Attached   bool     `json:"attached"`
+	ID         string      `json:"id"`
+	Text       string      `json:"text"`
+	SpeakerID  string      `json:"speakerId"`
+	TargetID   string      `json:"targetId"`
+	CapturedBy string      `json:"capturedBy"`
+	At         string      `json:"ts"`
+	GoalIDs    []string    `json:"goalIds,omitempty"`
+	Attached   bool        `json:"attached"`
+	Truncated  *Truncation `json:"truncated,omitempty"`
 }
 
 type Cut struct {

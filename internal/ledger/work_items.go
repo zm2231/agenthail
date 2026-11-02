@@ -47,14 +47,14 @@ func (h Handoff) empty() bool {
 }
 
 type WorkItem struct {
-	ID        string    `json:"id"`
-	ClauseID  string    `json:"clauseId"`
-	Text      string    `json:"text"`
-	State     WorkState `json:"state"`
-	Assignee  string    `json:"assignee,omitempty"`
-	CreatedBy string    `json:"createdBy"`
-	Reason    string    `json:"reason,omitempty"`
-	Reviewer  string    `json:"reviewer,omitempty"`
+	ID        string      `json:"id"`
+	ClauseID  string      `json:"clauseId"`
+	Text      string      `json:"text"`
+	State     WorkState   `json:"state"`
+	Assignee  string      `json:"assignee,omitempty"`
+	CreatedBy string      `json:"createdBy"`
+	Reason    string      `json:"reason,omitempty"`
+	Reviewer  string      `json:"reviewer,omitempty"`
 	DependsOn []string    `json:"dependsOn,omitempty"`
 	Handoff   *Handoff    `json:"handoff,omitempty"`
 	Timeline  []WorkEntry `json:"timeline,omitempty"`

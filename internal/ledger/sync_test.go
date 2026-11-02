@@ -1,12 +1,15 @@
 package ledger_test
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -215,6 +218,70 @@ func TestTheOwnerTakesNoIDIssuingReplayOnceItsLedgerIsShared(t *testing.T) {
 	if _, err := owner.store.Board(project); err != nil {
 		t.Fatalf("the owner's board after refused replays: %v", err)
 	}
+}
+
+func TestANonOwnerIssuesNoIDsEvenForACheckStartedBeforeTheMove(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	g := searchAsk(t, mac.store)
+	if _, err := mac.store.StartCheck(project, g, "run-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	adopt(t, project, mac, owner)
+	_, err := mac.store.ReportCheck(ledger.CheckReport{ProjectKey: project, Run: "run-1", SessionID: "run-1", Missing: []ledger.Omission{{Breadth: "fuzzy matching", From: "claude-prompt:1"}}}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "planned there") {
+		t.Fatalf("a non-owner's check report: %v", err)
+	}
+	workRefused(t, mac.store, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"}, "planned there")
+	for _, typ := range []ledger.EventType{ledger.EventCut, ledger.EventWorkItem} {
+		var n int
+		if err := mac.db.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=? AND type=?`, project, string(typ)).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("the non-owner wrote %d %s events (%v)", n, typ, err)
+		}
+	}
+}
+
+func TestAPullThatReordersRebuildsTheBoardInOwnerOrder(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	items(t, mac.store, "add the index")
+	adopt(t, project, mac, owner)
+	work(t, mac.store, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", Text: "written first on the mac"})
+	work(t, owner.store, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", SessionID: "lead", Text: "on the owner before the mac replayed"})
+	syncOnce(t, project, mac, owner)
+	sameLedger(t, project, mac, owner)
+	item, _ := board(t, mac.store).WorkItem("widget-W1")
+	if got := item.Timeline[len(item.Timeline)-1].Text; got != "written first on the mac" {
+		t.Fatalf("mac timeline ends with %q, want the owner's order", got)
+	}
+}
+
+func TestEveryStoredEventFitsOneReplay(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	adopt(t, project, mac, owner)
+	whole := strings.Repeat("a\"é\n", ledger.MaxEventBytes/2)
+	capture(t, mac.store, project, "claude-prompt:huge", whole)
+	capture(t, mac.store, project, "claude-prompt:big", strings.Repeat("b", ledger.MaxEventBytes-1024))
+	capture(t, mac.store, project, "claude-prompt:after", "and after it")
+	capture(t, mac.store, project, "claude-prompt:huge", whole)
+	syncOnce(t, project, mac, owner)
+	sameLedger(t, project, mac, owner)
+
+	sum := sha256.Sum256([]byte(whole))
+	for _, u := range board(t, owner.store).Utterances() {
+		if u.ID != "claude-prompt:huge" {
+			continue
+		}
+		tr := u.Truncated
+		if tr == nil || tr.OriginalBytes != len(whole) || tr.SHA256 != hex.EncodeToString(sum[:]) || !strings.HasPrefix(whole, strings.SplitN(u.Text, "\n[agenthail:", 2)[0]) || !strings.Contains(u.Text, "sha256 "+tr.SHA256) {
+			t.Fatalf("the oversized words were not kept as a marked head: truncated=%+v, text ends %q", tr, u.Text[max(0, len(u.Text)-160):])
+		}
+		if !utf8.ValidString(u.Text) {
+			t.Fatal("the kept head splits a character")
+		}
+		return
+	}
+	t.Fatal("the oversized words were not recorded")
 }
 
 func TestOwnershipNeedsOneSideWithoutHistory(t *testing.T) {

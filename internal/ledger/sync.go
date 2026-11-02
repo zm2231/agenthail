@@ -206,6 +206,27 @@ func (s *Store) ClaimOwnership(projectKey, forHost string, adopting bool) error 
 	})
 }
 
+func plannedHere(q querier, projectKey string) error {
+	var owner string
+	if err := q.QueryRow(`SELECT owner_host_id FROM ledger_state WHERE project_key=?`, projectKey).Scan(&owner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if owner == "" {
+		return nil
+	}
+	self, err := hostID(q)
+	if err != nil {
+		return err
+	}
+	if owner != self {
+		return refuse("the ledger for %s is kept on host %s; a write that issues an ID is planned there, not here", projectKey, owner)
+	}
+	return nil
+}
+
 func requireOwner(tx querier, projectKey string) error {
 	self, err := hostID(tx)
 	if err != nil {

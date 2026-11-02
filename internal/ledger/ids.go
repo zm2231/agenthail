@@ -42,6 +42,9 @@ type idIssuer struct {
 
 func (ids *idIssuer) next(typ EventType, prefix string) (string, error) {
 	if ids.issued == nil {
+		if err := plannedHere(ids.q, ids.projectKey); err != nil {
+			return "", err
+		}
 		ids.issued = map[EventType]int{}
 	}
 	var count int

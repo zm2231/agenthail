@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	ledgerReplayBodyLimit = 8 << 20
+	ledgerReplayBodyLimit = 2 * ledger.MaxEventBytes
 	ledgerPullPage        = 500
 )
 

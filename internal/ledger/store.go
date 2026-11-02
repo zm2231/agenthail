@@ -111,8 +111,13 @@ type rowScanner interface {
 
 const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at`
 
+const MaxEventBytes = 4 << 20
+
 // insertEvent returns Seq 0 when verb is INSERT OR IGNORE and the ref or origin already exists.
 func insertEvent(db execer, verb string, event Event) (Event, error) {
+	if len(event.Payload) > MaxEventBytes {
+		return Event{}, refuse("a ledger event holds at most %d bytes; this %s holds %d", MaxEventBytes, event.Type, len(event.Payload))
+	}
 	result, err := db.Exec(
 		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
 		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq, event.OriginSeq,
