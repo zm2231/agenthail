@@ -166,7 +166,7 @@ func (s *Store) AssignOwner(projectKey, owner string) error {
 		case current != "":
 			return refuse("%s already syncs with %s; moving a ledger to another owner is not supported", projectKey, current)
 		}
-		if _, err := tx.Exec(`UPDATE ledger_events SET actor_host_id=?, origin_seq=seq WHERE project_key=? AND origin_seq=0`, self, projectKey); err != nil {
+		if err := stampLegacy(tx, projectKey, self); err != nil {
 			return err
 		}
 		_, err = tx.Exec(`INSERT INTO ledger_state(project_key,owner_host_id,owner_cursor) VALUES(?,?,0)
@@ -197,7 +197,7 @@ func (s *Store) ClaimOwnership(projectKey, forHost string, adopting bool) error 
 				return refuse("both hosts already hold ledger history for %s; the owner cannot adopt another host's history on top of its own", projectKey)
 			}
 		}
-		if _, err := tx.Exec(`UPDATE ledger_events SET actor_host_id=?, origin_seq=seq WHERE project_key=? AND origin_seq=0`, self, projectKey); err != nil {
+		if err := stampLegacy(tx, projectKey, self); err != nil {
 			return err
 		}
 		_, err = tx.Exec(`INSERT INTO ledger_state(project_key,owner_host_id) VALUES(?,?)
