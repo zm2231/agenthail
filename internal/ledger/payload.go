@@ -1,13 +1,13 @@
 package ledger
 
 type UtterancePayload struct {
-	Text       string `json:"text"`
-	MessageID  string `json:"messageId"`
-	SessionID  string `json:"sessionId"`
-	TargetID   string `json:"targetId"`
-	Surface    string `json:"surface"`
-	QuotedSpan string `json:"quotedSpan,omitempty"`
-	TS         string `json:"ts"`
+	Text        string `json:"text"`
+	UtteranceID string `json:"utteranceId"`
+	SessionID   string `json:"sessionId"`
+	TargetID    string `json:"targetId"`
+	Surface     string `json:"surface"`
+	QuotedSpan  string `json:"quotedSpan,omitempty"`
+	TS          string `json:"ts"`
 }
 
 type GoalPayload struct {

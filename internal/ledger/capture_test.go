@@ -13,10 +13,10 @@ func TestPersonCaptureRecordsUtterance(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := ledger.PersonCapture(s)
-	if err := capture(ledger.CaptureInput{
+	if err := capture(ledger.Utterance{
 		ProjectKey: "proj-1",
-		MessageID:  "msg-1",
-		SessionID:  "sess-1",
+		CaptureRef: "msg-1",
+		SpeakerID:  "sess-1",
 		TargetID:   "target-1",
 		Surface:    "claude",
 		Text:       "build me a widget",
@@ -39,10 +39,10 @@ func TestPersonCaptureSkipsDisabledProject(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewStore(db, db)
 	capture := ledger.PersonCapture(s)
-	if err := capture(ledger.CaptureInput{
+	if err := capture(ledger.Utterance{
 		ProjectKey: "proj-1",
-		MessageID:  "msg-1",
-		SessionID:  "sess-1",
+		CaptureRef: "msg-1",
+		SpeakerID:  "sess-1",
 		Surface:    "claude",
 		Text:       "build me a widget",
 	}); err != nil {
@@ -64,10 +64,10 @@ func TestPersonCaptureSkipsEmptyText(t *testing.T) {
 		t.Fatal(err)
 	}
 	capture := ledger.PersonCapture(s)
-	if err := capture(ledger.CaptureInput{
+	if err := capture(ledger.Utterance{
 		ProjectKey: "proj-1",
-		MessageID:  "msg-1",
-		SessionID:  "sess-1",
+		CaptureRef: "msg-1",
+		SpeakerID:  "sess-1",
 		Surface:    "claude",
 		Text:       "",
 	}); err != nil {

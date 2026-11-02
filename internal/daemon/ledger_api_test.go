@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+const submitted = int64(1_800_000_000_000)
 
 func ledgerDaemon(t *testing.T) (*Daemon, *registry.Registry, http.Handler) {
 	t.Helper()
@@ -68,7 +71,7 @@ func TestLedgerAPICapturesForEnabledProject(t *testing.T) {
 	}
 
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "s1", MessageID: "u-abc123", Prompt: "build the widget",
+		SessionID: "s1", CaptureRef: "h-1", Prompt: "build the widget", SubmittedAtMs: submitted,
 	})
 	if !resp.Captured || resp.ProjectKey != "test-key" {
 		t.Fatalf("expected captured=true projectKey=test-key, got %+v", resp)
@@ -107,7 +110,7 @@ func TestLedgerAPISkipsDisabledProject(t *testing.T) {
 	}
 
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "s2", MessageID: "u-def456", Prompt: "should not capture",
+		SessionID: "s2", CaptureRef: "h-2", Prompt: "should not capture", SubmittedAtMs: submitted,
 	})
 	if resp.Captured {
 		t.Fatalf("expected captured=false for disabled project, got %+v", resp)
@@ -136,7 +139,7 @@ func TestLedgerAPICapturesCoordinatorInUnsetProject(t *testing.T) {
 	}
 
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "coord-1", MessageID: "u-coord1", Prompt: "coordinator capture",
+		SessionID: "coord-1", CaptureRef: "h-3", Prompt: "coordinator capture", SubmittedAtMs: submitted,
 	})
 	if !resp.Captured {
 		t.Fatalf("expected coordinator captured in unset project, got %+v", resp)
@@ -160,52 +163,62 @@ func TestLedgerAPISkipsNonCoordinatorInUnsetProject(t *testing.T) {
 	}
 
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "worker-1", MessageID: "u-worker1", Prompt: "not a coordinator",
+		SessionID: "worker-1", CaptureRef: "h-4", Prompt: "not a coordinator", SubmittedAtMs: submitted,
 	})
 	if resp.Captured {
 		t.Fatalf("expected non-coordinator NOT captured in unset project, got %+v", resp)
 	}
 }
 
-func TestLedgerAPIDedupsByMessageID(t *testing.T) {
-	_, r, handler := ledgerDaemon(t)
-
+func enabledLedgerProject(t *testing.T, r *registry.Registry, sessionID string) *ledger.Store {
+	t.Helper()
 	projectDir := t.TempDir()
-	if err := r.AddProject(registry.ProjectRecord{
-		ID: "proj-5", WorkspaceRoot: projectDir, Title: "Dedup", Key: "dedup-key",
-	}); err != nil {
+	if err := r.AddProject(registry.ProjectRecord{ID: "proj-5", WorkspaceRoot: projectDir, Title: "Repeats", Key: "repeat-key"}); err != nil {
 		t.Fatal(err)
 	}
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
-	if err := store.Enable("dedup-key"); err != nil {
+	if err := store.Enable("repeat-key"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{
-		ID: "s5", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI,
-		Cwd: projectDir, Status: surface.StatusIdle,
-	}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: sessionID, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: projectDir, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
+	return store
+}
 
-	resp1 := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "s5", MessageID: "u-same-id", Prompt: "first capture",
-	})
-	if !resp1.Captured {
-		t.Fatal("first capture should succeed")
+func TestLedgerAPIKeepsRepeatedPromptsAndAbsorbsRetries(t *testing.T) {
+	_, r, handler := ledgerDaemon(t)
+	store := enabledLedgerProject(t, r, "s5")
+	for _, req := range []ledgerCaptureRequest{
+		{SessionID: "s5", CaptureRef: "h-a", Prompt: "yes", SubmittedAtMs: submitted},
+		{SessionID: "s5", CaptureRef: "h-a", Prompt: "yes", SubmittedAtMs: submitted},
+		{SessionID: "s5", CaptureRef: "h-b", Prompt: "yes", SubmittedAtMs: submitted + 60_000},
+	} {
+		if !ledgerPost(t, handler, req).Captured {
+			t.Fatalf("capture %+v not recorded", req)
+		}
 	}
-
-	resp2 := ledgerPost(t, handler, ledgerCaptureRequest{
-		SessionID: "s5", MessageID: "u-same-id", Prompt: "first capture",
-	})
-	if !resp2.Captured {
-		t.Fatal("second capture should report captured (idempotent)")
-	}
-
-	events, err := store.Events("dedup-key", 0, 100)
+	events, err := store.Events("repeat-key", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event after dedup, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("want 2 utterances (a retry and a real repeat), got %d", len(events))
+	}
+}
+
+func TestLedgerAPIIgnoresPeerMessagesDeliveredAsPrompts(t *testing.T) {
+	_, r, handler := ledgerDaemon(t)
+	store := enabledLedgerProject(t, r, "s6")
+	for i, prompt := range []string{
+		"<cross-session-message from=\"uds:/tmp/x.sock\" from-session=\"peer\" from-name=\"@lead\">\ndo the thing\n</cross-session-message>",
+		"<task-notification>\n<task-id>x</task-id>\n</task-notification>",
+	} {
+		if ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "s6", CaptureRef: fmt.Sprintf("h-%d", i), Prompt: prompt, SubmittedAtMs: submitted}).Captured {
+			t.Fatalf("injected prompt %d captured as the person's words", i)
+		}
+	}
+	if events, _ := store.Events("repeat-key", 0, 100); len(events) != 0 {
+		t.Fatalf("want no utterances, got %d", len(events))
 	}
 }

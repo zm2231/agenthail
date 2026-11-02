@@ -23,12 +23,12 @@ func (d *Daemon) personCapture(ctx delivery.PersonCaptureContext) {
 	}
 	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
 	capture := ledger.PersonCapture(store)
-	captureErr := capture(ledger.CaptureInput{
+	captureErr := capture(ledger.Utterance{
 		ProjectKey: project.Key,
-		SessionID:  surface.PersonSessionID,
+		CaptureRef: captureMessageID(ctx.DeliveryKey),
+		SpeakerID:  surface.PersonSessionID,
 		TargetID:   ctx.TargetSessionID,
 		Surface:    ctx.TargetSurface,
-		MessageID:  captureMessageID(ctx.DeliveryKey),
 		Text:       ctx.Message,
 	})
 	if captureErr != nil {

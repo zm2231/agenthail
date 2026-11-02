@@ -76,20 +76,43 @@ func (s *Store) AppendEvent(event Event) (Event, error) {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.db.Exec(
-		`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,message_id,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq, event.MessageID,
-		event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	return insertEvent(s.db, event, "", 0)
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,capture_ref,journal_ref,created_at`
+
+func insertEvent(db execer, event Event, matchKey string, occurredMs int64) (Event, error) {
+	result, err := db.Exec(
+		`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,capture_ref,journal_ref,match_key,occurred_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq,
+		event.CaptureRef, event.JournalRef, matchKey, occurredMs, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	)
 	if err != nil {
 		return Event{}, err
 	}
-	seq, err := result.LastInsertId()
-	if err != nil {
+	if event.Seq, err = result.LastInsertId(); err != nil {
 		return Event{}, err
 	}
-	event.Seq = seq
 	return event, nil
+}
+
+func scanEvent(row rowScanner) (Event, error) {
+	var e Event
+	var typ, ts string
+	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.CaptureRef, &e.JournalRef, &ts); err != nil {
+		return Event{}, err
+	}
+	e.Type = EventType(typ)
+	e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+	return e, nil
 }
 
 func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, error) {
@@ -97,7 +120,7 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 		limit = 100
 	}
 	rows, err := s.read.Query(
-		`SELECT seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,message_id,created_at FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq LIMIT ?`,
+		`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq LIMIT ?`,
 		projectKey, afterSeq, limit,
 	)
 	if err != nil {
@@ -106,76 +129,13 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 	defer rows.Close()
 	var events []Event
 	for rows.Next() {
-		var e Event
-		var typ, ts string
-		if err := rows.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.MessageID, &ts); err != nil {
+		e, err := scanEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		e.Type = EventType(typ)
-		e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
 		events = append(events, e)
 	}
 	return events, rows.Err()
-}
-
-func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surfaceName, text string) (Event, error) {
-	payload := UtterancePayload{
-		Text:      text,
-		MessageID: messageID,
-		SessionID: sessionID,
-		TargetID:  targetID,
-		Surface:   surfaceName,
-		TS:        time.Now().UTC().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return Event{}, err
-	}
-	return s.appendEventDedup(Event{
-		ProjectKey:     projectKey,
-		Type:           EventUtterance,
-		Payload:        data,
-		ActorSessionID: sessionID,
-		MessageID:      messageID,
-	})
-}
-
-func (s *Store) appendEventDedup(event Event) (Event, error) {
-	if event.MessageID == "" {
-		return s.AppendEvent(event)
-	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
-	}
-	result, err := s.db.Exec(
-		`INSERT OR IGNORE INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,message_id,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq, event.MessageID,
-		event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-	)
-	if err != nil {
-		return Event{}, err
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		var e Event
-		var typ, ts string
-		err := s.read.QueryRow(
-			`SELECT seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,message_id,created_at FROM ledger_events WHERE project_key=? AND message_id=?`,
-			event.ProjectKey, event.MessageID,
-		).Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.MessageID, &ts)
-		if err != nil {
-			return Event{}, err
-		}
-		e.Type = EventType(typ)
-		e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
-		return e, nil
-	}
-	seq, err := result.LastInsertId()
-	if err != nil {
-		return Event{}, err
-	}
-	event.Seq = seq
-	return event, nil
 }
 
 func (s *Store) RecordGoal(projectKey, goalID, name, parentGoalID, actorSessionID string) (Event, error) {
@@ -217,7 +177,7 @@ func (s *Store) UnattachedUtterances(projectKey string) ([]Event, error) {
 	var unattached []Event
 	for _, u := range utterances {
 		var p UtterancePayload
-		if json.Unmarshal(u.Payload, &p) == nil && !attached[p.MessageID] {
+		if json.Unmarshal(u.Payload, &p) == nil && !attached[p.UtteranceID] {
 			unattached = append(unattached, u)
 		}
 	}

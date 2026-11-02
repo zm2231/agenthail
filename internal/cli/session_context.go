@@ -2,14 +2,13 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -77,7 +76,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	}
 	var ledgerContext string
 	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && session.Cwd != "" {
-		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.Prompt)
+		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.Prompt, now)
 	}
 
 	if text == "" && ledgerContext == "" {
@@ -93,7 +92,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
 }
 
-func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, prompt string) string {
+func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, prompt string, submittedAt time.Time) string {
 	var client *daemonAPIClient
 	var err error
 	if a.daemonAPIOverride != nil {
@@ -104,11 +103,12 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	if err != nil {
 		return ""
 	}
-	messageID := terminalUtteranceID(session.ID, prompt)
-	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]string{
-		"sessionId": session.ID,
-		"messageId": messageID,
-		"prompt":    prompt,
+	captureRef := uuid.NewString()
+	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]any{
+		"sessionId":     session.ID,
+		"captureRef":    captureRef,
+		"prompt":        prompt,
+		"submittedAtMs": submittedAt.UnixMilli(),
 	}, nil)
 	if err != nil || status != http.StatusOK {
 		return ""
@@ -120,10 +120,5 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	if json.Unmarshal(body, &result) != nil || !result.Captured {
 		return ""
 	}
-	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", messageID, result.ProjectKey)
-}
-
-func terminalUtteranceID(sessionID, prompt string) string {
-	h := sha256.Sum256([]byte(sessionID + "\x00" + prompt))
-	return "u-" + hex.EncodeToString(h[:12])
+	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", captureRef, result.ProjectKey)
 }

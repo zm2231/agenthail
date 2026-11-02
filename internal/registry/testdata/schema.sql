@@ -1,4 +1,4 @@
--- schemaVersion 42
+-- schemaVersion 41
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -29,8 +29,14 @@ CREATE UNIQUE INDEX delivery_intents_uuid ON delivery_intents(uuid);
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
 
--- index ledger_events_dedup
-CREATE UNIQUE INDEX ledger_events_dedup ON ledger_events(project_key, message_id) WHERE message_id != '';
+-- index ledger_events_capture_ref
+CREATE UNIQUE INDEX ledger_events_capture_ref ON ledger_events(project_key, capture_ref) WHERE capture_ref != '';
+
+-- index ledger_events_journal_ref
+CREATE UNIQUE INDEX ledger_events_journal_ref ON ledger_events(project_key, journal_ref) WHERE journal_ref != '';
+
+-- index ledger_events_match
+CREATE INDEX ledger_events_match ON ledger_events(project_key, match_key, seq) WHERE match_key != '';
 
 -- index ledger_events_project
 CREATE INDEX ledger_events_project ON ledger_events(project_key, seq);
@@ -320,7 +326,10 @@ CREATE TABLE ledger_events (
 	actor_session_id TEXT NOT NULL DEFAULT '',
 	actor_host_id TEXT NOT NULL DEFAULT '',
 	owner_seq INTEGER NOT NULL DEFAULT 0,
-	message_id TEXT NOT NULL DEFAULT '',
+	capture_ref TEXT NOT NULL DEFAULT '',
+	journal_ref TEXT NOT NULL DEFAULT '',
+	match_key TEXT NOT NULL DEFAULT '',
+	occurred_ms INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
