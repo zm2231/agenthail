@@ -18,7 +18,7 @@ type ledgerWriteArgs struct {
 
 var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--clause": true, "--type": true, "--source": true, "--session": true, "--project": true, "--from": true}
 
-var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--json": true}
+var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true}
 
 func parseLedgerWrite(args []string) (ledgerWriteArgs, error) {
 	parsed := ledgerWriteArgs{values: map[string][]string{}, bools: map[string]bool{}}
@@ -128,7 +128,7 @@ func (a *App) ledgerAttach(args []string, propose bool) error {
 	req := ledger.AttachRequest{
 		As: ledger.AttachAs(w.value("--as")), To: w.value("--to"), Clauses: w.values["--clause"],
 		AskType: ledger.AskType(w.value("--type")), Source: ledger.ClauseSource(w.value("--source")),
-		Adopt: w.bools["--adopt"], Reject: w.bools["--reject"], Delegate: w.value("--session"),
+		Adopt: w.bools["--adopt"], Reject: w.bools["--reject"], Ack: w.bools["--ack"], Delegate: w.value("--session"),
 	}
 	switch {
 	case propose && len(w.positional) > 1:

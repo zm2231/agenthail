@@ -32,6 +32,7 @@ type AttachRequest struct {
 	Source      ClauseSource `json:"source,omitempty"`
 	Adopt       bool         `json:"adopt,omitempty"`
 	Reject      bool         `json:"reject,omitempty"`
+	Ack         bool         `json:"ack,omitempty"`
 	Delegate    string       `json:"delegate,omitempty"`
 }
 

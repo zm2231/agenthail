@@ -171,7 +171,8 @@ func TestProposalBindsOnlyOnceThePersonAdoptsIt(t *testing.T) {
 		t.Fatalf("proposal = %+v", c)
 	}
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C1", Adopt: true}, "only a proposed clause can be adopted")
-	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2"}, "exactly one of --adopt or --reject")
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2"}, "exactly one of --adopt, --reject or --ack")
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true, Ack: true}, "exactly one of")
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true})
 	c = clause(t, board(t, s), "widget-C2")
 	if c.Source != ledger.SourceAdopted || c.OwnerSessionID != "s1" || !slices.Contains(c.Sources, "claude-prompt:2") {
@@ -198,6 +199,33 @@ func TestRejectingAProposalIsNotACut(t *testing.T) {
 	if len(c.Cuts) != 1 || c.Cuts[0].Acked || c.Cuts[0].ID != "widget-X1" {
 		t.Fatalf("stated clause cut = %+v", c)
 	}
+}
+
+func TestACutIsAckedOnlyByThePersonsWords(t *testing.T) {
+	s := newStore(t)
+	capture(t, s, project, "claude-prompt:1", "build search and export")
+	capture(t, s, project, "claude-prompt:2", "drop export")
+	capture(t, s, project, "claude-prompt:3", "ok, drop it")
+	g := goal(t, s, "Search")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsNewAsk, To: g, Clauses: []string{"build search", "build export"}})
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Reject: true})
+	refused(t, s, ledger.AttachRequest{As: ledger.AsReacts, To: "widget-X1", Ack: true}, "needs the person's utterance")
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsReacts, To: "widget-C2", Ack: true}, "\"widget-C2\" is not a cut")
+	if open := board(t, s).ClausesOwnedBy("s1"); len(open) != 2 {
+		t.Fatalf("a pending cut closed its clause: %+v", open)
+	}
+	result := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsReacts, To: "widget-X1", Ack: true})
+	if result.Readback != "intent ledger: widget-X1 acked: widget-C2 is cut" || result.GoalID != g {
+		t.Fatalf("result = %+v", result)
+	}
+	b := board(t, s)
+	if c := clause(t, b, "widget-C2"); !c.Cuts[0].Acked {
+		t.Fatalf("cut not acked: %+v", c)
+	}
+	if open := b.ClausesOwnedBy("s1"); len(open) != 1 || open[0].ID != "widget-C1" {
+		t.Fatalf("open clauses after ack = %+v", open)
+	}
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", As: ledger.AsReacts, To: "widget-X1", Ack: true}, "already acked")
 }
 
 func TestDelegatedClausesNeedTheDelegation(t *testing.T) {

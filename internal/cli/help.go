@@ -154,7 +154,8 @@ Intent ledger:
   ledger goal <name>             Create a goal, or show the one with that name
   ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."]
                                  Attach the person's words: new-ask, extends, constrains, refines,
-                                 reacts (--adopt|--reject), delegates [--session], decides, conversation
+                                 reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
+                                 decides, conversation
   ledger propose --to <id|project> --clause "..."
                                  Propose clauses; they bind once the person adopts them
   ledger asks                    List all asks

@@ -97,8 +97,9 @@ type CutPayload struct {
 }
 
 type CutAckPayload struct {
-	CutID   string `json:"cutId"`
-	AckedBy string `json:"ackedBy"`
+	CutID             string `json:"cutId"`
+	AckedBy           string `json:"ackedBy"`
+	SourceUtteranceID string `json:"sourceUtteranceId,omitempty"`
 }
 
 type WaitPayload struct {

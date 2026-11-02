@@ -39,15 +39,24 @@ func (p *attachPlan) refine() error {
 }
 
 func (p *attachPlan) react() error {
-	c, err := p.targetClause()
-	if err != nil {
-		return err
+	chosen := 0
+	for _, flag := range []bool{p.req.Adopt, p.req.Reject, p.req.Ack} {
+		if flag {
+			chosen++
+		}
 	}
-	if p.req.Adopt == p.req.Reject {
-		return refuse("--as reacts needs exactly one of --adopt or --reject")
+	if chosen != 1 {
+		return refuse("--as reacts needs exactly one of --adopt, --reject or --ack")
 	}
 	if len(p.req.Clauses) > 0 {
 		return refuse("--as reacts takes no --clause; refine the wording with --as refines")
+	}
+	if p.req.Ack {
+		return p.ackCut()
+	}
+	c, err := p.targetClause()
+	if err != nil {
+		return err
 	}
 	p.effects = append(p.effects, c.ID)
 	if p.req.Adopt {
@@ -72,6 +81,24 @@ func (p *attachPlan) react() error {
 	p.effects = append(p.effects, id)
 	p.summary = fmt.Sprintf("%s cut, pending the person's ack (%s)", c.ID, id)
 	return p.add(EventCut, CutPayload{CutID: id, ClauseID: c.ID, Reason: "rejected in " + p.utterance.ID, AuthorSession: p.req.SessionID})
+}
+
+func (p *attachPlan) ackCut() error {
+	for _, c := range p.board.clauses {
+		for _, cut := range c.Cuts {
+			if cut.ID != p.req.To {
+				continue
+			}
+			if cut.Acked {
+				return refuse("%s is already acked", cut.ID)
+			}
+			p.goalID = p.board.clauseGoal(c)
+			p.effects = append(p.effects, cut.ID, c.ID)
+			p.summary = fmt.Sprintf("%s acked: %s is cut", cut.ID, c.ID)
+			return p.add(EventCutAck, CutAckPayload{CutID: cut.ID, AckedBy: p.utterance.SpeakerID, SourceUtteranceID: p.utterance.ID})
+		}
+	}
+	return refuse("--as reacts --ack needs --to <cut>; %q is not a cut in %s", p.req.To, p.req.ProjectKey)
 }
 
 func (p *attachPlan) delegate() error {
