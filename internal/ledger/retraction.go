@@ -34,9 +34,18 @@ type sourceUse struct {
 	kind      string
 	id        string
 	prior     string
+	after     string
 	owners    map[string]string
 	delegate  string
 	fromState WorkState
+	toState   WorkState
+}
+
+type decisionVersion struct {
+	ref       string
+	version   int
+	text      string
+	principal string
 }
 
 func (b *Board) used(ref string, use sourceUse) {
@@ -79,6 +88,10 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		if ask == nil {
 			return false
 		}
+		if source := personSourceLeft(ask, ref); source != "" {
+			ask.SourceUtterance = source
+			return false
+		}
 		for _, c := range ask.Clauses {
 			delete(b.clauses, c.ID)
 			b.retractions = append(b.retractions, Retraction{Kind: RetractedClause, ID: c.ID, UtteranceID: ref, Reason: r.Reason, AttachedBy: r.AttachedBy})
@@ -109,10 +122,25 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		if d == nil {
 			return false
 		}
+		versions := b.decisionVersions[use.id]
+		kept := slices.DeleteFunc(slices.Clone(versions), func(v decisionVersion) bool { return v.ref == ref })
+		if len(kept) == len(versions) {
+			return false
+		}
 		if q := b.questions[d.QuestionID]; q != nil && q.Kind == QuestionOutward {
 			r.Outward = true
 		}
-		delete(b.decisions, use.id)
+		b.decisionVersions[use.id] = kept
+		if len(kept) == 0 {
+			delete(b.decisions, use.id)
+			return true
+		}
+		last := kept[len(kept)-1]
+		current := d.Version == last.version
+		d.Version, d.Text, d.Principal, d.SourceUtterance = last.version, last.text, last.principal, last.ref
+		if current {
+			return false
+		}
 	case RetractedAnswer:
 		q := b.questions[use.id]
 		if q == nil || q.AnsweredBy != ref {
@@ -123,7 +151,7 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		b.restoreQuestionCuts(q.ID)
 	case RetractedReview:
 		item := b.workItems[use.id]
-		if item == nil {
+		if item == nil || item.State != use.toState {
 			return false
 		}
 		item.State, item.Reviewer = use.fromState, ""
@@ -150,7 +178,7 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 			ask.Delegates = slices.Delete(ask.Delegates, i, i+1)
 		}
 		for id, owner := range use.owners {
-			if c := b.clauses[id]; c != nil {
+			if c := b.clauses[id]; c != nil && c.OwnerSessionID == use.delegate {
 				c.OwnerSessionID = owner
 			}
 		}
@@ -159,12 +187,26 @@ func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
 		if c == nil {
 			return false
 		}
-		c.Text = use.prior
 		c.Sources = withoutRef(c.Sources, ref)
+		if c.Text != use.after {
+			return false
+		}
+		c.Text = use.prior
 	default:
 		return false
 	}
 	return true
+}
+
+func personSourceLeft(ask *Ask, ref string) string {
+	for _, c := range ask.Clauses {
+		for _, source := range c.Sources {
+			if source != ref {
+				return source
+			}
+		}
+	}
+	return ""
 }
 
 func (b *Board) dropClause(c *Clause) {

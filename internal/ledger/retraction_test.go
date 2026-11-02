@@ -98,6 +98,63 @@ func TestReclassifiedWordsUndoAnApprovalAnAckAndARejection(t *testing.T) {
 	}
 }
 
+func TestAnAskKeepsWhatThePersonLaterAddedToIt(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewCachedStore(db, db)
+	g := goal(t, s, "Search")
+	capture(t, s, project, "claude-prompt:wake", "build search")
+	capture(t, s, project, "claude-prompt:typed", "and add filters")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:wake", As: ledger.AsNewAsk, To: g, Clauses: []string{"build search"}})
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:typed", As: ledger.AsExtends, To: "widget-A1", Clauses: []string{"add filters"}})
+
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:wake", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	rebuilt, err := ledger.NewStore(db, db).Board(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string]*ledger.Board{"cached": board(t, s), "rebuilt": rebuilt} {
+		asks := b.AllAsks()
+		if len(asks) != 1 || asks[0].SourceUtterance != "claude-prompt:typed" || len(asks[0].Clauses) != 1 || asks[0].Clauses[0].Text != "add filters" {
+			t.Fatalf("%s board: the person's later clause or its ask was lost: %+v", name, asks)
+		}
+		if got := asks[0].Clauses[0].Sources; len(got) != 1 || got[0] != "claude-prompt:typed" {
+			t.Fatalf("%s board: sources %v", name, got)
+		}
+	}
+}
+
+func TestADecisionKeepsTheVersionThePersonGave(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, second, wantText string
+		wantVersion                   int
+	}{
+		{"retracted first version", "claude-prompt:wake", "claude-prompt:typed", "use postgres 16", 2},
+		{"retracted later version", "claude-prompt:typed", "claude-prompt:wake", "use postgres", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := ledger.NewBoard()
+			events := []ledger.Event{
+				makeEvent(1, ledger.EventUtterance, ledger.UtterancePayload{UtteranceID: "claude-prompt:wake", Text: "w", CapturedBy: ledger.CapturedByHook}),
+				makeEvent(2, ledger.EventUtterance, ledger.UtterancePayload{UtteranceID: "claude-prompt:typed", Text: "t", CapturedBy: ledger.CapturedByHook}),
+				makeEvent(3, ledger.EventDecision, ledger.DecisionPayload{DecisionID: "D1", Version: 1, Text: "use postgres", Principal: "person", SourceUtterance: tc.first}),
+				makeEvent(4, ledger.EventDecisionVer, ledger.DecisionPayload{DecisionID: "D1", Version: 2, Text: "use postgres 16", Principal: "person", SourceUtterance: tc.second}),
+				makeEvent(5, ledger.EventReclassified, ledger.ReclassifiedPayload{UtteranceID: "claude-prompt:wake", Reason: "scheduled"}),
+			}
+			for _, e := range events {
+				if err := b.Apply(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			decisions := b.Decisions()
+			if len(decisions) != 1 || decisions[0].Version != tc.wantVersion || decisions[0].Text != tc.wantText || decisions[0].SourceUtterance != "claude-prompt:typed" {
+				t.Fatalf("decisions = %+v", decisions)
+			}
+		})
+	}
+}
+
 func sortedRetractions(rs []ledger.Retraction) []ledger.Retraction {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Kind+rs[i].ID < rs[j].Kind+rs[j].ID })
 	return rs

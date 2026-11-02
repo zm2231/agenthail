@@ -103,6 +103,7 @@ type Board struct {
 	reviews            reviewState
 	checks             checkState
 	uses               map[string][]sourceUse
+	decisionVersions   map[string][]decisionVersion
 	attachedBy         map[string][]string
 	retractions        []Retraction
 	applied            int64
@@ -130,6 +131,7 @@ func (b *Board) reset() {
 	b.reviews = newReviewState()
 	b.checks = newCheckState()
 	b.uses = map[string][]sourceUse{}
+	b.decisionVersions = map[string][]decisionVersion{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
 	b.applied = 0
@@ -414,6 +416,7 @@ func (b *Board) applyDecision(data []byte) error {
 		SourceUtterance: p.SourceUtterance,
 		QuestionID:      p.QuestionID,
 	}
+	b.decisionVersions[p.DecisionID] = []decisionVersion{{ref: p.SourceUtterance, version: p.Version, text: p.Text, principal: p.Principal}}
 	b.used(p.SourceUtterance, sourceUse{kind: RetractedDecision, id: p.DecisionID})
 	return nil
 }
@@ -427,6 +430,7 @@ func (b *Board) applyDecisionVersion(data []byte) error {
 		d.Version = p.Version
 		d.Text = p.Text
 		d.Principal = p.Principal
+		b.decisionVersions[p.DecisionID] = append(b.decisionVersions[p.DecisionID], decisionVersion{ref: p.SourceUtterance, version: p.Version, text: p.Text, principal: p.Principal})
 		b.used(p.SourceUtterance, sourceUse{kind: RetractedDecision, id: p.DecisionID})
 	}
 	return nil
@@ -525,7 +529,7 @@ func (b *Board) applySupersession(data []byte) error {
 	if !ok {
 		return nil
 	}
-	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedRevision, id: p.ClauseID, prior: c.Text})
+	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedRevision, id: p.ClauseID, prior: c.Text, after: p.NewVersion})
 	c.Text = p.NewVersion
 	if p.SourceUtteranceID != "" {
 		c.Sources = append(c.Sources, p.SourceUtteranceID)
