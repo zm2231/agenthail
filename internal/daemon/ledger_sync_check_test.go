@@ -1,11 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -47,4 +50,49 @@ func TestTheReplicaChecksItsLogAgainstTheOwnersAndFindsTheFirstDifference(t *tes
 		view := syncViewOf(t, mac)
 		return view.Log == "mismatch" && view.FirstDiff == changed
 	})
+
+	searched := owner.gate.digestRequests.Load()
+	mustLedger(t, owner, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "remote-a", Name: "Infra"}, nil)
+	before := syncViewOf(t, mac).LogThrough
+	mac.daemon.wakeLedgerSync(host)
+	testkit.Eventually(t, "the replica checks again past the owner's new event", 20*time.Second, func() bool {
+		view := syncViewOf(t, mac)
+		return view.LogThrough > before && view.Log == "mismatch"
+	})
+	if view := syncViewOf(t, mac); view.FirstDiff != changed {
+		t.Fatalf("the first difference moved to %d after the owner appended", view.FirstDiff)
+	}
+	if again := owner.gate.digestRequests.Load(); again != searched {
+		t.Fatalf("an append on the owner re-ran the search: %d more digest lookups", again-searched)
+	}
+}
+
+func TestALogLongerThanOnePageIsCheckedThroughItsEnd(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	store := ledger.NewStore(owner.reg.WriteDB(), owner.reg.ReadDB())
+	for i := range ledgerPullPage + 100 {
+		if _, _, err := store.RecordUtterance(ledger.Utterance{ProjectKey: widgetKey, Ref: fmt.Sprintf("claude-prompt:owner-%d", i), SpeakerID: "remote-a", Text: "said on the owner", CapturedBy: ledger.CapturedByHook}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head, err := store.LatestSeq(widgetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	testkit.Eventually(t, "the replica checks the whole pulled log", 30*time.Second, func() bool {
+		view := syncViewOf(t, mac)
+		return view.Log == "match" && view.LogThrough == head
+	})
+}
+
+func TestAPageWithoutADigestIsAFailedCheck(t *testing.T) {
+	mac, _, record := ledgerOnTwoHosts(t)
+	host, ok := mac.daemon.pairedHost(record.ID)
+	if !ok {
+		t.Fatal("the owner is not paired")
+	}
+	if check := mac.daemon.checkLedgerLog(context.Background(), host, widgetKey, nil); check.Error == "" || check.Match {
+		t.Fatalf("a pull without a digest passed the check: %+v", check)
+	}
 }

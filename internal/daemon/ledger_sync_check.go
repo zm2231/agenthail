@@ -13,10 +13,11 @@ import (
 type ledgerLogCheck struct {
 	At              time.Time
 	Through         int64
-	OwnerSHA256     string
 	Match           bool
 	FirstDifference int64
 	Error           string
+	localBefore     string
+	localAt         string
 }
 
 func (d *Daemon) checkLedgerLog(ctx context.Context, host *pairedHost, key string, owner *ledger.LogDigest) ledgerLogCheck {
@@ -25,8 +26,9 @@ func (d *Daemon) checkLedgerLog(ctx context.Context, host *pairedHost, key strin
 		check.Error = host.record.Name + " sent no log digest with its last page"
 		return check
 	}
-	check.Through, check.OwnerSHA256 = owner.Through, owner.SHA256
-	local, err := d.ledgerStore().LogDigest(key, owner.Through)
+	check.Through = owner.Through
+	store := d.ledgerStore()
+	local, err := store.LogDigest(key, owner.Through)
 	if err != nil {
 		check.Error = err.Error()
 		return check
@@ -35,17 +37,40 @@ func (d *Daemon) checkLedgerLog(ctx context.Context, host *pairedHost, key strin
 		check.Match = true
 		return check
 	}
-	if last, ok := d.ledgerSync.last(key); ok && last.Check.Through == owner.Through && last.Check.OwnerSHA256 == owner.SHA256 && last.Check.FirstDifference > 0 {
-		check.FirstDifference = last.Check.FirstDifference
-		return check
+	first := int64(0)
+	if last, ok := d.ledgerSync.last(key); ok && last.Check.FirstDifference > 0 && last.Check.FirstDifference <= owner.Through {
+		first = last.Check.FirstDifference
 	}
-	first, err := d.firstLedgerDifference(ctx, host, key, owner.Through)
-	if err != nil {
+	if first > 0 {
+		before, at, err := localAround(store, key, first)
+		if err != nil {
+			check.Error = err.Error()
+			return check
+		}
+		if last, _ := d.ledgerSync.last(key); before == last.Check.localBefore && at == last.Check.localAt {
+			check.FirstDifference, check.localBefore, check.localAt = first, before, at
+			return check
+		}
+	}
+	if first, err = d.firstLedgerDifference(ctx, host, key, owner.Through); err != nil {
 		check.Error = "the logs differ through owner position " + strconv.FormatInt(owner.Through, 10) + "; locating the first difference failed: " + err.Error()
 		return check
 	}
 	check.FirstDifference = first
+	if check.localBefore, check.localAt, err = localAround(store, key, first); err != nil {
+		check.Error = err.Error()
+	}
 	return check
+}
+
+// localAround is this host's digest just before and at the first difference; the owner's prefix through it never changes, so equal values here mean the difference is still there.
+func localAround(store *ledger.Store, key string, first int64) (string, string, error) {
+	before, err := store.LogDigest(key, first-1)
+	if err != nil {
+		return "", "", err
+	}
+	at, err := store.LogDigest(key, first)
+	return before.SHA256, at.SHA256, err
 }
 
 func (d *Daemon) firstLedgerDifference(ctx context.Context, host *pairedHost, key string, through int64) (int64, error) {

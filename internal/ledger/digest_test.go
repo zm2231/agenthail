@@ -63,6 +63,7 @@ func TestSyncedHostsAgreeOnTheLogDigestUntilARowDiffers(t *testing.T) {
 	mac, owner := newSyncHost(t), newSyncHost(t)
 	searchAsk(t, mac.store)
 	adopt(t, project, mac, owner)
+	capture(t, owner.store, "repo:github.com/acme/infra", "claude-prompt:elsewhere", "another project's words between this one's")
 	items(t, owner.store, "add the index")
 	capture(t, mac.store, project, "claude-prompt:later", "and later")
 	syncOnce(t, project, mac, owner)
