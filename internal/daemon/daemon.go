@@ -296,6 +296,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
+	go d.runLedgerQuestions(ctx)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})
 	go func() {

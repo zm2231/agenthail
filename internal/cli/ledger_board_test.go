@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -106,6 +107,49 @@ func TestLedgerBoardShowsGoalsProvenanceAndUnattachedWords(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(goals), &parsed); err != nil || len(parsed) != 1 || len(parsed[0].Clauses) != 1 || parsed[0].Clauses[0].Sources[0] != "claude-prompt:1" {
 		t.Fatalf("goals json %s err %v", goals, err)
+	}
+}
+
+func TestLedgerBoardKeepsWithdrawnCutsAndMarksDefaultedDecisions(t *testing.T) {
+	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	dir := t.TempDir()
+	const key = "repo:github.com/acme/widget"
+	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
+	if _, _, err := ls.RecordUtterance(ledger.Utterance{ProjectKey: key, Ref: "claude-prompt:1", SpeakerID: "person", TargetID: "s1", Text: "keep it all", CapturedBy: ledger.CapturedByHook}); err != nil {
+		t.Fatal(err)
+	}
+	ls.EnsureGoal(key, "Search", "s1")
+	now := time.Now()
+	for _, req := range []ledger.QuestionRequest{
+		{ProjectKey: key, SessionID: "s1", To: "widget-G1", Text: "how broad?", Recommendation: "all", DefaultAnswer: "a smaller first version", Kind: ledger.QuestionScope, DeadlineMs: now.Add(time.Hour).UnixMilli()},
+		{ProjectKey: key, SessionID: "s1", To: "widget-G1", Text: "which index?", Recommendation: "fts", DefaultAnswer: "fts and fuzzy", KeepsBreadth: true, Kind: ledger.QuestionScope, DeadlineMs: now.Add(time.Hour).UnixMilli()},
+	} {
+		if _, err := ls.AskQuestion(req, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ls.ExpireQuestions(key, now.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ls.Attach(ledger.AttachRequest{ProjectKey: key, SessionID: "s1", UtteranceID: "claude-prompt:1", As: ledger.AsAnswers, To: "widget-Q1"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return app.cmdLedger(nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"cut widget-X1 on widget-G1: default of widget-Q1 on expiry: a smaller first version (withdrawn: its question was answered)",
+		"1 unanswered defaults became pending cuts",
+		"applied by default from widget-Q2; not the person's decision, authorizes nothing outward",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("board lacks %q:\n%s", want, out)
+		}
 	}
 }
 

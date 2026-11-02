@@ -86,19 +86,43 @@ func (p *attachPlan) react() error {
 func (p *attachPlan) ackCut() error {
 	for _, c := range p.board.clauses {
 		for _, cut := range c.Cuts {
-			if cut.ID != p.req.To {
-				continue
+			if cut.ID == p.req.To {
+				p.goalID = p.board.clauseGoal(c)
+				return p.recordAck(cut, c.ID)
 			}
-			if cut.Acked {
-				return refuse("%s is already acked", cut.ID)
+		}
+	}
+	for _, t := range p.board.targetCuts {
+		if t.ID == p.req.To {
+			goalID, err := p.board.targetGoal(t.Target)
+			if err != nil {
+				return err
 			}
-			p.goalID = p.board.clauseGoal(c)
-			p.effects = append(p.effects, cut.ID, c.ID)
-			p.summary = fmt.Sprintf("%s acked: %s is cut", cut.ID, c.ID)
-			return p.add(EventCutAck, CutAckPayload{CutID: cut.ID, AckedBy: p.utterance.SpeakerID, SourceUtteranceID: p.utterance.ID})
+			p.goalID = goalID
+			return p.recordAck(t.Cut, t.Target)
 		}
 	}
 	return refuse("--as reacts --ack needs --to <cut>; %q is not a cut in %s", p.req.To, p.req.ProjectKey)
+}
+
+func (p *attachPlan) recordAck(cut Cut, target string) error {
+	if cut.Acked {
+		return refuse("%s is already acked", cut.ID)
+	}
+	if cut.Withdrawn {
+		return refuse("%s was withdrawn when its question was answered", cut.ID)
+	}
+	p.effects = append(p.effects, cut.ID, target)
+	p.summary = fmt.Sprintf("%s acked: %s is cut", cut.ID, target)
+	if err := p.add(EventCutAck, CutAckPayload{CutID: cut.ID, AckedBy: p.utterance.SpeakerID, SourceUtteranceID: p.utterance.ID}); err != nil {
+		return err
+	}
+	q := p.board.questions[cut.QuestionID]
+	if q == nil || q.State != QuestionOpen {
+		return nil
+	}
+	p.summary += fmt.Sprintf("; %s resolved with its default", q.ID)
+	return p.add(EventQuestionRes, QuestionResolvedPayload{QuestionID: q.ID, Answer: q.DefaultAnswer, SourceUtteranceID: p.utterance.ID, Applied: true, Effects: []string{cut.ID}})
 }
 
 func (p *attachPlan) delegate() error {

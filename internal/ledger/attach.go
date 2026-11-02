@@ -17,6 +17,7 @@ const (
 	AsDelegates    AttachAs = "delegates"
 	AsDecides      AttachAs = "decides"
 	AsConversation AttachAs = "conversation"
+	AsAnswers      AttachAs = "answers"
 )
 
 const ProjectTarget = "project"
@@ -129,9 +130,9 @@ func (p *attachPlan) build() error {
 	switch req.As {
 	case AsNewAsk, AsExtends, AsConstrains:
 		return p.addClauses()
-	case AsRefines, AsReacts, AsDelegates, AsDecides, AsConversation:
+	case AsRefines, AsReacts, AsDelegates, AsDecides, AsConversation, AsAnswers:
 	default:
-		return refuse("unknown --as %q; use new-ask, extends, constrains, refines, reacts, delegates, decides or conversation", req.As)
+		return refuse("unknown --as %q; use new-ask, extends, constrains, refines, reacts, delegates, decides, answers or conversation", req.As)
 	}
 	if req.Source != "" {
 		return refuse("--source applies only to new clauses (new-ask, extends, constrains)")
@@ -148,6 +149,8 @@ func (p *attachPlan) build() error {
 		return p.delegate()
 	case AsDecides:
 		return p.decide()
+	case AsAnswers:
+		return p.answer()
 	}
 	if req.To != "" || len(req.Clauses) > 0 {
 		return refuse("--as conversation takes no --to or --clause")

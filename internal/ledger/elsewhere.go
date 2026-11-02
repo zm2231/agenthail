@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -101,5 +102,23 @@ func (p *attachPlan) readback(q querier, board *Board) (string, error) {
 		}
 		line += fmt.Sprintf("; %d unattached: %s%s", n, strings.Join(ids, ", "), more)
 	}
+	if open := openQuestionsOn(board, p.goalID); len(open) > 0 {
+		line += "; open questions: " + strings.Join(open, ", ")
+	}
 	return line, nil
+}
+
+func openQuestionsOn(board *Board, goalID string) []string {
+	var open []Question
+	for _, q := range board.Questions() {
+		if q.State == QuestionOpen && q.GoalID == goalID {
+			open = append(open, q)
+		}
+	}
+	sort.Slice(open, func(i, j int) bool { return open[i].DeadlineMs < open[j].DeadlineMs })
+	ids := make([]string, 0, len(open))
+	for _, q := range open {
+		ids = append(ids, q.ID)
+	}
+	return ids
 }

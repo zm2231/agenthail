@@ -28,7 +28,20 @@ const (
 	EventRedact        EventType = "redact"
 	EventAttach        EventType = "attach"
 	EventClauseSource  EventType = "clause.source"
+	EventQuestionEsc   EventType = "question.escalated"
 )
+
+type QuestionKind string
+
+const (
+	QuestionScope   QuestionKind = "scope"
+	QuestionFraming QuestionKind = "framing"
+	QuestionOutward QuestionKind = "outward"
+)
+
+const OutwardDefault = "don't"
+
+const PrincipalDefault = "default"
 
 type AskType string
 

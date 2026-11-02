@@ -158,6 +158,17 @@ Intent ledger:
                                  decides, conversation
   ledger propose --to <id|project> --clause "..."
                                  Propose clauses; they bind once the person adopts them
+  ledger question --to <id|project> "<question>" --recommendation "..." --default "..."
+                  --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]
+                                 Track a question; the person answers with attach --as answers.
+                                 Unanswered, only a --keeps-breadth default applies itself;
+                                 any other waits for the person's ack
+  ledger questions [--all]       List open questions (--all includes answered ones)
+  ledger work [--mine]           List work items
+  ledger work add <clause_id> "<text>"
+                                 Add a work item under a clause; closing work never closes the clause
+  ledger work <claim|block|unblock|done|reopen> <item_id> [--reason "..."]
+                                 Move a work item; block needs a reason, only the assignee closes it
   ledger asks                    List all asks
   ledger ask <ask_id>            Show one ask with its clauses
   ledger enable [@session]       Capture the person's words in this project, or for one session

@@ -66,6 +66,26 @@ func TestLedgerAPICaptureNamesTheSessionsEarlierUnattachedWords(t *testing.T) {
 	}
 }
 
+func TestLedgerAPIWorkItemsMoveThroughTheDaemon(t *testing.T) {
+	_, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-w", "repo:github.com/acme/widget")
+	if err := p.store.Enable(p.key); err != nil {
+		t.Fatal(err)
+	}
+	p.session(t, r, "s1")
+	ref := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "s1", PromptID: "p-1", Prompt: "add search"}).Ref
+	ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: p.key, SessionID: "s1", Name: "Search"}, nil)
+	ledgerWrite(t, handler, "/api/v1/ledger/attach", ledger.AttachRequest{ProjectKey: p.key, SessionID: "s1", UtteranceID: ref, As: ledger.AsNewAsk, To: "widget-G1", Clauses: []string{"add search"}}, nil)
+	var added ledger.WorkResult
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"}, &added); code != http.StatusOK || added.Item.ID != "widget-W1" {
+		t.Fatalf("add status=%d body=%s", code, body)
+	}
+	code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkClose, ItemID: "widget-W1"}, nil)
+	if code != http.StatusConflict || !strings.Contains(body, "done needs it in_progress") {
+		t.Fatalf("done before claim: status=%d body=%s", code, body)
+	}
+}
+
 func TestLedgerAPIRefusesUnprovenClausesWithAConflict(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-b", "repo:github.com/acme/widget")
