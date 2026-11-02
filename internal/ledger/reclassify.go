@@ -69,6 +69,7 @@ func (b *Board) applyReclassified(data []byte) error {
 	if b.utterances[p.UtteranceID] == nil {
 		return nil
 	}
+	b.retract(p.UtteranceID, p.Reason)
 	delete(b.utterances, p.UtteranceID)
 	for i, id := range b.utteranceOrder {
 		if id == p.UtteranceID {

@@ -28,6 +28,9 @@ func (b *Board) applyAttach(data []byte) error {
 	if u == nil {
 		return nil
 	}
+	if !slices.Contains(b.attachedBy[p.UtteranceID], p.SessionID) {
+		b.attachedBy[p.UtteranceID] = append(b.attachedBy[p.UtteranceID], p.SessionID)
+	}
 	u.Attached = true
 	if p.GoalID != "" && !slices.Contains(u.GoalIDs, p.GoalID) {
 		u.GoalIDs = append(u.GoalIDs, p.GoalID)
@@ -44,6 +47,7 @@ func (b *Board) applyClauseSource(data []byte) error {
 	if !ok {
 		return nil
 	}
+	b.used(p.UtteranceID, sourceUse{kind: RetractedAdoption, id: p.ClauseID, prior: string(c.Source)})
 	c.Source = p.ToSource
 	if p.OwnerSessionID != "" {
 		c.OwnerSessionID = p.OwnerSessionID

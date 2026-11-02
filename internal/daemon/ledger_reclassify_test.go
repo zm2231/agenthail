@@ -1,12 +1,59 @@
 package daemon
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestWorkAttachedFromAScheduledPromptIsTakenBackWithOneNotice(t *testing.T) {
+	d, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-raced", "raced-key")
+	if err := p.store.Enable(p.key); err != nil {
+		t.Fatal(err)
+	}
+	s := p.session(t, r, "racer")
+	ref := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "wake-r", Prompt: "Add filters and continue."}).Ref
+	var goal ledgerGoalResponse
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: p.key, SessionID: s.ID, Name: "Search"}, &goal); code != http.StatusOK {
+		t.Fatalf("goal %d %s", code, body)
+	}
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/attach", ledger.AttachRequest{ProjectKey: p.key, SessionID: s.ID, UtteranceID: ref, As: ledger.AsNewAsk, To: goal.Goal.ID, Clauses: []string{"add filters"}}, nil); code != http.StatusOK {
+		t.Fatalf("attach %d %s", code, body)
+	}
+	source := journalSource(d, s, nil)
+	scheduled := liveEvent(surface.TimelineItem{ID: "event-wake-r", Kind: "event", Title: "Claude Code instructions", PromptID: "wake-r", Timestamp: time.Now().UTC().Format(time.RFC3339Nano)})
+	source.append(scheduled)
+	source.append(scheduled)
+
+	board, err := p.store.Board(p.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asks := board.AllAsks(); len(asks) != 0 {
+		t.Fatalf("an ask built from a scheduled prompt survived: %+v", asks)
+	}
+	var notices []string
+	rows, err := r.ReadDB().Query(`SELECT message FROM message_queue WHERE session_id=? AND delivery_key=?`, s.ID, "ledger:retracted:"+ref+":"+s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var message string
+		if err := rows.Scan(&message); err != nil {
+			t.Fatal(err)
+		}
+		notices = append(notices, message)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "retracted: ask") || !strings.Contains(notices[0], "Redo any of it only from the person's own words") {
+		t.Fatalf("notices = %q", notices)
+	}
+}
 
 func TestAScheduledPromptIsNotThePersonsWordsInEitherOrder(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)

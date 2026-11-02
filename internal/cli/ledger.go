@@ -121,6 +121,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"questions":          view.questions,
 			"targetCuts":         view.targetCuts,
 			"g2Waivers":          view.waivers,
+			"retractions":        append([]ledger.Retraction{}, view.retractions...),
 			"checks":             board.GoalChecks(),
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,

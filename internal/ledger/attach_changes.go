@@ -80,7 +80,7 @@ func (p *attachPlan) react() error {
 	}
 	p.effects = append(p.effects, id)
 	p.summary = fmt.Sprintf("%s cut, pending the person's ack (%s)", c.ID, id)
-	return p.add(EventCut, CutPayload{CutID: id, ClauseID: c.ID, Reason: "rejected in " + p.utterance.ID, AuthorSession: p.req.SessionID})
+	return p.add(EventCut, CutPayload{CutID: id, ClauseID: c.ID, Reason: "rejected in " + p.utterance.ID, AuthorSession: p.req.SessionID, FromUtterance: p.utterance.ID})
 }
 
 func (p *attachPlan) ackCut() error {

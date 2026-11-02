@@ -115,6 +115,7 @@ func (b *Board) applyCutWithdrawn(data []byte) error {
 	for _, t := range b.targetCuts {
 		if t.ID == p.CutID {
 			t.Withdrawn, t.CoveredBy = true, p.ClauseIDs
+			b.used(p.UtteranceID, sourceUse{kind: RetractedCutCover, id: p.CutID})
 		}
 	}
 	return nil
