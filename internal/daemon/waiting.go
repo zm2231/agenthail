@@ -202,7 +202,9 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		defer cancel()
 		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
 		var actions []surface.RequestAction
-		if request, open := d.waitingRequest(notificationCtx, session, waiting); open {
+		request, open := d.waitingRequest(notificationCtx, session, waiting)
+		d.noticeWaiting(notificationCtx, session, waiting, request, open)
+		if open {
 			// A notification's buttons answer the session it names, so one
 			// that carries a request names the session that holds it.
 			mobile.SessionID = sessionID
@@ -252,6 +254,7 @@ func (d *Daemon) withdrawWaiting(sessionID string, waiting surface.Waiting) {
 }
 
 func (d *Daemon) withdrawWaitingNow(ctx context.Context, sessionID string, waiting surface.Waiting) {
+	d.withdrawWaitingNotice(sessionID, waiting)
 	key := waitingNotificationKey(sessionID, waiting.ID)
 	if err := d.withdrawDesktop("agenthail-" + key); err != nil {
 		d.log.Printf("withdraw desktop notification: %s", err)
