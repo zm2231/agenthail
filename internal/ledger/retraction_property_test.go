@@ -279,6 +279,46 @@ func checkAgainstOracle(t *testing.T, name string, b *Board, events []Event, ret
 	}
 }
 
+func TestACascadeOfDelegationsRetractsInEitherOrder(t *testing.T) {
+	for _, order := range [][]string{{"claude-prompt:c", "claude-prompt:lead"}, {"claude-prompt:lead", "claude-prompt:c"}} {
+		db := openRegistry(t, registrytest.Path(t)).WriteDB()
+		s := NewCachedStore(db, db)
+		insert := func(typ EventType, ref string, p any) {
+			data, _ := json.Marshal(p)
+			if _, err := insertEvent(db, `INSERT`, Event{ProjectKey: lockProject, Type: typ, Payload: data, Ref: ref, CreatedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Board(lockProject); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, ref := range []string{"claude-prompt:lead", "claude-prompt:c"} {
+			insert(EventUtterance, "", UtterancePayload{UtteranceID: ref, Text: ref, CapturedBy: CapturedByHook})
+		}
+		insert(EventAsk, "", AskPayload{AskID: "A1", Type: AskBuild, Principal: "person"})
+		insert(EventClause, "", ClausePayload{ClauseID: "C1", AskID: "A1", Text: "build", State: StateOwned, OwnerSessionID: "lead"})
+		insert(EventDelegation, "", DelegationPayload{AskID: "A1", DelegatorSessionID: "lead", DelegateSessionID: "b", SourceUtteranceID: "claude-prompt:lead"})
+		insert(EventDelegation, "", DelegationPayload{AskID: "A1", DelegatorSessionID: "b", DelegateSessionID: "c", SourceUtteranceID: "claude-prompt:c"})
+		for _, ref := range order {
+			insert(EventReclassified, reclassifiedRef(ref), ReclassifiedPayload{UtteranceID: ref, Reason: "scheduled"})
+		}
+		cached, err := s.Board(lockProject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rebuilt, err := NewStore(db, db).Board(lockProject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, b := range map[string]*Board{"cached": cached, "rebuilt": rebuilt} {
+			asks := b.AllAsks()
+			if len(asks) != 1 || len(asks[0].Delegates) != 0 || asks[0].Clauses[0].OwnerSessionID != "lead" {
+				t.Fatalf("order %v, %s board: want lead owning with no delegates, got %+v", order, name, asks)
+			}
+		}
+	}
+}
+
 func TestRetractionEqualsTheLogWithoutTheRetractedWords(t *testing.T) {
 	for seed := int64(1); seed <= 500; seed++ {
 		l := randomWordsLog(rand.New(rand.NewSource(seed)))
