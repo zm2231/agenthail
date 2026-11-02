@@ -14,7 +14,15 @@ mkdir -p "$DEST"
 # npm ci rejects the lock file when the prefix runs through a symlink, as
 # macOS temporary directories under /var do.
 DEST="$(cd "$DEST" && pwd -P)"
-cp "$ROOT/claude-host/host.mjs" "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
+cp "$ROOT"/claude-host/*.mjs "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
+for module in "$DEST"/*.mjs; do
+	for dependency in $(sed -nE "s/.*(from|import\() *['\"](\.\/[^'\"]+)['\"].*/\2/p" "$module"); do
+		if [ ! -f "$DEST/$dependency" ]; then
+			echo "error: $(basename "$module") imports $dependency, which is not staged" >&2
+			exit 1
+		fi
+	done
+done
 "$NPM" ci --omit=dev --omit=optional --ignore-scripts --no-bin-links --no-audit --no-fund --prefix "$DEST" >/dev/null
 # agenthail update extracts only directories and regular files.
 if find "$DEST" ! -type d ! -type f -print -quit | grep -q .; then

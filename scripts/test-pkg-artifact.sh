@@ -36,6 +36,7 @@ test -x "$root/runtime/node/bin/node"
 test -f "$root/pydeps/curl_cffi/__init__.py"
 test -f "$root/node_modules/@steipete/sweet-cookie/package.json"
 test -f "$root/claude-host/host.mjs"
+test -f "$root/claude-host/checker.mjs"
 test ! -e "$root/claude-host/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
 test -f "$root/skills/agenthail-operations/SKILL.md"
 test -x "$payload/usr/local/bin/agenthail"
@@ -79,6 +80,7 @@ test "$(readlink "$work/home/.hermes/skills/agenthail-operations")" = "$root/ski
 PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
 (cd "$root" && PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
 "$root/runtime/node/bin/node" --check "$root/claude-host/host.mjs"
+(cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('./checker.mjs').then(module => { if (!module.checkerOptions) process.exit(1) })")
 (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
 linkage="$work/linkage.txt"
