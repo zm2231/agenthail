@@ -50,14 +50,16 @@ export function carried(configDir) {
 
 const RUNTIME_ENV = ['HOME', 'USER', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'CLAUDE_CONFIG_DIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR'];
 
-// checkerEnv is the checker's whole environment, built from an allow-list:
-// what Claude needs to run and reach its API, never the rest of the host's.
-// AGENTHAIL_CLAUDE_HOST_CHECKER_ENV names further variables to pass.
+// The test harness's stand-in Claude reads these; they change nothing in Claude.
+const TEST_ENV = /^(FAKE_CLAUDE_[A-Z_]+|AGENTHAIL_TEST_OWNER_PIDS)$/;
+
+// checkerEnv is the checker's whole environment, built from a fixed
+// allow-list: what Claude needs to run and reach its API, never the rest of
+// the host's.
 export function checkerEnv(hostEnv, settingsEnv) {
   const env = {};
-  const extra = (hostEnv.AGENTHAIL_CLAUDE_HOST_CHECKER_ENV ?? '').split(',').filter(Boolean);
   for (const [name, value] of Object.entries(hostEnv)) {
-    if (typeof value === 'string' && (RUNTIME_ENV.includes(name) || extra.includes(name) || AUTH_ENV.test(name))) env[name] = value;
+    if (typeof value === 'string' && (RUNTIME_ENV.includes(name) || AUTH_ENV.test(name) || TEST_ENV.test(name))) env[name] = value;
   }
   return { ...env, ...settingsEnv, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...CHECKER_ENV };
 }

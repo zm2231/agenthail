@@ -1335,7 +1335,7 @@ process.stdout.write('{"result":"reported"}');
       env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', CHECKER_TEST_UNRELATED: 'x', ENABLE_TOOL_SEARCH: 'true' },
     }),
   );
-  await startHost(f, { agenthail, env: { CHECKER_HOST_LEAK: 'x', AGENTHAIL_CLAUDE_HOST_CHECKER_ENV: 'FAKE_CLAUDE_DIR,AGENTHAIL_TEST_OWNER_PIDS' } });
+  await startHost(f, { agenthail, env: { CHECKER_HOST_LEAK: 'x', ENABLE_TOOL_SEARCH: 'true', AGENTHAIL_CLAUDE_HOST_CHECKER_ENV: 'ENABLE_TOOL_SEARCH,CHECKER_HOST_LEAK' } });
   const c = new Client(f.socket);
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
