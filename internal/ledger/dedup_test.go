@@ -29,7 +29,7 @@ func utterances(t *testing.T, s *ledger.Store) []ledger.Event {
 func TestEachOccurrenceIsItsOwnUtterance(t *testing.T) {
 	s := newStore(t)
 	for _, u := range []ledger.Utterance{said(ledger.PromptRef("a"), "yes"), said(ledger.PromptRef("b"), "yes"), said(ledger.DeliveryRef("c"), "yes")} {
-		if _, err := s.RecordUtterance(u); err != nil {
+		if _, _, err := s.RecordUtterance(u); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,11 +40,11 @@ func TestEachOccurrenceIsItsOwnUtterance(t *testing.T) {
 
 func TestOneOccurrenceRecordedTwiceIsOneUtterance(t *testing.T) {
 	s := newStore(t)
-	first, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes"))
+	first, _, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes, from the journal"))
+	again, _, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes, from the journal"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestConcurrentWritersOfOneOccurrenceRecordOne(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e, err := s.RecordUtterance(said(ledger.PromptRef("same"), "build it"))
+			e, _, err := s.RecordUtterance(said(ledger.PromptRef("same"), "build it"))
 			seqs[i], errs[i] = e.Seq, err
 		}()
 	}
@@ -80,7 +80,7 @@ func TestConcurrentWritersOfOneOccurrenceRecordOne(t *testing.T) {
 }
 
 func TestUtteranceNeedsARef(t *testing.T) {
-	if _, err := newStore(t).RecordUtterance(said("", "no ref")); err == nil {
+	if _, _, err := newStore(t).RecordUtterance(said("", "no ref")); err == nil {
 		t.Fatal("an utterance without a ref was recorded")
 	}
 }

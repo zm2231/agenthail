@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -24,8 +25,12 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 		return project.Key, false, err
 	}
 	u.ProjectKey, u.SpeakerID, u.TargetID = project.Key, surface.PersonSessionID, session.ID
-	if _, err := store.RecordUtterance(u); err != nil {
+	_, missed, err := store.RecordUtterance(u)
+	if err != nil {
 		return project.Key, false, err
+	}
+	if missed != nil && d.events != nil {
+		d.events.relay(registry.DaemonEvent{ID: uint64(missed.ID), Type: ledger.EventCaptureMissed, EntityID: missed.SessionID, Payload: missed.Payload, CreatedAt: missed.At})
 	}
 	return project.Key, true, nil
 }

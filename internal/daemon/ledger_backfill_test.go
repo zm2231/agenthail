@@ -82,6 +82,8 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	s := p.session(t, r, "s-missed")
 	source := journalSource(d, s, nil)
 	now := time.Now()
+	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
+	defer cancel()
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "caught", Prompt: "seen by the hook"})
 	source.append(liveEvent(typedPrompt("u-caught", "caught", "seen by the hook", now)))
 	source.append(liveEvent(typedPrompt("u-missed", "missed", "hook was down", now)))
@@ -102,6 +104,40 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	}
 	if len(missed) != 1 || missed[0].EntityID != s.ID || !strings.Contains(string(missed[0].Payload), ledger.PromptRef("missed")) || !strings.Contains(string(missed[0].Payload), `"reason":"unknown"`) {
 		t.Fatalf("want one missed-capture event for the prompt the hook never saw, got %+v", missed)
+	}
+	var live []apiEvent
+	for drained := false; !drained; {
+		select {
+		case event := <-stream:
+			if event.Type == ledger.EventCaptureMissed {
+				live = append(live, event)
+			}
+		case <-time.After(200 * time.Millisecond):
+			drained = true
+		}
+	}
+	if len(live) != 1 || live[0].ID != missed[0].ID || live[0].EntityID != s.ID {
+		t.Fatalf("a live subscriber must see the persisted missed-capture event %d once, got %+v", missed[0].ID, live)
+	}
+}
+
+func TestRelayedEventsKeepTheHubInIDOrder(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	older, err := r.AppendDaemonEvent("test.older", "", []byte(`{}`), time.Now(), eventHistoryLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.publishEvent("test.newer", "", map[string]string{})
+	d.events.relay(older)
+	backlog, _, _, cancel := d.events.subscribe(0)
+	defer cancel()
+	for i := 1; i < len(backlog); i++ {
+		if backlog[i].ID <= backlog[i-1].ID {
+			t.Fatalf("history out of id order at %d: %+v", i, backlog)
+		}
+	}
+	if d.events.cursor() <= older.ID {
+		t.Fatalf("cursor %d moved behind the newer event", d.events.cursor())
 	}
 }
 
