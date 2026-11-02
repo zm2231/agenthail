@@ -118,8 +118,18 @@ type ClauseStatePayload struct {
 	FromState   ClauseState `json:"fromState"`
 	ToState     ClauseState `json:"toState"`
 	EvidenceRef string      `json:"evidenceRef,omitempty"`
-	ProgressRef string      `json:"progressRef,omitempty"`
-	Actor       string      `json:"actor"`
+	ProgressRef    string      `json:"progressRef,omitempty"`
+	OwnerSessionID string      `json:"ownerSessionId,omitempty"`
+	Actor          string      `json:"actor"`
+}
+
+type GatePayload struct {
+	Gate      string   `json:"gate"`
+	SessionID string   `json:"sessionId"`
+	TurnID    string   `json:"turnId,omitempty"`
+	Result    string   `json:"result"`
+	Blocked   []string `json:"blocked,omitempty"`
+	Waived    []string `json:"waived,omitempty"`
 }
 
 type DecisionPayload struct {

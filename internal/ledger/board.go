@@ -62,6 +62,7 @@ type Cut struct {
 }
 
 type Wait struct {
+	SessionID  string `json:"sessionId,omitempty"`
 	Condition  string `json:"condition"`
 	DeadlineMs int64  `json:"deadlineMs"`
 	Resolved   string `json:"resolved,omitempty"`
@@ -95,6 +96,7 @@ type Board struct {
 	questions          map[string]*Question
 	workItems          map[string]*WorkItem
 	projectDefaultCuts int
+	gates              gateState
 	applied            int64
 }
 
@@ -116,6 +118,7 @@ func (b *Board) reset() {
 	b.questions = map[string]*Question{}
 	b.workItems = map[string]*WorkItem{}
 	b.projectDefaultCuts = 0
+	b.gates = newGateState()
 	b.applied = 0
 }
 
@@ -160,6 +163,10 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyQuestionResolved(event.Payload)
 	case EventQuestionEsc:
 		err = b.applyQuestionEscalated(event.Payload)
+	case EventGate:
+		err = b.gates.applyGate(event)
+	case EventWaiver:
+		err = b.gates.applyWaiver(event.Payload)
 	case EventWorkItem:
 		err = b.applyWorkItem(event.Payload)
 	case EventWorkItemState:
@@ -353,6 +360,9 @@ func (b *Board) applyClauseState(data []byte) error {
 		return nil
 	}
 	c.State = p.ToState
+	if p.OwnerSessionID != "" {
+		c.OwnerSessionID = p.OwnerSessionID
+	}
 	if p.ProgressRef != "" {
 		c.ProgressRef = p.ProgressRef
 		c.SelfReported = true
@@ -437,7 +447,7 @@ func (b *Board) applyWait(data []byte) error {
 	if !ok {
 		return nil
 	}
-	c.Waits = append(c.Waits, Wait{Condition: p.Condition, DeadlineMs: p.DeadlineMs})
+	c.Waits = append(c.Waits, Wait{SessionID: p.SessionID, Condition: p.Condition, DeadlineMs: p.DeadlineMs})
 	return nil
 }
 

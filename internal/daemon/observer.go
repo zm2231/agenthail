@@ -240,6 +240,9 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if desktopNotificationMessage != "" {
 		d.notifyTurnCompleted(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
 	}
+	if terminalCompletion {
+		d.gateLedgerTurn(*session, observation.CompletedTurnID)
+	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)
 	if steerQueueErr != nil {

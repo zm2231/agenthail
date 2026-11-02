@@ -45,6 +45,12 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerQuestions(store, args)
 	case "work":
 		return a.ledgerWork(store, args)
+	case "own":
+		return a.ledgerClause(ledger.ClauseOwn, args)
+	case "progress":
+		return a.ledgerClause(ledger.ClauseProgress, args)
+	case "wait":
+		return a.ledgerClause(ledger.ClauseWait, args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -108,6 +114,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"projectConstraints": view.constraints,
 			"questions":          view.questions,
 			"targetCuts":         view.targetCuts,
+			"g2Waivers":          view.waivers,
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
 		}

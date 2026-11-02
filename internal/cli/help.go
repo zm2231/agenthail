@@ -169,6 +169,12 @@ Intent ledger:
                                  Add a work item under a clause; closing work never closes the clause
   ledger work <claim|block|unblock|done|reopen> <item_id> [--reason "..."]
                                  Move a work item; block needs a reason, only the assignee closes it
+  ledger own <clause_id> [--session <id>]
+                                 Take ownership of a clause (or give it to a session)
+  ledger progress <clause_id> --ref <commit|file|PR|evidence>
+                                 Report self-reported progress on a clause you own
+  ledger wait <clause_id> --condition "..." --deadline <30m|4h|2d>
+                                 Declare what a clause you own is waiting on
   ledger asks                    List all asks
   ledger ask <ask_id>            Show one ask with its clauses
   ledger enable [@session]       Capture the person's words in this project, or for one session

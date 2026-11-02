@@ -29,6 +29,16 @@ const (
 	EventAttach        EventType = "attach"
 	EventClauseSource  EventType = "clause.source"
 	EventQuestionEsc   EventType = "question.escalated"
+	EventGate          EventType = "gate"
+)
+
+const (
+	GateG2 = "G2"
+
+	GatePass           = "pass"
+	GateBlocked        = "blocked"
+	GateWaived         = "waived"
+	GateDeferredPerson = "deferred-person-active"
 )
 
 type QuestionKind string
