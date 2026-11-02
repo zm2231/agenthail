@@ -44,6 +44,49 @@ func TestDashboardSendAndItsJournalEntryAreOneUtterance(t *testing.T) {
 	}
 }
 
+func TestPersonSteersAreCapturedUnderTheirIntentOnEveryBranch(t *testing.T) {
+	r := openLedgerRegistry(t)
+	p := addLedgerProject(t, r, "proj-steer", "steer-key")
+	if err := p.store.Enable(p.key); err != nil {
+		t.Fatal(err)
+	}
+	waiting := p.session(t, r, "waiting")
+	running := p.session(t, r, "running")
+	fake := &daemonSurface{sessions: map[string]surface.Session{"waiting": waiting, "running": running}, observations: map[string]*surface.TurnObservation{
+		"waiting": {Status: surface.StatusBusy, WaitingOn: &surface.Waiting{Kind: surface.WaitingDialog, ID: "dialog-1", Since: time.Now()}},
+		"running": {Status: surface.StatusBusy},
+	}, accepted: true}
+	d := newTestDaemon(t, r, []surface.Surface{fake})
+	queued, err := d.dispatcher().Steer(context.Background(), fake, &waiting, "after the dialog", surface.AuthorPerson)
+	if err != nil || queued.MessageID == "" {
+		t.Fatalf("steer to a waiting session: %+v %v", queued, err)
+	}
+	steered, _ := d.dispatcher().Steer(context.Background(), fake, &running, "change course", surface.AuthorPerson)
+	events := p.events(t)
+	if len(events) != 2 || events[0].Ref != ledger.DeliveryRef(queued.MessageID) {
+		t.Fatalf("want the queued and the steered words, the queued one under its intent %s; got %+v (steer receipt %+v)", queued.MessageID, events, steered)
+	}
+	journalSource(d, waiting, fake).append(liveEvent(surface.TimelineItem{ID: "peer:" + queued.MessageID, Kind: "message", Role: "user", Origin: surface.OriginPerson, Text: "after the dialog", MessageID: queued.MessageID, Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}))
+	if events := p.events(t); len(events) != 2 {
+		t.Fatalf("the queued send's journal entry added an utterance: %+v", events)
+	}
+}
+
+func TestLedgerAPIReportsAFailedWrite(t *testing.T) {
+	_, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-fail", "fail-key")
+	if err := p.store.Enable(p.key); err != nil {
+		t.Fatal(err)
+	}
+	p.session(t, r, "s-fail")
+	if _, err := r.WriteDB().Exec(`DROP TABLE ledger_events`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := ledgerPostStatus(t, handler, ledgerCaptureRequest{SessionID: "s-fail", PromptID: "p-fail", Prompt: "lost?"}); code != 500 {
+		t.Fatalf("status %d, want 500 when the ledger write fails", code)
+	}
+}
+
 func TestPersonSendToTheCoordinatorIsCapturedInUnsetProject(t *testing.T) {
 	r := openLedgerRegistry(t)
 	p := addLedgerProject(t, r, "proj-unset", "unset-send-key")

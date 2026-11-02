@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -13,7 +14,7 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 	if session.Cwd == "" {
 		return "", false, nil
 	}
-	project, err := ResolvePathProject(context.Background(), d.Registry, session.Cwd)
+	project, err := d.sessionProject(session)
 	if err != nil || project == nil || project.Key == "" {
 		return "", false, err
 	}
@@ -27,6 +28,20 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 		return project.Key, false, err
 	}
 	return project.Key, true, nil
+}
+
+// sessionProject uses the catalog's cached identity so per-prompt capture does not run git on the stream callback.
+func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error) {
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	d.catalogIdentities.setProjects(records)
+	identity := d.catalogIdentities.identity(context.Background(), session, time.Now(), func() *CatalogProject { return nil })
+	if identity.Project == nil && identity.UnavailableReason != "" {
+		return nil, fmt.Errorf("resolve the project of %s: %s", session.Cwd, identity.UnavailableReason)
+	}
+	return identity.Project, nil
 }
 
 // ledgerSince is the earliest grant that puts sessionID in the project's ledger scope.

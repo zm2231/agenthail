@@ -23,44 +23,39 @@ type ledgerCaptureResponse struct {
 
 func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST for this endpoint.")
 		return
 	}
 	var req ledgerCaptureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 	if req.SessionID == "" || req.Prompt == "" || req.PromptID == "" {
-		http.Error(w, "sessionId, promptId and prompt are required", http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId, promptId and prompt are required.")
 		return
 	}
 	if !surfaces.IsTypedHumanPrompt(req.Prompt) {
-		writeJSON(w, ledgerCaptureResponse{})
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
 	session, err := d.Registry.Session(req.SessionID)
 	if err != nil {
-		writeJSON(w, ledgerCaptureResponse{})
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
 	ref := ledger.PromptRef(req.PromptID)
 	key, captured, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: "terminal", Text: req.Prompt, At: time.Now()})
 	if err != nil {
 		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, key, err)
-		http.Error(w, "capture failed", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "capture_failed", "The prompt was not recorded in the ledger.")
 		return
 	}
 	if !captured {
-		writeJSON(w, ledgerCaptureResponse{})
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
-	writeJSON(w, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref})
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref})
 }
 
 func (d *Daemon) registerLedgerRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
