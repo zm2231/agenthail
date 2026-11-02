@@ -1,7 +1,6 @@
 package ledger_test
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -9,27 +8,13 @@ import (
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
-var base = time.UnixMilli(1_800_000_000_000)
-
-func hook(ref, target, text string, at time.Time) ledger.Utterance {
-	return ledger.Utterance{ProjectKey: "p", CaptureRef: ref, SpeakerID: "person", TargetID: target, Surface: "terminal", Text: text, At: at}
+func newStore(t *testing.T) *ledger.Store {
+	db := openTestDB(t)
+	return ledger.NewStore(db, db)
 }
 
-func journal(ref, target, text string, at time.Time) ledger.Utterance {
-	return ledger.Utterance{ProjectKey: "p", JournalRef: ref, SpeakerID: "person", TargetID: target, Surface: "journal", Text: text, At: at}
-}
-
-func record(t *testing.T, s *ledger.Store, utterances ...ledger.Utterance) []ledger.Event {
-	t.Helper()
-	var out []ledger.Event
-	for _, u := range utterances {
-		e, err := s.RecordUtterance(u)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, e)
-	}
-	return out
+func said(ref, text string) ledger.Utterance {
+	return ledger.Utterance{ProjectKey: "p", Ref: ref, SpeakerID: "person", TargetID: "s1", Surface: "terminal", Text: text}
 }
 
 func utterances(t *testing.T, s *ledger.Store) []ledger.Event {
@@ -41,94 +26,93 @@ func utterances(t *testing.T, s *ledger.Store) []ledger.Event {
 	return events
 }
 
-func newStore(t *testing.T) *ledger.Store {
-	db := openTestDB(t)
-	return ledger.NewStore(db, db)
-}
-
-func TestSamePromptTwiceIsTwoUtterances(t *testing.T) {
+func TestEachOccurrenceIsItsOwnUtterance(t *testing.T) {
 	s := newStore(t)
-	record(t, s, hook("h1", "s1", "yes", base), hook("h2", "s1", "yes", base.Add(time.Minute)))
-	if got := utterances(t, s); len(got) != 2 {
-		t.Fatalf("want 2 utterances, got %d", len(got))
+	for _, u := range []ledger.Utterance{said(ledger.PromptRef("a"), "yes"), said(ledger.PromptRef("b"), "yes"), said(ledger.DeliveryRef("c"), "yes")} {
+		if _, err := s.RecordUtterance(u); err != nil {
+			t.Fatal(err)
+		}
 	}
-}
-
-func TestBackfillOfBothRepeatsKeepsTwoAndBindsInOrder(t *testing.T) {
-	s := newStore(t)
-	captured := record(t, s, hook("h1", "s1", "yes", base), hook("h2", "s1", "yes", base.Add(time.Minute)))
-	backfilled := record(t, s, journal("j1", "s1", "yes", base.Add(time.Second)), journal("j2", "s1", "yes", base.Add(time.Minute+time.Second)))
-	got := utterances(t, s)
-	if len(got) != 2 {
-		t.Fatalf("want 2 utterances after backfill, got %d", len(got))
-	}
-	if backfilled[0].Seq != captured[0].Seq || backfilled[1].Seq != captured[1].Seq {
-		t.Fatalf("journal entries bound out of order: captured %d,%d backfilled %d,%d", captured[0].Seq, captured[1].Seq, backfilled[0].Seq, backfilled[1].Seq)
-	}
-	if got[0].JournalRef != "j1" || got[1].JournalRef != "j2" || got[0].CaptureRef != "h1" || got[1].CaptureRef != "h2" {
-		t.Fatalf("refs not recorded on the utterances: %+v", got)
-	}
-}
-
-func TestBackfillBeforeHookStillOneUtterance(t *testing.T) {
-	s := newStore(t)
-	first := record(t, s, journal("j1", "s1", "ship it", base.Add(time.Second)))
-	second := record(t, s, hook("h1", "s1", "ship it", base))
-	got := utterances(t, s)
-	if len(got) != 1 || first[0].Seq != second[0].Seq || got[0].CaptureRef != "h1" || got[0].JournalRef != "j1" {
-		t.Fatalf("want one utterance carrying both refs, got %+v", got)
-	}
-}
-
-func TestBackfillWithoutCaptureIsRecorded(t *testing.T) {
-	s := newStore(t)
-	record(t, s, hook("h1", "s1", "yes", base), journal("j1", "s1", "yes", base.Add(ledger.JournalWindow+time.Minute)), journal("j2", "s1", "no", base))
 	if got := utterances(t, s); len(got) != 3 {
-		t.Fatalf("journal prompts with no capture in the window must be kept, got %d utterances", len(got))
+		t.Fatalf("same words, three occurrences: want 3 utterances, got %d", len(got))
 	}
 }
 
-func TestSameWordsToAnotherSessionAreSeparate(t *testing.T) {
+func TestOneOccurrenceRecordedTwiceIsOneUtterance(t *testing.T) {
 	s := newStore(t)
-	record(t, s, hook("h1", "s1", "yes", base), hook("h2", "s2", "yes", base), journal("j2", "s2", "yes", base))
+	first, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.RecordUtterance(said(ledger.PromptRef("a"), "yes, from the journal"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := utterances(t, s)
-	if len(got) != 2 || got[0].JournalRef != "" || got[1].JournalRef != "j2" {
-		t.Fatalf("journal entry for s2 must bind only to s2's capture: %+v", got)
+	if len(got) != 1 || again.Seq != first.Seq || got[0].Ref != ledger.PromptRef("a") {
+		t.Fatalf("want one utterance returned to both writers, got %+v (first %d again %d)", got, first.Seq, again.Seq)
 	}
 }
 
-func TestRetriedRefsAreIdempotent(t *testing.T) {
+func TestConcurrentWritersOfOneOccurrenceRecordOne(t *testing.T) {
 	s := newStore(t)
-	record(t, s, hook("h1", "s1", "yes", base), hook("h1", "s1", "yes", base.Add(time.Minute)), journal("j1", "s1", "yes", base), journal("j1", "s1", "yes", base))
-	if got := utterances(t, s); len(got) != 1 {
-		t.Fatalf("retries of one ref must not add utterances, got %d", len(got))
-	}
-}
-
-func TestConcurrentHookCopiesOfOneSubmissionRecordOne(t *testing.T) {
-	s := newStore(t)
-	const copies = 8
-	seqs := make([]int64, copies)
-	errs := make([]error, copies)
+	const writers = 8
+	seqs := make([]int64, writers)
+	errs := make([]error, writers)
 	var wg sync.WaitGroup
-	for i := range copies {
+	for i := range writers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e, err := s.RecordUtterance(hook(fmt.Sprintf("copy-%d", i), "s1", "build it", base.Add(time.Duration(i)*100*time.Millisecond)))
+			e, err := s.RecordUtterance(said(ledger.PromptRef("same"), "build it"))
 			seqs[i], errs[i] = e.Seq, err
 		}()
 	}
 	wg.Wait()
 	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("copy %d: %v", i, err)
-		}
-		if seqs[i] != seqs[0] {
-			t.Fatalf("copy %d got seq %d, copy 0 got %d", i, seqs[i], seqs[0])
+		if err != nil || seqs[i] != seqs[0] || seqs[i] == 0 {
+			t.Fatalf("writer %d: seq %d (writer 0: %d) err %v", i, seqs[i], seqs[0], err)
 		}
 	}
 	if got := utterances(t, s); len(got) != 1 {
-		t.Fatalf("want one utterance for one submission, got %d", len(got))
+		t.Fatalf("want one utterance, got %d", len(got))
+	}
+}
+
+func TestUtteranceNeedsARef(t *testing.T) {
+	if _, err := newStore(t).RecordUtterance(said("", "no ref")); err == nil {
+		t.Fatal("an utterance without a ref was recorded")
+	}
+}
+
+func TestEnableKeepsItsGrantTimeUntilDisabled(t *testing.T) {
+	s := newStore(t)
+	if scope, err := s.Scope("p"); err != nil || scope.State != ledger.LedgerUnset {
+		t.Fatalf("new project scope %+v err %v", scope, err)
+	}
+	before := time.Now().Add(-time.Millisecond)
+	if err := s.Enable("p"); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.Scope("p")
+	if first.State != ledger.LedgerEnabled || first.Since.Before(before.Truncate(time.Millisecond)) {
+		t.Fatalf("enable scope %+v", first)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := s.Enable("p"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.Scope("p"); !again.Since.Equal(first.Since) {
+		t.Fatalf("enabling an enabled ledger moved its grant from %v to %v", first.Since, again.Since)
+	}
+	if err := s.Disable("p"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := s.Enable("p"); err != nil {
+		t.Fatal(err)
+	}
+	if reenabled, _ := s.Scope("p"); !reenabled.Since.After(first.Since) {
+		t.Fatalf("re-enable after disable kept the old grant %v", reenabled.Since)
 	}
 }

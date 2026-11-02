@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -19,6 +18,7 @@ type claudeHookInput struct {
 	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
+	PromptID  string `json:"prompt_id"`
 }
 
 // sessionContext is what the session-context hook adds to a Claude or Codex
@@ -75,8 +75,8 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		}
 	}
 	var ledgerContext string
-	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && session.Cwd != "" {
-		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.Prompt, now)
+	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
+		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.PromptID, hook.Prompt)
 	}
 
 	if text == "" && ledgerContext == "" {
@@ -92,7 +92,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
 }
 
-func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, prompt string, submittedAt time.Time) string {
+func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, promptID, prompt string) string {
 	var client *daemonAPIClient
 	var err error
 	if a.daemonAPIOverride != nil {
@@ -103,12 +103,10 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	if err != nil {
 		return ""
 	}
-	captureRef := uuid.NewString()
-	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]any{
-		"sessionId":     session.ID,
-		"captureRef":    captureRef,
-		"prompt":        prompt,
-		"submittedAtMs": submittedAt.UnixMilli(),
+	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]string{
+		"sessionId": session.ID,
+		"promptId":  promptID,
+		"prompt":    prompt,
 	}, nil)
 	if err != nil || status != http.StatusOK {
 		return ""
@@ -116,9 +114,10 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	var result struct {
 		Captured   bool   `json:"captured"`
 		ProjectKey string `json:"projectKey"`
+		Ref        string `json:"ref"`
 	}
 	if json.Unmarshal(body, &result) != nil || !result.Captured {
 		return ""
 	}
-	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", captureRef, result.ProjectKey)
+	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", result.Ref, result.ProjectKey)
 }

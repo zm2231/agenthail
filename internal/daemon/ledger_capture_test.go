@@ -56,7 +56,7 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 	}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 
-	_, err = d.dispatcher().DeliverWithOptions(
+	receipt, err := d.dispatcher().DeliverWithOptions(
 		context.Background(), fake, &target,
 		"remember to test the ledger", "delivery-key-1",
 		surface.SendOptions{Author: surface.AuthorPerson},
@@ -88,8 +88,9 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 	if payload.Surface != string(surface.KindCodex) {
 		t.Fatalf("expected surface %s, got %s", surface.KindCodex, payload.Surface)
 	}
-	if payload.UtteranceID != "delivery-key-1" || events[0].CaptureRef != "delivery-key-1" {
-		t.Fatalf("expected utterance and capture ref delivery-key-1, got %s / %s", payload.UtteranceID, events[0].CaptureRef)
+	want := ledger.DeliveryRef(receipt.MessageID)
+	if receipt.MessageID == "" || payload.UtteranceID != want || events[0].Ref != want {
+		t.Fatalf("utterance must carry the delivery intent ref %q, got %q / %q", want, payload.UtteranceID, events[0].Ref)
 	}
 }
 

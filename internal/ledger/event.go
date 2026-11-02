@@ -68,7 +68,6 @@ type Event struct {
 	ActorSessionID string
 	ActorHostID    string
 	OwnerSeq       int64
-	CaptureRef     string
-	JournalRef     string
+	Ref            string
 	CreatedAt      time.Time
 }

@@ -460,6 +460,22 @@ func (r *Registry) CoordinatorHistory(projectID string) ([]CoordinatorHistoryEnt
 	})
 }
 
+// CoordinatorSince is when sessionID last became projectID's coordinator; false if it is not the coordinator now.
+func (r *Registry) CoordinatorSince(projectID, sessionID string) (time.Time, bool, error) {
+	spec, err := r.Coordinator(projectID)
+	if errors.Is(err, ErrNoCoordinator) {
+		return time.Time{}, false, nil
+	}
+	if err != nil || sessionID == "" || spec.SessionID != sessionID {
+		return time.Time{}, false, err
+	}
+	var at sql.NullInt64
+	if err := r.read.QueryRow(`SELECT MAX(at_ms) FROM coordinator_history WHERE project_id=? AND session_id=? AND action IN ('set','replaced')`, projectID, sessionID).Scan(&at); err != nil || !at.Valid {
+		return time.Time{}, false, err
+	}
+	return time.UnixMilli(at.Int64).UTC(), true, nil
+}
+
 func recordCoordinatorHistoryTx(tx *sql.Tx, projectID, action, name, sessionID, previousName, previousSession, changedBy string, at time.Time) error {
 	_, err := tx.Exec(`INSERT INTO coordinator_history (project_id,action,name,session_id,previous_name,previous_session_id,changed_by,at_ms) VALUES (?,?,?,?,?,?,?,?)`,
 		projectID, action, name, sessionID, previousName, previousSession, changedBy, at.UnixMilli())
@@ -625,6 +641,9 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id,project_id) VALUES (?,?)`, previous, spec.ProjectID); err != nil {
 			return err
 		}
+	}
+	if err := recordCoordinatorHistoryTx(tx, spec.ProjectID, "replaced", spec.Name, next, spec.Name, previous, "", time.Now().UTC()); err != nil {
+		return err
 	}
 	if _, err := publishCoordinatorTx(tx, spec.ProjectID); err != nil && !errors.Is(err, ErrNoCoordinator) {
 		return err

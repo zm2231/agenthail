@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -54,17 +55,22 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	enabled, err := store.Enabled(key)
+	scope, err := store.Scope(key)
 	if err != nil {
 		return err
 	}
-	if !enabled {
+	if scope.State == ledger.LedgerDisabled {
 		if hasFlag(args, "--json") {
-			return emit(map[string]any{"projectKey": key, "enabled": false})
+			return emit(map[string]any{"projectKey": key, "capture": "disabled"})
 		}
-		fmt.Printf("ledger is not enabled for this project (%s)\n", key)
+		fmt.Printf("ledger is disabled for this project (%s)\n", key)
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
+	}
+	capture, coverage := "coordinator", "capturing the coordinator's prompts only; enable with: agenthail ledger enable"
+	if scope.State == ledger.LedgerEnabled {
+		capture = "enabled"
+		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
 	}
 
 	events, err := store.Events(key, 0, 10000)
@@ -77,13 +83,19 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	}
 
 	if hasFlag(args, "--json") {
-		return emit(map[string]any{
+		out := map[string]any{
 			"projectKey": key,
+			"capture":    capture,
 			"asks":       board.OpenAsks(),
 			"decisions":  board.Decisions(),
-		})
+		}
+		if scope.State == ledger.LedgerEnabled {
+			out["captureSince"] = scope.Since
+		}
+		return emit(out)
 	}
 
+	fmt.Println(coverage)
 	asks := board.OpenAsks()
 	decisions := board.Decisions()
 	if len(asks) == 0 && len(decisions) == 0 {

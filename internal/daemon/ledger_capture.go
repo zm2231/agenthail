@@ -1,44 +1,23 @@
 package daemon
 
 import (
-	"context"
+	"time"
 
-	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) personCapture(ctx delivery.PersonCaptureContext) {
-	if ctx.TargetCwd == "" {
+func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
+	if capture.IntentUUID == "" {
 		return
 	}
-	project, err := ResolvePathProject(context.Background(), d.Registry, ctx.TargetCwd)
-	if err != nil {
-		d.log.Printf("ledger capture: resolve project for %s: %s", ctx.TargetCwd, err)
-		return
-	}
-	if project == nil || project.Key == "" {
-		return
-	}
-	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
-	capture := ledger.PersonCapture(store)
-	captureErr := capture(ledger.Utterance{
-		ProjectKey: project.Key,
-		CaptureRef: captureMessageID(ctx.DeliveryKey),
-		SpeakerID:  surface.PersonSessionID,
-		TargetID:   ctx.TargetSessionID,
-		Surface:    ctx.TargetSurface,
-		Text:       ctx.Message,
+	key, _, err := d.recordPersonWords(capture.Target, ledger.Utterance{
+		Ref:     ledger.DeliveryRef(capture.IntentUUID),
+		Surface: string(capture.Target.Surface),
+		Text:    capture.Message,
+		At:      time.Now(),
 	})
-	if captureErr != nil {
-		d.log.Printf("ledger capture: record utterance for project %s: %s", project.Key, captureErr)
+	if err != nil {
+		d.log.Printf("ledger capture: record delivery %s to %s in project %s: %s", capture.IntentUUID, capture.Target.ID, key, err)
 	}
-}
-
-func captureMessageID(deliveryKey string) string {
-	if deliveryKey != "" {
-		return deliveryKey
-	}
-	return uuid.NewString()
 }

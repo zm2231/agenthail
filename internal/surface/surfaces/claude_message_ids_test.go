@@ -29,9 +29,16 @@ func TestClaudePromptsCarryTheIDTheirSenderGaveThem(t *testing.T) {
 			}
 		})
 	}
-	reply := claudeTimelineItems(map[string]any{"type": "assistant", "uuid": "record-4", "message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "Done"}}}})
-	if len(reply) != 1 || reply[0].MessageID != "" {
+	reply := claudeTimelineItems(map[string]any{"type": "assistant", "uuid": "record-4", "promptId": "p-1", "message": map[string]any{"id": "m1", "content": []any{map[string]any{"type": "text", "text": "Done"}}}})
+	if len(reply) != 1 || reply[0].MessageID != "" || reply[0].PromptID != "" {
 		t.Fatalf("a reply carried a prompt id: %+v", reply)
+	}
+}
+
+func TestClaudeTypedPromptsCarryTheHookPromptID(t *testing.T) {
+	items := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-1", "promptId": "bb6af0fd", "origin": map[string]any{"kind": "human"}, "message": map[string]any{"content": "yes"}})
+	if len(items) != 1 || items[0].PromptID != "bb6af0fd" || items[0].MessageID != "record-1" {
+		t.Fatalf("items=%+v", items)
 	}
 }
 

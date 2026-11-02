@@ -13,10 +13,9 @@ import (
 )
 
 type captureCall struct {
-	SessionID     string `json:"sessionId"`
-	CaptureRef    string `json:"captureRef"`
-	Prompt        string `json:"prompt"`
-	SubmittedAtMs int64  `json:"submittedAtMs"`
+	SessionID string `json:"sessionId"`
+	PromptID  string `json:"promptId"`
+	Prompt    string `json:"prompt"`
 }
 
 func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall) {
@@ -44,7 +43,7 @@ func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall)
 		mu.Lock()
 		calls = append(calls, call)
 		mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "projectKey": "test-key"})
+		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID})
 	}))
 	t.Cleanup(server.Close)
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
@@ -58,34 +57,32 @@ func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall)
 	}
 }
 
-func TestTerminalPromptSendsEachSubmissionToTheDaemon(t *testing.T) {
+func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 	app, calls := ledgerHookFixture(t, true)
-	prompt := `{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"yes"}`
-	first := time.UnixMilli(1_800_000_000_000)
-	output := app.sessionContext(strings.NewReader(prompt), surface.KindClaude, 4242, first)
-	app.sessionContext(strings.NewReader(prompt), surface.KindClaude, 4242, first.Add(time.Minute))
-
+	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"yes","prompt_id":"bb6af0fd"}`), surface.KindClaude, 4242, time.Now())
 	got := calls()
-	if len(got) != 2 {
-		t.Fatalf("want 2 capture calls, got %+v", got)
-	}
-	if got[0].CaptureRef == "" || got[0].CaptureRef == got[1].CaptureRef {
-		t.Fatalf("each submission needs its own capture ref: %+v", got)
-	}
-	if got[0].SessionID != "s1" || got[0].Prompt != "yes" || got[0].SubmittedAtMs != first.UnixMilli() || got[1].SubmittedAtMs != first.Add(time.Minute).UnixMilli() {
-		t.Fatalf("capture calls carry the wrong session, prompt or submit time: %+v", got)
+	if len(got) != 1 || got[0] != (captureCall{SessionID: "s1", PromptID: "bb6af0fd", Prompt: "yes"}) {
+		t.Fatalf("capture call %+v", got)
 	}
 	if output == nil {
 		t.Fatal("expected hook output naming the capture")
 	}
-	if text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string); !strings.Contains(text, got[0].CaptureRef) {
-		t.Fatalf("hook context %q does not name capture %s", text, got[0].CaptureRef)
+	if text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string); !strings.Contains(text, "claude-prompt:bb6af0fd") {
+		t.Fatalf("hook context %q does not name the capture", text)
+	}
+}
+
+func TestTerminalPromptWithoutAPromptIDIsLeftToTheJournal(t *testing.T) {
+	app, calls := ledgerHookFixture(t, true)
+	app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"yes"}`), surface.KindClaude, 4242, time.Now())
+	if got := calls(); len(got) != 0 {
+		t.Fatalf("hook captured a prompt it cannot identify: %+v", got)
 	}
 }
 
 func TestTerminalPromptAddsNoLedgerContextWhenNotCaptured(t *testing.T) {
 	app, calls := ledgerHookFixture(t, false)
-	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"hello"}`), surface.KindClaude, 4242, time.Now())
+	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"hello","prompt_id":"p-hello"}`), surface.KindClaude, 4242, time.Now())
 	if len(calls()) != 1 {
 		t.Fatalf("want 1 capture call, got %d", len(calls()))
 	}

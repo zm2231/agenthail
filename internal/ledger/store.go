@@ -38,26 +38,31 @@ func (s *Store) Enabled(projectKey string) (bool, error) {
 	return enabled == LedgerEnabled, nil
 }
 
-func (s *Store) CapturesForCoordinator(projectKey string) (bool, error) {
-	if projectKey == "" {
-		return false, nil
-	}
-	var enabled int
-	err := s.read.QueryRow(`SELECT enabled FROM ledger_state WHERE project_key=?`, projectKey).Scan(&enabled)
+type Scope struct {
+	State int
+	Since time.Time
+}
+
+func (s *Store) Scope(projectKey string) (Scope, error) {
+	var state int
+	var since int64
+	err := s.read.QueryRow(`SELECT enabled,since_ms FROM ledger_state WHERE project_key=?`, projectKey).Scan(&state, &since)
 	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
+		return Scope{State: LedgerUnset}, nil
 	}
 	if err != nil {
-		return false, err
+		return Scope{}, err
 	}
-	return enabled != LedgerDisabled, nil
+	return Scope{State: state, Since: time.UnixMilli(since).UTC()}, nil
 }
 
 func (s *Store) Enable(projectKey string) error {
 	if projectKey == "" {
 		return fmt.Errorf("project key is required")
 	}
-	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled) VALUES(?,?) ON CONFLICT(project_key) DO UPDATE SET enabled=?`, projectKey, LedgerEnabled, LedgerEnabled)
+	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled,since_ms) VALUES(?,?,?)
+		ON CONFLICT(project_key) DO UPDATE SET since_ms=CASE WHEN enabled=excluded.enabled THEN since_ms ELSE excluded.since_ms END, enabled=excluded.enabled`,
+		projectKey, LedgerEnabled, time.Now().UnixMilli())
 	return err
 }
 
@@ -76,7 +81,7 @@ func (s *Store) AppendEvent(event Event) (Event, error) {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
-	return insertEvent(s.db, event, "", 0)
+	return insertEvent(s.db, `INSERT`, event)
 }
 
 type execer interface {
@@ -87,15 +92,19 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,capture_ref,journal_ref,created_at`
+const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at`
 
-func insertEvent(db execer, event Event, matchKey string, occurredMs int64) (Event, error) {
+// insertEvent returns Seq 0 when verb is INSERT OR IGNORE and the ref already exists.
+func insertEvent(db execer, verb string, event Event) (Event, error) {
 	result, err := db.Exec(
-		`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,capture_ref,journal_ref,match_key,occurred_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?)`,
 		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq,
-		event.CaptureRef, event.JournalRef, matchKey, occurredMs, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		event.Ref, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	)
 	if err != nil {
+		return Event{}, err
+	}
+	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return Event{}, err
 	}
 	if event.Seq, err = result.LastInsertId(); err != nil {
@@ -107,7 +116,7 @@ func insertEvent(db execer, event Event, matchKey string, occurredMs int64) (Eve
 func scanEvent(row rowScanner) (Event, error) {
 	var e Event
 	var typ, ts string
-	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.CaptureRef, &e.JournalRef, &ts); err != nil {
+	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.Ref, &ts); err != nil {
 		return Event{}, err
 	}
 	e.Type = EventType(typ)

@@ -5,12 +5,16 @@ import "github.com/zm2231/agenthail/internal/surface"
 func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	items := claudeRecordItems(record)
 	id := claudeMessageID(record)
-	if id == "" {
-		return items
+	promptID := ""
+	if str(record, "type") == "user" {
+		promptID = str(record, "promptId")
 	}
 	for i := range items {
 		if items[i].Kind == "message" && (items[i].Role == "user" || items[i].Role == "peer") {
-			items[i].MessageID = id
+			if id != "" {
+				items[i].MessageID = id
+			}
+			items[i].PromptID = promptID
 		}
 	}
 	return items

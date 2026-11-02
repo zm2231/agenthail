@@ -14,6 +14,7 @@ import (
 
 type sessionSourceManager struct {
 	registry *registry.Registry
+	prompts  func(surface.Session, sessionJournalPayload)
 	mu       sync.Mutex
 	sources  map[string]*sessionSource
 	running  sync.WaitGroup

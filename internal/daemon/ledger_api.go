@@ -1,26 +1,24 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type ledgerCaptureRequest struct {
-	SessionID     string `json:"sessionId"`
-	CaptureRef    string `json:"captureRef"`
-	Prompt        string `json:"prompt"`
-	SubmittedAtMs int64  `json:"submittedAtMs"`
+	SessionID string `json:"sessionId"`
+	PromptID  string `json:"promptId"`
+	Prompt    string `json:"prompt"`
 }
 
 type ledgerCaptureResponse struct {
 	Captured   bool   `json:"captured"`
 	ProjectKey string `json:"projectKey,omitempty"`
+	Ref        string `json:"ref,omitempty"`
 }
 
 func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request) {
@@ -33,67 +31,31 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if req.SessionID == "" || req.Prompt == "" || req.CaptureRef == "" || req.SubmittedAtMs <= 0 {
-		http.Error(w, "sessionId, captureRef, prompt and submittedAtMs are required", http.StatusBadRequest)
+	if req.SessionID == "" || req.Prompt == "" || req.PromptID == "" {
+		http.Error(w, "sessionId, promptId and prompt are required", http.StatusBadRequest)
 		return
 	}
 	if !surfaces.IsTypedHumanPrompt(req.Prompt) {
-		writeJSON(w, ledgerCaptureResponse{Captured: false})
+		writeJSON(w, ledgerCaptureResponse{})
 		return
 	}
-
 	session, err := d.Registry.Session(req.SessionID)
-	if err != nil || session.Cwd == "" {
-		writeJSON(w, ledgerCaptureResponse{Captured: false})
+	if err != nil {
+		writeJSON(w, ledgerCaptureResponse{})
 		return
 	}
-
-	project, err := ResolvePathProject(context.Background(), d.Registry, session.Cwd)
-	if err != nil || project == nil || project.Key == "" {
-		writeJSON(w, ledgerCaptureResponse{Captured: false})
-		return
-	}
-
-	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
-	if !d.sessionCapturesForProject(store, project, session) {
-		writeJSON(w, ledgerCaptureResponse{Captured: false})
-		return
-	}
-
-	_, captureErr := store.RecordUtterance(ledger.Utterance{
-		ProjectKey: project.Key,
-		CaptureRef: req.CaptureRef,
-		SpeakerID:  surface.PersonSessionID,
-		TargetID:   req.SessionID,
-		Surface:    "terminal",
-		Text:       req.Prompt,
-		At:         time.UnixMilli(req.SubmittedAtMs),
-	})
-	if captureErr != nil {
-		d.log.Printf("ledger capture: record terminal utterance for project %s: %s", project.Key, captureErr)
+	ref := ledger.PromptRef(req.PromptID)
+	key, captured, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: "terminal", Text: req.Prompt, At: time.Now()})
+	if err != nil {
+		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, key, err)
 		http.Error(w, "capture failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, ledgerCaptureResponse{Captured: true, ProjectKey: project.Key})
-}
-
-func (d *Daemon) sessionCapturesForProject(store *ledger.Store, project *CatalogProject, session *surface.Session) bool {
-	enabled, err := store.Enabled(project.Key)
-	if err != nil {
-		return false
+	if !captured {
+		writeJSON(w, ledgerCaptureResponse{})
+		return
 	}
-	if enabled {
-		return true
-	}
-	captures, err := store.CapturesForCoordinator(project.Key)
-	if err != nil || !captures {
-		return false
-	}
-	spec, err := d.Registry.Coordinator(project.LocalID)
-	if err != nil {
-		return false
-	}
-	return spec.SessionID == session.ID
+	writeJSON(w, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
