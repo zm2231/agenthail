@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,38 @@ func TestPersonSteersAreCapturedUnderTheirIntentOnEveryBranch(t *testing.T) {
 	journalSource(d, waiting, fake).append(liveEvent(surface.TimelineItem{ID: "peer:" + queued.MessageID, Kind: "message", Role: "user", Origin: surface.OriginPerson, Text: "after the dialog", MessageID: queued.MessageID, Timestamp: time.Now().UTC().Format(time.RFC3339Nano)}))
 	if events := p.events(t); len(events) != 2 {
 		t.Fatalf("the queued send's journal entry added an utterance: %+v", events)
+	}
+}
+
+func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
+	d, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-missed", "missed-key")
+	if err := p.store.Enable(p.key); err != nil {
+		t.Fatal(err)
+	}
+	s := p.session(t, r, "s-missed")
+	source := journalSource(d, s, nil)
+	now := time.Now()
+	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "caught", Prompt: "seen by the hook"})
+	source.append(liveEvent(typedPrompt("u-caught", "caught", "seen by the hook", now)))
+	source.append(liveEvent(typedPrompt("u-missed", "missed", "hook was down", now)))
+	source.appendSeedItems([]surface.TimelineItem{typedPrompt("u-missed", "missed", "hook was down", now)})
+	source.append(liveEvent(surface.TimelineItem{ID: "peer:intent-1", Kind: "message", Role: "user", Origin: surface.OriginPerson, Text: "sent from the dashboard", MessageID: "intent-1", Timestamp: now.Format(time.RFC3339Nano)}))
+	if events := p.events(t); len(events) != 3 {
+		t.Fatalf("want 3 utterances, got %d", len(events))
+	}
+	recent, err := r.RecentDaemonEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missed []registry.DaemonEvent
+	for _, event := range recent {
+		if event.Type == ledger.EventCaptureMissed {
+			missed = append(missed, event)
+		}
+	}
+	if len(missed) != 1 || missed[0].EntityID != s.ID || !strings.Contains(string(missed[0].Payload), ledger.PromptRef("missed")) || !strings.Contains(string(missed[0].Payload), `"reason":"unknown"`) {
+		t.Fatalf("want one missed-capture event for the prompt the hook never saw, got %+v", missed)
 	}
 }
 

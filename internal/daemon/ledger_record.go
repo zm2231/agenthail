@@ -74,7 +74,7 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 		d.log.Printf("ledger backfill: prompt %s in %s has no time: %s", ref, session.ID, err)
 		return
 	}
-	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at}); err != nil {
+	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, Backfilled: true}); err != nil {
 		d.log.Printf("ledger backfill: record %s for %s: %s", ref, session.ID, err)
 	}
 }
