@@ -96,6 +96,10 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyWait(event.Payload)
 	case EventWaitResolved:
 		err = b.applyWaitResolved(event.Payload)
+	case EventDelegation:
+		err = b.applyDelegation(event.Payload)
+	case EventSupersession:
+		err = b.applySupersession(event.Payload)
 	}
 	if err == nil {
 		b.applied = event.Seq
@@ -348,5 +352,35 @@ func (b *Board) applyWaitResolved(data []byte) error {
 			break
 		}
 	}
+	return nil
+}
+
+func (b *Board) applyDelegation(data []byte) error {
+	var p DelegationPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	ask, ok := b.asks[p.AskID]
+	if !ok {
+		return nil
+	}
+	for _, c := range ask.Clauses {
+		if c.OwnerSessionID == p.DelegatorSessionID || c.OwnerSessionID == "" {
+			c.OwnerSessionID = p.DelegateSessionID
+		}
+	}
+	return nil
+}
+
+func (b *Board) applySupersession(data []byte) error {
+	var p SupersessionPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c, ok := b.clauses[p.ClauseID]
+	if !ok {
+		return nil
+	}
+	c.Text = p.NewVersion
 	return nil
 }

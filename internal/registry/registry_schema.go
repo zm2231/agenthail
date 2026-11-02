@@ -466,9 +466,11 @@ CREATE TABLE IF NOT EXISTS ledger_events (
 	actor_session_id TEXT NOT NULL DEFAULT '',
 	actor_host_id TEXT NOT NULL DEFAULT '',
 	owner_seq INTEGER NOT NULL DEFAULT 0,
+	message_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ledger_events_project ON ledger_events(project_key, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_events_dedup ON ledger_events(project_key, message_id) WHERE message_id != '';
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
 	enabled INTEGER NOT NULL DEFAULT 0,

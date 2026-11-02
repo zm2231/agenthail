@@ -68,5 +68,6 @@ type Event struct {
 	ActorSessionID string
 	ActorHostID    string
 	OwnerSeq       int64
+	MessageID      string
 	CreatedAt      time.Time
 }
