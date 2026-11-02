@@ -30,9 +30,12 @@ type Receipt struct {
 	WaitingOn *surface.Waiting `json:"waitingOn,omitempty"`
 }
 
+type PersonCaptureFunc func(sessionID, message string, options surface.SendOptions)
+
 type Dispatcher struct {
 	Registry         *registry.Registry
 	ProblemCommitted func()
+	PersonCapture    PersonCaptureFunc
 }
 
 func (d Dispatcher) Deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string) (*Receipt, error) {
@@ -252,6 +255,9 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		var err error
 		if ctx, err = WithSender(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
 			return nil, err
+		}
+		if d.PersonCapture != nil && options.SourceSessionID == surface.PersonSessionID {
+			d.PersonCapture(session.ID, message, options)
 		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
