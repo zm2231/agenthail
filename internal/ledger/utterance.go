@@ -55,6 +55,19 @@ func (s *Store) RecordUtterance(u Utterance) (Event, bool, error) {
 	if err != nil {
 		return Event{}, false, err
 	}
+	board, release, err := s.lockBoard(u.ProjectKey)
+	if err != nil {
+		return Event{}, false, err
+	}
+	defer release()
+	e, inserted, err := s.insertUtterance(u, data)
+	if err != nil {
+		return Event{}, false, err
+	}
+	return e, inserted, s.catchUp(board, u.ProjectKey)
+}
+
+func (s *Store) insertUtterance(u Utterance, data []byte) (Event, bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Event{}, false, err

@@ -36,7 +36,15 @@ func (s *Store) lockBoard(projectKey string) (*Board, func(), error) {
 }
 
 func (s *Store) catchUp(board *Board, projectKey string) error {
-	rows, err := s.read.Query(`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq`, projectKey, board.AppliedSeq())
+	err := applyCommitted(s.read, board, projectKey)
+	if err != nil && s.cache != nil {
+		delete(s.cache.boards, projectKey)
+	}
+	return err
+}
+
+func applyCommitted(read querier, board *Board, projectKey string) error {
+	rows, err := read.Query(`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq`, projectKey, board.AppliedSeq())
 	if err != nil {
 		return err
 	}
@@ -57,9 +65,6 @@ func (s *Store) catchUp(board *Board, projectKey string) error {
 	}
 	for _, e := range events {
 		if err := board.Apply(e); err != nil {
-			if s.cache != nil {
-				delete(s.cache.boards, projectKey)
-			}
 			return err
 		}
 	}
@@ -73,33 +78,35 @@ func (s *Store) writePlanned(projectKey, actor string, now time.Time, plan plann
 	if err != nil {
 		return nil, nil, err
 	}
-	fail := func(err error) (*Board, func(), error) {
+	if err := s.commitPlanned(board, projectKey, actor, now, plan); err != nil {
 		release()
 		return nil, nil, err
 	}
+	if err := s.catchUp(board, projectKey); err != nil {
+		release()
+		return nil, nil, err
+	}
+	return board, release, nil
+}
+
+func (s *Store) commitPlanned(board *Board, projectKey, actor string, now time.Time, plan plannedEvent) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fail(err)
+		return err
 	}
 	defer tx.Rollback()
 	typ, payload, err := plan(board, &idIssuer{q: tx, projectKey: projectKey})
 	if err != nil {
-		return fail(err)
+		return err
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return fail(err)
+		return err
 	}
 	if _, err := insertEvent(tx, `INSERT`, Event{ProjectKey: projectKey, Type: typ, Payload: data, ActorSessionID: actor, CreatedAt: now.UTC()}); err != nil {
-		return fail(err)
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return fail(err)
-	}
-	if err := s.catchUp(board, projectKey); err != nil {
-		return fail(err)
-	}
-	return board, release, nil
+	return tx.Commit()
 }
 
 func (s *Store) Board(projectKey string) (*Board, error) {
