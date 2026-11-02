@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/permissions"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -136,9 +137,9 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	claudeHookStates := map[string]string{}
 	for _, root := range claudeRoots {
-		state, err := claudeHooksState(filepath.Join(root, "settings.json"))
+		state, err := claudehooks.AllStateAt(filepath.Join(root, "settings.json"))
 		if err != nil {
-			state = claudeHookMissing
+			state = claudehooks.Missing
 		}
 		claudeHookStates[root] = state
 	}
@@ -245,9 +246,9 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Printf("  %s\n", describeClaudeConfigRoot(described, time.Now()))
 			}
 			switch claudeHookStates[root] {
-			case claudeHookMissing:
+			case claudehooks.Missing:
 				fmt.Printf("  hooks: missing; terminal prompts can't be answered from Agenthail, and terminal sessions aren't told who they are, until you run: agenthail hooks install\n")
-			case claudeHookOutdated:
+			case claudehooks.Outdated:
 				fmt.Printf("  hooks: outdated; terminal prompts may not reach Agenthail, and terminal sessions may not be told who they are, until you run: agenthail hooks install\n")
 			}
 			if state, ok := remoteControl[root]; ok {

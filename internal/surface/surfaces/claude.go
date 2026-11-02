@@ -31,6 +31,7 @@ type Claude struct {
 	transcripts  *claudeTranscriptIndex
 	host         *claudeHost
 	prompts      *claudePrompts
+	promptHooks  promptHooks
 	request      ClaudeRequest
 	webAccounts  claudeWebAccounts
 	localOnly    bool

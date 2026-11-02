@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -63,7 +64,7 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("hook-key"); err != nil {
 		t.Fatal(err)
 	}
-	if problems := doctor(); len(problems) != 1 || problems[0] != (promptHookProblem{Root: root, State: claudeHookMissing}) {
+	if problems := doctor(); len(problems) != 1 || problems[0] != (promptHookProblem{Root: root, State: claudehooks.Missing}) {
 		t.Fatalf("doctor problems %+v", problems)
 	}
 	text, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
@@ -101,7 +102,7 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 		t.Fatalf("board json problems %+v err %v", boardJSON.Problems, err)
 	}
 
-	if _, err := installClaudeHooks(filepath.Join(root, "settings.json"), "/opt/agenthail/bin/agenthail"); err != nil {
+	if _, err := claudehooks.InstallAt(filepath.Join(root, "settings.json"), "/opt/agenthail/bin/agenthail"); err != nil {
 		t.Fatal(err)
 	}
 	if problems := doctor(); len(problems) != 0 {
@@ -132,7 +133,7 @@ func TestACoordinatorAloneMakesThePromptHookMatter(t *testing.T) {
 		t.Fatal(err)
 	}
 	problems, err := ledgerPromptHookProblems(context.Background(), store)
-	if err != nil || len(problems) != 1 || problems[0].State != claudeHookMissing {
+	if err != nil || len(problems) != 1 || problems[0].State != claudehooks.Missing {
 		t.Fatalf("a coordinator did not make the hook matter: %+v err %v", problems, err)
 	}
 	if problems[0].EnabledProject != "" {

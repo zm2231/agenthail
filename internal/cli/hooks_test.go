@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -66,7 +67,7 @@ func TestHooksInstallAddsAgenthailsHooksToEveryClaudeRootAndKeepsOtherSettings(t
 		}
 		return report.ClaudeHooks
 	}
-	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudeHookMissing || hook[second] != claudeHookMissing || len(hook) != 2 {
+	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudehooks.Missing || hook[second] != claudehooks.Missing || len(hook) != 2 {
 		t.Fatalf("doctor before install=%v", hook)
 	}
 	for range 2 {
@@ -74,7 +75,7 @@ func TestHooksInstallAddsAgenthailsHooksToEveryClaudeRootAndKeepsOtherSettings(t
 			t.Fatal(err)
 		}
 	}
-	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudeHookInstalled || hook[second] != claudeHookInstalled {
+	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudehooks.Installed || hook[second] != claudehooks.Installed {
 		t.Fatalf("doctor after install=%v", hook)
 	}
 	data, err := os.ReadFile(primary)
@@ -86,12 +87,12 @@ func TestHooksInstallAddsAgenthailsHooksToEveryClaudeRootAndKeepsOtherSettings(t
 		t.Fatalf("a repeated install did not keep one hook beside the others: %s", data)
 	}
 	ours := entries[2].Get("hooks.0")
-	if !strings.HasPrefix(ours.Get("command").String(), "exec '") || !strings.HasSuffix(ours.Get("command").String(), "' hook permission-request") || ours.Get("timeout").Int() != claudePromptHook.timeout || entries[2].Get("matcher").String() != "*" {
+	if !strings.HasPrefix(ours.Get("command").String(), "exec '") || !strings.HasSuffix(ours.Get("command").String(), "' hook permission-request") || ours.Get("timeout").Int() != claudehooks.Prompt.Timeout || entries[2].Get("matcher").String() != "*" {
 		t.Fatalf("hook=%s", ours.Raw)
 	}
-	for _, h := range []claudeHook{claudeStartHook, claudePromptSubmit} {
-		if entries := gjson.GetBytes(data, "hooks."+h.event).Array(); len(entries) != 1 || !strings.HasSuffix(entries[0].Get("hooks.0.command").String(), "' hook session-context") || entries[0].Get("matcher").Exists() {
-			t.Fatalf("%s hooks=%s", h.event, gjson.GetBytes(data, "hooks."+h.event).Raw)
+	for _, h := range []claudehooks.Hook{claudehooks.Start, claudehooks.PromptSubmit} {
+		if entries := gjson.GetBytes(data, "hooks."+h.Event).Array(); len(entries) != 1 || !strings.HasSuffix(entries[0].Get("hooks.0.command").String(), "' hook session-context") || entries[0].Get("matcher").Exists() {
+			t.Fatalf("%s hooks=%s", h.Event, gjson.GetBytes(data, "hooks."+h.Event).Raw)
 		}
 	}
 	if gjson.GetBytes(data, "model").String() != "opus" || gjson.GetBytes(data, "permissions.allow.0").String() != "Bash(ls)" || gjson.GetBytes(data, "hooks.Stop.0.hooks.0.command").String() != "notify-done" {
@@ -117,7 +118,7 @@ func TestHooksInstallAddsAgenthailsHooksToEveryClaudeRootAndKeepsOtherSettings(t
 	if gjson.GetBytes(data, "hooks.SessionStart.#").Int() != 0 || gjson.GetBytes(data, "hooks.UserPromptSubmit.#").Int() != 0 {
 		t.Fatalf("uninstall left the session-context hooks: %s", data)
 	}
-	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudeHookMissing || hook[second] != claudeHookMissing {
+	if hook := doctorHook(); hook[filepath.Join(home, ".claude")] != claudehooks.Missing || hook[second] != claudehooks.Missing {
 		t.Fatalf("doctor after uninstall=%v", hook)
 	}
 }
@@ -127,7 +128,7 @@ func TestHooksInstallRefusesSettingsThatAreNotAJSONObject(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"model": `), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installClaudeHooks(path, "/bin/agenthail"); err == nil {
+	if _, err := claudehooks.InstallAt(path, "/bin/agenthail"); err == nil {
 		t.Fatal("a broken settings file was rewritten")
 	}
 	if data, _ := os.ReadFile(path); string(data) != `{"model": ` {
@@ -344,11 +345,11 @@ func TestOnlyTheHookCommandInstallWritesIsAgenthails(t *testing.T) {
 		"'/usr/local/bin/agenthail' hook permission-request --verbose":               false,
 		"'agenthail' hook permission-request":                                        false,
 	} {
-		if claudePromptHook.owns(command) != ours {
+		if claudehooks.Prompt.Owns(command) != ours {
 			t.Errorf("owns(%q) != %v", command, ours)
 		}
 	}
-	if claudeStartHook.owns("exec '/usr/local/bin/agenthail' hook permission-request") || !claudeStartHook.owns("exec '/usr/local/bin/agenthail' hook session-context") {
+	if claudehooks.Start.Owns("exec '/usr/local/bin/agenthail' hook permission-request") || !claudehooks.Start.Owns("exec '/usr/local/bin/agenthail' hook session-context") {
 		t.Error("the session-context hook claims the prompt hook's command or misses its own")
 	}
 }
@@ -366,8 +367,8 @@ func TestTheHookCommandRunsWithClaudeAsItsParentUnderEveryShell(t *testing.T) {
 	if err := os.WriteFile(stand, []byte("#!/bin/sh\necho \"$PPID $*\" > \""+recorded+"\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	command := claudePromptHook.command(stand)
-	if !claudePromptHook.owns(command) {
+	command := claudehooks.Prompt.Command(stand)
+	if !claudehooks.Prompt.Owns(command) {
 		t.Fatalf("the command install writes is not recognized as Agenthail's: %q", command)
 	}
 	ran := 0
@@ -384,7 +385,7 @@ func TestTheHookCommandRunsWithClaudeAsItsParentUnderEveryShell(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := strings.TrimSpace(string(data)), fmt.Sprintf("%d %s", os.Getpid(), claudePromptHook.args); got != want {
+		if got, want := strings.TrimSpace(string(data)), fmt.Sprintf("%d %s", os.Getpid(), claudehooks.Prompt.Args); got != want {
 			t.Errorf("under %s the hook saw parent and args %q, want %q", shell, got, want)
 		}
 	}
@@ -405,8 +406,8 @@ func TestInstallBringsAHookWrittenWithoutExecUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := claudePromptHook.command(executable)
-	old := strings.TrimPrefix(command, claudeHookExec)
+	command := claudehooks.Prompt.Command(executable)
+	old := strings.TrimPrefix(command, "exec ")
 	if err := os.WriteFile(settings, []byte(`{"hooks":{"PermissionRequest":[{"matcher":"*","hooks":[{"type":"command","command":`+strconv.Quote(old)+`,"timeout":86400}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -449,13 +450,13 @@ func TestInstallMovesAgenthailsHookOutOfAMatcherThatNarrowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook := func(h claudeHook) string {
-		return `{"type":"command","command":` + strconv.Quote(h.command(executable)) + `,"timeout":` + strconv.FormatInt(h.timeout, 10) + `}`
+	hook := func(h claudehooks.Hook) string {
+		return `{"type":"command","command":` + strconv.Quote(h.Command(executable)) + `,"timeout":` + strconv.FormatInt(h.Timeout, 10) + `}`
 	}
 	if err := os.WriteFile(settings, []byte(`{"hooks":{
-		"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard-bash"},`+hook(claudePromptHook)+`]}],
-		"SessionStart":[{"matcher":"startup","hooks":[`+hook(claudeStartHook)+`]}],
-		"UserPromptSubmit":[{"hooks":[`+hook(claudePromptSubmit)+`]}]}}`), 0600); err != nil {
+		"PermissionRequest":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard-bash"},`+hook(claudehooks.Prompt)+`]}],
+		"SessionStart":[{"matcher":"startup","hooks":[`+hook(claudehooks.Start)+`]}],
+		"UserPromptSubmit":[{"hooks":[`+hook(claudehooks.PromptSubmit)+`]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
@@ -478,10 +479,10 @@ func TestInstallMovesAgenthailsHookOutOfAMatcherThatNarrowsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := gjson.GetBytes(data, "hooks.PermissionRequest").Array()
-	if len(prompt) != 2 || prompt[0].Get("matcher").String() != "Bash" || prompt[0].Get("hooks.#").Int() != 1 || prompt[0].Get("hooks.0.command").String() != "guard-bash" || prompt[1].Get("matcher").String() != "*" || !claudePromptHook.owns(prompt[1].Get("hooks.0.command").String()) {
+	if len(prompt) != 2 || prompt[0].Get("matcher").String() != "Bash" || prompt[0].Get("hooks.#").Int() != 1 || prompt[0].Get("hooks.0.command").String() != "guard-bash" || prompt[1].Get("matcher").String() != "*" || !claudehooks.Prompt.Owns(prompt[1].Get("hooks.0.command").String()) {
 		t.Fatalf("PermissionRequest after install: %s", gjson.GetBytes(data, "hooks.PermissionRequest").Raw)
 	}
-	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 1 || start[0].Get("matcher").Exists() || !claudeStartHook.owns(start[0].Get("hooks.0.command").String()) {
+	if start := gjson.GetBytes(data, "hooks.SessionStart").Array(); len(start) != 1 || start[0].Get("matcher").Exists() || !claudehooks.Start.Owns(start[0].Get("hooks.0.command").String()) {
 		t.Fatalf("SessionStart after install: %s", gjson.GetBytes(data, "hooks.SessionStart").Raw)
 	}
 	if got := status(); got != settings+": installed" {

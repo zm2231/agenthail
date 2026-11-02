@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -35,7 +36,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	if json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&hook) != nil || hook.SessionID == "" {
 		return nil
 	}
-	if hook.Event != claudeStartHook.event && hook.Event != claudePromptSubmit.event {
+	if hook.Event != claudehooks.Start.Event && hook.Event != claudehooks.PromptSubmit.Event {
 		return nil
 	}
 	store, err := a.openRegistry()
@@ -62,7 +63,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		return nil
 	}
 	text := ""
-	if hook.Event == claudeStartHook.event {
+	if hook.Event == claudehooks.Start.Event {
 		claimed, err := store.ClaimSessionStart(session.ID, fmt.Sprintf("%s:%d", hook.Source, parent), card.Fingerprint(), now)
 		if err == nil && claimed {
 			text = agentcard.Render(card)
@@ -78,7 +79,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		}
 	}
 	var ledgerContext string
-	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
+	if hook.Event == claudehooks.PromptSubmit.Event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
 		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)
 	}
 

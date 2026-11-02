@@ -37,7 +37,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	if sess.Transport == "uds" {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 	}
-	capabilities.Respond = c.prompts.any(sess.ID)
+	capabilities.Respond = c.answersPrompts(sess)
 	if c.localOnly || nativeClaudeOnly(sess) {
 		capabilities.Steer = false
 		capabilities.Compact = false
