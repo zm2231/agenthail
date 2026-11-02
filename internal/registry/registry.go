@@ -50,7 +50,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 40
+	schemaVersion    = 41
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
@@ -179,7 +179,9 @@ func connect(path string) (*Registry, error) {
 	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
-func (r *Registry) Path() string { return r.path }
+func (r *Registry) Path() string    { return r.path }
+func (r *Registry) WriteDB() *sql.DB { return r.db }
+func (r *Registry) ReadDB() *sql.DB  { return r.read }
 
 func (r *Registry) Close() error {
 	r.seen.mu.Lock()

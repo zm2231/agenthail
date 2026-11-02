@@ -75,6 +75,7 @@ func rekeyClaudeConversations(tx *sql.Tx) error {
 			"daemon_event_items":      {"dedupe_key"},
 			"action_receipts":         {"receipt"},
 			"api_action_reservations": {"receipt"},
+			"ledger_events":           {"actor_session_id", "payload"},
 		} {
 			if tables[table] {
 				if err := rewriteSerializedTx(tx, table, columns, replacer); err != nil {

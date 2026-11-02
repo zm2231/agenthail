@@ -458,4 +458,23 @@ CREATE TABLE IF NOT EXISTS session_moves (
 	updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_moves_conversation ON session_moves(conversation, role, state);
+CREATE TABLE IF NOT EXISTS ledger_events (
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_key TEXT NOT NULL,
+	type TEXT NOT NULL,
+	payload BLOB NOT NULL,
+	actor_session_id TEXT NOT NULL DEFAULT '',
+	actor_host_id TEXT NOT NULL DEFAULT '',
+	owner_seq INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ledger_events_project ON ledger_events(project_key, seq);
+CREATE TABLE IF NOT EXISTS ledger_state (
+	project_key TEXT PRIMARY KEY,
+	enabled INTEGER NOT NULL DEFAULT 0,
+	owner_host_id TEXT NOT NULL DEFAULT '',
+	owner_cursor INTEGER NOT NULL DEFAULT 0,
+	deadline_ms INTEGER NOT NULL DEFAULT 0,
+	freeze_version TEXT NOT NULL DEFAULT ''
+);
 `
