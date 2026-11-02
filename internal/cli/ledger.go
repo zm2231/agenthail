@@ -25,9 +25,9 @@ func (a *App) cmdLedger(args []string) error {
 		}
 		return a.ledgerAsk(store, positional[1], args)
 	case "enable":
-		return a.ledgerEnable(store)
+		return a.ledgerEnable(store, args)
 	case "disable":
-		return a.ledgerDisable(store)
+		return a.ledgerDisable(store, args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -61,6 +61,9 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		return err
 	}
 	if !enabled {
+		if hasFlag(args, "--json") {
+			return emit(map[string]any{"projectKey": key, "enabled": false})
+		}
 		fmt.Printf("ledger is not enabled for this project (%s)\n", key)
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
@@ -181,7 +184,7 @@ func (a *App) ledgerAsk(store *ledger.Store, askID string, args []string) error 
 	return fmt.Errorf("ask %s not found", askID)
 }
 
-func (a *App) ledgerEnable(store *ledger.Store) error {
+func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
 	if err != nil {
 		return err
@@ -189,17 +192,23 @@ func (a *App) ledgerEnable(store *ledger.Store) error {
 	if err := store.Enable(key); err != nil {
 		return err
 	}
+	if hasFlag(args, "--json") {
+		return emit(map[string]any{"projectKey": key, "enabled": true})
+	}
 	fmt.Printf("ledger enabled for %s\n", key)
 	return nil
 }
 
-func (a *App) ledgerDisable(store *ledger.Store) error {
+func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
 	if err != nil {
 		return err
 	}
 	if err := store.Disable(key); err != nil {
 		return err
+	}
+	if hasFlag(args, "--json") {
+		return emit(map[string]any{"projectKey": key, "enabled": false})
 	}
 	fmt.Printf("ledger disabled for %s\n", key)
 	return nil
