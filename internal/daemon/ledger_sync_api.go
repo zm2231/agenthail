@@ -1,0 +1,214 @@
+package daemon
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/ledger"
+)
+
+const (
+	ledgerReplayBodyLimit = 8 << 20
+	ledgerPullPage        = 500
+)
+
+type ledgerClaimRequest struct {
+	ProjectKey string `json:"projectKey"`
+	Adopting   bool   `json:"adopting"`
+}
+
+type ledgerReplayRequest struct {
+	ProjectKey string             `json:"projectKey"`
+	Events     []ledger.WireEvent `json:"events"`
+}
+
+type ledgerReplayResponse struct {
+	OwnerSeqs []int64 `json:"ownerSeqs"`
+}
+
+type ledgerEventsResponse struct {
+	Events []ledger.WireEvent `json:"events"`
+	Head   int64              `json:"head"`
+}
+
+type ledgerSyncView struct {
+	ProjectKey string     `json:"projectKey"`
+	Owner      string     `json:"owner"`
+	OwnerName  string     `json:"ownerName"`
+	OwnerState string     `json:"ownerState"`
+	Cursor     int64      `json:"cursor"`
+	OwnerHead  int64      `json:"ownerHead"`
+	Lag        int64      `json:"lag"`
+	Unreplayed int        `json:"unreplayed"`
+	SyncedAt   *time.Time `json:"syncedAt,omitempty"`
+	LastError  string     `json:"lastError,omitempty"`
+}
+
+type ledgerOwnerRequest struct {
+	ProjectKey string `json:"projectKey"`
+	Host       string `json:"host"`
+}
+
+type ledgerOwnerResponse struct {
+	ProjectKey string `json:"projectKey"`
+	Owner      string `json:"owner"`
+	OwnerName  string `json:"ownerName"`
+	Adopted    bool   `json:"adopted"`
+}
+
+func (d *Daemon) registerLedgerSyncRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
+	mux.HandleFunc("/api/v1/ledger/sync/claim", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncClaimHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncReplayHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncEventsHandler)))
+	mux.HandleFunc("/api/v1/ledger/owner", d.apiV1Guard(dashboard, "control", d.apiLedgerOwnerHandler))
+	mux.HandleFunc("/api/v1/ledger/sync/status", d.apiV1Guard(dashboard, "read", d.apiLedgerSyncStatusHandler))
+}
+
+func (d *Daemon) ledgerHostOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if hostID, isHost := requestingHost(r.Context()); !isHost || hostID == "" {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "Only a paired host syncs a ledger with this one.")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (d *Daemon) apiLedgerSyncClaimHandler(w http.ResponseWriter, r *http.Request) {
+	var req ledgerClaimRequest
+	if !decodeLedgerWrite(w, r, &req) {
+		return
+	}
+	hostID, _ := requestingHost(r.Context())
+	if err := d.ledgerStore().ClaimOwnership(req.ProjectKey, hostID, req.Adopting); err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, ledgerOwnerResponse{ProjectKey: req.ProjectKey, Owner: d.hostIdentity().ID, OwnerName: d.hostIdentity().Name})
+}
+
+func (d *Daemon) apiLedgerSyncReplayHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST for this endpoint.")
+		return
+	}
+	var req ledgerReplayRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, ledgerReplayBodyLimit)).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	hostID, _ := requestingHost(r.Context())
+	seqs, err := d.ledgerStore().AcceptEvents(req.ProjectKey, hostID, ledger.FromWire(req.ProjectKey, req.Events))
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, ledgerReplayResponse{OwnerSeqs: seqs})
+}
+
+func (d *Daemon) apiLedgerSyncEventsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+		return
+	}
+	query := r.URL.Query()
+	after, _ := strconv.ParseInt(query.Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit < 1 || limit > ledgerPullPage {
+		limit = ledgerPullPage
+	}
+	key := query.Get("projectKey")
+	events, err := d.ledgerStore().ExportEvents(key, after, limit)
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	head, err := d.ledgerStore().LatestSeq(key)
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, ledgerEventsResponse{Events: ledger.ToWire(events), Head: head})
+}
+
+func (d *Daemon) apiLedgerSyncStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+		return
+	}
+	views, err := d.ledgerSyncViews()
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, views)
+}
+
+func (d *Daemon) ledgerSyncViews() ([]ledgerSyncView, error) {
+	store := d.ledgerStore()
+	keys, err := store.RemotelyOwned()
+	if err != nil {
+		return nil, err
+	}
+	views := []ledgerSyncView{}
+	for _, key := range keys {
+		status, err := store.Status(key)
+		if err != nil {
+			return nil, err
+		}
+		view := ledgerSyncView{ProjectKey: key, Owner: status.Owner, OwnerName: status.Owner, OwnerState: "not paired", Cursor: status.Cursor, Unreplayed: status.Unreplayed}
+		if host, ok := d.pairedHost(status.Owner); ok {
+			view.OwnerName = host.record.Name
+			view.OwnerState, _ = host.status()
+		}
+		if last, ok := d.ledgerSync.last(key); ok {
+			view.LastError = last.Error
+			if !last.SyncedAt.IsZero() {
+				synced := last.SyncedAt
+				view.SyncedAt, view.OwnerHead = &synced, last.Head
+				view.Lag = max(0, last.Head-status.Cursor)
+			}
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
+	var req ledgerOwnerRequest
+	if !decodeLedgerWrite(w, r, &req) {
+		return
+	}
+	if req.ProjectKey == "" || req.Host == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectKey and host are required.")
+		return
+	}
+	host, ok := d.pairedHost(req.Host)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "host_not_found", "No paired host "+req.Host+"; see agenthail hosts.")
+		return
+	}
+	store := d.ledgerStore()
+	adopting, err := store.HoldsHistory(req.ProjectKey)
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	var claimed ledgerOwnerResponse
+	if err := d.ledgerHostCall(r.Context(), host, http.MethodPost, "/api/v1/ledger/sync/claim", nil, ledgerClaimRequest{ProjectKey: req.ProjectKey, Adopting: adopting}, &claimed); err != nil {
+		writeLedgerHostError(w, host, err)
+		return
+	}
+	if claimed.Owner != host.record.ID {
+		writeAPIError(w, http.StatusConflict, "owner_mismatch", host.record.Name+" answered as "+claimed.Owner+", not as itself.")
+		return
+	}
+	if err := store.AssignOwner(req.ProjectKey, host.record.ID); err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	d.wakeLedgerSync(host)
+	writeDashboardJSON(w, http.StatusOK, ledgerOwnerResponse{ProjectKey: req.ProjectKey, Owner: host.record.ID, OwnerName: host.record.Name, Adopted: adopting})
+}

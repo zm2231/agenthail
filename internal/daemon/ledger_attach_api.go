@@ -36,10 +36,13 @@ func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {
 	return true
 }
 
-func (d *Daemon) knownLedgerSession(w http.ResponseWriter, sessionID string) bool {
+func (d *Daemon) knownLedgerSession(w http.ResponseWriter, r *http.Request, sessionID string) bool {
 	if sessionID == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId is required: run this from inside a session, or pass --from.")
 		return false
+	}
+	if ledgerProxiedBy(r) != "" {
+		return true
 	}
 	if _, err := d.Registry.Session(sessionID); err != nil {
 		writeAPIError(w, http.StatusNotFound, "session_not_found", "No session "+sessionID+" in this Agenthail.")
@@ -48,10 +51,17 @@ func (d *Daemon) knownLedgerSession(w http.ResponseWriter, sessionID string) boo
 	return true
 }
 
-func (d *Daemon) knownLedgerProject(w http.ResponseWriter, key, sessionID string) bool {
+func (d *Daemon) knownLedgerProject(w http.ResponseWriter, r *http.Request, key, sessionID string) bool {
 	if key == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectKey is required.")
 		return false
+	}
+	if ledgerProxiedBy(r) != "" {
+		if owner, _, err := d.ledgerStore().Owner(key); err != nil || owner != d.hostIdentity().ID {
+			writeAPIError(w, http.StatusConflict, "refused", "This host does not own the ledger for "+key+".")
+			return false
+		}
+		return true
 	}
 	known, err := d.ledgerProjectKnown(key, sessionID)
 	if err != nil {
@@ -99,7 +109,7 @@ func writeLedgerError(w http.ResponseWriter, err error) {
 
 func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledgerGoalRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
 		return
 	}
 	goal, created, err := d.ledgerStore().EnsureGoal(req.ProjectKey, req.Name, req.SessionID)
@@ -112,7 +122,7 @@ func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.WorkRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
 		return
 	}
 	result, err := d.ledgerStore().Work(req, time.Now())
@@ -125,7 +135,7 @@ func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.AttachRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
 		return
 	}
 	result, err := d.ledgerStore().Attach(req)

@@ -66,6 +66,9 @@ type pairedHost struct {
 	build  buildinfo.Identity
 	drain  sync.Mutex
 	wake   chan struct{}
+
+	ledgerMu   sync.Mutex
+	ledgerWake chan struct{}
 	// hidden holds rows the host serves whose id is already a local session,
 	// guarded by mu. Only the mirror loop writes it.
 	hidden map[string]dashboardSession
@@ -232,11 +235,16 @@ func (d *Daemon) attachHostLocked(record registry.PairedHost) error {
 		parent = context.Background()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	host := &pairedHost{record: record, client: client, cancel: cancel, state: hostStateConnecting, wake: make(chan struct{}, 1)}
+	host := &pairedHost{record: record, client: client, cancel: cancel, state: hostStateConnecting, wake: make(chan struct{}, 1), ledgerWake: make(chan struct{}, 1)}
 	d.federation.hosts[record.ID] = host
 	if d.federation.running {
-		d.federation.wg.Add(2)
-		host.done.Add(2)
+		d.federation.wg.Add(3)
+		host.done.Add(3)
+		go func() {
+			defer d.federation.wg.Done()
+			defer host.done.Done()
+			d.runHostLedgerSync(ctx, host)
+		}()
 		go func() {
 			defer d.federation.wg.Done()
 			defer host.done.Done()

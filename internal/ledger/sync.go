@@ -51,8 +51,38 @@ func (s *Store) RemoteOwner(projectKey string) (string, error) {
 	return owner, nil
 }
 
+func (s *Store) ProjectsPlannedHere(typ EventType) ([]string, error) {
+	keys, err := s.ProjectsWith(typ)
+	if err != nil {
+		return nil, err
+	}
+	here := keys[:0]
+	for _, key := range keys {
+		owner, err := s.RemoteOwner(key)
+		if err != nil {
+			return nil, err
+		}
+		if owner == "" {
+			here = append(here, key)
+		}
+	}
+	return here, nil
+}
+
+func (s *Store) RemotelyOwned() ([]string, error) {
+	self, err := hostID(s.read)
+	if err != nil {
+		return nil, err
+	}
+	return s.projectKeys(`SELECT project_key FROM ledger_state WHERE owner_host_id NOT IN ('', ?) ORDER BY project_key`, self)
+}
+
 func (s *Store) SyncedProjects(owner string) ([]string, error) {
-	rows, err := s.read.Query(`SELECT project_key FROM ledger_state WHERE owner_host_id=? ORDER BY project_key`, owner)
+	return s.projectKeys(`SELECT project_key FROM ledger_state WHERE owner_host_id=? ORDER BY project_key`, owner)
+}
+
+func (s *Store) projectKeys(query string, args ...any) ([]string, error) {
+	rows, err := s.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -90,10 +90,10 @@ Before you stop: report what changed (agenthail ledger progress <clause> --ref <
 
 func (d *Daemon) apiLedgerClauseHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.ClauseRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
 		return
 	}
-	if req.Owner != "" {
+	if req.Owner != "" && ledgerProxiedBy(r) == "" {
 		if _, err := d.Registry.Session(req.Owner); err != nil {
 			writeAPIError(w, http.StatusNotFound, "session_not_found", "No session "+req.Owner+" in this Agenthail.")
 			return

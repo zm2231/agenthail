@@ -45,6 +45,8 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerQuestions(store, args)
 	case "work":
 		return a.ledgerWork(store, args)
+	case "owner":
+		return a.ledgerOwner(store, args)
 	case "own":
 		return a.ledgerClause(ledger.ClauseOwn, args)
 	case "progress":

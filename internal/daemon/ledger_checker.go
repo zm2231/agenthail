@@ -52,7 +52,7 @@ func mkdirPrivate(dir string) error {
 
 func (d *Daemon) sweepLedgerChecks(ctx context.Context, now time.Time) {
 	store := d.ledgerStore()
-	keys, err := store.ProjectsWith(ledger.EventGoal)
+	keys, err := store.ProjectsPlannedHere(ledger.EventGoal)
 	if err != nil {
 		d.log.Printf("ledger checks: list projects: %s", err)
 		return

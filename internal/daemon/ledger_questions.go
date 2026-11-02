@@ -14,7 +14,7 @@ const ledgerQuestionSweep = 30 * time.Second
 
 func (d *Daemon) apiLedgerQuestionHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.QuestionRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
 		return
 	}
 	q, err := d.ledgerStore().AskQuestion(req, time.Now())
@@ -45,7 +45,7 @@ func (d *Daemon) runLedgerSweeps(ctx context.Context) {
 
 func (d *Daemon) sweepLedgerQuestions(ctx context.Context, now time.Time) {
 	store := d.ledgerStore()
-	keys, err := store.ProjectsWith(ledger.EventQuestion)
+	keys, err := store.ProjectsPlannedHere(ledger.EventQuestion)
 	if err != nil {
 		d.log.Printf("ledger questions: list projects: %s", err)
 		return
