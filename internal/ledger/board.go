@@ -102,10 +102,9 @@ type Board struct {
 	gates              gateState
 	reviews            reviewState
 	checks             checkState
-	uses               map[string][]sourceUse
-	applying           int64
-	setBy              map[string]int64
-	decisionVersions   map[string][]decisionVersion
+	retracted          map[string]string
+	kept               map[string]string
+	dropped            map[string]bool
 	attachedBy         map[string][]string
 	retractions        []Retraction
 	applied            int64
@@ -132,9 +131,9 @@ func (b *Board) reset() {
 	b.gates = newGateState()
 	b.reviews = newReviewState()
 	b.checks = newCheckState()
-	b.uses = map[string][]sourceUse{}
-	b.setBy = map[string]int64{}
-	b.decisionVersions = map[string][]decisionVersion{}
+	b.retracted = map[string]string{}
+	b.kept = map[string]string{}
+	b.dropped = map[string]bool{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
 	b.applied = 0
@@ -143,7 +142,34 @@ func (b *Board) reset() {
 func (b *Board) Apply(event Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.applying = event.Seq
+	return b.apply(event)
+}
+
+func (b *Board) apply(event Event) error {
+	skip, resource, err := b.screen(event)
+	if err != nil || skip {
+		if err == nil {
+			b.applied = event.Seq
+		}
+		return err
+	}
+	err = b.dispatch(event)
+	if err == nil && resource != nil {
+		resource()
+	}
+	if err == nil {
+		err = b.reviews.observe(event)
+	}
+	if err == nil {
+		err = b.checks.observe(event)
+	}
+	if err == nil {
+		b.applied = event.Seq
+	}
+	return err
+}
+
+func (b *Board) dispatch(event Event) error {
 	var err error
 	switch event.Type {
 	case EventGoal:
@@ -196,15 +222,6 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyCutWithdrawn(event.Payload)
 	case EventReclassified:
 		err = b.applyReclassified(event.Payload)
-	}
-	if err == nil {
-		err = b.reviews.observe(event)
-	}
-	if err == nil {
-		err = b.checks.observe(event)
-	}
-	if err == nil {
-		b.applied = event.Seq
 	}
 	return err
 }
@@ -305,12 +322,16 @@ func clauseFullyCut(c *Clause) bool {
 	return false
 }
 
+// Rebuild replays under the write lock so readers never see a half-built board.
 func (b *Board) Rebuild(events []Event) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.reset()
-	b.mu.Unlock()
+	if err := b.collectRetracted(events); err != nil {
+		return err
+	}
 	for _, e := range events {
-		if err := b.Apply(e); err != nil {
+		if err := b.apply(e); err != nil {
 			return err
 		}
 	}
@@ -346,7 +367,6 @@ func (b *Board) applyAsk(data []byte) error {
 	if g, ok := b.goals[p.GoalID]; ok {
 		g.Asks = append(g.Asks, p.AskID)
 	}
-	b.used(p.SourceUtterance, sourceUse{kind: RetractedAsk, id: p.AskID})
 	return nil
 }
 
@@ -369,7 +389,6 @@ func (b *Board) applyClause(data []byte) error {
 	if p.SourceUtteranceID != "" {
 		c.Sources = []string{p.SourceUtteranceID}
 	}
-	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedClause, id: p.ClauseID})
 	b.clauses[p.ClauseID] = c
 	switch ask, ok := b.asks[p.AskID]; {
 	case ok:
@@ -392,13 +411,9 @@ func (b *Board) applyClauseState(data []byte) error {
 	if !ok {
 		return nil
 	}
-	if p.ToState == StateRejected {
-		b.used(p.EvidenceRef, sourceUse{kind: RetractedRejection, id: p.ClauseID, prior: string(p.FromState)})
-	}
 	c.State = p.ToState
 	if p.OwnerSessionID != "" {
 		c.OwnerSessionID = p.OwnerSessionID
-		b.setBy[ownerKey(c.ID)] = b.applying
 	}
 	if p.ProgressRef != "" {
 		c.ProgressRef = p.ProgressRef
@@ -421,8 +436,6 @@ func (b *Board) applyDecision(data []byte) error {
 		SourceUtterance: p.SourceUtterance,
 		QuestionID:      p.QuestionID,
 	}
-	b.decisionVersions[p.DecisionID] = []decisionVersion{{ref: p.SourceUtterance, version: p.Version, text: p.Text, principal: p.Principal}}
-	b.used(p.SourceUtterance, sourceUse{kind: RetractedDecision, id: p.DecisionID})
 	return nil
 }
 
@@ -435,8 +448,6 @@ func (b *Board) applyDecisionVersion(data []byte) error {
 		d.Version = p.Version
 		d.Text = p.Text
 		d.Principal = p.Principal
-		b.decisionVersions[p.DecisionID] = append(b.decisionVersions[p.DecisionID], decisionVersion{ref: p.SourceUtterance, version: p.Version, text: p.Text, principal: p.Principal})
-		b.used(p.SourceUtterance, sourceUse{kind: RetractedDecision, id: p.DecisionID})
 	}
 	return nil
 }
@@ -448,7 +459,6 @@ func (b *Board) applyCut(data []byte) error {
 	}
 	cut := Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked, QuestionID: p.QuestionID, CheckRun: p.CheckRun, FromUtterance: p.FromUtterance}
 	b.countDefaultCut(p.QuestionID)
-	b.used(p.FromUtterance, sourceUse{kind: RetractedCut, id: p.CutID})
 	if c, ok := b.clauses[p.ClauseID]; ok {
 		c.Cuts = append(c.Cuts, cut)
 		return nil
@@ -464,8 +474,18 @@ func (b *Board) applyCutAck(data []byte) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
-	if b.setCut(p.CutID, func(c *Cut) { c.Acked = true }) {
-		b.used(p.SourceUtteranceID, sourceUse{kind: RetractedCutAck, id: p.CutID})
+	for _, c := range b.clauses {
+		for i := range c.Cuts {
+			if c.Cuts[i].ID == p.CutID {
+				c.Cuts[i].Acked = true
+				return nil
+			}
+		}
+	}
+	for _, t := range b.targetCuts {
+		if t.ID == p.CutID {
+			t.Acked = true
+		}
 	}
 	return nil
 }
@@ -511,18 +531,14 @@ func (b *Board) applyDelegation(data []byte) error {
 		return nil
 	}
 	ask.Delegates = append(ask.Delegates, p.DelegateSessionID)
-	owners := map[string]string{}
 	for _, c := range ask.Clauses {
 		if c.Source == SourceProposed || c.State == StateRejected {
 			continue
 		}
 		if c.OwnerSessionID == p.DelegatorSessionID || c.OwnerSessionID == "" {
-			owners[c.ID] = c.OwnerSessionID
 			c.OwnerSessionID = p.DelegateSessionID
-			b.setBy[ownerKey(c.ID)] = b.applying
 		}
 	}
-	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedDelegation, id: p.AskID, delegate: p.DelegateSessionID, owners: owners})
 	return nil
 }
 
@@ -535,7 +551,6 @@ func (b *Board) applySupersession(data []byte) error {
 	if !ok {
 		return nil
 	}
-	b.used(p.SourceUtteranceID, sourceUse{kind: RetractedRevision, id: p.ClauseID, prior: c.Text, after: p.NewVersion})
 	c.Text = p.NewVersion
 	if p.SourceUtteranceID != "" {
 		c.Sources = append(c.Sources, p.SourceUtteranceID)

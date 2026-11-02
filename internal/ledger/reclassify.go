@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -66,16 +67,9 @@ func (b *Board) applyReclassified(data []byte) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
-	if b.utterances[p.UtteranceID] == nil {
-		return nil
+	if _, known := b.retracted[p.UtteranceID]; !known && b.utterances[p.UtteranceID] != nil {
+		return fmt.Errorf("%w: %s was reclassified after the board applied it", errNeedsReplay, p.UtteranceID)
 	}
-	b.retract(p.UtteranceID, p.Reason)
-	delete(b.utterances, p.UtteranceID)
-	for i, id := range b.utteranceOrder {
-		if id == p.UtteranceID {
-			b.utteranceOrder = append(b.utteranceOrder[:i:i], b.utteranceOrder[i+1:]...)
-			break
-		}
-	}
+	b.retracted[p.UtteranceID] = p.Reason
 	return nil
 }

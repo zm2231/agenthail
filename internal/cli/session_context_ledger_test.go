@@ -13,8 +13,8 @@ import (
 )
 
 type captureCall struct {
-	SessionID string `json:"sessionId"`
-	PromptID  string `json:"promptId"`
+	SessionID   string `json:"sessionId"`
+	PromptID    string `json:"promptId"`
 	Prompt      string `json:"prompt"`
 	MessageUUID string `json:"messageUuid"`
 }

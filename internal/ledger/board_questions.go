@@ -70,8 +70,6 @@ func (b *Board) applyQuestionResolved(data []byte) error {
 	q.State, q.Answer, q.AnsweredBy, q.Applied = QuestionAnswered, p.Answer, p.SourceUtteranceID, p.Applied
 	if p.Auto {
 		q.State = QuestionDefaulted
-	} else {
-		b.used(p.SourceUtteranceID, sourceUse{kind: RetractedAnswer, id: p.QuestionID})
 	}
 	b.withdrawQuestionCuts(q.ID)
 	return nil

@@ -47,11 +47,9 @@ func (b *Board) applyClauseSource(data []byte) error {
 	if !ok {
 		return nil
 	}
-	b.used(p.UtteranceID, sourceUse{kind: RetractedAdoption, id: p.ClauseID, prior: string(c.Source)})
 	c.Source = p.ToSource
 	if p.OwnerSessionID != "" {
 		c.OwnerSessionID = p.OwnerSessionID
-		b.setBy[ownerKey(c.ID)] = b.applying
 	}
 	if p.UtteranceID != "" {
 		c.Sources = append(c.Sources, p.UtteranceID)

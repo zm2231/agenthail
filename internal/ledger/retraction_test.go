@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,8 +80,8 @@ func TestReclassifiedWordsUndoAnApprovalAnAckAndARejection(t *testing.T) {
 	}
 	b := board(t, s)
 	export, caching := clause(t, b, "widget-C2"), clause(t, b, "widget-C3")
-	if len(export.Cuts) != 1 || export.Cuts[0].Acked || !export.Cuts[0].Withdrawn {
-		t.Fatalf("a cut raised and acked by the task's words still stands: %+v", export.Cuts)
+	if len(export.Cuts) != 0 || export.State == ledger.StateRejected {
+		t.Fatalf("a cut raised by the task's words still stands: %+v", export)
 	}
 	if caching.State == ledger.StateRejected {
 		t.Fatalf("the task's words still reject a proposed clause: %+v", caching)
@@ -123,6 +124,15 @@ func TestAnAskKeepsWhatThePersonLaterAddedToIt(t *testing.T) {
 		if got := asks[0].Clauses[0].Sources; len(got) != 1 || got[0] != "claude-prompt:typed" {
 			t.Fatalf("%s board: sources %v", name, got)
 		}
+		var shown bool
+		for _, r := range b.Retractions() {
+			if r.Kind == ledger.RetractedAsk && r.ID == asks[0].ID {
+				shown = r.ReSourcedTo == "claude-prompt:typed" && strings.Contains(r.String(), "re-sourced to claude-prompt:typed")
+			}
+		}
+		if !shown {
+			t.Fatalf("%s board: the kept ask does not show it was re-sourced: %+v", name, b.Retractions())
+		}
 	}
 }
 
@@ -143,10 +153,8 @@ func TestADecisionKeepsTheVersionThePersonGave(t *testing.T) {
 				makeEvent(4, ledger.EventDecisionVer, ledger.DecisionPayload{DecisionID: "D1", Version: 2, Text: "use postgres 16", Principal: "person", SourceUtterance: tc.second}),
 				makeEvent(5, ledger.EventReclassified, ledger.ReclassifiedPayload{UtteranceID: "claude-prompt:wake", Reason: "scheduled"}),
 			}
-			for _, e := range events {
-				if err := b.Apply(e); err != nil {
-					t.Fatal(err)
-				}
+			if err := b.Rebuild(events); err != nil {
+				t.Fatal(err)
 			}
 			decisions := b.Decisions()
 			if len(decisions) != 1 || decisions[0].Version != tc.wantVersion || decisions[0].Text != tc.wantText || decisions[0].SourceUtterance != "claude-prompt:typed" {

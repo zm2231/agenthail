@@ -1,6 +1,8 @@
 package ledger
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 )
@@ -16,7 +18,7 @@ const (
 	RetractedCutCover   = "cut-withdrawal"
 	RetractedDelegation = "delegation"
 	RetractedRevision   = "revision"
-	RetractedRejection  = "rejection"
+	RetractedClauseMove = "clause-state"
 	RetractedCut        = "cut"
 )
 
@@ -26,41 +28,16 @@ type Retraction struct {
 	UtteranceID string   `json:"utteranceId"`
 	Reason      string   `json:"reason"`
 	AttachedBy  []string `json:"attachedBy,omitempty"`
+	ReSourcedTo string   `json:"reSourcedTo,omitempty"`
 	// Outward marks an answer or approval that may already have let a session merge, deploy or send.
 	Outward bool `json:"authorizedOutward,omitempty"`
 }
 
-type sourceUse struct {
-	kind      string
-	id        string
-	prior     string
-	after     string
-	owners    map[string]string
-	delegate  string
-	fromState WorkState
-	seq       int64
-}
-
-func ownerKey(clauseID string) string { return "owner:" + clauseID }
-
-func stateKey(itemID string) string { return "state:" + itemID }
-
-type decisionVersion struct {
-	ref       string
-	version   int
-	text      string
-	principal string
-}
-
-func (b *Board) used(ref string, use sourceUse) {
-	if ref != "" {
-		use.seq = b.applying
-		b.uses[ref] = append(b.uses[ref], use)
-	}
-}
-
 func (r Retraction) String() string {
 	line := fmt.Sprintf("retracted: %s %s built from %s words, not the person's (%s)", r.Kind, r.ID, r.Reason, r.UtteranceID)
+	if r.ReSourcedTo != "" {
+		line += fmt.Sprintf("; kept only because the person built on it: re-sourced to %s", r.ReSourcedTo)
+	}
 	if r.Outward {
 		line += "; it authorized an outward act: check whether a merge, deploy or send was done on it"
 	}
@@ -70,198 +47,203 @@ func (r Retraction) String() string {
 func (b *Board) Retractions() []Retraction {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return slices.Clone(b.retractions)
-}
-
-func (b *Board) retract(ref, reason string) {
-	uses := b.uses[ref]
-	delete(b.uses, ref)
-	for i := len(uses) - 1; i >= 0; i-- {
-		use := uses[i]
-		r := Retraction{Kind: use.kind, ID: use.id, UtteranceID: ref, Reason: reason, AttachedBy: b.attachedBy[ref]}
-		if !b.undo(ref, use, &r) {
-			continue
-		}
-		b.retractions = append(b.retractions, r)
+	out := slices.Clone(b.retractions)
+	for i := range out {
+		out[i].AttachedBy = slices.Clone(b.attachedBy[out[i].UtteranceID])
 	}
+	return out
 }
 
-func (b *Board) undo(ref string, use sourceUse, r *Retraction) bool {
-	switch use.kind {
-	case RetractedAsk:
-		ask := b.asks[use.id]
-		if ask == nil {
-			return false
-		}
-		if source := personSourceLeft(ask, ref); source != "" {
-			ask.SourceUtterance = source
-			return false
-		}
-		for _, c := range ask.Clauses {
-			delete(b.clauses, c.ID)
-			b.retractions = append(b.retractions, Retraction{Kind: RetractedClause, ID: c.ID, UtteranceID: ref, Reason: r.Reason, AttachedBy: r.AttachedBy})
-		}
-		delete(b.asks, use.id)
-		if g := b.goals[ask.GoalID]; g != nil {
-			g.Asks = slices.DeleteFunc(g.Asks, func(id string) bool { return id == use.id })
-		}
-	case RetractedClause:
-		c := b.clauses[use.id]
-		if c == nil {
-			return false
-		}
-		c.Sources = withoutRef(c.Sources, ref)
-		if len(c.Sources) > 0 || c.Source == SourceProposed {
-			return false
-		}
-		b.dropClause(c)
-	case RetractedAdoption:
-		c := b.clauses[use.id]
-		if c == nil {
-			return false
-		}
-		c.Sources = withoutRef(c.Sources, ref)
-		c.Source = ClauseSource(use.prior)
-	case RetractedDecision:
-		d := b.decisions[use.id]
-		if d == nil {
-			return false
-		}
-		versions := b.decisionVersions[use.id]
-		kept := slices.DeleteFunc(slices.Clone(versions), func(v decisionVersion) bool { return v.ref == ref })
-		if len(kept) == len(versions) {
-			return false
-		}
-		if q := b.questions[d.QuestionID]; q != nil && q.Kind == QuestionOutward {
-			r.Outward = true
-		}
-		b.decisionVersions[use.id] = kept
-		if len(kept) == 0 {
-			delete(b.decisions, use.id)
-			return true
-		}
-		last := kept[len(kept)-1]
-		current := d.Version == last.version
-		d.Version, d.Text, d.Principal, d.SourceUtterance = last.version, last.text, last.principal, last.ref
-		if current {
-			return false
-		}
-	case RetractedAnswer:
-		q := b.questions[use.id]
-		if q == nil || q.AnsweredBy != ref {
-			return false
-		}
-		q.State, q.Answer, q.AnsweredBy, q.Applied = QuestionOpen, "", "", false
-		r.Outward = q.Kind == QuestionOutward
-		b.restoreQuestionCuts(q.ID)
-	case RetractedReview:
-		delete(b.reviews.approvedBy, ref)
-		item := b.workItems[use.id]
-		if item == nil || b.setBy[stateKey(use.id)] != use.seq {
-			return false
-		}
-		item.State, item.Reviewer = use.fromState, ""
-		r.Outward = true
-	case RetractedCutAck:
-		return b.setCut(use.id, func(c *Cut) { c.Acked = false })
-	case RetractedCutCover:
-		return b.setCut(use.id, func(c *Cut) { c.Withdrawn, c.CoveredBy = false, nil })
-	case RetractedCut:
-		return b.setCut(use.id, func(c *Cut) { c.Withdrawn = true })
-	case RetractedRejection:
-		c := b.clauses[use.id]
-		if c == nil || c.State != StateRejected {
-			return false
-		}
-		c.State = ClauseState(use.prior)
-	case RetractedDelegation:
-		ask := b.asks[use.id]
-		if ask == nil {
-			return false
-		}
-		if i := slices.Index(ask.Delegates, use.delegate); i >= 0 {
-			ask.Delegates = slices.Delete(ask.Delegates, i, i+1)
-		}
-		if slices.Contains(ask.Delegates, use.delegate) {
-			return true
-		}
-		for id, owner := range use.owners {
-			if c := b.clauses[id]; c != nil && b.setBy[ownerKey(id)] == use.seq {
-				c.OwnerSessionID = owner
-			}
-		}
-	case RetractedRevision:
-		c := b.clauses[use.id]
-		if c == nil {
-			return false
-		}
-		c.Sources = withoutRef(c.Sources, ref)
-		if c.Text != use.after {
-			return false
-		}
-		c.Text = use.prior
-	default:
-		return false
-	}
-	return true
+// errNeedsReplay asks the store to replay the project: live words build on something dropped as retracted.
+var errNeedsReplay = errors.New("ledger: the board needs a replay")
+
+type eventSource struct {
+	UtteranceID       string `json:"utteranceId"`
+	SourceUtteranceID string `json:"sourceUtteranceId"`
+	FromUtterance     string `json:"fromUtterance"`
+	EvidenceRef       string `json:"evidenceRef"`
+	AskID             string `json:"askId"`
+	ClauseID          string `json:"clauseId"`
+	DecisionID        string `json:"decisionId"`
+	CutID             string `json:"cutId"`
+	QuestionID        string `json:"questionId"`
+	ItemID            string `json:"itemId"`
+	SessionID         string `json:"sessionId"`
 }
 
-func personSourceLeft(ask *Ask, ref string) string {
-	for _, c := range ask.Clauses {
-		for _, source := range c.Sources {
-			if source != ref {
-				return source
-			}
+func (s eventSource) ref() string {
+	for _, ref := range []string{s.UtteranceID, s.SourceUtteranceID, s.FromUtterance, s.EvidenceRef} {
+		if ref != "" {
+			return ref
 		}
 	}
 	return ""
 }
 
-func (b *Board) dropClause(c *Clause) {
-	delete(b.clauses, c.ID)
-	if ask := b.asks[c.AskID]; ask != nil {
-		ask.Clauses = slices.DeleteFunc(ask.Clauses, func(x *Clause) bool { return x.ID == c.ID })
+func (b *Board) collectRetracted(events []Event) error {
+	for _, e := range events {
+		if e.Type != EventReclassified {
+			continue
+		}
+		var p ReclassifiedPayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		b.retracted[p.UtteranceID] = p.Reason
 	}
-	if g := b.goals[c.GoalID]; g != nil {
-		g.Constraints = slices.DeleteFunc(g.Constraints, func(x *Clause) bool { return x.ID == c.ID })
+	if len(b.retracted) == 0 {
+		return nil
 	}
-	b.projectConstraints = slices.DeleteFunc(b.projectConstraints, func(x *Clause) bool { return x.ID == c.ID })
-}
-
-func (b *Board) setCut(id string, change func(*Cut)) bool {
-	for _, c := range b.clauses {
-		for i := range c.Cuts {
-			if c.Cuts[i].ID == id {
-				change(&c.Cuts[i])
-				return true
+	askOf := map[string]string{}
+	for _, e := range events {
+		var src eventSource
+		if json.Unmarshal(e.Payload, &src) != nil {
+			continue
+		}
+		if e.Type == EventClause {
+			askOf[src.ClauseID] = src.AskID
+		}
+		ref := src.ref()
+		if _, retracted := b.retracted[ref]; ref == "" || retracted {
+			continue
+		}
+		for _, key := range builtOn(e.Type, src, askOf) {
+			if _, ok := b.kept[key]; !ok {
+				b.kept[key] = ref
 			}
 		}
 	}
-	for _, t := range b.targetCuts {
-		if t.ID == id {
-			change(&t.Cut)
-			return true
-		}
-	}
-	return false
+	return nil
 }
 
-func (b *Board) restoreQuestionCuts(questionID string) {
-	restore := func(c *Cut) {
-		if c.QuestionID == questionID && !c.Acked && len(c.CoveredBy) == 0 {
-			c.Withdrawn = false
-		}
+// builtOn names the asks, clauses and decisions an event extends; one built from reclassified words stays, re-sourced to the person's.
+func builtOn(t EventType, src eventSource, askOf map[string]string) []string {
+	switch t {
+	case EventClause, EventDelegation:
+		return []string{skippedKey(RetractedAsk, src.AskID)}
+	case EventSupersession, EventClauseSource:
+		return []string{skippedKey(RetractedClause, src.ClauseID), skippedKey(RetractedAsk, askOf[src.ClauseID])}
+	case EventDecisionVer:
+		return []string{skippedKey(RetractedDecision, src.DecisionID)}
 	}
-	for _, c := range b.clauses {
-		for i := range c.Cuts {
-			restore(&c.Cuts[i])
-		}
+	return nil
+}
+
+func createdKey(t EventType, src eventSource) string {
+	switch t {
+	case EventAsk:
+		return skippedKey(RetractedAsk, src.AskID)
+	case EventClause:
+		return skippedKey(RetractedClause, src.ClauseID)
+	case EventDecision:
+		return skippedKey(RetractedDecision, src.DecisionID)
 	}
-	for _, t := range b.targetCuts {
-		restore(&t.Cut)
+	return ""
+}
+
+// screen skips every event sourced from reclassified words, as if they had never been captured.
+func (b *Board) screen(event Event) (skip bool, resource func(), err error) {
+	if len(b.retracted) == 0 || event.Type == EventReclassified {
+		return false, nil, nil
+	}
+	var src eventSource
+	if json.Unmarshal(event.Payload, &src) != nil {
+		return false, nil, nil
+	}
+	ref := src.ref()
+	if ref == "" {
+		return false, nil, nil
+	}
+	reason, retracted := b.retracted[ref]
+	if !retracted {
+		for _, key := range builtOn(event.Type, src, nil) {
+			if b.dropped[key] {
+				return false, nil, fmt.Errorf("%w: %s builds on %s", errNeedsReplay, ref, key)
+			}
+		}
+		return false, nil, nil
+	}
+	r := b.retraction(event, src, ref, reason)
+	key := createdKey(event.Type, src)
+	if key != "" && b.kept[key] != "" {
+		r.ReSourcedTo = b.kept[key]
+		b.retractions = append(b.retractions, r)
+		return false, func() { b.resource(event.Type, src, r.ReSourcedTo) }, nil
+	}
+	if key != "" {
+		b.dropped[key] = true
+	}
+	if r.Kind != "" {
+		b.retractions = append(b.retractions, r)
+	}
+	return true, nil, nil
+}
+
+func (b *Board) resource(t EventType, src eventSource, ref string) {
+	switch t {
+	case EventAsk:
+		if ask := b.asks[src.AskID]; ask != nil {
+			ask.SourceUtterance = ref
+		}
+	case EventClause:
+		if c := b.clauses[src.ClauseID]; c != nil {
+			c.Sources = nil
+		}
+	case EventDecision:
+		if d := b.decisions[src.DecisionID]; d != nil {
+			d.SourceUtterance = ref
+		}
 	}
 }
 
-func withoutRef(refs []string, ref string) []string {
-	return slices.DeleteFunc(slices.Clone(refs), func(r string) bool { return r == ref })
+func (b *Board) retraction(event Event, src eventSource, ref, reason string) Retraction {
+	r := Retraction{UtteranceID: ref, Reason: reason}
+	switch event.Type {
+	case EventUtterance:
+		return Retraction{}
+	case EventAttach:
+		if !slices.Contains(b.attachedBy[ref], src.SessionID) {
+			b.attachedBy[ref] = append(b.attachedBy[ref], src.SessionID)
+		}
+		return Retraction{}
+	case EventAsk:
+		r.Kind, r.ID = RetractedAsk, src.AskID
+	case EventClause:
+		r.Kind, r.ID = RetractedClause, src.ClauseID
+	case EventDecision:
+		r.Kind, r.ID, r.Outward = RetractedDecision, src.DecisionID, b.outwardQuestion(src.QuestionID)
+	case EventDecisionVer:
+		r.Kind, r.ID, r.Outward = RetractedDecision, src.DecisionID, b.outwardQuestion(src.QuestionID)
+		if d := b.decisions[src.DecisionID]; d != nil {
+			r.Outward = r.Outward || b.outwardQuestion(d.QuestionID)
+		}
+	case EventQuestionRes:
+		r.Kind, r.ID, r.Outward = RetractedAnswer, src.QuestionID, b.outwardQuestion(src.QuestionID)
+	case EventWorkItemState:
+		r.Kind, r.ID, r.Outward = RetractedReview, src.ItemID, true
+	case EventCut:
+		r.Kind, r.ID = RetractedCut, src.CutID
+	case EventCutAck:
+		r.Kind, r.ID = RetractedCutAck, src.CutID
+	case EventCutWithdrawn:
+		r.Kind, r.ID = RetractedCutCover, src.CutID
+	case EventDelegation:
+		r.Kind, r.ID = RetractedDelegation, src.AskID
+	case EventSupersession:
+		r.Kind, r.ID = RetractedRevision, src.ClauseID
+	case EventClauseSource:
+		r.Kind, r.ID = RetractedAdoption, src.ClauseID
+	case EventClauseState:
+		r.Kind, r.ID = RetractedClauseMove, src.ClauseID
+	default:
+		r.Kind = string(event.Type)
+	}
+	return r
 }
+
+func (b *Board) outwardQuestion(id string) bool {
+	q := b.questions[id]
+	return q != nil && q.Kind == QuestionOutward
+}
+
+func skippedKey(kind, id string) string { return kind + ":" + id }
