@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -27,10 +28,17 @@ func (d *Daemon) personCapture(ctx delivery.PersonCaptureContext) {
 		SessionID:  surface.PersonSessionID,
 		TargetID:   ctx.TargetSessionID,
 		Surface:    ctx.TargetSurface,
-		MessageID:  ctx.DeliveryKey,
+		MessageID:  captureMessageID(ctx.DeliveryKey),
 		Text:       ctx.Message,
 	})
 	if captureErr != nil {
 		d.log.Printf("ledger capture: record utterance for project %s: %s", project.Key, captureErr)
 	}
+}
+
+func captureMessageID(deliveryKey string) string {
+	if deliveryKey != "" {
+		return deliveryKey
+	}
+	return uuid.NewString()
 }

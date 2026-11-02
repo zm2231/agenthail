@@ -1,10 +1,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
@@ -34,21 +35,18 @@ func (a *App) cmdLedger(args []string) error {
 }
 
 func ledgerProjectKey(a *App) (string, error) {
-	r := a.registry()
-	projects, err := r.ListProjects()
-	if err != nil {
-		return "", err
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	for _, p := range projects {
-		if p.Key != "" && strings.HasPrefix(cwd, p.WorkspaceRoot) {
-			return p.Key, nil
-		}
+	project, err := daemon.ResolvePathProject(context.Background(), a.registry(), cwd)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("no project found for %s; run 'agenthail project add' first", cwd)
+	if project == nil || project.Key == "" {
+		return "", fmt.Errorf("no project found for %s; run 'agenthail project add' first", cwd)
+	}
+	return project.Key, nil
 }
 
 func (a *App) ledgerBoard(store *ledger.Store, args []string) error {

@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -156,7 +158,10 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 	t.Cleanup(func() { r.Close() })
 
 	outerDir := t.TempDir()
-	innerDir := t.TempDir()
+	innerDir := filepath.Join(outerDir, "child")
+	if err := os.MkdirAll(innerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.AddProject(registry.ProjectRecord{
 		ID: "outer", WorkspaceRoot: outerDir, Title: "Outer", Key: "outer-key",
 	}); err != nil {
