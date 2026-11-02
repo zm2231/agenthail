@@ -36,6 +36,7 @@
 		2FC1D67B5831D9A1572234FD /* TurnNoticePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8516330BAD617EC489F9B21 /* TurnNoticePreference.swift */; };
 		2FD5634CC821FF495F750726 /* ProxyPrefer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518B0A4AD3561D274206BDB8 /* ProxyPrefer.swift */; };
 		3088041E658DFAE92C94F2EB /* ClaudeSubagentList.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12EFFAC919D5A9794A56E13 /* ClaudeSubagentList.swift */; };
+		3484C3764353426F7FE15B58 /* TerminalQuestionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6042C2F46355EA034B11D0D /* TerminalQuestionUITests.swift */; };
 		35D62B0FAA562423252C2DE2 /* AgenthailIOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352FB70958533EE6B1BD305F /* AgenthailIOSViews.swift */; };
 		37F145C3DF675BD48D249F6E /* UsageMetersLineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2599AE2529568B082FBB6307 /* UsageMetersLineTests.swift */; };
 		393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */; };
@@ -351,6 +352,7 @@
 		A36D99BE4B16C1C05F7C009F /* TranscriptRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptRows.swift; sourceTree = "<group>"; };
 		A525C1EFD654AE4C9F0FD65E /* PhoneAccentStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAccentStyle.swift; sourceTree = "<group>"; };
 		A54994D15DBB657D2775DB14 /* AgenthailNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgenthailNotificationService.entitlements; sourceTree = "<group>"; };
+		A6042C2F46355EA034B11D0D /* TerminalQuestionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalQuestionUITests.swift; sourceTree = "<group>"; };
 		A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReadingUITests.swift; sourceTree = "<group>"; };
 		A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTests.swift; sourceTree = "<group>"; };
 		AB597912B0447C43772021FB /* ScrimField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrimField.swift; sourceTree = "<group>"; };
@@ -520,6 +522,7 @@
 				4ED59D26CF86A6F2EF869B2B /* ShortTranscriptUITests.swift */,
 				EDE9B5CB52773C3043A3F2D0 /* TabHitAreaUITests.swift */,
 				0B076C97F3E9777192BE7445 /* TapWhenReady.swift */,
+				A6042C2F46355EA034B11D0D /* TerminalQuestionUITests.swift */,
 				91B0815C156FA841DACA9408 /* TranscriptLiveEdgeUITests.swift */,
 				A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */,
 				AFBB43A50691914AFA2683A6 /* TurnNoticeUITests.swift */,
@@ -937,6 +940,7 @@
 				E3942C4E595EDB071AAEA572 /* ShortTranscriptUITests.swift in Sources */,
 				DA8474323814D1302D2A1FAD /* TabHitAreaUITests.swift in Sources */,
 				84AFE005DFA7159DC412701B /* TapWhenReady.swift in Sources */,
+				3484C3764353426F7FE15B58 /* TerminalQuestionUITests.swift in Sources */,
 				47F4661F55A577BE2203BCA3 /* TranscriptLiveEdgeUITests.swift in Sources */,
 				4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */,
 				B5939FFE0799BC0D656C132D /* TurnNoticeUITests.swift in Sources */,
