@@ -147,65 +147,6 @@ func (s *Store) syncWrite(projectKey string, reorders bool, fn func(tx *sql.Tx) 
 	return s.catchUp(board, projectKey)
 }
 
-func (s *Store) AssignOwner(projectKey, owner string) error {
-	return s.syncWrite(projectKey, true, func(tx *sql.Tx) error {
-		self, err := hostID(tx)
-		if err != nil {
-			return err
-		}
-		if owner == self {
-			return refuse("this host cannot be its own remote owner; run ledger owner on the other host")
-		}
-		var current string
-		if err := tx.QueryRow(`SELECT owner_host_id FROM ledger_state WHERE project_key=?`, projectKey).Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		switch {
-		case current == owner:
-			return nil
-		case current != "":
-			return refuse("%s already syncs with %s; moving a ledger to another owner is not supported", projectKey, current)
-		}
-		if err := stampLegacy(tx, projectKey, self); err != nil {
-			return err
-		}
-		_, err = tx.Exec(`INSERT INTO ledger_state(project_key,owner_host_id,owner_cursor) VALUES(?,?,0)
-			ON CONFLICT(project_key) DO UPDATE SET owner_host_id=excluded.owner_host_id, owner_cursor=0`, projectKey, owner)
-		return err
-	})
-}
-
-func (s *Store) ClaimOwnership(projectKey, forHost string, adopting bool) error {
-	return s.syncWrite(projectKey, false, func(tx *sql.Tx) error {
-		self, err := hostID(tx)
-		if err != nil {
-			return err
-		}
-		var current string
-		if err := tx.QueryRow(`SELECT owner_host_id FROM ledger_state WHERE project_key=?`, projectKey).Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if current != "" && current != self {
-			return refuse("%s is owned by %s, not by this host", projectKey, current)
-		}
-		if adopting {
-			var others int
-			if err := tx.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=? AND actor_host_id!=?`, projectKey, forHost).Scan(&others); err != nil {
-				return err
-			}
-			if others > 0 {
-				return refuse("both hosts already hold ledger history for %s; the owner cannot adopt another host's history on top of its own", projectKey)
-			}
-		}
-		if err := stampLegacy(tx, projectKey, self); err != nil {
-			return err
-		}
-		_, err = tx.Exec(`INSERT INTO ledger_state(project_key,owner_host_id) VALUES(?,?)
-			ON CONFLICT(project_key) DO UPDATE SET owner_host_id=excluded.owner_host_id`, projectKey, self)
-		return err
-	})
-}
-
 func plannedHere(q querier, projectKey string) error {
 	var owner string
 	if err := q.QueryRow(`SELECT owner_host_id FROM ledger_state WHERE project_key=?`, projectKey).Scan(&owner); err != nil {

@@ -67,8 +67,9 @@ type pairedHost struct {
 	drain  sync.Mutex
 	wake   chan struct{}
 
-	ledgerMu   sync.Mutex
-	ledgerWake chan struct{}
+	ledgerMu        sync.Mutex
+	ledgerWake      chan struct{}
+	ledgerConfirmed map[string]bool
 	// hidden holds rows the host serves whose id is already a local session,
 	// guarded by mu. Only the mirror loop writes it.
 	hidden map[string]dashboardSession

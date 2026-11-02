@@ -169,7 +169,17 @@ type actionGate struct {
 	beyondVersion atomic.Int32
 	// ledgerDrops extends drops and truncate to ledger writes.
 	ledgerDrops atomic.Bool
+	// confirmLoss loses the next ledger confirm: confirmApplied answers
+	// nothing after applying it, confirmUnsent drops it unapplied.
+	confirmLoss atomic.Int32
+	// confirmBlocked drops every ledger confirm unapplied while set.
+	confirmBlocked atomic.Bool
 }
+
+const (
+	confirmApplied = 1
+	confirmUnsent  = 2
+)
 
 func (g *actionGate) gated(path string) bool {
 	return path == "/api/v1/actions" || (g.ledgerDrops.Load() && strings.HasPrefix(path, "/api/v1/ledger/") && !strings.HasPrefix(path, "/api/v1/ledger/sync/"))
@@ -298,6 +308,17 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			_ = buffered.Flush()
 			conn.Close()
 			return
+		}
+		if r.URL.Path == "/api/v1/ledger/sync/confirm" {
+			if loss := n.gate.confirmLoss.Swap(0); loss != 0 || n.gate.confirmBlocked.Load() {
+				if loss == confirmApplied {
+					n.handler.ServeHTTP(httptest.NewRecorder(), r)
+				}
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					conn.Close()
+				}
+				return
+			}
 		}
 		if n.gate.gated(r.URL.Path) && n.gate.take() {
 			n.handler.ServeHTTP(httptest.NewRecorder(), r)

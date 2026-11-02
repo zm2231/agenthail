@@ -91,6 +91,7 @@ type Daemon struct {
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
 	ledgerSync        ledgerSyncHealth
+	ledgerClaims      ledgerClaims
 	checks            checkerRunner
 	g2                *g2Counter
 	delivered         deliveredWords

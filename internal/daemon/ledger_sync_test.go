@@ -236,3 +236,26 @@ func TestAMacOfflineCapturesThenAttachesOnceTheOwnerIsBack(t *testing.T) {
 		return len(views) == 1 && views[0].Unreplayed == 0 && views[0].LastError == "" && views[0].Lag == 0 && views[0].SyncedAt != nil
 	})
 }
+
+func TestARefusedOwnerAssignmentLeavesNeitherHostOwning(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	words, err := json.Marshal(ledger.UtterancePayload{Text: strings.Repeat("x", ledger.MaxEventBytes), UtteranceID: "claude-prompt:old", SessionID: "local-a", CapturedBy: ledger.CapturedByHook})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mac.reg.WriteDB().Exec(`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,ref,created_at) VALUES(?,?,?,?,?,?)`, widgetKey, string(ledger.EventUtterance), words, "local-a", "claude-prompt:old", time.Now().UTC().Format("2006-01-02T15:04:05Z")); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := ledgerRequest(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}); code == http.StatusOK || !strings.Contains(body, "cannot sync") {
+		t.Fatalf("owner assignment over an unreplayable event: status=%d body=%s", code, body)
+	}
+	for name, node := range map[string]*federationNode{"mac": mac, "owner": owner} {
+		var n int
+		if err := node.reg.ReadDB().QueryRow(`SELECT COUNT(*) FROM ledger_state WHERE project_key=? AND owner_host_id!=''`, widgetKey).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("%s records an owner after the refusal", name)
+		}
+	}
+}

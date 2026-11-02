@@ -19,6 +19,8 @@ type ledgerOwnerResult struct {
 	Owner      string `json:"owner"`
 	OwnerName  string `json:"ownerName"`
 	Adopted    bool   `json:"adopted"`
+	Confirmed  bool   `json:"confirmed"`
+	Pending    string `json:"pending,omitempty"`
 }
 
 func (a *App) ledgerOwner(store *ledger.Store, args []string) error {
@@ -60,6 +62,9 @@ func (a *App) ledgerOwner(store *ledger.Store, args []string) error {
 	line := fmt.Sprintf("%s: the ledger is now kept on %s; writes here go through it and its log syncs back", key, result.OwnerName)
 	if result.Adopted {
 		line += "; this host's existing ledger history moves to it"
+	}
+	if !result.Confirmed {
+		line = fmt.Sprintf("%s: assigned to %s here, but %s has not confirmed it yet (%s); sync confirms it once %s answers, and agenthail doctor shows the state", key, result.OwnerName, result.OwnerName, result.Pending, result.OwnerName)
 	}
 	fmt.Println(line)
 	return nil

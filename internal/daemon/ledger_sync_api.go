@@ -56,10 +56,14 @@ type ledgerOwnerResponse struct {
 	Owner      string `json:"owner"`
 	OwnerName  string `json:"ownerName"`
 	Adopted    bool   `json:"adopted"`
+	Confirmed  bool   `json:"confirmed"`
+	Pending    string `json:"pending,omitempty"`
 }
 
 func (d *Daemon) registerLedgerSyncRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/ledger/sync/claim", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncClaimHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/confirm", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncConfirmHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/abort", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncAbortHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncReplayHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncEventsHandler)))
 	mux.HandleFunc("/api/v1/ledger/owner", d.apiV1Guard(dashboard, "control", d.apiLedgerOwnerHandler))
@@ -74,19 +78,6 @@ func (d *Daemon) ledgerHostOnly(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
-}
-
-func (d *Daemon) apiLedgerSyncClaimHandler(w http.ResponseWriter, r *http.Request) {
-	var req ledgerClaimRequest
-	if !decodeLedgerWrite(w, r, &req) {
-		return
-	}
-	hostID, _ := requestingHost(r.Context())
-	if err := d.ledgerStore().ClaimOwnership(req.ProjectKey, hostID, req.Adopting); err != nil {
-		writeLedgerError(w, err)
-		return
-	}
-	writeDashboardJSON(w, http.StatusOK, ledgerOwnerResponse{ProjectKey: req.ProjectKey, Owner: d.hostIdentity().ID, OwnerName: d.hostIdentity().Name})
 }
 
 func (d *Daemon) apiLedgerSyncReplayHandler(w http.ResponseWriter, r *http.Request) {
@@ -174,41 +165,4 @@ func (d *Daemon) ledgerSyncViews() ([]ledgerSyncView, error) {
 		views = append(views, view)
 	}
 	return views, nil
-}
-
-func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
-	var req ledgerOwnerRequest
-	if !decodeLedgerWrite(w, r, &req) {
-		return
-	}
-	if req.ProjectKey == "" || req.Host == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectKey and host are required.")
-		return
-	}
-	host, ok := d.pairedHost(req.Host)
-	if !ok {
-		writeAPIError(w, http.StatusNotFound, "host_not_found", "No paired host "+req.Host+"; see agenthail hosts.")
-		return
-	}
-	store := d.ledgerStore()
-	adopting, err := store.HoldsHistory(req.ProjectKey)
-	if err != nil {
-		writeLedgerError(w, err)
-		return
-	}
-	var claimed ledgerOwnerResponse
-	if err := d.ledgerHostCall(r.Context(), host, http.MethodPost, "/api/v1/ledger/sync/claim", nil, ledgerClaimRequest{ProjectKey: req.ProjectKey, Adopting: adopting}, &claimed); err != nil {
-		writeLedgerHostError(w, host, err)
-		return
-	}
-	if claimed.Owner != host.record.ID {
-		writeAPIError(w, http.StatusConflict, "owner_mismatch", host.record.Name+" answered as "+claimed.Owner+", not as itself.")
-		return
-	}
-	if err := store.AssignOwner(req.ProjectKey, host.record.ID); err != nil {
-		writeLedgerError(w, err)
-		return
-	}
-	d.wakeLedgerSync(host)
-	writeDashboardJSON(w, http.StatusOK, ledgerOwnerResponse{ProjectKey: req.ProjectKey, Owner: host.record.ID, OwnerName: host.record.Name, Adopted: adopting})
 }

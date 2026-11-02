@@ -47,6 +47,24 @@ func TestAnOverCapEventKeepsTheProjectLocalOnEitherSide(t *testing.T) {
 	}
 }
 
+func TestOnlyAnUnsharedAssignmentCanBeReleased(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	if err := mac.store.AssignOwner(project, owner.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := mac.store.ReleaseOwner(project, owner.id); err != nil {
+		t.Fatalf("release before anything synced: %v", err)
+	}
+	if remote, cursor, err := mac.store.Owner(project); err != nil || remote != "" || cursor != 0 {
+		t.Fatalf("after release: owner %q cursor %d, %v", remote, cursor, err)
+	}
+	adopt(t, project, mac, owner)
+	if err := mac.store.ReleaseOwner(project, owner.id); err == nil || !strings.Contains(err.Error(), "already shares") {
+		t.Fatalf("released a ledger that already shares events with its owner: %v", err)
+	}
+}
+
 func TestOversizedWordsWithControlAndInvalidBytesKeepAValidHead(t *testing.T) {
 	s := newSyncHost(t).store
 	text := strings.Repeat("\x01\xff<é", ledger.MaxEventBytes/3)

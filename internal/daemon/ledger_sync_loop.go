@@ -93,6 +93,11 @@ func (d *Daemon) syncLedgerHost(ctx context.Context, host *pairedHost) {
 func (d *Daemon) syncLedgerProject(ctx context.Context, host *pairedHost, key string) (int64, error) {
 	host.ledgerMu.Lock()
 	defer host.ledgerMu.Unlock()
+	if !host.ledgerConfirmed[key] {
+		if err := d.confirmLedgerOwnerLocked(ctx, host, key); err != nil {
+			return 0, err
+		}
+	}
 	store := d.ledgerStore()
 	for {
 		pending, err := store.PendingReplay(key, ledgerReplayBatch)
