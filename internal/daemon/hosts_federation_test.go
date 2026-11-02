@@ -167,6 +167,12 @@ type actionGate struct {
 	transfers      atomic.Pointer[snapshotHold]
 	// beyondVersion counts requests for anything other than /api/v1/version.
 	beyondVersion atomic.Int32
+	// ledgerDrops extends drops and truncate to ledger writes.
+	ledgerDrops atomic.Bool
+}
+
+func (g *actionGate) gated(path string) bool {
+	return path == "/api/v1/actions" || (g.ledgerDrops.Load() && strings.HasPrefix(path, "/api/v1/ledger/") && !strings.HasPrefix(path, "/api/v1/ledger/sync/"))
 }
 
 // snapshotHold parks the requests it is installed for until release is closed.
@@ -273,7 +279,7 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			hold.waiting.Add(1)
 			<-hold.release
 		}
-		if r.URL.Path == "/api/v1/actions" && n.gate.truncate.Add(-1) >= 0 {
+		if n.gate.gated(r.URL.Path) && n.gate.truncate.Add(-1) >= 0 {
 			recorder := httptest.NewRecorder()
 			n.handler.ServeHTTP(recorder, r)
 			hijacker, ok := w.(http.Hijacker)
@@ -293,7 +299,7 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			conn.Close()
 			return
 		}
-		if r.URL.Path == "/api/v1/actions" && n.gate.take() {
+		if n.gate.gated(r.URL.Path) && n.gate.take() {
 			n.handler.ServeHTTP(httptest.NewRecorder(), r)
 			hijacker, ok := w.(http.Hijacker)
 			if !ok {
@@ -1123,7 +1129,7 @@ func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testin
 		}()
 	}
 	wg.Wait()
-	waitHostLoops(t, "after overlapping attaches", 2)
+	waitHostLoops(t, "after overlapping attaches", 3)
 	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())

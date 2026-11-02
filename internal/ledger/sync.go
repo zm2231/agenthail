@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -231,8 +232,8 @@ func (s *Store) AcceptEvents(projectKey, fromHost string, events []Event) ([]int
 			return err
 		}
 		for i, e := range events {
-			if e.OriginSeq <= 0 || e.Type == "" {
-				return fmt.Errorf("replayed event %d has no origin or type", i)
+			if e.OriginSeq <= 0 || e.Type == "" || !json.Valid(e.Payload) {
+				return refuse("replayed event %d has no origin, no type or a payload that is not JSON", i)
 			}
 			seq, err := existingEvent(tx, projectKey, fromHost, e)
 			if err != nil {

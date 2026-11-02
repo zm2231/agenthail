@@ -208,6 +208,13 @@ func TestTheOwnerTakesNoIDIssuingReplayOnceItsLedgerIsShared(t *testing.T) {
 	if _, err := owner.store.AcceptEvents(project, mac.id, []ledger.Event{rogue}); err == nil || !strings.Contains(err.Error(), "issues an ID") {
 		t.Fatalf("ID-issuing replay after sharing: %v", err)
 	}
+	broken := ledger.Event{ProjectKey: project, Type: ledger.EventWorkComment, Payload: []byte(`{"itemId":`), OriginSeq: 1000, CreatedAt: time.Now()}
+	if _, err := owner.store.AcceptEvents(project, mac.id, []ledger.Event{broken}); err == nil || !strings.Contains(err.Error(), "not JSON") {
+		t.Fatalf("malformed replay: %v", err)
+	}
+	if _, err := owner.store.Board(project); err != nil {
+		t.Fatalf("the owner's board after refused replays: %v", err)
+	}
 }
 
 func TestOwnershipNeedsOneSideWithoutHistory(t *testing.T) {
