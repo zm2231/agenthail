@@ -3,12 +3,69 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestASessionWithNoHookCaptureSkipsTheRederive(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	s := surface.Session{ID: "quiet", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir(), Status: surface.StatusIdle, Transcript: "/transcript.jsonl"}
+	if err := r.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(sessionJournalPayload{ItemID: "100-aaaaaa-0", Op: "upsert", Version: 1, ProviderKey: "timeline:100-aaaaaa-0", Kind: "message", Role: "user", Body: "hello"})
+	if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.ID, Kind: "message", ProviderKey: "timeline:100-aaaaaa-0", Payload: payload}, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []error{r.MarkSessionJournalSeedWithIdentity(s.ID, true, "transcript"), r.MarkSessionJournalDerivation(s.ID, 1), r.SetSessionTranscriptCheckpoint(s.ID, registry.TranscriptCheckpoint{Offset: 900, Identity: "transcript"})} {
+		if step != nil {
+			t.Fatal(step)
+		}
+	}
+	before, err := r.ReadSessionJournalPage(s.ID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{sessions: map[string]surface.Session{s.ID: s}, observations: map[string]*surface.TurnObservation{}, accepted: true, kind: surface.KindClaude}
+	adapter := &rederiveSurface{daemonSurface: fake, items: []surface.TimelineItem{{ID: "100-aaaaaa-0", Kind: "message", Role: "user", Text: "hello"}}}
+	source := &sessionSource{manager: d.sources, session: s, adapter: adapter, epoch: "quiet", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	if err := source.loadSeed(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := r.ReadSessionJournalPage(s.ID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := r.SessionJournalDerivation(s.ID)
+	if err != nil || adapter.calls != 0 || after.LatestSeq != before.LatestSeq || version != transcriptJournalDerivation {
+		t.Fatalf("read the transcript %d times, latest %d then %d, derivation %d %v", adapter.calls, before.LatestSeq, after.LatestSeq, version, err)
+	}
+}
+
+func TestRederivesWaitForASlot(t *testing.T) {
+	r := openLedgerRegistry(t)
+	manager := newTestSourceManager(t, r)
+	s := surface.Session{ID: "waiting", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transcript: "/transcript.jsonl"}
+	if err := r.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	for range journalRederives {
+		manager.rederives <- struct{}{}
+	}
+	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, kind: surface.KindClaude}
+	adapter := &rederiveSurface{daemonSurface: fake}
+	source := &sessionSource{manager: manager, session: s, adapter: adapter, epoch: "waiting", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := source.rederiveJournal(ctx); !errors.Is(err, context.DeadlineExceeded) || adapter.calls != 0 {
+		t.Fatalf("a rederive past the bound ran: %v, %d reads", err, adapter.calls)
+	}
+}
 
 func TestRederivingAnOlderJournalReclassifiesAnEarlierHookCapture(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)

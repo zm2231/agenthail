@@ -20,6 +20,15 @@ func notPersonPrompt(payload sessionJournalPayload) (string, bool) {
 	return payload.Kind + ": " + payload.Title, true
 }
 
+func (d *Daemon) holdsUncheckedHookCapture(sessionID string) bool {
+	held, err := d.ledgerStore().HoldsUncheckedHookCapture(sessionID)
+	if err != nil {
+		d.log.Printf("ledger reclassify: hook captures of %s: %s", sessionID, err)
+		return true
+	}
+	return held
+}
+
 func (d *Daemon) reclassifyHookCapture(session surface.Session, ref, reason string) {
 	store := d.ledgerStore()
 	targets, _, err := d.ledgerTargets(store, session)

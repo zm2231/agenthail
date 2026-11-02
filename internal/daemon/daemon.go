@@ -178,6 +178,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		g2:                newG2Counter(time.Now()),
 	}
 	d.sources.prompts = d.backfillPrompt
+	d.sources.hookCaptured = d.holdsUncheckedHookCapture
 	d.ui = newUIState(reg)
 	d.snapshots = newSnapshotRelay()
 	identity, err := reg.HostIdentity()

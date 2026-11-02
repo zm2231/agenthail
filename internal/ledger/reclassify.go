@@ -1,7 +1,9 @@
 package ledger
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -39,6 +41,17 @@ func (s *Store) ReclassifyUtterance(projectKey, ref, reason string, now time.Tim
 		return false, err
 	}
 	return e.Seq != 0, s.catchUp(board, projectKey)
+}
+
+func (s *Store) HoldsUncheckedHookCapture(sessionID string) (bool, error) {
+	var one int
+	err := s.read.QueryRow(`SELECT 1 FROM ledger_events u WHERE u.type=? AND u.ref LIKE ? AND json_extract(u.payload,'$.capturedBy')=? AND json_extract(u.payload,'$.targetId')=?
+		AND NOT EXISTS (SELECT 1 FROM ledger_events r WHERE r.project_key=u.project_key AND r.ref=? || u.ref) LIMIT 1`,
+		string(EventUtterance), promptRefPrefix+"%", CapturedByHook, sessionID, reclassifiedRef("")).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (b *Board) hookCaptured(ref string) bool {

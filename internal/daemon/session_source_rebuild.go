@@ -107,6 +107,8 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 // 2: prompts Claude sent itself keep their prompt id, so their hook captures leave the person's words.
 const transcriptJournalDerivation = 2
 
+const journalRederives = 2
+
 func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	reader, ok := s.adapter.(surface.TranscriptItemReader)
 	if !ok {
@@ -115,6 +117,15 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
 	if err != nil || version >= transcriptJournalDerivation {
 		return err
+	}
+	if version >= 1 && (s.manager.hookCaptured == nil || !s.manager.hookCaptured(s.session.ID)) {
+		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, transcriptJournalDerivation)
+	}
+	select {
+	case s.manager.rederives <- struct{}{}:
+		defer func() { <-s.manager.rederives }()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	var rows []registry.SessionJournalEntry
 	before := uint64(0)
