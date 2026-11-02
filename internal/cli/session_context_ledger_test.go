@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -10,10 +13,68 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestTerminalPromptCapturesUtteranceWhenLedgerEnabled(t *testing.T) {
+func ledgerHookFixture(t *testing.T) (*App, *registry.Registry, *ledger.Store) {
+	t.Helper()
 	withoutSessionContextLimit(t)
 	fake := &cliSurface{kind: surface.KindClaude}
-	_, store := cliFixture(t, fake)
+	app, store := cliFixture(t, fake)
+
+	captureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ledger/capture" {
+			http.NotFound(w, r)
+			return
+		}
+		var req struct {
+			SessionID string `json:"sessionId"`
+			MessageID string `json:"messageId"`
+			Prompt    string `json:"prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		session, err := store.Session(req.SessionID)
+		if err != nil || session.Cwd == "" {
+			json.NewEncoder(w).Encode(map[string]any{"captured": false})
+			return
+		}
+		projects, err := store.ListProjects()
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"captured": false})
+			return
+		}
+		var projectKey string
+		for _, p := range projects {
+			if p.Key != "" && strings.HasPrefix(session.Cwd, p.WorkspaceRoot) {
+				projectKey = p.Key
+				break
+			}
+		}
+		if projectKey == "" {
+			json.NewEncoder(w).Encode(map[string]any{"captured": false})
+			return
+		}
+		ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
+		enabled, err := ls.Enabled(projectKey)
+		if err != nil || !enabled {
+			json.NewEncoder(w).Encode(map[string]any{"captured": false})
+			return
+		}
+		ls.RecordUtterance(projectKey, req.MessageID, surface.PersonSessionID, req.SessionID, "terminal", req.Prompt)
+		json.NewEncoder(w).Encode(map[string]any{"captured": true, "projectKey": projectKey})
+	}))
+	t.Cleanup(captureServer.Close)
+
+	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
+		return &daemonAPIClient{baseURL: captureServer.URL, token: "", httpClient: captureServer.Client()}, nil
+	}
+
+	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
+	return app, store, ls
+}
+
+func TestTerminalPromptCapturesUtteranceWhenLedgerEnabled(t *testing.T) {
+	app, store, ls := ledgerHookFixture(t)
 
 	projectDir := t.TempDir()
 	if err := store.AddProject(registry.ProjectRecord{
@@ -21,7 +82,6 @@ func TestTerminalPromptCapturesUtteranceWhenLedgerEnabled(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
 	if err := ls.Enable("test-key"); err != nil {
 		t.Fatal(err)
 	}
@@ -32,21 +92,17 @@ func TestTerminalPromptCapturesUtteranceWhenLedgerEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hooks := rootHooks(t, store, fake, 1)
 	start := `{"session_id":"s1","hook_event_name":"SessionStart","source":"startup"}`
-	hooks(start)
+	app.sessionContext(strings.NewReader(start), surface.KindClaude, 4242, time.Now())
 
 	prompt := `{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"build the widget"}`
-	printed := hooks(prompt)
-
-	found := false
-	for _, line := range printed {
-		if strings.Contains(line, "intent ledger") && strings.Contains(line, "captured") {
-			found = true
-		}
+	output := app.sessionContext(strings.NewReader(prompt), surface.KindClaude, 4242, time.Now())
+	if output == nil {
+		t.Fatal("expected hook output with ledger context")
 	}
-	if !found {
-		t.Fatalf("expected ledger capture context, got %q", printed)
+	ctx := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
+	if !strings.Contains(ctx, "intent ledger") || !strings.Contains(ctx, "captured") {
+		t.Fatalf("expected ledger capture context, got %q", ctx)
 	}
 
 	events, err := ls.Events("test-key", 0, 100)
@@ -62,9 +118,7 @@ func TestTerminalPromptCapturesUtteranceWhenLedgerEnabled(t *testing.T) {
 }
 
 func TestTerminalPromptSkipsCaptureWhenLedgerDisabled(t *testing.T) {
-	withoutSessionContextLimit(t)
-	fake := &cliSurface{kind: surface.KindClaude}
-	_, store := cliFixture(t, fake)
+	app, store, ls := ledgerHookFixture(t)
 
 	projectDir := t.TempDir()
 	if err := store.AddProject(registry.ProjectRecord{
@@ -72,7 +126,6 @@ func TestTerminalPromptSkipsCaptureWhenLedgerDisabled(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
 	if err := ls.Enable("disabled-key"); err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +139,8 @@ func TestTerminalPromptSkipsCaptureWhenLedgerDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hooks := rootHooks(t, store, fake, 1)
-	hooks(`{"session_id":"s2","hook_event_name":"SessionStart","source":"startup"}`)
-	hooks(`{"session_id":"s2","hook_event_name":"UserPromptSubmit","prompt":"should not capture"}`)
+	app.sessionContext(strings.NewReader(`{"session_id":"s2","hook_event_name":"SessionStart","source":"startup"}`), surface.KindClaude, 4242, time.Now())
+	app.sessionContext(strings.NewReader(`{"session_id":"s2","hook_event_name":"UserPromptSubmit","prompt":"should not capture"}`), surface.KindClaude, 4242, time.Now())
 
 	events, err := ls.Events("disabled-key", 0, 100)
 	if err != nil {
@@ -99,15 +151,16 @@ func TestTerminalPromptSkipsCaptureWhenLedgerDisabled(t *testing.T) {
 	}
 }
 
-func TestTerminalPromptCapturesForCoordinatorInUnsetProject(t *testing.T) {
-	withoutSessionContextLimit(t)
-	fake := &cliSurface{kind: surface.KindClaude}
-	_, store := cliFixture(t, fake)
+func TestTerminalPromptDedupsByMessageID(t *testing.T) {
+	app, store, ls := ledgerHookFixture(t)
 
 	projectDir := t.TempDir()
 	if err := store.AddProject(registry.ProjectRecord{
-		ID: "proj-3", WorkspaceRoot: projectDir, Title: "Unset", Key: "unset-key",
+		ID: "proj-3", WorkspaceRoot: projectDir, Title: "Dedup", Key: "dedup-key",
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ls.Enable("dedup-key"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RegisterSession(surface.Session{
@@ -117,18 +170,17 @@ func TestTerminalPromptCapturesForCoordinatorInUnsetProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hooks := rootHooks(t, store, fake, 1)
-	hooks(`{"session_id":"s3","hook_event_name":"SessionStart","source":"startup"}`)
-	hooks(`{"session_id":"s3","hook_event_name":"UserPromptSubmit","prompt":"coordinator capture test"}`)
+	app.sessionContext(strings.NewReader(`{"session_id":"s3","hook_event_name":"SessionStart","source":"startup"}`), surface.KindClaude, 4242, time.Now())
 
-	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
-	events, err := ls.Events("unset-key", 0, 100)
+	prompt := `{"session_id":"s3","hook_event_name":"UserPromptSubmit","prompt":"same prompt twice"}`
+	app.sessionContext(strings.NewReader(prompt), surface.KindClaude, 4242, time.Now())
+	app.sessionContext(strings.NewReader(prompt), surface.KindClaude, 4242, time.Now())
+
+	events, err := ls.Events("dedup-key", 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 1 {
-		t.Fatalf("expected 1 event for unset (coordinator-captures) project, got %d", len(events))
+		t.Fatalf("expected 1 event after dedup (same session+prompt = same messageId), got %d", len(events))
 	}
 }
-
-var _ = time.Now

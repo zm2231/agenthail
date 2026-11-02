@@ -118,13 +118,18 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 	return events, rows.Err()
 }
 
-func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surface, text string) (Event, error) {
+func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surfaceName, text string) (Event, error) {
+	if messageID != "" {
+		if existing, found := s.findUtteranceByMessageID(projectKey, messageID); found {
+			return existing, nil
+		}
+	}
 	payload := UtterancePayload{
 		Text:      text,
 		MessageID: messageID,
 		SessionID: sessionID,
 		TargetID:  targetID,
-		Surface:   surface,
+		Surface:   surfaceName,
 		TS:        time.Now().UTC().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(payload)
@@ -137,6 +142,31 @@ func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surf
 		Payload:        data,
 		ActorSessionID: sessionID,
 	})
+}
+
+func (s *Store) findUtteranceByMessageID(projectKey, messageID string) (Event, bool) {
+	rows, err := s.read.Query(
+		`SELECT seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,created_at FROM ledger_events WHERE project_key=? AND type=? ORDER BY seq`,
+		projectKey, string(EventUtterance),
+	)
+	if err != nil {
+		return Event{}, false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e Event
+		var typ, ts string
+		if rows.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &ts) != nil {
+			continue
+		}
+		e.Type = EventType(typ)
+		e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+		var p UtterancePayload
+		if json.Unmarshal(e.Payload, &p) == nil && p.MessageID == messageID {
+			return e, true
+		}
+	}
+	return Event{}, false
 }
 
 func (s *Store) RecordGoal(projectKey, goalID, name, parentGoalID, actorSessionID string) (Event, error) {
