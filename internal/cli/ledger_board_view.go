@@ -16,6 +16,8 @@ type boardView struct {
 	allAsks     map[string]ledger.Ask
 	decisions   []ledger.Decision
 	constraints []ledger.Clause
+	questions   []ledger.Question
+	targetCuts  []ledger.TargetCut
 }
 
 func ledgerIDNumber(id string) int {
@@ -32,7 +34,8 @@ func byLedgerID[T any](items []T, id func(T) string) {
 }
 
 func newBoardView(board *ledger.Board) boardView {
-	v := boardView{goals: board.Goals(), asks: board.OpenAsks(), decisions: board.Decisions(), constraints: board.ProjectConstraints(), allAsks: map[string]ledger.Ask{}}
+	v := boardView{goals: board.Goals(), asks: board.OpenAsks(), decisions: board.Decisions(), constraints: board.ProjectConstraints(),
+		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), allAsks: map[string]ledger.Ask{}}
 	for _, ask := range board.AllAsks() {
 		v.allAsks[ask.ID] = ask
 	}
@@ -65,11 +68,7 @@ func clauseLine(c *ledger.Clause) string {
 func printClause(indent string, c *ledger.Clause) {
 	fmt.Println(indent + clauseLine(c))
 	for _, cut := range c.Cuts {
-		status := "pending the person's ack"
-		if cut.Acked {
-			status = "acked"
-		}
-		fmt.Printf("%s  cut %s: %s (%s)\n", indent, cut.ID, cut.Reason, status)
+		fmt.Printf("%s  cut %s: %s (%s)\n", indent, cut.ID, cut.Reason, cutStatus(cut))
 	}
 	for _, w := range c.Waits {
 		resolved := ""
@@ -80,8 +79,18 @@ func printClause(indent string, c *ledger.Clause) {
 	}
 }
 
+func cutStatus(cut ledger.Cut) string {
+	switch {
+	case cut.Acked:
+		return "acked"
+	case cut.Withdrawn:
+		return "withdrawn: its question was answered"
+	}
+	return "pending the person's ack"
+}
+
 func (v boardView) print(attachment ledger.Attachment) {
-	empty := len(v.goals) == 0 && len(v.asks) == 0 && len(v.decisions) == 0 && len(v.constraints) == 0
+	empty := len(v.goals) == 0 && len(v.asks) == 0 && len(v.decisions) == 0 && len(v.constraints) == 0 && len(v.questions) == 0
 	for _, g := range v.goals {
 		fmt.Printf("%s %s", g.ID, g.Name)
 		if len(g.Asks) > 0 {
@@ -107,6 +116,14 @@ func (v boardView) print(attachment ledger.Attachment) {
 			on = "the project"
 		}
 		fmt.Printf("%s v%d on %s: %s [%s] from %s\n", d.ID, d.Version, on, d.Text, d.Principal, d.SourceUtterance)
+	}
+	for _, t := range v.targetCuts {
+		if !t.Acked && !t.Withdrawn {
+			fmt.Printf("cut %s on %s: %s (%s)\n", t.ID, t.Target, t.Reason, cutStatus(t.Cut))
+		}
+	}
+	for _, q := range v.questions {
+		fmt.Println(questionLine(q))
 	}
 	printAttachment(attachment)
 	if empty && len(attachment.Unattached) == 0 && len(attachment.Elsewhere) == 0 {
@@ -163,6 +180,9 @@ func (a *App) ledgerGoals(store *ledger.Store, args []string) error {
 		for _, d := range g.Decisions {
 			fmt.Printf("  decided %s: %s from %s\n", d.ID, d.Text, d.SourceUtterance)
 		}
+		for _, q := range g.Questions {
+			fmt.Println("  " + questionLine(q))
+		}
 	}
 	return nil
 }
@@ -171,6 +191,7 @@ type goalView struct {
 	ledger.Goal
 	Clauses   []*ledger.Clause  `json:"clauses"`
 	Decisions []ledger.Decision `json:"decisions,omitempty"`
+	Questions []ledger.Question `json:"questions,omitempty"`
 }
 
 func (v boardView) goalViews() []goalView {
@@ -183,6 +204,11 @@ func (v boardView) goalViews() []goalView {
 		for _, d := range v.decisions {
 			if d.GoalID == g.ID {
 				view.Decisions = append(view.Decisions, d)
+			}
+		}
+		for _, q := range v.questions {
+			if q.GoalID == g.ID {
+				view.Questions = append(view.Questions, q)
 			}
 		}
 		out = append(out, view)

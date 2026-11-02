@@ -52,9 +52,11 @@ type UtteranceView struct {
 }
 
 type Cut struct {
-	ID     string `json:"id"`
-	Reason string `json:"reason"`
-	Acked  bool   `json:"acked"`
+	ID         string `json:"id"`
+	Reason     string `json:"reason"`
+	Acked      bool   `json:"acked"`
+	Withdrawn  bool   `json:"withdrawn,omitempty"`
+	QuestionID string `json:"questionId,omitempty"`
 }
 
 type Wait struct {
@@ -81,6 +83,8 @@ type Board struct {
 	utterances         map[string]*UtteranceView
 	utteranceOrder     []string
 	projectConstraints []*Clause
+	targetCuts         []*TargetCut
+	questions          map[string]*Question
 	applied            int64
 }
 
@@ -98,6 +102,8 @@ func (b *Board) reset() {
 	b.utterances = map[string]*UtteranceView{}
 	b.utteranceOrder = nil
 	b.projectConstraints = nil
+	b.targetCuts = nil
+	b.questions = map[string]*Question{}
 	b.applied = 0
 }
 
@@ -136,6 +142,12 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyAttach(event.Payload)
 	case EventClauseSource:
 		err = b.applyClauseSource(event.Payload)
+	case EventQuestion:
+		err = b.applyQuestion(event.Payload)
+	case EventQuestionRes:
+		err = b.applyQuestionResolved(event.Payload)
+	case EventQuestionEsc:
+		err = b.applyQuestionEscalated(event.Payload)
 	}
 	if err == nil {
 		b.applied = event.Seq
@@ -366,11 +378,14 @@ func (b *Board) applyCut(data []byte) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
-	c, ok := b.clauses[p.ClauseID]
-	if !ok {
+	cut := Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked, QuestionID: p.QuestionID}
+	if c, ok := b.clauses[p.ClauseID]; ok {
+		c.Cuts = append(c.Cuts, cut)
 		return nil
 	}
-	c.Cuts = append(c.Cuts, Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked})
+	if p.Target != "" {
+		b.targetCuts = append(b.targetCuts, &TargetCut{Cut: cut, Target: p.Target})
+	}
 	return nil
 }
 
@@ -385,6 +400,11 @@ func (b *Board) applyCutAck(data []byte) error {
 				c.Cuts[i].Acked = true
 				return nil
 			}
+		}
+	}
+	for _, t := range b.targetCuts {
+		if t.ID == p.CutID {
+			t.Acked = true
 		}
 	}
 	return nil

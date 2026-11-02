@@ -39,6 +39,10 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerAttach(args, false)
 	case "propose":
 		return a.ledgerAttach(args, true)
+	case "question":
+		return a.ledgerQuestion(args)
+	case "questions":
+		return a.ledgerQuestions(store, args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -100,6 +104,8 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"asks":               view.asks,
 			"decisions":          view.decisions,
 			"projectConstraints": view.constraints,
+			"questions":          view.questions,
+			"targetCuts":         view.targetCuts,
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
 		}

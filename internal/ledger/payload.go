@@ -56,6 +56,33 @@ type AttachPayload struct {
 	Effects     []string `json:"effects,omitempty"`
 }
 
+type QuestionPayload struct {
+	QuestionID     string       `json:"questionId"`
+	Target         string       `json:"target"`
+	GoalID         string       `json:"goalId,omitempty"`
+	Kind           QuestionKind `json:"kind"`
+	Text           string       `json:"text"`
+	Recommendation string       `json:"recommendation"`
+	DefaultAnswer  string       `json:"defaultAnswer"`
+	DeadlineMs     int64        `json:"deadlineMs"`
+	Narrows        bool         `json:"narrows,omitempty"`
+	OwnerSessionID string       `json:"ownerSessionId"`
+}
+
+type QuestionResolvedPayload struct {
+	QuestionID        string   `json:"questionId"`
+	Answer            string   `json:"answer"`
+	SourceUtteranceID string   `json:"sourceUtteranceId,omitempty"`
+	Applied           bool     `json:"applied"`
+	Auto              bool     `json:"auto,omitempty"`
+	Effects           []string `json:"effects,omitempty"`
+}
+
+type QuestionEscalatedPayload struct {
+	QuestionID string `json:"questionId"`
+	DeadlineMs int64  `json:"deadlineMs"`
+}
+
 type DelegationPayload struct {
 	AskID              string `json:"askId"`
 	DelegatorSessionID string `json:"delegatorSessionId"`
@@ -82,6 +109,7 @@ type ClauseStatePayload struct {
 type DecisionPayload struct {
 	DecisionID      string `json:"decisionId"`
 	GoalID          string `json:"goalId,omitempty"`
+	QuestionID      string `json:"questionId,omitempty"`
 	Version         int    `json:"version"`
 	Text            string `json:"text"`
 	Principal       string `json:"principal"`
@@ -90,7 +118,9 @@ type DecisionPayload struct {
 
 type CutPayload struct {
 	CutID         string `json:"cutId"`
-	ClauseID      string `json:"clauseId"`
+	ClauseID      string `json:"clauseId,omitempty"`
+	Target        string `json:"target,omitempty"`
+	QuestionID    string `json:"questionId,omitempty"`
 	Reason        string `json:"reason"`
 	AuthorSession string `json:"authorSessionId"`
 	Acked         bool   `json:"acked"`
