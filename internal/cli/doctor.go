@@ -179,7 +179,10 @@ func (a *App) cmdDoctor(args []string) error {
 	hookProblems := []promptHookProblem{}
 	var hookErr, syncErr error
 	var syncHealth []ledgerSyncHealth
+	var push pushHealth
+	var pushErr error
 	if r := a.registry(); r != nil {
+		push, pushErr = pushHealthOf(r)
 		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		syncHealth, syncErr = a.ledgerSyncHealth(callCtx, r)
 		cancel()
@@ -210,13 +213,20 @@ func (a *App) cmdDoctor(args []string) error {
 	if syncErr != nil {
 		syncFailures++
 	}
+	pushFailures := len(push.Problems)
+	if pushErr != nil {
+		pushFailures++
+	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
 		if syncErr != nil {
 			report["ledgerSyncError"] = syncErr.Error()
+		}
+		if pushErr != nil {
+			report["pushError"] = pushErr.Error()
 		}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
@@ -266,6 +276,11 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if syncErr != nil {
 			fmt.Printf("ledger sync: unknown (%s)\n", syncErr)
+		}
+		if pushErr != nil {
+			fmt.Printf("push: unknown (%s)\n", pushErr)
+		} else {
+			fmt.Println(push)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
@@ -346,6 +361,9 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	if failures > 0 {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
+	}
+	if pushFailures > 0 {
+		return fmt.Errorf("doctor found %d push notification problem(s), or could not check them", pushFailures)
 	}
 	if syncFailures > 0 {
 		return fmt.Errorf("doctor found %d ledger(s) not syncing with their owner, or could not check them", syncFailures)

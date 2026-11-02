@@ -59,31 +59,38 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNot
 	defer wait.Wait()
 	targets, err := d.Registry.DevicePushTargets()
 	if err != nil {
-		d.log.Printf("load device push targets: %s", err)
+		d.log.Printf("push %s: load device push targets: %s", notification.EventType, err)
 		return
 	}
+	attempt := newPushAttempt(notification, len(targets))
+	var sends sync.WaitGroup
 	concurrency := make(chan struct{}, 4)
 	for _, target := range targets {
 		target := target
-		wait.Add(1)
+		sends.Add(1)
 		go func() {
-			defer wait.Done()
+			defer sends.Done()
+			var sendErr error
 			select {
 			case concurrency <- struct{}{}:
 				defer func() { <-concurrency }()
+				sendErr = sendDevicePushWithRetry(ctx, target, notification)
 			case <-ctx.Done():
-				return
+				sendErr = fmt.Errorf("not sent: %w", ctx.Err())
 			}
-			if err := sendDevicePushWithRetry(ctx, target, notification); err != nil {
-				d.log.Printf("mobile notification %s: %s", target.DeviceID, err)
-				if isTerminalPushRelayError(err) {
-					if removeErr := d.Registry.RemoveDevicePushTarget(target.DeviceID); removeErr != nil {
-						d.log.Printf("remove rejected mobile notification target %s: %s", target.DeviceID, removeErr)
-					}
+			attempt.record(target.DeviceID, sendErr)
+			if recordErr := d.Registry.RecordPushOutcome(target.DeviceID, notification.EventType, time.Now(), sendErr); recordErr != nil {
+				d.log.Printf("record push outcome %s: %s", target.DeviceID, recordErr)
+			}
+			if isTerminalPushRelayError(sendErr) {
+				if removeErr := d.Registry.RemoveDevicePushTarget(target.DeviceID); removeErr != nil {
+					d.log.Printf("remove rejected mobile notification target %s: %s", target.DeviceID, removeErr)
 				}
 			}
 		}()
 	}
+	sends.Wait()
+	d.log.Print(attempt.line(PushRelayURL() != ""))
 }
 
 func sendDevicePushWithRetry(ctx context.Context, target registry.DevicePushTarget, notification mobileNotification) error {
@@ -172,11 +179,11 @@ func (d *Daemon) withdrawFromPairedDevices(ctx context.Context, collapseID strin
 		d.log.Printf("load device push targets: %s", err)
 		return
 	}
+	attempt := newPushAttempt(mobileNotification{EventType: "withdraw", CollapseID: collapseID}, len(targets))
 	for _, target := range targets {
-		if err := sendDeviceWithdraw(ctx, target, collapseID); err != nil {
-			d.log.Printf("withdraw mobile notification %s: %s", target.DeviceID, err)
-		}
+		attempt.record(target.DeviceID, sendDeviceWithdraw(ctx, target, collapseID))
 	}
+	d.log.Print(attempt.line(PushRelayURL() != ""))
 }
 
 func sendDeviceWithdraw(ctx context.Context, target registry.DevicePushTarget, collapseID string) error {

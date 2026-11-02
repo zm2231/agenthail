@@ -417,6 +417,16 @@ CREATE TABLE projects (
 	archived_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
+-- table push_outcomes
+CREATE TABLE push_outcomes (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL DEFAULT '',
+	attempted_at TEXT NOT NULL DEFAULT '',
+	succeeded_at TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	failed_at TEXT NOT NULL DEFAULT ''
+);
+
 -- table relay_deliveries
 CREATE TABLE relay_deliveries (
 	route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,

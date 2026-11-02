@@ -250,6 +250,14 @@ CREATE TABLE IF NOT EXISTS device_push_targets (
 	enabled INTEGER NOT NULL DEFAULT 1,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS push_outcomes (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL DEFAULT '',
+	attempted_at TEXT NOT NULL DEFAULT '',
+	succeeded_at TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	failed_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS browser_push_subscriptions (
 	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
 	endpoint TEXT NOT NULL,

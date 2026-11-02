@@ -25,6 +25,10 @@ Registration requires an App Attest statement bound to a fresh, five-minute, sin
 
 Relay credentials expire after 90 days. Existing credentials without an App Attest record are revoked on use. Registration, credential checks, and delivery use Cloudflare rate limiting. The Worker fails closed when a required store, app identity, or limiter is unavailable.
 
+## Diagnosing a push that did not arrive
+
+The daemon writes one line to `daemon.log` for every notification it sends to paired phones and every withdrawal: `push <eventType> session=<id> request=<id|-> key=<collapseId> devices=N delivered=k failed=m`, followed by each failed device's first eight id characters and the error, and a note when no paired device takes notifications or no relay is configured. A device counts as delivered when the relay answered 2xx, which it does only after APNs accepted the push; that is not proof the phone showed it. The daemon also keeps each device's latest attempt in the registry's `push_outcomes` table: event type, when it was attempted, when a push last succeeded, and the last error and when. `agenthail doctor` lists every device registered for notifications with those times, and fails when a device's last push failed after its last delivery or when devices are paired but no relay is configured.
+
 ## Test and deploy
 
 Run `npm test` from `push-relay`.
