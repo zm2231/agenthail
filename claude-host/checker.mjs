@@ -21,14 +21,31 @@ Do not judge whether the work is feasible or wise, and do not invent requests th
 Answer only by calling the report tool once: list each missing piece with the utterance id it comes from, or report none.
 You have no other tools and no access to files, commands or the web.`;
 
-export function userDefaultModel(configDir) {
+const AUTH_ENV = /^(ANTHROPIC_|AWS_|CLAUDE_CODE_USE_|CLAUDE_CODE_SKIP_|CLOUD_ML_|GOOGLE_|VERTEX_)|^(HTTPS?_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS|CLAUDE_CODE_API_KEY_HELPER_TTL_MS)$/;
+const AUTH_SETTINGS = ['apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport'];
+
+function personSettings(configDir) {
   const dir = configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   try {
-    const model = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).model;
-    return typeof model === 'string' ? model : '';
+    const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+    return settings && typeof settings === 'object' ? settings : {};
   } catch {
-    return '';
+    return {};
   }
+}
+
+// carried is what of the person's settings a checker keeps: the default
+// model and how Claude reaches its API (proxy, keys, key helper), nothing
+// that adds tools, hooks or permissions.
+export function carried(configDir) {
+  const settings = personSettings(configDir);
+  const env = {};
+  for (const [name, value] of Object.entries(settings.env ?? {})) {
+    if (AUTH_ENV.test(name) && typeof value === 'string') env[name] = value;
+  }
+  const auth = {};
+  for (const name of AUTH_SETTINGS) if (typeof settings[name] === 'string') auth[name] = settings[name];
+  return { model: typeof settings.model === 'string' ? settings.model : '', env, auth };
 }
 
 export function reportArgs(run, session, report) {
@@ -61,8 +78,10 @@ export function checkerOptions({ run, sessionId, configDir, agenthail }) {
         });
       }),
   );
-  const model = userDefaultModel(configDir);
+  const { model, env, auth } = carried(configDir);
   return {
+    env: { ...env, ...CHECKER_ENV },
+    ...(Object.keys(auth).length ? { settings: auth } : {}),
     tools: [],
     allowedTools: [REPORT_TOOL],
     settingSources: [],

@@ -6,7 +6,7 @@
 // ({id, result} or {id, error: {code, message}}); a subscribed connection also
 // receives {event} lines.
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { CHECKER_ENV, checkerOptions } from './checker.mjs';
+import { checkerOptions } from './checker.mjs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -269,7 +269,7 @@ class Session {
   }
 
   remember() {
-    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, updatedAt: new Date().toISOString() });
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
     writeSettings();
   }
 
@@ -282,6 +282,7 @@ class Session {
       openedAt: this.openedAt,
       permissionMode: this.permissionMode,
       model: this.model,
+      ...(this.checker ? { checker: this.checker } : {}),
       contextWindow: this.context?.window ?? 0,
       contextModel: this.context?.model ?? '',
       autoCompact: this.context?.autoCompact ?? null,
@@ -325,7 +326,7 @@ const methods = {
   },
   setModel: async ({ sessionId, model }) => {
     if (typeof model !== 'string' || model === '' || /\s/.test(model)) throw new HostError('invalid', 'model must be one model name');
-    const s = session(sessionId);
+    const s = unsandboxed(sessionId);
     await s.query.setModel(model);
     s.model = model;
     s.remember();
@@ -333,7 +334,7 @@ const methods = {
   },
   setPermissionMode: async ({ sessionId, permissionMode }) => {
     if (!PERMISSION_MODES.has(permissionMode)) throw new HostError('invalid', `unknown permission mode: ${permissionMode}`);
-    const s = session(sessionId);
+    const s = unsandboxed(sessionId);
     await s.query.setPermissionMode(permissionMode);
     s.permissionMode = permissionMode;
     s.remember();
@@ -427,17 +428,20 @@ async function open(params) {
   // Claude starts a resumed conversation in the settings' default mode and
   // model, so a resume without them reopens in the ones it last ran with here.
   const kept = params.resume ? settings.get(id) : undefined;
+  if (kept?.checker) throw new HostError('invalid', `session ${id} was a narrowing checker; it is not resumed`);
   const checker = params.checker ? checkerOptions({ run: params.checker.run, sessionId: id, configDir: params.configDir, agenthail: args.agenthail }) : null;
   const permissionMode = checker?.permissionMode || params.permissionMode || kept?.permissionMode || '';
   const model = params.model || checker?.model || kept?.model || '';
   const s = new Session(id, cwd, permissionMode, model);
+  s.checker = params.checker?.run ?? '';
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
   let init;
   try {
+    const { env: checkerEnv, ...checkerQuery } = checker ?? {};
     const conduct = checker
-      ? { ...checker, ...(model ? { model } : {}), sessionId: id }
+      ? { ...checkerQuery, ...(model ? { model } : {}), sessionId: id }
       : {
           // Without a system prompt the SDK sends an empty one and Claude runs
           // with a minimal prompt instead of Claude Code's. A conversation keeps
@@ -471,7 +475,7 @@ async function open(params) {
           ...process.env,
           CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
           ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}),
-          ...(checker ? CHECKER_ENV : {}),
+          ...checkerEnv,
         },
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
@@ -492,7 +496,7 @@ async function open(params) {
     throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
   }
   s.setCommands(init.commands);
-  if (params.permissionMode || params.model) s.remember();
+  if (params.permissionMode || params.model || s.checker) s.remember();
   s.setState('idle');
   return s.describe();
 }
@@ -919,6 +923,12 @@ function session(id) {
     refuseOrphaned(id);
     throw new HostError('not_open', `Claude session ${id} is not open in the host`);
   }
+  return s;
+}
+
+function unsandboxed(id) {
+  const s = session(id);
+  if (s.checker) throw new HostError('invalid', `session ${id} is a narrowing checker; its model and permissions do not change`);
   return s;
 }
 

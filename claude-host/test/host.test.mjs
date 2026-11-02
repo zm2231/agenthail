@@ -1326,7 +1326,15 @@ process.stdout.write('{"result":"reported"}');
   );
   const configDir = path.join(f.root, 'person-claude');
   fs.mkdirSync(configDir);
-  fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({ model: 'claude-person-default', permissions: { allow: ['Bash(*)'] } }));
+  fs.writeFileSync(
+    path.join(configDir, 'settings.json'),
+    JSON.stringify({
+      model: 'claude-person-default',
+      permissions: { allow: ['Bash(*)'] },
+      apiKeyHelper: '/usr/bin/true',
+      env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', CHECKER_TEST_UNRELATED: 'x', ENABLE_TOOL_SEARCH: 'true' },
+    }),
+  );
   await startHost(f, { agenthail });
   const c = new Client(f.socket);
   await c.call('subscribe', { after: 0 });
@@ -1356,6 +1364,12 @@ process.stdout.write('{"result":"reported"}');
   assert.ok(!argv.includes('--allow-dangerously-skip-permissions'), argv.join(' '));
   assert.equal(spawned.todoTools, '0');
   assert.equal(spawned.claudeaiMcp, 'false');
+  for (const name of ['ANTHROPIC_BASE_URL', 'HTTPS_PROXY']) assert.ok(spawned.env.includes(name), `${name} reaches the checker's Claude`);
+  for (const name of ['CHECKER_TEST_UNRELATED', 'ENABLE_TOOL_SEARCH']) assert.ok(!spawned.env.includes(name), `${name} stays behind`);
+  assert.deepEqual(JSON.parse(value('--settings')), { apiKeyHelper: '/usr/bin/true' });
+  assert.ok(!argv.join(' ').includes('127.0.0.1:9'), 'auth values never go on the command line');
+  await assert.rejects(c.call('setPermissionMode', { sessionId: id, permissionMode: 'bypassPermissions' }), /narrowing checker/);
+  await assert.rejects(c.call('setModel', { sessionId: id, model: 'claude-other' }), /narrowing checker/);
 
   const uuid = randomUUID();
   await c.call('send', { sessionId: id, uuid, text: `CHECKER ${JSON.stringify({ missing: [{ breadth: 'typo tolerance', from: 'claude-prompt:2' }] })}`, origin: { kind: 'human' } });
@@ -1371,5 +1385,7 @@ process.stdout.write('{"result":"reported"}');
   assert.match(JSON.stringify(reply.reported), /reported/);
   const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(ran, [['ledger', 'check-report', id, '--from', id, '--json', '--missing', 'typo tolerance', '--in', 'claude-prompt:2']]);
+  await c.call('close', { sessionId: id });
+  await assert.rejects(c.call('open', { resume: id, cwd: f.cwd }), /narrowing checker; it is not resumed/);
   c.close();
 });
