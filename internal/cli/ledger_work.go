@@ -10,8 +10,11 @@ import (
 )
 
 const ledgerWorkUsage = `usage: agenthail ledger work [--mine]
-       agenthail ledger work critical-path
+       agenthail ledger work <item_id>
+       agenthail ledger work <critical-path|ready|next>
        agenthail ledger work add <clause_id> "<text>"
+       agenthail ledger work comment <item_id> "<text>"
+       agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
        agenthail ledger work <claim|block|unblock|submit|reopen> <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
        agenthail ledger work dep <item_id> --on <item_id>
@@ -25,16 +28,25 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	if len(w.positional) < 2 {
 		return a.ledgerWorkList(store, w)
 	}
-	if w.positional[1] == "critical-path" {
+	switch w.positional[1] {
+	case "critical-path":
 		return a.ledgerCriticalPath(store, w)
+	case "ready", "next":
+		return a.ledgerWorkReady(store, w, w.positional[1] == "next")
 	}
 	action := ledger.WorkAction(w.positional[1])
-	req := ledger.WorkRequest{Action: action, Reason: w.value("--reason"), DependsOn: w.value("--on"), UtteranceID: w.value("--utterance"),
+	if len(w.positional) == 2 && !workActions[action] {
+		return a.ledgerWorkShow(store, w, w.positional[1])
+	}
+	req := ledger.WorkRequest{Action: action, Reason: w.value("--reason"), DependsOn: w.value("--on"), UtteranceID: w.value("--utterance"), LogType: w.value("--type"),
 		Handoff: ledger.Handoff{Done: w.values["--done"], Remaining: w.values["--remaining"], Decisions: w.values["--decisions"], Uncertain: w.values["--uncertain"]}}
+	note := action == ledger.WorkComment || action == ledger.WorkLog
 	switch {
 	case action == ledger.WorkAdd && len(w.positional) >= 4:
 		req.ClauseID, req.Text = w.positional[2], strings.Join(w.positional[3:], " ")
-	case action != ledger.WorkAdd && len(w.positional) == 3:
+	case note && len(w.positional) >= 4:
+		req.ItemID, req.Text = w.positional[2], strings.Join(w.positional[3:], " ")
+	case action != ledger.WorkAdd && !note && len(w.positional) == 3:
 		req.ItemID = w.positional[2]
 	default:
 		return fmt.Errorf("%s", ledgerWorkUsage)
@@ -118,6 +130,12 @@ func (a *App) ledgerCriticalPath(store *ledger.Store, w ledgerWriteArgs) error {
 	return nil
 }
 
+var workActions = map[ledger.WorkAction]bool{
+	ledger.WorkAdd: true, ledger.WorkClaim: true, ledger.WorkBlock: true, ledger.WorkUnblock: true, ledger.WorkSubmit: true,
+	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkDep: true,
+	ledger.WorkComment: true, ledger.WorkLog: true,
+}
+
 func workLine(item ledger.WorkItem) string {
 	line := fmt.Sprintf("%s [%s] on %s: %s", item.ID, item.State, item.ClauseID, item.Text)
 	if item.Assignee != "" {
@@ -135,5 +153,20 @@ func workLine(item ledger.WorkItem) string {
 	if h := item.Handoff; h != nil {
 		line += fmt.Sprintf(" handoff from %s: done %q, remaining %q, decisions %q, uncertain %q", h.By, h.Done, h.Remaining, h.Decisions, h.Uncertain)
 	}
+	if comments, logs := workNoteCounts(item); comments+logs > 0 {
+		line += fmt.Sprintf(" (%d comments, %d log entries)", comments, logs)
+	}
 	return line
+}
+
+func workNoteCounts(item ledger.WorkItem) (comments, logs int) {
+	for _, e := range item.Timeline {
+		switch e.Kind {
+		case "comment":
+			comments++
+		case "log":
+			logs++
+		}
+	}
+	return comments, logs
 }

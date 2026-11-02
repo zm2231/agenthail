@@ -216,11 +216,13 @@ func (b *Board) dispatch(event Event) error {
 	case EventWaiver:
 		err = b.gates.applyWaiver(event.Payload)
 	case EventWorkItem:
-		err = b.applyWorkItem(event.Payload)
+		err = b.applyWorkItem(event)
 	case EventWorkItemState:
-		err = b.applyWorkItemState(event.Payload)
+		err = b.applyWorkItemState(event)
 	case EventWorkItemDep:
-		err = b.applyWorkDep(event.Payload)
+		err = b.applyWorkDep(event)
+	case EventWorkComment, EventWorkLog:
+		err = b.applyWorkNote(event)
 	case EventCutWithdrawn:
 		err = b.applyCutWithdrawn(event.Payload)
 	case EventReclassified:

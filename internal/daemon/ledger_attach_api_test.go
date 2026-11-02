@@ -84,6 +84,17 @@ func TestLedgerAPIWorkItemsMoveThroughTheDaemon(t *testing.T) {
 	if code != http.StatusConflict || !strings.Contains(body, "submit needs it in_progress") {
 		t.Fatalf("done before claim: status=%d body=%s", code, body)
 	}
+	code, body = ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkLog, ItemID: "widget-W1", Text: "started"}, nil)
+	if code != http.StatusConflict || !strings.Contains(body, "has no assignee") {
+		t.Fatalf("log before claim: status=%d body=%s", code, body)
+	}
+	var commented ledger.WorkResult
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkComment, ItemID: "widget-W1", Text: "check the migration"}, &commented); code != http.StatusOK || commented.Readback != "intent ledger: comment on widget-W1" {
+		t.Fatalf("comment status=%d body=%s", code, body)
+	}
+	if n := len(commented.Item.Timeline); n != 2 || commented.Item.Timeline[1].Kind != "comment" {
+		t.Fatalf("comment result timeline = %+v", commented.Item.Timeline)
+	}
 }
 
 func TestLedgerAPIRefusesUnprovenClausesWithAConflict(t *testing.T) {

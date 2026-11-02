@@ -179,6 +179,12 @@ Intent ledger:
   ledger work handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
                                  Hand off a claimed item with its state; it reopens for the next session
   ledger work critical-path      Longest chain of unfinished work items
+  ledger work <item_id>          Show one work item with its timeline
+  ledger work ready | next       Open items whose dependencies are done, most-unblocking first; next is the top one
+  ledger work comment <item_id> "<text>"
+                                 Comment on a work item from any session
+  ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
+                                 Add to the running log of an item you hold
   ledger own <clause_id> [--session <id>]
                                  Take ownership of a clause (or give it to a session)
   ledger progress <clause_id> --ref <commit|file|PR|evidence>

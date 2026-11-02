@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -29,6 +30,8 @@ const (
 	WorkReopen  WorkAction = "reopen"
 	WorkHandoff WorkAction = "handoff"
 	WorkDep     WorkAction = "dep"
+	WorkComment WorkAction = "comment"
+	WorkLog     WorkAction = "log"
 )
 
 type Handoff struct {
@@ -52,8 +55,9 @@ type WorkItem struct {
 	CreatedBy string    `json:"createdBy"`
 	Reason    string    `json:"reason,omitempty"`
 	Reviewer  string    `json:"reviewer,omitempty"`
-	DependsOn []string  `json:"dependsOn,omitempty"`
-	Handoff   *Handoff  `json:"handoff,omitempty"`
+	DependsOn []string    `json:"dependsOn,omitempty"`
+	Handoff   *Handoff    `json:"handoff,omitempty"`
+	Timeline  []WorkEntry `json:"timeline,omitempty"`
 }
 
 type WorkRequest struct {
@@ -67,6 +71,7 @@ type WorkRequest struct {
 	DependsOn   string     `json:"dependsOn,omitempty"`
 	UtteranceID string     `json:"utteranceId,omitempty"`
 	Handoff     Handoff    `json:"handoff,omitempty"`
+	LogType     string     `json:"logType,omitempty"`
 }
 
 type WorkResult struct {
@@ -108,12 +113,13 @@ func joinStates(states []WorkState) string {
 	return strings.Join(names, " or ")
 }
 
-func (b *Board) applyWorkItem(data []byte) error {
+func (b *Board) applyWorkItem(event Event) error {
 	var p WorkItemPayload
-	if err := json.Unmarshal(data, &p); err != nil {
+	if err := json.Unmarshal(event.Payload, &p); err != nil {
 		return err
 	}
-	item := &WorkItem{ID: p.ItemID, ClauseID: p.ClauseID, Text: p.Text, State: WorkOpen, CreatedBy: p.CreatedBy}
+	item := &WorkItem{ID: p.ItemID, ClauseID: p.ClauseID, Text: p.Text, State: WorkOpen, CreatedBy: p.CreatedBy,
+		Timeline: []WorkEntry{{At: event.CreatedAt, Actor: p.CreatedBy, Kind: "created", Text: p.Text, State: WorkOpen}}}
 	b.workItems[p.ItemID] = item
 	if c := b.clauses[p.ClauseID]; c != nil {
 		c.WorkItems = append(c.WorkItems, item)
@@ -121,9 +127,9 @@ func (b *Board) applyWorkItem(data []byte) error {
 	return nil
 }
 
-func (b *Board) applyWorkItemState(data []byte) error {
+func (b *Board) applyWorkItemState(event Event) error {
 	var p WorkItemStatePayload
-	if err := json.Unmarshal(data, &p); err != nil {
+	if err := json.Unmarshal(event.Payload, &p); err != nil {
 		return err
 	}
 	item := b.workItems[p.ItemID]
@@ -137,16 +143,32 @@ func (b *Board) applyWorkItemState(data []byte) error {
 	if p.Handoff != nil {
 		item.Handoff = p.Handoff
 	}
+	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "state", State: p.ToState, Text: stateEntryText(p)})
 	return nil
 }
 
-func (b *Board) applyWorkDep(data []byte) error {
+func stateEntryText(p WorkItemStatePayload) string {
+	var parts []string
+	if p.Reason != "" {
+		parts = append(parts, p.Reason)
+	}
+	if p.Reviewer != "" {
+		parts = append(parts, "reviewed by "+p.Reviewer)
+	}
+	if h := p.Handoff; h != nil {
+		parts = append(parts, fmt.Sprintf("handoff: done %q, remaining %q, decisions %q, uncertain %q", h.Done, h.Remaining, h.Decisions, h.Uncertain))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (b *Board) applyWorkDep(event Event) error {
 	var p WorkDepPayload
-	if err := json.Unmarshal(data, &p); err != nil {
+	if err := json.Unmarshal(event.Payload, &p); err != nil {
 		return err
 	}
 	if item := b.workItems[p.ItemID]; item != nil {
 		item.DependsOn = append(item.DependsOn, p.DependsOn)
+		item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "dep", Text: "waits on " + p.DependsOn})
 	}
 	return nil
 }
@@ -156,7 +178,7 @@ func (b *Board) WorkItems() []WorkItem {
 	defer b.mu.RUnlock()
 	out := make([]WorkItem, 0, len(b.workItems))
 	for _, item := range b.workItems {
-		out = append(out, *item)
+		out = append(out, item.snapshot())
 	}
 	return out
 }
