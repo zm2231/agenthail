@@ -470,7 +470,6 @@ CREATE TABLE IF NOT EXISTS ledger_events (
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ledger_events_project ON ledger_events(project_key, seq);
-CREATE UNIQUE INDEX IF NOT EXISTS ledger_events_dedup ON ledger_events(project_key, message_id) WHERE message_id != '';
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
 	enabled INTEGER NOT NULL DEFAULT 0,

@@ -5,42 +5,18 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
-	_ "modernc.org/sqlite"
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 )
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:?_pragma=foreign_keys(1)")
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
-	for _, stmt := range []string{
-		`CREATE TABLE ledger_events (
-			seq INTEGER PRIMARY KEY AUTOINCREMENT,
-			project_key TEXT NOT NULL,
-			type TEXT NOT NULL,
-			payload BLOB NOT NULL,
-			actor_session_id TEXT NOT NULL DEFAULT '',
-			actor_host_id TEXT NOT NULL DEFAULT '',
-			owner_seq INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX ledger_events_project ON ledger_events(project_key, seq)`,
-		`CREATE TABLE ledger_state (
-			project_key TEXT PRIMARY KEY,
-			enabled INTEGER NOT NULL DEFAULT 0,
-			owner_host_id TEXT NOT NULL DEFAULT '',
-			owner_cursor INTEGER NOT NULL DEFAULT 0,
-			deadline_ms INTEGER NOT NULL DEFAULT 0,
-			freeze_version TEXT NOT NULL DEFAULT ''
-		)`,
-	} {
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return db
+	t.Cleanup(func() { r.Close() })
+	return r.WriteDB()
 }
 
 func TestEnableDisable(t *testing.T) {
