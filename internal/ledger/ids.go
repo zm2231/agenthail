@@ -42,6 +42,9 @@ type idIssuer struct {
 
 func (ids *idIssuer) next(typ EventType, prefix string) (string, error) {
 	if ids.issued == nil {
+		if err := plannedHere(ids.q, ids.projectKey); err != nil {
+			return "", err
+		}
 		ids.issued = map[EventType]int{}
 	}
 	var count int
@@ -53,7 +56,7 @@ func (ids *idIssuer) next(typ EventType, prefix string) (string, error) {
 }
 
 func loadEvents(q querier, projectKey string) ([]Event, error) {
-	rows, err := q.Query(`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? ORDER BY seq`, projectKey)
+	rows, err := q.Query(`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? ORDER BY owner_seq=0, owner_seq, seq`, projectKey)
 	if err != nil {
 		return nil, err
 	}

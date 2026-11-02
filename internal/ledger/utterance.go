@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -56,7 +55,7 @@ func (s *Store) RecordUtterance(u Utterance) (Event, bool, error) {
 	if u.At.IsZero() {
 		u.At = time.Now()
 	}
-	data, err := json.Marshal(UtterancePayload{
+	data, err := fitUtterance(UtterancePayload{
 		Text:        u.Text,
 		UtteranceID: u.Ref,
 		SessionID:   u.SpeakerID,

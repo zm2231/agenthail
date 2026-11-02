@@ -43,14 +43,15 @@ type Clause struct {
 }
 
 type UtteranceView struct {
-	ID         string   `json:"id"`
-	Text       string   `json:"text"`
-	SpeakerID  string   `json:"speakerId"`
-	TargetID   string   `json:"targetId"`
-	CapturedBy string   `json:"capturedBy"`
-	At         string   `json:"ts"`
-	GoalIDs    []string `json:"goalIds,omitempty"`
-	Attached   bool     `json:"attached"`
+	ID         string      `json:"id"`
+	Text       string      `json:"text"`
+	SpeakerID  string      `json:"speakerId"`
+	TargetID   string      `json:"targetId"`
+	CapturedBy string      `json:"capturedBy"`
+	At         string      `json:"ts"`
+	GoalIDs    []string    `json:"goalIds,omitempty"`
+	Attached   bool        `json:"attached"`
+	Truncated  *Truncation `json:"truncated,omitempty"`
 }
 
 type Cut struct {
@@ -337,11 +338,14 @@ func (b *Board) Rebuild(events []Event) error {
 	}
 	b.replaying = true
 	defer func() { b.replaying = false }()
+	var last int64
 	for _, e := range events {
 		if err := b.apply(e); err != nil {
 			return err
 		}
+		last = max(last, e.Seq)
 	}
+	b.applied = last
 	return nil
 }
 

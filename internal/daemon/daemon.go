@@ -90,6 +90,8 @@ type Daemon struct {
 	catalogIdentities *catalogIdentityCache
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
+	ledgerSync        ledgerSyncHealth
+	ledgerClaims      ledgerClaims
 	checks            checkerRunner
 	g2                *g2Counter
 	delivered         deliveredWords

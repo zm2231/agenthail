@@ -109,13 +109,18 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at`
+const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at`
 
-// insertEvent returns Seq 0 when verb is INSERT OR IGNORE and the ref already exists.
+const MaxEventBytes = 4 << 20
+
+// insertEvent returns Seq 0 when verb is INSERT OR IGNORE and the ref or origin already exists.
 func insertEvent(db execer, verb string, event Event) (Event, error) {
+	if len(event.Payload) > MaxEventBytes {
+		return Event{}, refuse("a ledger event holds at most %d bytes; this %s holds %d", MaxEventBytes, event.Type, len(event.Payload))
+	}
 	result, err := db.Exec(
-		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq,
+		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq, event.OriginSeq,
 		event.Ref, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	)
 	if err != nil {
@@ -127,13 +132,19 @@ func insertEvent(db execer, verb string, event Event) (Event, error) {
 	if event.Seq, err = result.LastInsertId(); err != nil {
 		return Event{}, err
 	}
+	if event.OriginSeq == 0 {
+		if _, err := db.Exec(`UPDATE ledger_events SET actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),''), origin_seq=seq WHERE seq=?`, event.Seq); err != nil {
+			return Event{}, err
+		}
+		event.OriginSeq = event.Seq
+	}
 	return event, nil
 }
 
 func scanEvent(row rowScanner) (Event, error) {
 	var e Event
 	var typ, ts string
-	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.Ref, &ts); err != nil {
+	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.OriginSeq, &e.Ref, &ts); err != nil {
 		return Event{}, err
 	}
 	e.Type = EventType(typ)

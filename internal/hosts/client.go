@@ -26,9 +26,10 @@ const (
 	// FederationVersion names what one daemon serves another beyond the
 	// client API: the session-options launch catalog, history filtered by
 	// session, each host's project coordinators with the actions that set
-	// and clear them, and whether a resolve match identifies its session. A
-	// host outside this range is reported as needing an update.
-	FederationVersion = 4
+	// and clear them, whether a resolve match identifies its session, and
+	// ledger sync (ownership, replay and pull). A host outside this range is
+	// reported as needing an update.
+	FederationVersion = 5
 	ResponseHeader    = "Agenthail-Host"
 	responseBodyLimit = 32 << 20
 )

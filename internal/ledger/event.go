@@ -109,6 +109,7 @@ type Event struct {
 	ActorSessionID string
 	ActorHostID    string
 	OwnerSeq       int64
+	OriginSeq      int64
 	Ref            string
 	CreatedAt      time.Time
 }

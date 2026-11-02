@@ -179,6 +179,8 @@ Intent ledger:
   ledger work handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
                                  Hand off a claimed item with its state; it reopens for the next session
   ledger work critical-path      Longest chain of unfinished work items
+  ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
+                                 syncs its log back; without a host, show the owner, sync cursor and replay backlog
   ledger work <item_id>          Show one work item with its timeline
   ledger work ready | next       Open items whose dependencies are done, most-unblocking first; next is the top one
   ledger work comment <item_id> "<text>"

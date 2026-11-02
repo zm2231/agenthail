@@ -27,7 +27,12 @@ func (s *Store) lockBoard(projectKey string) (*Board, func(), error) {
 	s.cache.mu.Lock()
 	board := s.cache.boards[projectKey]
 	if board == nil {
-		board = NewBoard()
+		loaded, err := loadBoard(s.read, projectKey)
+		if err != nil {
+			s.cache.mu.Unlock()
+			return nil, nil, err
+		}
+		board = loaded
 		s.cache.boards[projectKey] = board
 	}
 	if err := s.catchUp(board, projectKey); err != nil {

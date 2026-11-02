@@ -1,14 +1,21 @@
 package ledger
 
 type UtterancePayload struct {
-	Text        string `json:"text"`
-	UtteranceID string `json:"utteranceId"`
-	SessionID   string `json:"sessionId"`
-	TargetID    string `json:"targetId"`
-	Surface     string `json:"surface"`
-	QuotedSpan  string `json:"quotedSpan,omitempty"`
-	CapturedBy  string `json:"capturedBy"`
-	TS          string `json:"ts"`
+	Text        string      `json:"text"`
+	UtteranceID string      `json:"utteranceId"`
+	SessionID   string      `json:"sessionId"`
+	TargetID    string      `json:"targetId"`
+	Surface     string      `json:"surface"`
+	QuotedSpan  string      `json:"quotedSpan,omitempty"`
+	CapturedBy  string      `json:"capturedBy"`
+	TS          string      `json:"ts"`
+	Truncated   *Truncation `json:"truncated,omitempty"`
+}
+
+type Truncation struct {
+	OriginalBytes int    `json:"originalBytes"`
+	KeptBytes     int    `json:"keptBytes"`
+	SHA256        string `json:"sha256"`
 }
 
 type GoalPayload struct {
