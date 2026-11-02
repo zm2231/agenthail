@@ -31,6 +31,7 @@ type ledgerReplayResponse struct {
 type ledgerEventsResponse struct {
 	Events []ledger.WireEvent `json:"events"`
 	Head   int64              `json:"head"`
+	Digest *ledger.LogDigest  `json:"digest,omitempty"`
 }
 
 type ledgerSyncView struct {
@@ -44,6 +45,10 @@ type ledgerSyncView struct {
 	Unreplayed int        `json:"unreplayed"`
 	SyncedAt   *time.Time `json:"syncedAt,omitempty"`
 	LastError  string     `json:"lastError,omitempty"`
+	Log        string     `json:"log"`
+	LogThrough int64      `json:"logThrough,omitempty"`
+	FirstDiff  int64      `json:"firstDifference,omitempty"`
+	LogError   string     `json:"logError,omitempty"`
 }
 
 type ledgerOwnerRequest struct {
@@ -66,6 +71,7 @@ func (d *Daemon) registerLedgerSyncRoutes(mux *http.ServeMux, dashboard *dashboa
 	mux.HandleFunc("/api/v1/ledger/sync/abort", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncAbortHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncReplayHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncEventsHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/digest", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncDigestHandler)))
 	mux.HandleFunc("/api/v1/ledger/owner", d.apiV1Guard(dashboard, "control", d.apiLedgerOwnerHandler))
 	mux.HandleFunc("/api/v1/ledger/sync/status", d.apiV1Guard(dashboard, "read", d.apiLedgerSyncStatusHandler))
 }
@@ -121,7 +127,20 @@ func (d *Daemon) apiLedgerSyncEventsHandler(w http.ResponseWriter, r *http.Reque
 		writeLedgerError(w, err)
 		return
 	}
-	writeVerbatimJSON(w, http.StatusOK, ledgerEventsResponse{Events: ledger.ToWire(events), Head: head})
+	page := ledgerEventsResponse{Events: ledger.ToWire(events), Head: head}
+	if len(events) < limit {
+		through := after
+		if len(events) > 0 {
+			through = events[len(events)-1].Seq
+		}
+		digest, err := d.ledgerStore().LogDigest(key, through)
+		if err != nil {
+			writeLedgerError(w, err)
+			return
+		}
+		page.Digest = &digest
+	}
+	writeVerbatimJSON(w, http.StatusOK, page)
 }
 
 func (d *Daemon) apiLedgerSyncStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +168,7 @@ func (d *Daemon) ledgerSyncViews() ([]ledgerSyncView, error) {
 		if err != nil {
 			return nil, err
 		}
-		view := ledgerSyncView{ProjectKey: key, Owner: status.Owner, OwnerName: status.Owner, OwnerState: "not paired", Cursor: status.Cursor, Unreplayed: status.Unreplayed}
+		view := ledgerSyncView{ProjectKey: key, Owner: status.Owner, OwnerName: status.Owner, OwnerState: "not paired", Cursor: status.Cursor, Unreplayed: status.Unreplayed, Log: "unchecked"}
 		if host, ok := d.pairedHost(status.Owner); ok {
 			view.OwnerName = host.record.Name
 			view.OwnerState, _ = host.status()
@@ -160,6 +179,15 @@ func (d *Daemon) ledgerSyncViews() ([]ledgerSyncView, error) {
 				synced := last.SyncedAt
 				view.SyncedAt, view.OwnerHead = &synced, last.Head
 				view.Lag = max(0, last.Head-status.Cursor)
+			}
+			switch check := last.Check; {
+			case check.At.IsZero():
+			case check.Error != "":
+				view.LogError = check.Error
+			case check.Match:
+				view.Log, view.LogThrough = "match", check.Through
+			default:
+				view.Log, view.LogThrough, view.FirstDiff = "mismatch", check.Through, check.FirstDifference
 			}
 		}
 		views = append(views, view)

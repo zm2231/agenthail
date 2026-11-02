@@ -22,10 +22,26 @@ type ledgerSyncHealth struct {
 	Unreplayed int        `json:"unreplayed"`
 	SyncedAt   *time.Time `json:"syncedAt,omitempty"`
 	LastError  string     `json:"lastError,omitempty"`
+	Log        string     `json:"log"`
+	LogThrough int64      `json:"logThrough,omitempty"`
+	FirstDiff  int64      `json:"firstDifference,omitempty"`
+	LogError   string     `json:"logError,omitempty"`
 }
 
 func (h ledgerSyncHealth) problem() bool {
-	return h.OwnerState != "connected" || h.LastError != "" || h.SyncedAt == nil
+	return h.OwnerState != "connected" || h.LastError != "" || h.SyncedAt == nil || h.Log == "mismatch" || h.LogError != ""
+}
+
+func (h ledgerSyncHealth) logLine() string {
+	switch {
+	case h.LogError != "":
+		return "; log check failed: " + h.LogError
+	case h.Log == "match":
+		return fmt.Sprintf("; log matches the owner's through owner position %d", h.LogThrough)
+	case h.Log == "mismatch":
+		return fmt.Sprintf("; LOG DIFFERS from the owner's: first difference at owner position %d (checked through %d)", h.FirstDiff, h.LogThrough)
+	}
+	return "; log not checked yet"
 }
 
 func (h ledgerSyncHealth) String() string {
@@ -35,7 +51,7 @@ func (h ledgerSyncHealth) String() string {
 	} else {
 		line += ", never synced since the daemon started"
 	}
-	line += fmt.Sprintf(", %d local events waiting to replay", h.Unreplayed)
+	line += fmt.Sprintf(", %d local events waiting to replay", h.Unreplayed) + h.logLine()
 	if h.LastError != "" {
 		line += "; last error: " + h.LastError
 	}

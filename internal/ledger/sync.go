@@ -306,7 +306,7 @@ func (s *Store) ApplyPulled(projectKey, owner string, events []Event) error {
 				continue
 			}
 			pulled := Event{ProjectKey: projectKey, Type: e.Type, Payload: e.Payload, ActorSessionID: e.ActorSessionID, ActorHostID: e.ActorHostID,
-				OwnerSeq: e.Seq, OriginSeq: e.OriginSeq, Ref: e.Ref, CreatedAt: e.CreatedAt}
+				OwnerSeq: e.Seq, OriginSeq: e.OriginSeq, Ref: e.Ref, CreatedAt: e.CreatedAt, Stamp: e.Stamp}
 			inserted, err := insertEvent(tx, `INSERT OR IGNORE`, pulled)
 			if err != nil {
 				return err

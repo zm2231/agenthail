@@ -30,6 +30,18 @@ type ledgerSyncResult struct {
 	Error    string
 	SyncedAt time.Time
 	Head     int64
+	Check    ledgerLogCheck
+}
+
+func (h *ledgerSyncHealth) recordCheck(key string, check ledgerLogCheck) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.byProject == nil {
+		h.byProject = map[string]ledgerSyncResult{}
+	}
+	result := h.byProject[key]
+	result.Check = check
+	h.byProject[key] = result
 }
 
 func (h *ledgerSyncHealth) record(key string, head int64, err error) {
@@ -146,6 +158,7 @@ func (d *Daemon) pullLedger(ctx context.Context, host *pairedHost, key string) (
 			return 0, err
 		}
 		if len(page.Events) < ledgerPullPage {
+			d.ledgerSync.recordCheck(key, d.checkLedgerLog(ctx, host, key, page.Digest))
 			return page.Head, nil
 		}
 	}
