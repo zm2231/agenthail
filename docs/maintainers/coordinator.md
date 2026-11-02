@@ -79,6 +79,13 @@ A Codex coordinator starts without a name or permission mode, which Codex thread
 
 Context growth is left to the agent's own compaction.
 
+## Stuck sessions
+
+A session that stops where an agent could help is told to one agent: its project's coordinator, or, when the project has none or the stuck session is the coordinator, the session that started it (`session_origins`). With neither, only the person hears. The person is notified in every case.
+
+- **Prompts.** `announceWaiting` resolves the request and queues a notice naming it and `agenthail answer <session> <allow|deny|"answer"> --request <id>`. The notice's delivery key is derived from the session and question, so it queues once; `withdrawWaitingNow` cancels it while still pending. A coordinator with no conversation is started by it through `coordinator.Service.Deliver`; a paired host's coordinator gets it through `coordinator-send`.
+- **Goals.** Every 30 seconds `sweepStoppedGoals` reads the goal of each goal-capable session active in the last day and since its last read, skipping sessions a `goal_completed` relay already reports on. A `blocked`, `usageLimited` or `budgetLimited` goal queues a notice keyed by session, goal, status and update time, so each stop is told once and a stop after resuming is told again.
+
 ## Limits
 
 A message that starts a new conversation loses its sender label, because the conversation is created with that message as its prompt.

@@ -13,6 +13,7 @@ import (
 
 type noticeFixture struct {
 	d       *Daemon
+	fake    *daemonSurface
 	reg     *registry.Registry
 	repo    string
 	worker  surface.Session
@@ -30,7 +31,7 @@ func newNoticeFixture(t *testing.T) noticeFixture {
 	repo := widgetRepo(t, "https://github.com/example/widget.git")
 	sessions := map[string]surface.Session{}
 	for _, id := range []string{"worker", "lead", "spawner"} {
-		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, Source: "vscode", Transport: "desktop", Cwd: repo, LastActive: time.Now()}
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: repo, LastActive: time.Now()}
 		if err := reg.RegisterSession(session); err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +47,7 @@ func newNoticeFixture(t *testing.T) noticeFixture {
 	d := newTestDaemon(t, reg, []surface.Surface{fake})
 	waiting := surface.Waiting{Kind: surface.WaitingApproval, ID: "approve-1", Answerable: true}
 	request := surface.Request{ID: "approve-1", Kind: surface.WaitingApproval, Tool: "Bash", Description: "rm -rf build"}
-	return noticeFixture{d: d, reg: reg, repo: repo, worker: sessions["worker"], request: request, waiting: waiting}
+	return noticeFixture{d: d, fake: fake, reg: reg, repo: repo, worker: sessions["worker"], request: request, waiting: waiting}
 }
 
 func (f noticeFixture) setLead(t *testing.T, sessionID string) {

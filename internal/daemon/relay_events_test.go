@@ -168,7 +168,7 @@ func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) 
 		base.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: id, Reply: &surface.ReplyResult{Text: id, Done: true}}
 		d.syncRelays(context.Background(), fake, &from)
 	}
-	for _, status := range []string{surface.GoalStatusPaused, surface.GoalStatusBlocked, surface.GoalStatusBudgetLimited, "unknown"} {
+	for _, status := range []string{surface.GoalStatusPaused, surface.GoalStatusActive, "unknown"} {
 		fake.goal.Status = status
 		d.syncRelays(context.Background(), fake, &from)
 		if r.QueueCount(to.ID) != 0 {

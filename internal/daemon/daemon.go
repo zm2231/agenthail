@@ -113,6 +113,7 @@ type Daemon struct {
 	federation               *federation
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
+	goalSweep                *goalSweeper
 	// limitResumeEnabled, when set, replaces the host's resume after limit
 	// setting.
 	limitResumeEnabled func() bool
@@ -177,6 +178,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
 		limitResumes:      newLimitResumer(),
+		goalSweep:         newGoalSweeper(),
 		g2:                newG2Counter(time.Now()),
 	}
 	d.sources.prompts = d.backfillPrompt
@@ -307,6 +309,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
+	go d.runGoalSweeps(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})

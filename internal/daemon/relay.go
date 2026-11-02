@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"syscall"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -148,6 +147,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 		}
 		events, err := d.Registry.PendingRelayEvents(route)
 		goalKey := route.LastGoalKey
+		var stopped *surface.GoalState
 		if err == nil && route.Handoff == registry.HandoffGoalCompleted && len(events) > 0 {
 			if captureErr != nil {
 				err = captureErr
@@ -159,7 +159,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 				cancel()
 				if goalErr != nil {
 					err = fmt.Errorf("goal state unavailable: %w", goalErr)
-				} else if goal == nil || goal.Status != surface.GoalStatusComplete || goal.CreatedAt.IsZero() {
+				} else if goal == nil || goal.Status != surface.GoalStatusComplete && !goalStopped(goal.Status) || goal.CreatedAt.IsZero() {
 					err = fmt.Errorf("waiting for explicit goal completion")
 				} else {
 					observation, observeErr := observed.get(ctx)
@@ -172,12 +172,18 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 					if err == nil && (latest.CompletedAt.IsZero() || latest.CompletedAt.Before(goal.CreatedAt)) {
 						err = fmt.Errorf("waiting for a completion timestamp within this goal")
 					}
-					goalKey = goal.CreatedAt.UTC().Format(time.RFC3339Nano) + ":" + goal.Objective
+					goalKey = goalKeyOf(goal)
 					if err == nil {
-						if goalKey == route.LastGoalKey {
+						switch {
+						case goalKey == route.LastGoalKey && goalStopped(goal.Status):
+							err = fmt.Errorf("the goal is %s; waiting for it to resume", goal.Status)
+						case goalKey == route.LastGoalKey:
 							err = fmt.Errorf("waiting for a new completed goal")
-						} else {
+						default:
 							events = events[len(events)-1:]
+							if goalStopped(goal.Status) {
+								stopped = goal
+							}
 						}
 					}
 				}
@@ -209,9 +215,16 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 					if len(text) > maxRelayText {
 						text = text[:maxRelayText] + "\n[relay text truncated by agenthail]"
 					}
+					if stopped != nil {
+						text = goalStopNote(d.answerTarget(from.ID), stopped) + "\n\n" + text
+					}
 					payload = fmt.Sprintf("[agenthail relay hops=%d id=%d turn=%s source=%s] %s", event.RelayHops+1, route.ID, event.CompletionID, d.resolveDisplay(from.ID), text)
 				}
-				_, err = d.Registry.ConsumeRelay(route, event, payload, busy, goalKey)
+				if stopped != nil {
+					_, err = d.Registry.ConsumeRelayReport(route, event, payload, busy, goalKey)
+				} else {
+					_, err = d.Registry.ConsumeRelay(route, event, payload, busy, goalKey)
+				}
 				if err != nil {
 					break
 				}
