@@ -28,7 +28,6 @@ func TestAnImplicitProjectsCapturedWordsCanBeAttached(t *testing.T) {
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d.discoverCatalog(context.Background())
 	const key = "repo:github.com/example/implicit"
 	if records, err := r.ListProjects(); err != nil || len(records) != 0 {
 		t.Fatalf("the fixture must have no project rows: %+v %v", records, err)
@@ -46,5 +45,19 @@ func TestAnImplicitProjectsCapturedWordsCanBeAttached(t *testing.T) {
 	}
 	if code, _ := ledgerWrite(t, handler, "/api/v1/ledger/attach", ledger.AttachRequest{ProjectKey: "repo:github.com/example/nowhere", SessionID: session.ID, UtteranceID: resp.Ref, As: ledger.AsConversation}, nil); code != http.StatusNotFound {
 		t.Fatalf("a key no catalog project has was accepted: %d", code)
+	}
+
+	outside := surface.Session{ID: "outside", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "outside", Cwd: t.TempDir(), Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
+	fake.sessions[outside.ID] = outside
+	if err := r.RegisterSession(outside); err != nil {
+		t.Fatal(err)
+	}
+	var goal ledgerGoalResponse
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: key, SessionID: outside.ID, Name: "Importer"}, &goal); code != http.StatusNotFound {
+		t.Fatalf("a session outside the project wrote before the catalog knew it: %d %s", code, body)
+	}
+	d.discoverCatalog(context.Background())
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: key, SessionID: outside.ID, Name: "Importer"}, &goal); code != http.StatusOK {
+		t.Fatalf("a catalog project's key from another session: %d %s", code, body)
 	}
 }

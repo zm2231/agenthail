@@ -48,32 +48,44 @@ func (d *Daemon) knownLedgerSession(w http.ResponseWriter, sessionID string) boo
 	return true
 }
 
-func (d *Daemon) knownLedgerProject(w http.ResponseWriter, key string) bool {
+func (d *Daemon) knownLedgerProject(w http.ResponseWriter, key, sessionID string) bool {
 	if key == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectKey is required.")
 		return false
 	}
-	projects, err := d.Registry.ListProjects()
+	known, err := d.ledgerProjectKnown(key, sessionID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "projects_unavailable", err.Error())
 		return false
+	}
+	if !known {
+		writeAPIError(w, http.StatusNotFound, "project_not_found", "No project "+key+" in this Agenthail; see agenthail projects.")
+	}
+	return known
+}
+
+func (d *Daemon) ledgerProjectKnown(key, sessionID string) (bool, error) {
+	projects, err := d.Registry.ListProjects()
+	if err != nil {
+		return false, err
 	}
 	for _, p := range projects {
 		if p.Key == key {
-			return true
+			return true, nil
 		}
 	}
-	// A repository with no added project is an implicit project, known by the catalog that capture also resolves through.
-	implicit, err := d.Registry.LocalCatalogProjectKey(key)
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "projects_unavailable", err.Error())
-		return false
+	if session, err := d.Registry.Session(sessionID); err == nil {
+		targets, _, err := d.ledgerTargets(d.ledgerStore(), *session)
+		if err != nil {
+			return false, err
+		}
+		for _, target := range targets {
+			if target.key == key {
+				return true, nil
+			}
+		}
 	}
-	if implicit {
-		return true
-	}
-	writeAPIError(w, http.StatusNotFound, "project_not_found", "No project "+key+" in this Agenthail; see agenthail projects.")
-	return false
+	return d.Registry.LocalCatalogProjectKey(key)
 }
 
 func writeLedgerError(w http.ResponseWriter, err error) {
@@ -87,7 +99,7 @@ func writeLedgerError(w http.ResponseWriter, err error) {
 
 func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledgerGoalRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	goal, created, err := d.ledgerStore().EnsureGoal(req.ProjectKey, req.Name, req.SessionID)
@@ -100,7 +112,7 @@ func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.WorkRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	result, err := d.ledgerStore().Work(req, time.Now())
@@ -113,7 +125,7 @@ func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
 
 func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.AttachRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	result, err := d.ledgerStore().Attach(req)
