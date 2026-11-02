@@ -35,7 +35,12 @@ func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
 		writeLedgerError(w, err)
 		return
 	}
-	adopting, err := store.HoldsHistory(key)
+	moves, err := store.HoldsHistory(key)
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	adopting, err := store.HoldsUnsharedIDs(key)
 	if err != nil {
 		writeLedgerError(w, err)
 		return
@@ -55,7 +60,7 @@ func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
 		writeLedgerError(w, err)
 		return
 	}
-	result := ledgerOwnerResponse{ProjectKey: key, Owner: host.record.ID, OwnerName: host.record.Name, Adopted: adopting}
+	result := ledgerOwnerResponse{ProjectKey: key, Owner: host.record.ID, OwnerName: host.record.Name, Adopted: moves}
 	var refusal ledgerOwnerRefusal
 	switch err := d.confirmLedgerOwnerLocked(r.Context(), host, key); {
 	case err == nil:
@@ -77,7 +82,11 @@ func (d *Daemon) abortLedgerClaim(ctx context.Context, host *pairedHost, key str
 }
 
 func (d *Daemon) confirmLedgerOwnerLocked(ctx context.Context, host *pairedHost, key string) error {
-	err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/ledger/sync/confirm", nil, ledgerClaimRequest{ProjectKey: key}, nil)
+	adopting, err := d.ledgerStore().HoldsUnsharedIDs(key)
+	if err != nil {
+		return err
+	}
+	err = d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/ledger/sync/confirm", nil, ledgerClaimRequest{ProjectKey: key, Adopting: adopting}, nil)
 	var status hosts.StatusError
 	switch {
 	case err == nil:
@@ -106,7 +115,7 @@ func (d *Daemon) apiLedgerSyncClaimHandler(w http.ResponseWriter, r *http.Reques
 		writeLedgerError(w, err)
 		return
 	}
-	if holder, ok := d.ledgerClaims.reserve(req.ProjectKey, requester, req.Adopting); !ok {
+	if holder, ok := d.ledgerClaims.reserve(req.ProjectKey, requester); !ok {
 		name := holder.requester
 		if other, found := d.pairedHost(holder.requester); found {
 			name = other.record.Name
@@ -123,15 +132,11 @@ func (d *Daemon) apiLedgerSyncConfirmHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	requester, _ := requestingHost(r.Context())
-	adopting := true
-	if claim, ok := d.ledgerClaims.lookup(req.ProjectKey); ok {
-		if claim.requester != requester {
-			writeAPIError(w, http.StatusConflict, "refused", "Another host's claim on "+req.ProjectKey+" is pending here.")
-			return
-		}
-		adopting = claim.adopting
+	if claim, ok := d.ledgerClaims.lookup(req.ProjectKey); ok && claim.requester != requester {
+		writeAPIError(w, http.StatusConflict, "refused", "Another host's claim on "+req.ProjectKey+" is pending here.")
+		return
 	}
-	if err := d.ledgerStore().ClaimOwnership(req.ProjectKey, requester, adopting); err != nil {
+	if err := d.ledgerStore().ClaimOwnership(req.ProjectKey, requester, req.Adopting); err != nil {
 		var refusal *ledger.Refusal
 		if errors.As(err, &refusal) {
 			d.ledgerClaims.release(req.ProjectKey, requester)

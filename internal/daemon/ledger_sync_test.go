@@ -92,9 +92,16 @@ func boardView(t *testing.T, reg *registry.Registry) string {
 
 func sameLedgerOnBothHosts(t *testing.T, mac, owner *federationNode) {
 	t.Helper()
+	var replica, authoritative string
+	var waiting int
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("last compared logs, %d mac events without an owner seq\nmac:\n%s\nowner:\n%s", waiting, replica, authoritative)
+		}
+	})
 	testkit.Eventually(t, "the mac's log matches the owner's", 20*time.Second, func() bool {
-		replica, waiting := eventLog(t, mac.reg, "owner_seq")
-		authoritative, _ := eventLog(t, owner.reg, "seq")
+		replica, waiting = eventLog(t, mac.reg, "owner_seq")
+		authoritative, _ = eventLog(t, owner.reg, "seq")
 		return waiting == 0 && replica == authoritative
 	})
 	if got, want := boardView(t, mac.reg), boardView(t, owner.reg); got != want {

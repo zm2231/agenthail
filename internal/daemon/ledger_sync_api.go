@@ -121,7 +121,7 @@ func (d *Daemon) apiLedgerSyncEventsHandler(w http.ResponseWriter, r *http.Reque
 		writeLedgerError(w, err)
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, ledgerEventsResponse{Events: ledger.ToWire(events), Head: head})
+	writeVerbatimJSON(w, http.StatusOK, ledgerEventsResponse{Events: ledger.ToWire(events), Head: head})
 }
 
 func (d *Daemon) apiLedgerSyncStatusHandler(w http.ResponseWriter, r *http.Request) {

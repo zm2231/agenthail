@@ -9,7 +9,6 @@ const ledgerClaimTTL = 10 * time.Minute
 
 type pendingLedgerClaim struct {
 	requester string
-	adopting  bool
 	expires   time.Time
 }
 
@@ -35,7 +34,7 @@ func (c *ledgerClaims) liveLocked(key string) (pendingLedgerClaim, bool) {
 	return claim, ok
 }
 
-func (c *ledgerClaims) reserve(key, requester string, adopting bool) (holder pendingLedgerClaim, ok bool) {
+func (c *ledgerClaims) reserve(key, requester string) (holder pendingLedgerClaim, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if claim, live := c.liveLocked(key); live && claim.requester != requester {
@@ -44,7 +43,7 @@ func (c *ledgerClaims) reserve(key, requester string, adopting bool) (holder pen
 	if c.byProject == nil {
 		c.byProject = map[string]pendingLedgerClaim{}
 	}
-	c.byProject[key] = pendingLedgerClaim{requester: requester, adopting: adopting, expires: c.clock().Add(ledgerClaimTTL)}
+	c.byProject[key] = pendingLedgerClaim{requester: requester, expires: c.clock().Add(ledgerClaimTTL)}
 	return pendingLedgerClaim{}, true
 }
 

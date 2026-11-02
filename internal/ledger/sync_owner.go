@@ -127,6 +127,24 @@ func (s *Store) ReleaseOwner(projectKey, owner string) error {
 	})
 }
 
+func (s *Store) HoldsUnsharedIDs(projectKey string) (bool, error) {
+	rows, err := s.read.Query(`SELECT DISTINCT type FROM ledger_events WHERE project_key=? AND owner_seq=0`, projectKey)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var typ string
+		if err := rows.Scan(&typ); err != nil {
+			return false, err
+		}
+		if IssuesID(EventType(typ)) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 func (s *Store) CheckClaim(projectKey, forHost string, adopting bool) error {
 	_, err := claimable(s.read, projectKey, forHost, adopting)
 	return err
