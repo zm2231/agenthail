@@ -140,6 +140,21 @@ func TestNotesGoWithAnItemWhoseWordsAreRetracted(t *testing.T) {
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", Text: "too late"}, "not a work item")
 }
 
+func TestReturnedWorkItemsDoNotShareBoardStorage(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	items(t, s, "schema", "index")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "widget-W2", DependsOn: "widget-W1"})
+	result := work(t, s, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W2", Text: "after the schema"})
+	result.Item.Timeline[0].Text, result.Item.DependsOn[0] = "changed", "widget-W9"
+	path := board(t, s).CriticalPath()
+	path[len(path)-1].Timeline[0].Text = "changed"
+	item, _ := board(t, s).WorkItem("widget-W2")
+	if item.Timeline[0].Text != "index" || item.DependsOn[0] != "widget-W1" {
+		t.Fatalf("a caller's edit reached the board: %+v", item)
+	}
+}
+
 func TestReadyPutsWhatUnblocksMostFirst(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)

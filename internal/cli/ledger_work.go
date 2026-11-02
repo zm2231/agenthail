@@ -28,11 +28,15 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	if len(w.positional) < 2 {
 		return a.ledgerWorkList(store, w)
 	}
-	switch w.positional[1] {
-	case "critical-path":
-		return a.ledgerCriticalPath(store, w)
-	case "ready", "next":
-		return a.ledgerWorkReady(store, w, w.positional[1] == "next")
+	switch view := w.positional[1]; view {
+	case "critical-path", "ready", "next":
+		if len(w.positional) != 2 {
+			return fmt.Errorf("%s takes no arguments\n%s", view, ledgerWorkUsage)
+		}
+		if view == "critical-path" {
+			return a.ledgerCriticalPath(store, w)
+		}
+		return a.ledgerWorkReady(store, w, view == "next")
 	}
 	action := ledger.WorkAction(w.positional[1])
 	if len(w.positional) == 2 && !workActions[action] {

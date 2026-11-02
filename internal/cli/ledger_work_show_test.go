@@ -103,4 +103,9 @@ func TestLedgerWorkShowsAnItemAndWhatIsReady(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"work", "widget-W9"}) }); err == nil || !strings.Contains(err.Error(), "not a work item") {
 		t.Fatalf("unknown item: %v", err)
 	}
+	for _, view := range []string{"ready", "next", "critical-path"} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"work", view, "typo"}) }); err == nil || !strings.Contains(err.Error(), "usage") {
+			t.Fatalf("%s with an extra argument: %v", view, err)
+		}
+	}
 }

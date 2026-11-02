@@ -102,7 +102,8 @@ func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 		return WorkResult{}, err
 	}
 	defer release()
-	return WorkResult{Item: *board.workItems[id], Readback: "intent ledger: " + readback}, nil
+	item, _ := board.WorkItem(id)
+	return WorkResult{Item: item, Readback: "intent ledger: " + readback}, nil
 }
 
 func joinStates(states []WorkState) string {
