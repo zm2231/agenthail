@@ -43,6 +43,8 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerQuestion(args)
 	case "questions":
 		return a.ledgerQuestions(store, args)
+	case "work":
+		return a.ledgerWork(store, args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}

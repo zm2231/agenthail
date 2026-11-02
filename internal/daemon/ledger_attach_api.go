@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -85,6 +86,19 @@ func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, ledgerGoalResponse{Goal: goal, Created: created})
+}
+
+func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
+	var req ledger.WorkRequest
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+		return
+	}
+	result, err := d.ledgerStore().Work(req, time.Now())
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, result)
 }
 
 func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) {

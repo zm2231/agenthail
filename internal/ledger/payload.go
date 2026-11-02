@@ -83,6 +83,22 @@ type QuestionEscalatedPayload struct {
 	DeadlineMs int64  `json:"deadlineMs"`
 }
 
+type WorkItemPayload struct {
+	ItemID    string `json:"itemId"`
+	ClauseID  string `json:"clauseId"`
+	Text      string `json:"text"`
+	CreatedBy string `json:"createdBy"`
+}
+
+type WorkItemStatePayload struct {
+	ItemID    string    `json:"itemId"`
+	FromState WorkState `json:"fromState"`
+	ToState   WorkState `json:"toState"`
+	Actor     string    `json:"actor"`
+	Assignee  string    `json:"assignee,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+}
+
 type DelegationPayload struct {
 	AskID              string `json:"askId"`
 	DelegatorSessionID string `json:"delegatorSessionId"`

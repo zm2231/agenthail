@@ -38,6 +38,7 @@ type Clause struct {
 	ProgressRef    string       `json:"progressRef,omitempty"`
 	Cuts           []Cut        `json:"cuts,omitempty"`
 	Waits          []Wait       `json:"waits,omitempty"`
+	WorkItems      []*WorkItem  `json:"workItems,omitempty"`
 }
 
 type UtteranceView struct {
@@ -85,6 +86,7 @@ type Board struct {
 	projectConstraints []*Clause
 	targetCuts         []*TargetCut
 	questions          map[string]*Question
+	workItems          map[string]*WorkItem
 	applied            int64
 }
 
@@ -104,6 +106,7 @@ func (b *Board) reset() {
 	b.projectConstraints = nil
 	b.targetCuts = nil
 	b.questions = map[string]*Question{}
+	b.workItems = map[string]*WorkItem{}
 	b.applied = 0
 }
 
@@ -148,6 +151,10 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyQuestionResolved(event.Payload)
 	case EventQuestionEsc:
 		err = b.applyQuestionEscalated(event.Payload)
+	case EventWorkItem:
+		err = b.applyWorkItem(event.Payload)
+	case EventWorkItemState:
+		err = b.applyWorkItemState(event.Payload)
 	}
 	if err == nil {
 		b.applied = event.Seq

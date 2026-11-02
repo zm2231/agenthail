@@ -162,6 +162,11 @@ Intent ledger:
                   --deadline <30m|4h|2d> --kind <scope|framing|outward> [--narrows]
                                  Track a question; the person answers with attach --as answers
   ledger questions [--all]       List open questions (--all includes answered ones)
+  ledger work [--mine]           List work items
+  ledger work add <clause_id> "<text>"
+                                 Add a work item under a clause; closing work never closes the clause
+  ledger work <claim|block|unblock|done|reopen> <item_id> [--reason "..."]
+                                 Move a work item; block needs a reason, only the assignee closes it
   ledger asks                    List all asks
   ledger ask <ask_id>            Show one ask with its clauses
   ledger enable [@session]       Capture the person's words in this project, or for one session

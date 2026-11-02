@@ -70,6 +70,9 @@ func printClause(indent string, c *ledger.Clause) {
 	for _, cut := range c.Cuts {
 		fmt.Printf("%s  cut %s: %s (%s)\n", indent, cut.ID, cut.Reason, cutStatus(cut))
 	}
+	for _, item := range c.WorkItems {
+		fmt.Printf("%s  work %s\n", indent, workLine(*item))
+	}
 	for _, w := range c.Waits {
 		resolved := ""
 		if w.Resolved != "" {
