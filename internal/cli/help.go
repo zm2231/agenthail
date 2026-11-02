@@ -181,6 +181,8 @@ Intent ledger:
   ledger work critical-path      Longest chain of unfinished work items
   ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
                                  syncs its log back; without a host, show the owner, sync cursor and replay backlog
+  ledger digest [--through N]    Hash of this host's ledger log in owner order through owner position N (default:
+                                 the sync cursor, or the log's end on the owner); equal on two hosts means equal logs
   ledger work <item_id>          Show one work item with its timeline
   ledger work ready | next       Open items whose dependencies are done, most-unblocking first; next is the top one
   ledger work comment <item_id> "<text>"

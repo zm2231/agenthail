@@ -174,6 +174,8 @@ type actionGate struct {
 	confirmLoss atomic.Int32
 	// confirmBlocked drops every ledger confirm unapplied while set.
 	confirmBlocked atomic.Bool
+	// digestRequests counts the ledger digest lookups this host answers.
+	digestRequests atomic.Int32
 }
 
 const (
@@ -308,6 +310,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			_ = buffered.Flush()
 			conn.Close()
 			return
+		}
+		if r.URL.Path == "/api/v1/ledger/sync/digest" {
+			n.gate.digestRequests.Add(1)
 		}
 		if r.URL.Path == "/api/v1/ledger/sync/confirm" {
 			if loss := n.gate.confirmLoss.Swap(0); loss != 0 || n.gate.confirmBlocked.Load() {

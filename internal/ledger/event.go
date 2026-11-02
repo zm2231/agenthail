@@ -112,4 +112,6 @@ type Event struct {
 	OriginSeq      int64
 	Ref            string
 	CreatedAt      time.Time
+	// Stamp is created_at exactly as stored; a replicated event keeps its origin's text.
+	Stamp string
 }

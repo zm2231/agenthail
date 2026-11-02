@@ -118,10 +118,13 @@ func insertEvent(db execer, verb string, event Event) (Event, error) {
 	if len(event.Payload) > MaxEventBytes {
 		return Event{}, refuse("a ledger event holds at most %d bytes; this %s holds %d", MaxEventBytes, event.Type, len(event.Payload))
 	}
+	if event.Stamp == "" {
+		event.Stamp = event.CreatedAt.UTC().Format(eventTimeLayout)
+	}
 	result, err := db.Exec(
 		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
 		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq, event.OriginSeq,
-		event.Ref, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		event.Ref, event.Stamp,
 	)
 	if err != nil {
 		return Event{}, err
@@ -148,7 +151,8 @@ func scanEvent(row rowScanner) (Event, error) {
 		return Event{}, err
 	}
 	e.Type = EventType(typ)
-	e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+	e.Stamp = ts
+	e.CreatedAt, _ = time.Parse(eventTimeLayout, ts)
 	return e, nil
 }
 

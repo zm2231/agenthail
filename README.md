@@ -325,6 +325,10 @@ Pair the Agenthail daemon on another machine and its sessions appear in the same
 
 To continue an idle Claude session on another paired machine, run `agenthail move <session> --to server`. The conversation keeps its id, history, model and permission mode, and from then on it runs there and is listed here as `server::<id>`. Messages queued for it follow it, except one with attached files, which fails and says so. The other machine needs a checkout of the same repository, and the session's working tree must be clean at a commit some remote branch has. A copy of the conversation stays in `agenthail-moved/<id>/<move id>/` under this machine's Claude config root (`~/.claude` by default) for recovery by hand; nothing reads it. If the other machine stops answering mid-move, the session waits, with no machine writing to it, until it answers again (`agenthail move list --unfinished`). To continue a session under another Claude account on the same machine, run `agenthail move <session> --root claude-work`: it moves to that config root with the project's folder trust, allowed tools and local MCP servers, and resumes there. `--to server --root claude-work` puts a moved session in that root on the other machine. [How a move works](docs/maintainers/host-move.md).
 
+## Keep track of what was asked
+
+The intent ledger records what you asked for in a project, from your own words, next to the work agents do about it: goals, asks and their clauses, open questions with their defaults, and work items with comments and logs. Turn it on with `agenthail ledger enable` in a project; sessions then attach each of your messages, read back how they recorded it, and are held at the end of a turn while your words go unrecorded. With `agenthail ledger owner server` one paired machine keeps the project's ledger and the others replicate it, checked by a log digest on every sync. [The intent ledger](docs/ledger.md).
+
 ## What Agenthail remembers
 
 Agenthail keeps a local record of messages it moved, work still waiting, retries, failures, and automatic handoffs. The Audit view makes it possible to come back hours later and understand what happened.

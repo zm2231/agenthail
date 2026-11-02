@@ -27,9 +27,9 @@ const (
 	// client API: the session-options launch catalog, history filtered by
 	// session, each host's project coordinators with the actions that set
 	// and clear them, whether a resolve match identifies its session, and
-	// ledger sync (ownership, replay and pull). A host outside this range is
-	// reported as needing an update.
-	FederationVersion = 5
+	// ledger sync (ownership, replay, and pull with the owner's log digest).
+	// A host outside this range is reported as needing an update.
+	FederationVersion = 6
 	ResponseHeader    = "Agenthail-Host"
 	responseBodyLimit = 32 << 20
 )
