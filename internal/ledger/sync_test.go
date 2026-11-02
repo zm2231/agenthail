@@ -1,0 +1,253 @@
+package ledger_test
+
+import (
+	"database/sql"
+	"fmt"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/ledger"
+)
+
+type syncHost struct {
+	db    *sql.DB
+	store *ledger.Store
+	id    string
+}
+
+func newSyncHost(t *testing.T) syncHost {
+	t.Helper()
+	db := openTestDB(t)
+	var id string
+	if err := db.QueryRow(`SELECT host_id FROM host_identity WHERE id=1`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return syncHost{db: db, store: ledger.NewCachedStore(db, db), id: id}
+}
+
+func syncOnce(t *testing.T, key string, mac, owner syncHost) {
+	t.Helper()
+	pending, err := mac.store.PendingReplay(key, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) > 0 {
+		seqs, err := owner.store.AcceptEvents(key, mac.id, pending)
+		if err != nil {
+			t.Fatalf("replay: %v", err)
+		}
+		if err := mac.store.MarkReplayed(key, pending, seqs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for {
+		_, cursor, err := mac.store.Owner(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := owner.store.ExportEvents(key, cursor, 2)
+		if err != nil {
+			t.Fatalf("export: %v", err)
+		}
+		if len(events) == 0 {
+			return
+		}
+		if err := mac.store.ApplyPulled(key, owner.id, events); err != nil {
+			t.Fatalf("pull: %v", err)
+		}
+	}
+}
+
+func adopt(t *testing.T, key string, mac, owner syncHost) {
+	t.Helper()
+	holds, err := mac.store.HoldsHistory(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.store.ClaimOwnership(key, mac.id, holds); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := mac.store.AssignOwner(key, owner.id); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	syncOnce(t, key, mac, owner)
+}
+
+func ownerLog(t *testing.T, db *sql.DB, key string) string {
+	t.Helper()
+	return logRows(t, db, `SELECT seq, actor_host_id, origin_seq, type, payload, actor_session_id, ref, created_at FROM ledger_events WHERE project_key=? ORDER BY seq`, key)
+}
+
+func replicaLog(t *testing.T, db *sql.DB, key string) string {
+	t.Helper()
+	var unsynced int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=? AND owner_seq=0`, key).Scan(&unsynced); err != nil || unsynced != 0 {
+		t.Fatalf("replica holds %d events the owner has not sequenced (%v)", unsynced, err)
+	}
+	return logRows(t, db, `SELECT owner_seq, actor_host_id, origin_seq, type, payload, actor_session_id, ref, created_at FROM ledger_events WHERE project_key=? ORDER BY owner_seq`, key)
+}
+
+func logRows(t *testing.T, db *sql.DB, query, key string) string {
+	t.Helper()
+	rows, err := db.Query(query, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var seq, origin int64
+		var host, typ, actor, ref, at string
+		var payload []byte
+		if err := rows.Scan(&seq, &host, &origin, &typ, &payload, &actor, &ref, &at); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fmt.Sprintf("%d %s/%d %s %s %s %s %s", seq, host, origin, typ, payload, actor, ref, at))
+	}
+	return strings.Join(out, "\n")
+}
+
+func sameLedger(t *testing.T, key string, mac, owner syncHost) {
+	t.Helper()
+	if got, want := replicaLog(t, mac.db, key), ownerLog(t, owner.db, key); got != want {
+		t.Fatalf("logs differ\nreplica:\n%s\nowner:\n%s", got, want)
+	}
+	macBoard, err := mac.store.Board(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerBoard, err := owner.store.Board(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := hostFree(t, macBoard), hostFree(t, ownerBoard); got != want {
+		t.Fatalf("boards differ\nreplica %s\nowner   %s", got, want)
+	}
+	rebuilt, err := ledger.NewStore(mac.db, mac.db).Board(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := hostFree(t, rebuilt), hostFree(t, ownerBoard); got != want {
+		t.Fatalf("replica rebuilt from its log differs from the owner\nreplica %s\nowner   %s", got, want)
+	}
+}
+
+var appliedSeq = regexp.MustCompile(`"applied":\d+,`)
+
+func hostFree(t *testing.T, b *ledger.Board) string {
+	t.Helper()
+	return appliedSeq.ReplaceAllString(snapshot(t, b), "")
+}
+
+func TestAdoptedHistoryReplicatesOnceEvenWhenReplayIsRetried(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	items(t, mac.store, "add the index")
+	work(t, mac.store, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", SessionID: "reviewer", Text: "mind the migration"})
+
+	if err := owner.store.ClaimOwnership(project, mac.id, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := mac.store.AssignOwner(project, owner.id); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := mac.store.PendingReplay(project, 500)
+	if err != nil || len(pending) == 0 {
+		t.Fatalf("pending = %d, %v", len(pending), err)
+	}
+	first, err := owner.store.AcceptEvents(project, mac.id, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := owner.store.AcceptEvents(project, mac.id, pending)
+	if err != nil || fmt.Sprint(first) != fmt.Sprint(again) {
+		t.Fatalf("a retried replay did not return the same owner seqs: %v vs %v (%v)", first, again, err)
+	}
+	syncOnce(t, project, mac, owner)
+	syncOnce(t, project, mac, owner)
+	sameLedger(t, project, mac, owner)
+
+	var n int
+	if err := owner.db.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=?`, project).Scan(&n); err != nil || n != len(pending) {
+		t.Fatalf("owner holds %d events, want each of the %d once (%v)", n, len(pending), err)
+	}
+}
+
+func TestWritesOnEitherHostLandOnceAndInOwnerOrder(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	adopt(t, project, mac, owner)
+
+	work(t, owner.store, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"})
+	capture(t, mac.store, project, "claude-prompt:offline", "and keep it fast")
+	syncOnce(t, project, mac, owner)
+	work(t, owner.store, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: "worker"})
+	syncOnce(t, project, mac, owner)
+	work(t, mac.store, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", SessionID: "worker", Text: "started on the mac"})
+	work(t, owner.store, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", SessionID: "lead", Text: "written on forge before the mac replayed"})
+	if done, err := mac.store.ReclassifyUtterance(project, "claude-prompt:offline", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	syncOnce(t, project, mac, owner)
+	sameLedger(t, project, mac, owner)
+
+	item, ok := board(t, mac.store).WorkItem("widget-W1")
+	if !ok || entryKinds(item) != "created state:in_progress comment log" {
+		t.Fatalf("mac board item = %+v", item)
+	}
+}
+
+func TestTheOwnerTakesNoIDIssuingReplayOnceItsLedgerIsShared(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	adopt(t, project, mac, owner)
+	work(t, owner.store, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "owner write"})
+	rogue := ledger.Event{ProjectKey: project, Type: ledger.EventWorkItem, Payload: []byte(`{"itemId":"widget-W9","clauseId":"widget-C1","text":"x","createdBy":"s1"}`), OriginSeq: 999, CreatedAt: time.Now()}
+	if _, err := owner.store.AcceptEvents(project, mac.id, []ledger.Event{rogue}); err == nil || !strings.Contains(err.Error(), "issues an ID") {
+		t.Fatalf("ID-issuing replay after sharing: %v", err)
+	}
+}
+
+func TestOwnershipNeedsOneSideWithoutHistory(t *testing.T) {
+	mac, owner := newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	searchAsk(t, owner.store)
+	if err := owner.store.ClaimOwnership(project, mac.id, true); err == nil || !strings.Contains(err.Error(), "both hosts already hold ledger history") {
+		t.Fatalf("claim with history on both sides: %v", err)
+	}
+	if err := mac.store.AssignOwner(project, mac.id); err == nil || !strings.Contains(err.Error(), "its own remote owner") {
+		t.Fatalf("self as owner: %v", err)
+	}
+}
+
+func TestTwoProjectsAdoptToDifferentOwners(t *testing.T) {
+	const other = "repo:github.com/acme/infra"
+	mac, forge, vps := newSyncHost(t), newSyncHost(t), newSyncHost(t)
+	searchAsk(t, mac.store)
+	capture(t, mac.store, other, "claude-prompt:infra", "rotate the keys")
+	g, _, err := mac.store.EnsureGoal(other, "Keys", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach(t, mac.store, ledger.AttachRequest{ProjectKey: other, UtteranceID: "claude-prompt:infra", As: ledger.AsNewAsk, To: g.ID, Clauses: []string{"rotate the keys"}})
+
+	adopt(t, project, mac, forge)
+	adopt(t, other, mac, vps)
+	sameLedger(t, project, mac, forge)
+	sameLedger(t, other, mac, vps)
+	for _, h := range []struct {
+		name string
+		host syncHost
+		gone string
+	}{{"forge", forge, other}, {"vps", vps, project}} {
+		var n int
+		if err := h.host.db.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=?`, h.gone).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("%s holds %d events of %s, which it does not own", h.name, n, h.gone)
+		}
+	}
+	if err := mac.store.AssignOwner(project, vps.id); err == nil || !strings.Contains(err.Error(), "already syncs with") {
+		t.Fatalf("moving an owned ledger: %v", err)
+	}
+}

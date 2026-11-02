@@ -337,11 +337,14 @@ func (b *Board) Rebuild(events []Event) error {
 	}
 	b.replaying = true
 	defer func() { b.replaying = false }()
+	var last int64
 	for _, e := range events {
 		if err := b.apply(e); err != nil {
 			return err
 		}
+		last = max(last, e.Seq)
 	}
+	b.applied = last
 	return nil
 }
 
