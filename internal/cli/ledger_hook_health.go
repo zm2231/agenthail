@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +12,6 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-const promptHookSessionsScanned = 500
 
 type promptHookProblem struct {
 	Root  string `json:"root"`
@@ -73,41 +72,56 @@ func ledgerPromptHookProblems(ctx context.Context, r *registry.Registry) ([]prom
 	if len(problems) == 0 || len(enabled) == 0 {
 		return problems, nil
 	}
-	held, err := enabledProjectsByRoot(ctx, r, roots, enabled)
+	affected := map[string]bool{}
+	for _, problem := range problems {
+		affected[problem.Root] = true
+	}
+	held, unresolved, err := enabledProjectsByRoot(ctx, r, roots, affected, enabled)
 	if err != nil {
 		return nil, err
 	}
 	for i := range problems {
 		problems[i].EnabledProject = held[problems[i].Root]
 	}
-	return problems, nil
+	return problems, errors.Join(unresolved...)
 }
 
-func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []surface.ClaudeConfigRoot, enabled map[string]bool) (map[string]string, error) {
-	sessions, err := r.ListSessions(promptHookSessionsScanned)
+func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []surface.ClaudeConfigRoot, affected map[string]bool, enabled map[string]bool) (map[string]string, []error, error) {
+	places, err := r.LocalSessionPlaces(surface.KindClaude)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	keys := map[string]string{}
+	resolveErrs := map[string]error{}
 	held := map[string]string{}
-	for _, session := range sessions {
-		if session.Surface != surface.KindClaude || session.Cwd == "" {
+	unknown := map[string][]error{}
+	for _, place := range places {
+		root := surface.ClaudeSessionConfigRoot(roots, place.Transcript)
+		if root == nil || !affected[root.Root] || held[root.Root] != "" {
 			continue
 		}
-		root := surface.ClaudeSessionConfigRoot(roots, session.Transcript)
-		if root == nil || held[root.Root] != "" {
-			continue
-		}
-		key, seen := keys[session.Cwd]
+		key, seen := keys[place.Cwd]
 		if !seen {
-			if project, err := daemon.ResolvePathProject(ctx, r, session.Cwd); err == nil && project != nil {
+			project, err := daemon.ResolvePathProject(ctx, r, place.Cwd)
+			if err != nil {
+				resolveErrs[place.Cwd] = fmt.Errorf("project of %s: %w", place.Cwd, err)
+			} else if project != nil {
 				key = project.Key
 			}
-			keys[session.Cwd] = key
+			keys[place.Cwd] = key
+		}
+		if err := resolveErrs[place.Cwd]; err != nil {
+			unknown[root.Root] = append(unknown[root.Root], err)
 		}
 		if enabled[key] {
 			held[root.Root] = key
 		}
 	}
-	return held, nil
+	var failed []error
+	for root, errs := range unknown {
+		if held[root] == "" {
+			failed = append(failed, errs...)
+		}
+	}
+	return held, failed, nil
 }

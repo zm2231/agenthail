@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -70,8 +72,15 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 		t.Fatalf("a root with no session of the enabled project failed doctor: %v", err)
 	}
 
-	if err := store.RegisterSession(surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "p", "terminal.jsonl")}); err != nil {
+	if err := store.RegisterSession(surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "p", "terminal.jsonl"), LastActive: time.Now().Add(-24 * time.Hour)}); err != nil {
 		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+	for i := range 501 {
+		id := fmt.Sprintf("newer-%03d", i)
+		if err := store.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: elsewhere, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "q", id+".jsonl"), LastActive: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if problems := doctor(); len(problems) != 1 || problems[0].EnabledProject != "hook-key" {
 		t.Fatalf("a root holding the enabled project's sessions is not a doctor problem: %+v", problems)

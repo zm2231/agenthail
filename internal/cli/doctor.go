@@ -189,7 +189,7 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	ledgerFailures := 0
 	for _, problem := range hookProblems {
-		if problem.EnabledProject != "" {
+		if problem.EnabledProject != "" || hookErr != nil {
 			ledgerFailures++
 		}
 	}
