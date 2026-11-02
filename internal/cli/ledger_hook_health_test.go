@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -61,9 +62,23 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 	if problems := doctor(); len(problems) != 1 || problems[0] != (promptHookProblem{Root: root, State: claudeHookMissing}) {
 		t.Fatalf("doctor problems %+v", problems)
 	}
-	text, _ := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
+	text, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
 	if !strings.Contains(text, want) {
 		t.Fatalf("doctor text lacks %q:\n%s", want, text)
+	}
+	if err != nil && strings.Contains(err.Error(), "ledger") {
+		t.Fatalf("a root with no session of the enabled project failed doctor: %v", err)
+	}
+
+	if err := store.RegisterSession(surface.Session{ID: "terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: filepath.Join(root, "projects", "p", "terminal.jsonl")}); err != nil {
+		t.Fatal(err)
+	}
+	if problems := doctor(); len(problems) != 1 || problems[0].EnabledProject != "hook-key" {
+		t.Fatalf("a root holding the enabled project's sessions is not a doctor problem: %+v", problems)
+	}
+	text, err = captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
+	if err == nil || !strings.Contains(err.Error(), "enabled ledger captures no terminal words") || !strings.Contains(text, "the ledger is enabled for hook-key") {
+		t.Fatalf("doctor did not fail on the enabled project's root: err=%v\n%s", err, text)
 	}
 	if out := board(); !strings.Contains(out, want) {
 		t.Fatalf("board lacks %q:\n%s", want, out)
@@ -95,16 +110,21 @@ func TestACoordinatorAloneMakesThePromptHookMatter(t *testing.T) {
 	if err := store.AddProject(registry.ProjectRecord{ID: "proj-c", WorkspaceRoot: dir, Title: "proj-c", Key: "coord-key"}); err != nil {
 		t.Fatal(err)
 	}
-	if problems, err := ledgerPromptHookProblems(store); err != nil || len(problems) != 0 {
+	if problems, err := ledgerPromptHookProblems(context.Background(), store); err != nil || len(problems) != 0 {
 		t.Fatalf("problems %+v err %v", problems, err)
 	}
-	if err := store.RegisterSession(surface.Session{ID: "coord-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle}); err != nil {
+	transcript := filepath.Join(home, ".claude", "projects", "p", "coord-session.jsonl")
+	if err := store.RegisterSession(surface.Session{ID: "coord-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle, Transcript: transcript}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SetCoordinator(registry.CoordinatorSpec{ProjectID: "proj-c", ProjectRoot: dir, Name: "coord", Surface: "claude", Cwd: dir}, registry.CoordinatorChange{SessionID: "coord-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if problems, err := ledgerPromptHookProblems(store); err != nil || len(problems) != 1 || problems[0].State != claudeHookMissing {
+	problems, err := ledgerPromptHookProblems(context.Background(), store)
+	if err != nil || len(problems) != 1 || problems[0].State != claudeHookMissing {
 		t.Fatalf("a coordinator did not make the hook matter: %+v err %v", problems, err)
+	}
+	if problems[0].EnabledProject != "" {
+		t.Fatalf("coordinator-only capture must stay a warning: %+v", problems[0])
 	}
 }

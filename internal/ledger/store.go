@@ -38,13 +38,21 @@ func (s *Store) Enabled(projectKey string) (bool, error) {
 	return enabled == LedgerEnabled, nil
 }
 
-func (s *Store) AnyEnabled() (bool, error) {
-	var one int
-	err := s.read.QueryRow(`SELECT 1 FROM ledger_state WHERE enabled=? LIMIT 1`, LedgerEnabled).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+func (s *Store) EnabledProjects() (map[string]bool, error) {
+	rows, err := s.read.Query(`SELECT project_key FROM ledger_state WHERE enabled=?`, LedgerEnabled)
+	if err != nil {
+		return nil, err
 	}
-	return err == nil, err
+	defer rows.Close()
+	keys := map[string]bool{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys[key] = true
+	}
+	return keys, rows.Err()
 }
 
 type Scope struct {

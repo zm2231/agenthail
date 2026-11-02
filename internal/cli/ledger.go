@@ -108,7 +108,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	}
 	view := newBoardView(board)
 	g2, g2Err := a.ledgerG2(key)
-	hookProblems, hookErr := ledgerPromptHookProblems(a.registry())
+	hookProblems, hookErr := ledgerPromptHookProblems(context.Background(), a.registry())
 
 	if hasFlag(args, "--json") {
 		out := map[string]any{

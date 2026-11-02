@@ -182,11 +182,19 @@ func (a *App) cmdDoctor(args []string) error {
 		setting, _ := r.PersonNameSetting()
 		personSet = setting != ""
 		var problems []promptHookProblem
-		problems, hookErr = ledgerPromptHookProblems(r)
+		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		problems, hookErr = ledgerPromptHookProblems(callCtx, r)
+		cancel()
 		hookProblems = append(hookProblems, problems...)
 	}
+	ledgerFailures := 0
+	for _, problem := range hookProblems {
+		if problem.EnabledProject != "" {
+			ledgerFailures++
+		}
+	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -312,6 +320,9 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	if failures > 0 {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
+	}
+	if ledgerFailures > 0 {
+		return fmt.Errorf("doctor found %d Claude config root(s) where the enabled ledger captures no terminal words", ledgerFailures)
 	}
 	return nil
 }
