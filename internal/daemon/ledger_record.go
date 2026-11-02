@@ -64,6 +64,11 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 }
 
 func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalPayload) {
+	if reason, ok := notPersonPrompt(payload); ok {
+		d.notPerson.add(payload.PromptID, time.Now())
+		d.reclassifyHookCapture(session, ledger.PromptRef(payload.PromptID), reason)
+		return
+	}
 	ref := journalPromptRef(payload)
 	if ref == "" {
 		return

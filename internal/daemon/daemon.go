@@ -93,6 +93,7 @@ type Daemon struct {
 	checks            checkerRunner
 	g2                *g2Counter
 	delivered         deliveredWords
+	notPerson         promptMarks
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool

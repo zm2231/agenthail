@@ -182,6 +182,8 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyWorkDep(event.Payload)
 	case EventCutWithdrawn:
 		err = b.applyCutWithdrawn(event.Payload)
+	case EventReclassified:
+		err = b.applyReclassified(event.Payload)
 	}
 	if err == nil {
 		err = b.reviews.observe(event)
