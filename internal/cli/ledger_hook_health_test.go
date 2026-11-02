@@ -191,6 +191,27 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 	}
 }
 
+func TestAnExpiredDeadlineStopsTheScanBeforeAnyUnrelatedSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	_, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("expired-key"); err != nil {
+		t.Fatal(err)
+	}
+	places := localSessionPlaces
+	localSessionPlaces = func(*registry.Registry, context.Context, surface.SurfaceKind) ([]registry.SessionPlace, error) {
+		return []registry.SessionPlace{{Cwd: "/elsewhere", Transcript: "/not/a/config/root/projects/x/s.jsonl"}}, nil
+	}
+	t.Cleanup(func() { localSessionPlaces = places })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	problems, err := ledgerPromptHookProblems(ctx, store)
+	if err == nil || !errors.Is(err, context.Canceled) || len(problems) != 1 {
+		t.Fatalf("an expired scan must report its deadline beside the problem: %+v %v", problems, err)
+	}
+}
+
 func TestADeadlineOnTheSessionScanKeepsTheProblemAndFailsDoctor(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

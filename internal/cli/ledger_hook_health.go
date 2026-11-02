@@ -100,13 +100,16 @@ func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []su
 	resolveErrs := map[string]error{}
 	held := map[string]string{}
 	unknown := map[string][]error{}
+	stopped := func(err error) []error {
+		return []error{fmt.Errorf("stopped telling which projects use the Claude config roots: %w", err)}
+	}
 	for _, place := range places {
+		if err := ctx.Err(); err != nil {
+			return held, stopped(err), nil
+		}
 		root := surface.ClaudeSessionConfigRoot(roots, place.Transcript)
 		if root == nil || !affected[root.Root] || held[root.Root] != "" {
 			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return held, []error{fmt.Errorf("stopped telling which projects use the Claude config roots: %w", err)}, nil
 		}
 		key, seen := keys[place.Cwd]
 		if !seen {
@@ -124,6 +127,9 @@ func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []su
 		if enabled[key] {
 			held[root.Root] = key
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return held, stopped(err), nil
 	}
 	var failed []error
 	for root, errs := range unknown {
