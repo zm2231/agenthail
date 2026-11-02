@@ -724,6 +724,51 @@
       "diffs" : [
 
       ],
+      "input" : "Which color?\n• Red — Warm\n• Blue\n\nWhere should it run? (choose any)\n• Mac\n• iPhone — The shared simulator",
+      "name" : "AskUserQuestion",
+      "object" : "Which color?",
+      "summary" : "Which color?",
+      "text" : "{\"questions\":[{\"question\":\"Which color?\",\"header\":\"Color\",\"multiSelect\":false,\"options\":[{\"label\":\"Red\",\"description\":\"Warm\"},{\"label\":\"Blue\",\"description\":\"\"}]},{\"question\":\"Where should it run?\",\"header\":\"Places\",\"multiSelect\":true,\"options\":[{\"label\":\"Mac\"},{\"label\":\"iPhone\",\"description\":\"The shared simulator\"}]}]}",
+      "verb" : "Ask you"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "diffs" : [
+
+      ],
+      "input" : "questions: [\n  {\n    \"options\": [],\n    \"question\": \"  \"\n  },\n  {\n    \"header\": \"No text\"\n  }\n]",
+      "name" : "AskUserQuestion",
+      "object" : "1 field",
+      "summary" : "1 field",
+      "text" : "{\"questions\":[{\"question\":\"  \",\"options\":[]},{\"header\":\"No text\"}]}",
+      "verb" : "Ask you"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "diffs" : [
+
+      ],
+      "input" : "questions: not a list",
+      "name" : "AskUserQuestion",
+      "object" : "not a list",
+      "summary" : "not a list",
+      "text" : "{\"questions\":\"not a list\"}",
+      "verb" : "Ask you"
+    },
+    {
+      "changes" : [
+
+      ],
+      "code" : false,
+      "diffs" : [
+
+      ],
       "input" : "message: Audit done\nDetails follow\nsummary: \nto: @collab",
       "name" : "SendMessage",
       "object" : "Audit done",

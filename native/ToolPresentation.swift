@@ -22,6 +22,7 @@ struct ToolPresentation {
                 return (["Task \(id)"] + [(input["status"] as? String)?.replacingOccurrences(of: "_", with: " ")].compactMap { $0 }).joined(separator: " · ")
             }
             if name == "TaskCreate", let subject = input["subject"] as? String, !subject.isEmpty { return subject }
+            if name == "AskUserQuestion", let first = Self.questions(input).first { return first.question }
             for key in Self.summaryKeys + input.keys.sorted() {
                 if let value = input[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
             }
@@ -51,6 +52,7 @@ struct ToolPresentation {
             case "Agent", "Task": return "Delegate to agent"
             case "TaskCreate": return "Add task"
             case "TaskUpdate": return "Update task"
+            case "AskUserQuestion": return "Ask you"
             default:
                 return name.replacingOccurrences(of: "functions.", with: "")
                     .replacingOccurrences(of: "mcp__", with: "")
@@ -73,6 +75,7 @@ struct ToolPresentation {
             case "WebFetch": return "globe"
             case "Agent", "Task": return "person.2"
             case "TaskCreate", "TaskUpdate": return "checklist"
+            case "AskUserQuestion": return "questionmark.bubble"
             default: return "wrench.and.screwdriver"
             }
         }
@@ -205,6 +208,12 @@ extension ToolPresentation {
     /// with nested values as indented JSON. Input that is not a JSON object reads as recorded.
     var readableInput: String {
         guard let input = Self.input(text), !input.isEmpty else { return text }
+        if name == "AskUserQuestion", case let asked = Self.questions(input), !asked.isEmpty {
+            return asked.map { question in
+                ([question.question + (question.multiSelect ? " (choose any)" : "")]
+                 + question.options.map { "• " + $0.label + ($0.description.isEmpty ? "" : " — " + $0.description) }).joined(separator: "\n")
+            }.joined(separator: "\n\n")
+        }
         let commandKey = ["command", "cmd"].first { input[$0] is String }
         var lines = commandKey.map { ["$ " + (input[$0] as! String)] } ?? []
         for key in input.keys.sorted() where key != commandKey {
@@ -259,6 +268,17 @@ extension ToolPresentation {
     private static func input(_ text: String) -> [String: Any]? {
         guard let data = text.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func questions(_ input: [String: Any]) -> [SessionRequest.Question] {
+        guard let asked = input["questions"] as? [[String: Any]] else { return [] }
+        return asked.compactMap { question in
+            guard let text = question["question"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            let options = (question["options"] as? [[String: Any]] ?? []).compactMap { option in
+                (option["label"] as? String).map { SessionRequest.Option(label: $0, description: option["description"] as? String ?? "") }
+            }
+            return SessionRequest.Question(question: text, header: question["header"] as? String ?? "", multiSelect: question["multiSelect"] as? Bool ?? false, options: options)
+        }
     }
 
     private static func firstLine(_ text: String) -> String {

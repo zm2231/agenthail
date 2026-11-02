@@ -57,6 +57,7 @@ export function toolSummary(name, text) {
     return [`Task ${input.taskId}`, string(input.status)?.replaceAll("_", " ")].filter((part) => part !== undefined).join(" · ");
   }
   if (name === "TaskCreate" && string(input.subject)) return input.subject;
+  if (name === "AskUserQuestion" && questions(input).length) return questions(input)[0].question;
   for (const key of [...summaryKeys, ...Object.keys(input).sort()]) {
     const value = string(input[key]);
     if (value !== undefined && !blank(value)) return value;
@@ -66,7 +67,7 @@ export function toolSummary(name, text) {
 }
 
 function title(name) {
-  const titles = { Read: "Read file", read_file: "Read file", Write: "Write file", write_file: "Write file", Grep: "Search files", Glob: "Search files", WebSearch: "Search the web", WebFetch: "Open webpage", Agent: "Delegate to agent", Task: "Delegate to agent", TaskCreate: "Add task", TaskUpdate: "Update task" };
+  const titles = { Read: "Read file", read_file: "Read file", Write: "Write file", write_file: "Write file", Grep: "Search files", Glob: "Search files", WebSearch: "Search the web", WebFetch: "Open webpage", Agent: "Delegate to agent", Task: "Delegate to agent", TaskCreate: "Add task", TaskUpdate: "Update task", AskUserQuestion: "Ask you" };
   return titles[name] ?? name.replaceAll("functions.", "").replaceAll("mcp__", "").replaceAll("__", " · ").replaceAll("_", " ");
 }
 
@@ -114,9 +115,24 @@ export function toolChanges(call) {
   return toolDiffs(call).map(fileChange);
 }
 
-export function readableInput(text) {
+function questions(input) {
+  if (!Array.isArray(input.questions)) return [];
+  return input.questions.flatMap((question) => {
+    if (!question || typeof question !== "object" || string(question.question) === undefined || blank(question.question)) return [];
+    const options = (Array.isArray(question.options) ? question.options : [])
+      .filter((option) => option && typeof option === "object" && string(option.label) !== undefined)
+      .map((option) => ({ label: option.label, description: string(option.description) ?? "" }));
+    return [{ question: question.question, multiSelect: question.multiSelect === true, options }];
+  });
+}
+
+export function readableInput(text, name = "") {
   const input = toolInput(text);
   if (!input || !Object.keys(input).length) return text || "";
+  const asked = name === "AskUserQuestion" ? questions(input) : [];
+  if (asked.length) {
+    return asked.map((question) => [question.question + (question.multiSelect ? " (choose any)" : ""), ...question.options.map((option) => `• ${option.label}${option.description ? ` — ${option.description}` : ""}`)].join("\n")).join("\n\n");
+  }
   const commandKey = ["command", "cmd"].find((key) => typeof input[key] === "string");
   const lines = commandKey ? [`$ ${input[commandKey]}`] : [];
   for (const key of Object.keys(input).sort()) {
