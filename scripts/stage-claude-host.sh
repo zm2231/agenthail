@@ -16,7 +16,7 @@ mkdir -p "$DEST"
 DEST="$(cd "$DEST" && pwd -P)"
 cp "$ROOT"/claude-host/*.mjs "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
 for module in "$DEST"/*.mjs; do
-	for dependency in $(sed -nE "s/.*(from|import\() *['\"](\.\/[^'\"]+)['\"].*/\2/p" "$module"); do
+	for dependency in $({ grep -oE "(from|import\() *['\"]\./[^'\"]+['\"]" "$module" || true; } | sed -E "s/.*['\"](\.\/[^'\"]+)['\"]/\1/"); do
 		if [ ! -f "$DEST/$dependency" ]; then
 			echo "error: $(basename "$module") imports $dependency, which is not staged" >&2
 			exit 1
