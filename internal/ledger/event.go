@@ -41,6 +41,8 @@ const (
 
 const OutwardDefault = "don't"
 
+const PrincipalDefault = "default"
+
 type AskType string
 
 const (

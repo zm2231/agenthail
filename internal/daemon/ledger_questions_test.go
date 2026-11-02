@@ -74,8 +74,8 @@ func TestLedgerAPIAsksAndRefusesQuestions(t *testing.T) {
 func TestExpiredQuestionsDefaultCutOrEscalateAndTellTheOwner(t *testing.T) {
 	d, r, handler, fake, desktop, p := questionDaemon(t)
 	ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: p.key, SessionID: "s1", Name: "Search"}, nil)
-	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "which index?", DefaultAnswer: "full-text and fuzzy", Kind: ledger.QuestionScope})
-	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "how broad?", DefaultAnswer: "a smaller first version", Narrows: true, Kind: ledger.QuestionScope})
+	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "which index?", DefaultAnswer: "full-text and fuzzy", KeepsBreadth: true, Kind: ledger.QuestionScope})
+	ask(t, handler, p, ledger.QuestionRequest{To: "widget-G1", Text: "how broad?", DefaultAnswer: "a smaller first version", Kind: ledger.QuestionScope})
 	ask(t, handler, p, ledger.QuestionRequest{To: ledger.ProjectTarget, Text: "publish the beta?", Kind: ledger.QuestionOutward})
 
 	d.sweepLedgerQuestions(context.Background(), time.Now())

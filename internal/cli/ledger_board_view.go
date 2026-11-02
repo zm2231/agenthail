@@ -82,6 +82,13 @@ func printClause(indent string, c *ledger.Clause) {
 	}
 }
 
+func decisionLine(d ledger.Decision, on string) string {
+	if d.ByPerson() {
+		return fmt.Sprintf("%s v%d on %s: %s [%s] from %s", d.ID, d.Version, on, d.Text, d.Principal, d.SourceUtterance)
+	}
+	return fmt.Sprintf("%s v%d on %s: %s [applied by default from %s; not the person's decision, authorizes nothing outward]", d.ID, d.Version, on, d.Text, d.QuestionID)
+}
+
 func cutStatus(cut ledger.Cut) string {
 	switch {
 	case cut.Acked:
@@ -98,6 +105,9 @@ func (v boardView) print(attachment ledger.Attachment) {
 		fmt.Printf("%s %s", g.ID, g.Name)
 		if len(g.Asks) > 0 {
 			fmt.Printf("  asks %s", strings.Join(g.Asks, ", "))
+		}
+		if g.DefaultCuts > 0 {
+			fmt.Printf("  %d unanswered defaults became pending cuts", g.DefaultCuts)
 		}
 		fmt.Println()
 		for _, c := range g.Constraints {
@@ -118,12 +128,10 @@ func (v boardView) print(attachment ledger.Attachment) {
 		if on == "" {
 			on = "the project"
 		}
-		fmt.Printf("%s v%d on %s: %s [%s] from %s\n", d.ID, d.Version, on, d.Text, d.Principal, d.SourceUtterance)
+		fmt.Println(decisionLine(d, on))
 	}
 	for _, t := range v.targetCuts {
-		if !t.Acked && !t.Withdrawn {
-			fmt.Printf("cut %s on %s: %s (%s)\n", t.ID, t.Target, t.Reason, cutStatus(t.Cut))
-		}
+		fmt.Printf("cut %s on %s: %s (%s)\n", t.ID, t.Target, t.Reason, cutStatus(t.Cut))
 	}
 	for _, q := range v.questions {
 		fmt.Println(questionLine(q))
@@ -181,7 +189,7 @@ func (a *App) ledgerGoals(store *ledger.Store, args []string) error {
 			printClause("  constraint ", c)
 		}
 		for _, d := range g.Decisions {
-			fmt.Printf("  decided %s: %s from %s\n", d.ID, d.Text, d.SourceUtterance)
+			fmt.Println("  " + decisionLine(d, g.ID))
 		}
 		for _, q := range g.Questions {
 			fmt.Println("  " + questionLine(q))

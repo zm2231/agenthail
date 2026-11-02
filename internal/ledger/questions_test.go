@@ -83,7 +83,9 @@ func TestAQuestionNeedsItsSafeguards(t *testing.T) {
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", Kind: ledger.QuestionOutward, DefaultAnswer: "send it"}, `default is always "don't"`)
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "deploy the index now?", DefaultAnswer: "yes"}, "reads as an outward act")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", Recommendation: "merge the branch", DefaultAnswer: "fts"}, "reads as an outward act")
-	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "drop fuzzy matching"}, "reads as narrowing")
+	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "Ship this?", DefaultAnswer: "yes", KeepsBreadth: true}, "reads as an outward act")
+	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "drop fuzzy matching", KeepsBreadth: true}, "cannot be declared --keeps-breadth")
+	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "omit fuzzy matching", KeepsBreadth: true}, "cannot be declared --keeps-breadth")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?"}, "needs --default")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", DefaultAnswer: "fts", DeadlineMs: asked.Add(-time.Minute).UnixMilli()}, "deadline in the future")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C9", Text: "which index?", DefaultAnswer: "fts"}, "is not a goal, ask or clause")
@@ -92,9 +94,9 @@ func TestAQuestionNeedsItsSafeguards(t *testing.T) {
 	if outward.DefaultAnswer != ledger.OutwardDefault || outward.ID != "widget-Q1" {
 		t.Fatalf("outward question = %+v", outward)
 	}
-	narrowing := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "drop fuzzy matching", Narrows: true})
-	if narrowing.GoalID != "widget-G1" || !narrowing.Narrows {
-		t.Fatalf("narrowing question = %+v", narrowing)
+	undeclared := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "omit fuzzy matching"})
+	if undeclared.GoalID != "widget-G1" || undeclared.AutoApplies() {
+		t.Fatalf("a default not declared to keep breadth applies itself: %+v", undeclared)
 	}
 }
 
@@ -128,7 +130,7 @@ func TestAnAnswerIsThePersonsWordsAndUpdatesTheTarget(t *testing.T) {
 func TestABreadthKeepingDefaultAppliesAsADisclosedDecision(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
-	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "which kind of search?", DefaultAnswer: "full-text and fuzzy"})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "which kind of search?", DefaultAnswer: "full-text and fuzzy", KeepsBreadth: true})
 	if expiries, err := s.ExpireQuestions(project, asked.Add(30*time.Minute)); err != nil || len(expiries) != 0 {
 		t.Fatalf("expired before its deadline: %+v %v", expiries, err)
 	}
@@ -138,8 +140,11 @@ func TestABreadthKeepingDefaultAppliesAsADisclosedDecision(t *testing.T) {
 	}
 	b := board(t, s)
 	d := b.Decisions()
-	if len(d) != 1 || d[0].GoalID != "widget-G1" || !strings.Contains(d[0].Text, "default applied") {
+	if len(d) != 1 || d[0].GoalID != "widget-G1" || !strings.Contains(d[0].Text, "default applied") || d[0].QuestionID != q.ID {
 		t.Fatalf("decisions = %+v", d)
+	}
+	if d[0].Principal != ledger.PrincipalDefault || d[0].ByPerson() {
+		t.Fatalf("a defaulted decision counts as the person's: %+v", d[0])
 	}
 	if got := question(t, s, q.ID); got.State != ledger.QuestionDefaulted || got.Answer != "full-text and fuzzy" {
 		t.Fatalf("question = %+v", got)
@@ -153,7 +158,7 @@ func TestANarrowingDefaultExpiresIntoAPendingCutNotADecision(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
 	capture(t, s, project, "claude-prompt:2", "ok, drop fuzzy")
-	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "drop fuzzy matching", Narrows: true})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "omit fuzzy matching"})
 	expiries := expire(t, s)
 	if len(expiries) != 1 || expiries[0].Outcome != ledger.ExpiryCut {
 		t.Fatalf("expiries = %+v", expiries)
@@ -185,11 +190,15 @@ func TestAnsweringWithdrawsTheCutItsDefaultLeftPending(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
 	capture(t, s, project, "claude-prompt:2", "no, keep fuzzy")
-	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "how broad?", DefaultAnswer: "a smaller first version", Narrows: true})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "how broad?", DefaultAnswer: "a smaller first version"})
 	expire(t, s)
-	cuts := board(t, s).TargetCuts()
+	b := board(t, s)
+	cuts := b.TargetCuts()
 	if len(cuts) != 1 || cuts[0].Target != "widget-G1" || cuts[0].Acked {
 		t.Fatalf("target cuts = %+v", cuts)
+	}
+	if goals := b.Goals(); goals[0].DefaultCuts != 1 {
+		t.Fatalf("goal does not count the default that became a cut: %+v", goals[0])
 	}
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsAnswers, To: q.ID})
 	if cuts := board(t, s).TargetCuts(); !cuts[0].Withdrawn {

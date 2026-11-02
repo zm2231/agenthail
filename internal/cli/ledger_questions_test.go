@@ -26,22 +26,30 @@ func TestLedgerDeadlinesAcceptMinutesHoursAndDays(t *testing.T) {
 
 func TestLedgerQuestionPostsTheQuestionAndSaysWhatHappensIfUnanswered(t *testing.T) {
 	app, calls := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
-		return http.StatusOK, ledger.Question{ID: "widget-Q1", Target: "widget-G1", Kind: ledger.QuestionScope, DefaultAnswer: "a smaller first version", Narrows: true, DeadlineMs: int64(body["deadlineMs"].(float64))}
+		return http.StatusOK, ledger.Question{ID: "widget-Q1", Target: "widget-G1", Kind: ledger.QuestionScope, DefaultAnswer: "a smaller first version", DeadlineMs: int64(body["deadlineMs"].(float64))}
 	})
 	before := time.Now()
 	out, err := captureStdout(t, func() error {
-		return app.cmdLedger([]string{"question", "--to", "widget-G1", "How", "broad?", "--recommendation", "everything", "--default", "a smaller first version", "--deadline", "4h", "--kind", "scope", "--narrows"})
+		return app.cmdLedger([]string{"question", "--to", "widget-G1", "How", "broad?", "--recommendation", "everything", "--default", "a smaller first version", "--deadline", "4h", "--kind", "scope"})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := (*calls)[0]
 	deadline := time.UnixMilli(int64(got["deadlineMs"].(float64)))
-	if got["path"] != "/api/v1/ledger/question" || got["text"] != "How broad?" || got["narrows"] != true || got["kind"] != "scope" || deadline.Sub(before) < 4*time.Hour-time.Minute {
+	if got["path"] != "/api/v1/ledger/question" || got["text"] != "How broad?" || got["keepsBreadth"] != nil || got["kind"] != "scope" || deadline.Sub(before) < 4*time.Hour-time.Minute {
 		t.Fatalf("request %v", got)
 	}
 	if !strings.Contains(out, "+widget-Q1 on widget-G1") || !strings.Contains(out, `"a smaller first version" waits for the person's ack`) {
 		t.Fatalf("output %q", out)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.cmdLedger([]string{"question", "--to", "widget-G1", "Which", "index?", "--recommendation", "fts", "--default", "fts and fuzzy", "--deadline", "1h", "--kind", "scope", "--keeps-breadth"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if (*calls)[1]["keepsBreadth"] != true {
+		t.Fatalf("--keeps-breadth not sent: %v", (*calls)[1])
 	}
 	if _, err := captureStdout(t, func() error {
 		return app.cmdLedger([]string{"question", "--to", "widget-G1", "How", "broad?", "--deadline", "4h"})

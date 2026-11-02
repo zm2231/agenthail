@@ -22,7 +22,7 @@ type Question struct {
 	Recommendation string        `json:"recommendation"`
 	DefaultAnswer  string        `json:"defaultAnswer"`
 	DeadlineMs     int64         `json:"deadlineMs"`
-	Narrows        bool          `json:"narrows,omitempty"`
+	KeepsBreadth   bool          `json:"keepsBreadth,omitempty"`
 	OwnerSessionID string        `json:"ownerSessionId"`
 	State          QuestionState `json:"state"`
 	Escalated      bool          `json:"escalated,omitempty"`
@@ -31,9 +31,9 @@ type Question struct {
 	Applied        bool          `json:"applied,omitempty"`
 }
 
-// AutoApplies is the never-resolve-toward-less rule: only a scope or framing default that keeps breadth applies itself.
+// AutoApplies is the never-resolve-toward-less rule: only a default declared to keep breadth applies itself.
 func (q Question) AutoApplies() bool {
-	return q.Kind != QuestionOutward && !q.Narrows
+	return q.Kind != QuestionOutward && q.KeepsBreadth
 }
 
 func (q Question) Expired(now time.Time) bool {
@@ -53,7 +53,7 @@ func (b *Board) applyQuestion(data []byte) error {
 	b.questions[p.QuestionID] = &Question{
 		ID: p.QuestionID, Target: p.Target, GoalID: p.GoalID, Kind: p.Kind, Text: p.Text,
 		Recommendation: p.Recommendation, DefaultAnswer: p.DefaultAnswer, DeadlineMs: p.DeadlineMs,
-		Narrows: p.Narrows, OwnerSessionID: p.OwnerSessionID, State: QuestionOpen,
+		KeepsBreadth: p.KeepsBreadth, OwnerSessionID: p.OwnerSessionID, State: QuestionOpen,
 	}
 	return nil
 }
@@ -73,6 +73,24 @@ func (b *Board) applyQuestionResolved(data []byte) error {
 	}
 	b.withdrawQuestionCuts(q.ID)
 	return nil
+}
+
+func (b *Board) countDefaultCut(questionID string) {
+	q := b.questions[questionID]
+	if q == nil {
+		return
+	}
+	if g := b.goals[q.GoalID]; g != nil {
+		g.DefaultCuts++
+		return
+	}
+	b.projectDefaultCuts++
+}
+
+func (b *Board) ProjectDefaultCuts() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.projectDefaultCuts
 }
 
 func (b *Board) withdrawQuestionCuts(questionID string) {

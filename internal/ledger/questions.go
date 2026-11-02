@@ -16,12 +16,12 @@ type QuestionRequest struct {
 	DefaultAnswer  string       `json:"defaultAnswer"`
 	DeadlineMs     int64        `json:"deadlineMs"`
 	Kind           QuestionKind `json:"kind"`
-	Narrows        bool         `json:"narrows,omitempty"`
+	KeepsBreadth   bool         `json:"keepsBreadth,omitempty"`
 }
 
-var outwardWords = regexp.MustCompile(`(?i)\b(send|sends|sending|sent|email|emails|e-mail|merge|merges|merging|merged|deploy|deploys|deploying|deployed|push|pushes|pushing|publish|publishes|publishing|release|releases|releasing|spend|spends|spending|pay|pays|paying|purchase|buy|charge|delete|deletes|deleting|deleted|destroy|wipe|force-push|rm)\b`)
+var outwardWords = regexp.MustCompile(`(?i)\b(send\w*|sent|e-?mail\w*|ship\w*|merg\w*|deploy\w*|push\w*|force-push\w*|publish\w*|releas\w*|launch\w*|go(es|ing)? live|roll(s|ed|ing)? ?out|spen[dt]\w*|pa(y|ys|ying|id|yment|yments)|purchas\w*|buy\w*|bought|charg\w*|refund\w*|transfer\w*|delet\w*|destroy\w*|wip(e|es|ed|ing)|truncat\w*|drop table|rm|uninstall\w*|terminat\w*|revok\w*|upload\w*|submit\w*|post(s|ed|ing)?|tweet\w*|announc\w*|invit\w*|notify\w*|contact\w*|sign(s|ed|ing)? up)\b`)
 
-var narrowingWords = regexp.MustCompile(`(?i)\b(drop|drops|dropping|defer|defers|deferring|skip|skips|skipping|later|postpone|smaller|minimal|only|without|exclude|excluding|cut|cuts|instead of|leave out|not now)\b`)
+var narrowingWords = regexp.MustCompile(`(?i)\b(drop\w*|defer\w*|skip\w*|later|postpon\w*|smaller|minimal\w*|minimum|only|without|exclud\w*|cut\w*|omit\w*|leav(e|es|ing) out|left out|not now|remov\w*|limit\w*|restrict\w*|narrow\w*|reduc\w*|simplif\w*|fewer|less|subset|partial\w*|stub\w*|mvp|instead|descop\w*|de-scop\w*|punt\w*|shelv\w*|backlog\w*|out of scope|trim\w*|strip\w*|lighter|cheaper|quick(er)? version)\b`)
 
 func (s *Store) AskQuestion(req QuestionRequest, now time.Time) (Question, error) {
 	q, err := req.question(now)
@@ -45,7 +45,7 @@ func (s *Store) AskQuestion(req QuestionRequest, now time.Time) (Question, error
 	}
 	data, err := json.Marshal(QuestionPayload{
 		QuestionID: q.ID, Target: q.Target, GoalID: q.GoalID, Kind: q.Kind, Text: q.Text, Recommendation: q.Recommendation,
-		DefaultAnswer: q.DefaultAnswer, DeadlineMs: q.DeadlineMs, Narrows: q.Narrows, OwnerSessionID: q.OwnerSessionID,
+		DefaultAnswer: q.DefaultAnswer, DeadlineMs: q.DeadlineMs, KeepsBreadth: q.KeepsBreadth, OwnerSessionID: q.OwnerSessionID,
 	})
 	if err != nil {
 		return Question{}, err
@@ -68,7 +68,7 @@ func (req QuestionRequest) question(now time.Time) (Question, error) {
 	case req.DeadlineMs <= now.UnixMilli():
 		return Question{}, refuse("a question needs a --deadline in the future")
 	}
-	q := Question{Target: req.To, Kind: req.Kind, Text: text, Recommendation: rec, DefaultAnswer: def, DeadlineMs: req.DeadlineMs, Narrows: req.Narrows, OwnerSessionID: req.SessionID, State: QuestionOpen}
+	q := Question{Target: req.To, Kind: req.Kind, Text: text, Recommendation: rec, DefaultAnswer: def, DeadlineMs: req.DeadlineMs, KeepsBreadth: req.KeepsBreadth, OwnerSessionID: req.SessionID, State: QuestionOpen}
 	switch req.Kind {
 	case QuestionOutward:
 		if def != "" && !strings.EqualFold(def, OutwardDefault) {
@@ -88,8 +88,8 @@ func (req QuestionRequest) question(now time.Time) (Question, error) {
 			return Question{}, refuse("this reads as an outward act (%q); ask it with --kind outward", outwardWords.FindString(field))
 		}
 	}
-	if !req.Narrows && narrowingWords.MatchString(def) {
-		return Question{}, refuse("the default reads as narrowing (%q); pass --narrows so it waits for the person's ack instead of applying itself", narrowingWords.FindString(def))
+	if req.KeepsBreadth && narrowingWords.MatchString(def) {
+		return Question{}, refuse("the default reads as narrowing (%q), so it cannot be declared --keeps-breadth; without it the default waits for the person's ack", narrowingWords.FindString(def))
 	}
 	return q, nil
 }

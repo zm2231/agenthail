@@ -19,7 +19,7 @@ type ledgerWriteArgs struct {
 var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--clause": true, "--type": true, "--source": true, "--session": true, "--project": true, "--from": true,
 	"--recommendation": true, "--default": true, "--deadline": true, "--kind": true, "--reason": true}
 
-var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--narrows": true, "--mine": true}
+var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true}
 
 func parseLedgerWrite(args []string) (ledgerWriteArgs, error) {
 	parsed := ledgerWriteArgs{values: map[string][]string{}, bools: map[string]bool{}}

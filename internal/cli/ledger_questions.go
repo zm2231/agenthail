@@ -34,7 +34,7 @@ func (a *App) ledgerQuestion(args []string) error {
 	}
 	text := strings.TrimSpace(strings.Join(w.positional[1:], " "))
 	if text == "" || w.value("--to") == "" || w.value("--deadline") == "" || w.value("--kind") == "" {
-		return fmt.Errorf(`usage: agenthail ledger question --to <goal|ask|clause|project> "<question>" --recommendation "<r>" --default "<d>" --deadline <30m|4h|2d> --kind <scope|framing|outward> [--narrows]`)
+		return fmt.Errorf(`usage: agenthail ledger question --to <goal|ask|clause|project> "<question>" --recommendation "<r>" --default "<d>" --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]`)
 	}
 	deadline, err := parseLedgerDeadline(w.value("--deadline"), time.Now())
 	if err != nil {
@@ -42,7 +42,7 @@ func (a *App) ledgerQuestion(args []string) error {
 	}
 	ctx := context.Background()
 	req := ledger.QuestionRequest{To: w.value("--to"), Text: text, Recommendation: w.value("--recommendation"), DefaultAnswer: w.value("--default"),
-		DeadlineMs: deadline.UnixMilli(), Kind: ledger.QuestionKind(w.value("--kind")), Narrows: w.bools["--narrows"]}
+		DeadlineMs: deadline.UnixMilli(), Kind: ledger.QuestionKind(w.value("--kind")), KeepsBreadth: w.bools["--keeps-breadth"]}
 	if req.ProjectKey, req.SessionID, err = a.ledgerWriteContext(ctx, w); err != nil {
 		return err
 	}

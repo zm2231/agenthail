@@ -76,7 +76,7 @@ func (s *Store) ExpireQuestions(projectKey string, now time.Time) ([]Expiry, err
 			}
 			expiry.Outcome, expiry.Effects = ExpiryDefaulted, []string{id}
 			text := fmt.Sprintf("%s: %s (default applied; no answer by the deadline)", q.Text, q.DefaultAnswer)
-			if err := add(EventDecision, DecisionPayload{DecisionID: id, GoalID: q.GoalID, QuestionID: q.ID, Version: 1, Text: text, Principal: q.OwnerSessionID}); err != nil {
+			if err := add(EventDecision, DecisionPayload{DecisionID: id, GoalID: q.GoalID, QuestionID: q.ID, Version: 1, Text: text, Principal: PrincipalDefault}); err != nil {
 				return nil, err
 			}
 			if err := add(EventQuestionRes, QuestionResolvedPayload{QuestionID: q.ID, Answer: q.DefaultAnswer, Applied: true, Auto: true, Effects: expiry.Effects}); err != nil {

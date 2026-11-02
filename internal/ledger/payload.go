@@ -65,7 +65,7 @@ type QuestionPayload struct {
 	Recommendation string       `json:"recommendation"`
 	DefaultAnswer  string       `json:"defaultAnswer"`
 	DeadlineMs     int64        `json:"deadlineMs"`
-	Narrows        bool         `json:"narrows,omitempty"`
+	KeepsBreadth   bool         `json:"keepsBreadth,omitempty"`
 	OwnerSessionID string       `json:"ownerSessionId"`
 }
 

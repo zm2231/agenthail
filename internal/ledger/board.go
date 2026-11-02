@@ -11,6 +11,7 @@ type Goal struct {
 	ParentGoalID string    `json:"parentGoalId,omitempty"`
 	Asks         []string  `json:"asks,omitempty"`
 	Constraints  []*Clause `json:"constraints,omitempty"`
+	DefaultCuts  int       `json:"defaultCuts,omitempty"`
 }
 
 type Ask struct {
@@ -73,6 +74,12 @@ type Decision struct {
 	Text            string `json:"text"`
 	Principal       string `json:"principal"`
 	SourceUtterance string `json:"sourceUtteranceId,omitempty"`
+	QuestionID      string `json:"questionId,omitempty"`
+}
+
+// ByPerson is whether a decision can authorize an outward act: one applied by an expired default never can.
+func (d Decision) ByPerson() bool {
+	return d.Principal != PrincipalDefault && d.SourceUtterance != ""
 }
 
 type Board struct {
@@ -87,6 +94,7 @@ type Board struct {
 	targetCuts         []*TargetCut
 	questions          map[string]*Question
 	workItems          map[string]*WorkItem
+	projectDefaultCuts int
 	applied            int64
 }
 
@@ -107,6 +115,7 @@ func (b *Board) reset() {
 	b.targetCuts = nil
 	b.questions = map[string]*Question{}
 	b.workItems = map[string]*WorkItem{}
+	b.projectDefaultCuts = 0
 	b.applied = 0
 }
 
@@ -363,6 +372,7 @@ func (b *Board) applyDecision(data []byte) error {
 		Text:            p.Text,
 		Principal:       p.Principal,
 		SourceUtterance: p.SourceUtterance,
+		QuestionID:      p.QuestionID,
 	}
 	return nil
 }
@@ -386,6 +396,7 @@ func (b *Board) applyCut(data []byte) error {
 		return err
 	}
 	cut := Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked, QuestionID: p.QuestionID}
+	b.countDefaultCut(p.QuestionID)
 	if c, ok := b.clauses[p.ClauseID]; ok {
 		c.Cuts = append(c.Cuts, cut)
 		return nil
