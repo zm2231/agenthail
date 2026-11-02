@@ -92,6 +92,7 @@ type Daemon struct {
 	ledger            *ledger.Store
 	checks            checkerRunner
 	g2                *g2Counter
+	delivered         deliveredWords
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool

@@ -20,6 +20,8 @@ type claudeHookInput struct {
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
 	PromptID  string `json:"prompt_id"`
+	// Set by the Claude host to the uuid of the message Claude took.
+	MessageUUID string `json:"agenthail_message_uuid"`
 }
 
 // sessionContext is what the session-context hook adds to a Claude or Codex
@@ -77,7 +79,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	}
 	var ledgerContext string
 	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
-		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.PromptID, hook.Prompt)
+		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)
 	}
 
 	if text == "" && ledgerContext == "" {
@@ -93,7 +95,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
 }
 
-func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, promptID, prompt string) string {
+func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, hook claudeHookInput) string {
 	var client *daemonAPIClient
 	var err error
 	if a.daemonAPIOverride != nil {
@@ -105,9 +107,10 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 		return ""
 	}
 	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]string{
-		"sessionId": session.ID,
-		"promptId":  promptID,
-		"prompt":    prompt,
+		"sessionId":   session.ID,
+		"promptId":    hook.PromptID,
+		"prompt":      hook.Prompt,
+		"messageUuid": hook.MessageUUID,
 	}, nil)
 	if err != nil || status != http.StatusOK {
 		return ""

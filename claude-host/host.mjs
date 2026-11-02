@@ -24,6 +24,7 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const TAKE_TIMEOUT_MS = 10_000;
+const HUMAN_KEPT = 64;
 // How long close waits for Claude to stop its turn and exit before it kills
 // the process, and how long it then waits for the killed process to exit. Both
 // together stay well inside the daemon's 20 s deadline for a stop.
@@ -114,6 +115,7 @@ class Session {
     this.tasks = [];
     this.taskSince = new Map();
     this.owed = new Set();
+    this.human = [];
     this.ambient = new Set();
     this.context = null;
     this.measuring = null;
@@ -768,6 +770,7 @@ async function take(s, params) {
   if (params.origin) message.origin = origin(params.origin);
   s.accepted.add(params.uuid);
   s.owe(params.uuid);
+  if (message.origin?.kind === 'human') s.human = [...s.human, { uuid: params.uuid, text: params.text.trim() }].slice(-HUMAN_KEPT);
   const taken = s.push(message);
   s.setState('busy');
   try {
@@ -827,9 +830,19 @@ function sessionContextHooks(s) {
         resolve({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
       });
       child.stdin.on('error', () => {});
-      child.stdin.end(JSON.stringify(input));
+      child.stdin.end(JSON.stringify(withMessageUUID(s, input)));
     });
   return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
+}
+
+// Claude names a prompt by its own id, so the host says which message it took.
+function withMessageUUID(s, input) {
+  if (input.hook_event_name !== 'UserPromptSubmit' || typeof input.prompt !== 'string') return input;
+  const prompt = input.prompt.trim();
+  const index = s.human.findIndex((entry) => entry.text === prompt);
+  if (index < 0) return input;
+  const [taken] = s.human.splice(index, 1);
+  return { ...input, agenthail_message_uuid: taken.uuid };
 }
 
 function spawnDetached(s, options, exited) {

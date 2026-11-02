@@ -11,14 +11,19 @@ func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
 	if capture.IntentUUID == "" {
 		return
 	}
-	key, _, err := d.recordPersonWords(capture.Target, ledger.Utterance{
+	now := time.Now()
+	key, captured, err := d.recordPersonWords(capture.Target, ledger.Utterance{
 		Ref:        ledger.DeliveryRef(capture.IntentUUID),
 		Surface:    string(capture.Target.Surface),
 		Text:       capture.Message,
-		At:         time.Now(),
+		At:         now,
 		CapturedBy: ledger.CapturedByDelivery,
 	})
 	if err != nil {
 		d.log.Printf("ledger capture: record delivery %s to %s in project %s: %s", capture.IntentUUID, capture.Target.ID, key, err)
+		return
+	}
+	if captured {
+		d.delivered.add(capture.Target.ID, capture.IntentUUID, capture.Message, now)
 	}
 }
