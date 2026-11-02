@@ -54,15 +54,19 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	return nil
 }
 
-func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs) error {
+func (a *App) workBoard(store *ledger.Store, w ledgerWriteArgs) (*ledger.Board, error) {
 	key := w.value("--project")
 	if key == "" {
 		var err error
 		if key, err = ledgerProjectKey(a); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	board, err := store.Board(key)
+	return store.Board(key)
+}
+
+func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs) error {
+	board, err := a.workBoard(store, w)
 	if err != nil {
 		return err
 	}
@@ -96,11 +100,7 @@ func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs) error {
 }
 
 func (a *App) ledgerCriticalPath(store *ledger.Store, w ledgerWriteArgs) error {
-	key, err := ledgerProjectKey(a)
-	if err != nil {
-		return err
-	}
-	board, err := store.Board(key)
+	board, err := a.workBoard(store, w)
 	if err != nil {
 		return err
 	}

@@ -105,6 +105,9 @@ func TestG2CountsWorkAndWaitingOnOthers(t *testing.T) {
 		t.Fatalf("no work this turn should block: %+v", r)
 	}
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "widget-W1", DependsOn: "widget-W2", SessionID: "lead"})
+	if r := gate(t, s, "t3b", quiet); r.Result != ledger.GateBlocked {
+		t.Fatalf("a dependency nobody holds is not waiting on others: %+v", r)
+	}
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W2", SessionID: "helper"})
 	if r := gate(t, s, "t4", quiet); r.Result != ledger.GatePass {
 		t.Fatalf("all open work waits on another session's item, so the clause is waiting: %+v", r)

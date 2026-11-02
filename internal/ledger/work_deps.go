@@ -102,7 +102,7 @@ func (b *Board) blockedOnOthers(c Clause, sessionID string) bool {
 		}
 		others := item.Assignee != "" && item.Assignee != sessionID
 		for _, id := range b.openDeps(item) {
-			if dep := b.workItems[id]; dep.Assignee != sessionID {
+			if dep := b.workItems[id]; dep.Assignee != "" && dep.Assignee != sessionID {
 				others = true
 			}
 		}
