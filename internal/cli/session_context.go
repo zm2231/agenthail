@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -124,15 +124,5 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	if json.Unmarshal(body, &result) != nil || !result.Captured {
 		return ""
 	}
-	return ledgerReadbackInstruction(result.Ref, result.ProjectKey, result.Unattached)
-}
-
-func ledgerReadbackInstruction(ref, projectKey string, unattached []string) string {
-	text := fmt.Sprintf(`[intent ledger] The person's message is utterance %s in %s. Before you reply, attach each fragment of it:
-  agenthail ledger attach %s --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> --to <goal|ask|clause|project> --clause "<their words, broadest reading>"
-Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. Put each readback line attach prints in your reply. Never narrow what they asked; anything you leave out is a cut they must ack.`, ref, projectKey, ref)
-	if len(unattached) > 0 {
-		text += "\nStill unattached from earlier: " + strings.Join(unattached, ", ")
-	}
-	return text
+	return ledger.ReadbackInstruction(result.Ref, result.ProjectKey, result.Unattached)
 }
