@@ -90,7 +90,7 @@ Before you stop: report what changed (agenthail ledger progress <clause> --ref <
 
 func (d *Daemon) apiLedgerClauseHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.ClauseRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	if req.Owner != "" {

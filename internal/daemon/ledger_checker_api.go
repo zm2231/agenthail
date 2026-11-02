@@ -18,7 +18,7 @@ type checkRequest struct {
 
 func (d *Daemon) apiLedgerCheckHandler(w http.ResponseWriter, r *http.Request) {
 	var req checkRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	board, err := d.ledgerStore().Board(req.ProjectKey)

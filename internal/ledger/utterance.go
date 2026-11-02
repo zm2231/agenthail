@@ -1,7 +1,9 @@
 package ledger
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,6 +33,17 @@ const promptRefPrefix = "claude-prompt:"
 func PromptRef(promptID string) string { return promptRefPrefix + promptID }
 
 func DeliveryRef(intentUUID string) string { return "delivery:" + intentUUID }
+
+func IsPromptRef(ref string) bool { return strings.HasPrefix(ref, promptRefPrefix) }
+
+func (s *Store) HasRef(projectKey, ref string) (bool, error) {
+	var one int
+	err := s.read.QueryRow(`SELECT 1 FROM ledger_events WHERE project_key=? AND ref=?`, projectKey, ref).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 func (u Utterance) HookMissed(inserted bool) bool {
 	return inserted && u.CapturedBy == CapturedByJournal && strings.HasPrefix(u.Ref, promptRefPrefix)

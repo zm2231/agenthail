@@ -14,7 +14,7 @@ const ledgerQuestionSweep = 30 * time.Second
 
 func (d *Daemon) apiLedgerQuestionHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.QuestionRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey) {
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, req.SessionID) || !d.knownLedgerProject(w, req.ProjectKey, req.SessionID) {
 		return
 	}
 	q, err := d.ledgerStore().AskQuestion(req, time.Now())

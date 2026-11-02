@@ -223,24 +223,35 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   await c.call('subscribe', { after: 0 });
   const id = randomUUID();
   const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  const sent = [];
   for (const text of ['hello', 'FAIL', 'NULL', 'ARRAY']) {
     const uuid = randomUUID();
+    sent.push(uuid);
     await c.call('send', { sessionId: id, uuid, text, origin: { kind: 'human' } });
     await c.event(turnResult(id, uuid));
   }
+  const peer = randomUUID();
+  await c.call('send', { sessionId: id, uuid: peer, text: 'hello', origin: { kind: 'peer', from: randomUUID() } });
+  await c.event(turnResult(id, peer));
   const recorded = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(
     recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
-    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null]],
+    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', 'card for UserPromptSubmit']],
   );
   assert.deepEqual(
-    recorded.map((r) => r.output),
+    recorded.map((r) => r.output).slice(0, 5),
     [{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'card for SessionStart' } }, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
   );
   const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(ran[0].args, ['hook', 'session-context', '--claude-pid', String(opened.pid)]);
   assert.equal(ran[0].input.session_id, id);
   assert.equal(ran[0].input.source, 'startup');
+  assert.equal(ran[0].input.agenthail_message_uuid, undefined);
+  assert.deepEqual(
+    ran.slice(1).map((r) => r.input.agenthail_message_uuid),
+    [...sent, undefined],
+    'each person message names the uuid Claude took; a peer message names none',
+  );
   c.close();
 });
 

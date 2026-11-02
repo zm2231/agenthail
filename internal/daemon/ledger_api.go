@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type ledgerCaptureRequest struct {
-	SessionID string `json:"sessionId"`
-	PromptID  string `json:"promptId"`
-	Prompt    string `json:"prompt"`
+	SessionID   string `json:"sessionId"`
+	PromptID    string `json:"promptId"`
+	Prompt      string `json:"prompt"`
+	MessageUUID string `json:"messageUuid,omitempty"`
 }
 
 type ledgerCaptureResponse struct {
@@ -53,7 +55,7 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId, promptId and prompt are required.")
 		return
 	}
-	if !surfaces.IsTypedHumanPrompt(req.Prompt) {
+	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !surfaces.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, time.Now()) {
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
@@ -62,8 +64,12 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
-	ref := ledger.PromptRef(req.PromptID)
-	key, captured, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: "terminal", Text: req.Prompt, At: time.Now(), CapturedBy: ledger.CapturedByHook})
+	now := time.Now()
+	ref, surfaceName := ledger.PromptRef(req.PromptID), "terminal"
+	if uuid, delivered := d.delivered.claim(session.ID, req.MessageUUID, req.Prompt, now); delivered {
+		ref, surfaceName = ledger.DeliveryRef(uuid), string(session.Surface)
+	}
+	key, captured, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: req.Prompt, At: now, CapturedBy: ledger.CapturedByHook})
 	if err != nil {
 		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, key, err)
 		writeAPIError(w, http.StatusInternalServerError, "capture_failed", "The prompt was not recorded in the ledger.")

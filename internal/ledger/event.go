@@ -32,6 +32,7 @@ const (
 	EventGate          EventType = "gate"
 	EventWorkItemDep   EventType = "work_item.dep"
 	EventCutWithdrawn  EventType = "cut.withdrawn"
+	EventReclassified  EventType = "utterance.reclassified"
 )
 
 const (

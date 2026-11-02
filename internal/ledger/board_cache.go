@@ -3,6 +3,8 @@ package ledger
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"slices"
 	"sync"
 	"time"
 )
@@ -63,12 +65,25 @@ func applyCommitted(read querier, board *Board, projectKey string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	replay := slices.ContainsFunc(events, func(e Event) bool { return e.Type == EventReclassified })
 	for _, e := range events {
-		if err := board.Apply(e); err != nil {
+		if replay {
+			break
+		}
+		err := board.Apply(e)
+		replay = errors.Is(err, errNeedsReplay)
+		if err != nil && !replay {
 			return err
 		}
 	}
-	return nil
+	if !replay {
+		return nil
+	}
+	all, err := loadEvents(read, projectKey)
+	if err != nil {
+		return err
+	}
+	return board.Rebuild(all)
 }
 
 type plannedEvent func(board *Board, ids *idIssuer) (EventType, any, error)

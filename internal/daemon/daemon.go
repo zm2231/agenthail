@@ -92,6 +92,8 @@ type Daemon struct {
 	ledger            *ledger.Store
 	checks            checkerRunner
 	g2                *g2Counter
+	delivered         deliveredWords
+	notPerson         promptMarks
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool
@@ -176,6 +178,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		g2:                newG2Counter(time.Now()),
 	}
 	d.sources.prompts = d.backfillPrompt
+	d.sources.hookCaptured = d.holdsUncheckedHookCapture
 	d.ui = newUIState(reg)
 	d.snapshots = newSnapshotRelay()
 	identity, err := reg.HostIdentity()

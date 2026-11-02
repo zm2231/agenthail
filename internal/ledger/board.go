@@ -102,6 +102,13 @@ type Board struct {
 	gates              gateState
 	reviews            reviewState
 	checks             checkState
+	retracted          map[string]string
+	kept               map[string]string
+	dropped            map[string]string
+	orphaned           map[string]string
+	replaying          bool
+	attachedBy         map[string][]string
+	retractions        []Retraction
 	applied            int64
 }
 
@@ -126,12 +133,46 @@ func (b *Board) reset() {
 	b.gates = newGateState()
 	b.reviews = newReviewState()
 	b.checks = newCheckState()
+	b.retracted = map[string]string{}
+	b.kept = map[string]string{}
+	b.dropped = map[string]string{}
+	b.orphaned = map[string]string{}
+	b.attachedBy = map[string][]string{}
+	b.retractions = nil
 	b.applied = 0
 }
 
 func (b *Board) Apply(event Event) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.apply(event)
+}
+
+func (b *Board) apply(event Event) error {
+	skip, resource, err := b.screen(event)
+	if err != nil || skip {
+		if err == nil {
+			b.applied = event.Seq
+		}
+		return err
+	}
+	err = b.dispatch(event)
+	if err == nil && resource != nil {
+		resource()
+	}
+	if err == nil {
+		err = b.reviews.observe(event)
+	}
+	if err == nil {
+		err = b.checks.observe(event)
+	}
+	if err == nil {
+		b.applied = event.Seq
+	}
+	return err
+}
+
+func (b *Board) dispatch(event Event) error {
 	var err error
 	switch event.Type {
 	case EventGoal:
@@ -182,15 +223,8 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyWorkDep(event.Payload)
 	case EventCutWithdrawn:
 		err = b.applyCutWithdrawn(event.Payload)
-	}
-	if err == nil {
-		err = b.reviews.observe(event)
-	}
-	if err == nil {
-		err = b.checks.observe(event)
-	}
-	if err == nil {
-		b.applied = event.Seq
+	case EventReclassified:
+		err = b.applyReclassified(event.Payload)
 	}
 	return err
 }
@@ -291,12 +325,18 @@ func clauseFullyCut(c *Clause) bool {
 	return false
 }
 
+// Rebuild replays under the write lock so readers never see a half-built board.
 func (b *Board) Rebuild(events []Event) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.reset()
-	b.mu.Unlock()
+	if err := b.collectRetracted(events); err != nil {
+		return err
+	}
+	b.replaying = true
+	defer func() { b.replaying = false }()
 	for _, e := range events {
-		if err := b.Apply(e); err != nil {
+		if err := b.apply(e); err != nil {
 			return err
 		}
 	}

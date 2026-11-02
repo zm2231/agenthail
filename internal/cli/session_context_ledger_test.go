@@ -13,9 +13,10 @@ import (
 )
 
 type captureCall struct {
-	SessionID string `json:"sessionId"`
-	PromptID  string `json:"promptId"`
-	Prompt    string `json:"prompt"`
+	SessionID   string `json:"sessionId"`
+	PromptID    string `json:"promptId"`
+	Prompt      string `json:"prompt"`
+	MessageUUID string `json:"messageUuid"`
 }
 
 func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall) {
@@ -63,6 +64,10 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 	got := calls()
 	if len(got) != 1 || got[0] != (captureCall{SessionID: "s1", PromptID: "bb6af0fd", Prompt: "yes"}) {
 		t.Fatalf("capture call %+v", got)
+	}
+	app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"go","prompt_id":"c0ffee","agenthail_message_uuid":"6f1c2c1e-0000-4000-8000-000000000001"}`), surface.KindClaude, 4242, time.Now())
+	if got := calls(); len(got) != 2 || got[1].MessageUUID != "6f1c2c1e-0000-4000-8000-000000000001" {
+		t.Fatalf("the host's message uuid did not reach the daemon: %+v", got)
 	}
 	if output == nil {
 		t.Fatal("expected hook output naming the capture")

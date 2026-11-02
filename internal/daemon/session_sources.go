@@ -15,10 +15,13 @@ import (
 type sessionSourceManager struct {
 	registry *registry.Registry
 	prompts  func(surface.Session, sessionJournalPayload)
-	mu       sync.Mutex
-	sources  map[string]*sessionSource
-	running  sync.WaitGroup
-	closed   bool
+	// hookCaptured says whether a ledger still holds a hook capture of the session's words that its journal has not checked.
+	hookCaptured func(sessionID string) bool
+	rederives    chan struct{}
+	mu           sync.Mutex
+	sources      map[string]*sessionSource
+	running      sync.WaitGroup
+	closed       bool
 }
 
 type sessionSource struct {
@@ -46,7 +49,7 @@ type sessionSource struct {
 }
 
 func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
-	return &sessionSourceManager{registry: store, sources: map[string]*sessionSource{}}
+	return &sessionSourceManager{registry: store, sources: map[string]*sessionSource{}, rederives: make(chan struct{}, journalRederives)}
 }
 
 func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {

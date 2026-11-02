@@ -42,6 +42,25 @@ func TestClaudeTypedPromptsCarryTheHookPromptID(t *testing.T) {
 	}
 }
 
+func TestAPromptClaudeSentItselfKeepsItsPromptIDAndIsNotThePersons(t *testing.T) {
+	wakeup := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-w", "promptId": "wake-1", "isMeta": true, "promptSource": "system", "turnOrigin": "scheduled", "wakeupSource": "loop_wakeup", "message": map[string]any{"role": "user", "content": "Check the verdict; continue the loop."}})
+	if len(wakeup) != 1 || wakeup[0].Kind != "event" || wakeup[0].PromptID != "wake-1" {
+		t.Fatalf("a scheduled meta prompt: %+v", wakeup)
+	}
+	plain := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-s", "promptId": "wake-2", "turnOrigin": "scheduled", "message": map[string]any{"role": "user", "content": "nightly check"}})
+	if len(plain) != 1 || plain[0].PromptID != "wake-2" || plain[0].Origin != "scheduled" {
+		t.Fatalf("a scheduled prompt must not read as the person's: %+v", plain)
+	}
+	skill := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-k", "promptId": "typed-1", "isMeta": true, "message": map[string]any{"role": "user", "content": "Base directory for this skill: ..."}})
+	if len(skill) != 1 || skill[0].PromptID != "" {
+		t.Fatalf("a meta record inside the person's turn must not carry their prompt id: %+v", skill)
+	}
+	person := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-h", "promptId": "sdk-1", "turnOrigin": "human", "promptSource": "sdk", "origin": map[string]any{"kind": "human"}, "message": map[string]any{"role": "user", "content": "reply with ok"}})
+	if len(person) != 1 || person[0].Origin != "" || person[0].PromptID != "sdk-1" {
+		t.Fatalf("the person's own prompt: %+v", person)
+	}
+}
+
 func TestClaudeRemoteControlPostsUnderTheDeliveryID(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "b", "b@example.com")
 	var posted []string

@@ -21,6 +21,7 @@ type boardView struct {
 	targetCuts  []ledger.TargetCut
 	waivers     []ledger.GateWaiver
 	checks      map[string]ledger.GoalChecks
+	retractions []ledger.Retraction
 }
 
 func ledgerIDNumber(id string) int {
@@ -38,7 +39,7 @@ func byLedgerID[T any](items []T, id func(T) string) {
 
 func newBoardView(board *ledger.Board) boardView {
 	v := boardView{goals: board.Goals(), asks: board.OpenAsks(), decisions: board.Decisions(), constraints: board.ProjectConstraints(),
-		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}, checks: map[string]ledger.GoalChecks{}}
+		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}, checks: map[string]ledger.GoalChecks{}, retractions: board.Retractions()}
 	for _, c := range board.GoalChecks() {
 		v.checks[c.GoalID] = c
 	}
@@ -147,6 +148,9 @@ func (v boardView) print(attachment ledger.Attachment) {
 	}
 	for _, waiver := range v.waivers {
 		fmt.Printf("waiver: G2 stopped re-blocking %s for %s after %d tries\n", waiver.Item, waiver.SessionID, ledger.GateBlockCap)
+	}
+	for _, r := range v.retractions {
+		fmt.Println(r)
 	}
 	printAttachment(attachment)
 	if empty && len(attachment.Unattached) == 0 && len(attachment.Elsewhere) == 0 {

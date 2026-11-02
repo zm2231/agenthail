@@ -21,13 +21,13 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 		return "", false, err
 	}
 	store := d.ledgerStore()
-	targets, grants, err := d.ledgerTargets(store, session)
+	targets, access, err := d.ledgerTargets(store, session)
 	if err != nil {
 		return "", false, err
 	}
 	recordedKey := ""
 	for _, target := range targets {
-		since, inScope, err := d.ledgerSince(store, target, session.ID, grants)
+		since, inScope, err := d.ledgerSince(store, target, session.ID, access)
 		if err != nil {
 			return target.key, false, err
 		}
@@ -49,31 +49,6 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 	return recordedKey, recordedKey != "", nil
 }
 
-func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]ledgerTarget, map[string]time.Time, error) {
-	var targets []ledgerTarget
-	if session.Cwd != "" {
-		project, err := d.sessionProject(session)
-		if err != nil {
-			return nil, nil, err
-		}
-		if project != nil && project.Key != "" {
-			targets = append(targets, ledgerTarget{key: project.Key, localID: project.LocalID})
-		}
-	}
-	grants, err := store.SessionGrants(session.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	granted := map[string]time.Time{}
-	for _, grant := range grants {
-		granted[grant.ProjectKey] = grant.Since
-		if len(targets) == 0 || targets[0].key != grant.ProjectKey {
-			targets = append(targets, ledgerTarget{key: grant.ProjectKey})
-		}
-	}
-	return targets, granted, nil
-}
-
 // sessionProject uses the catalog's cached identity so per-prompt capture does not run git on the stream callback.
 func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error) {
 	records, err := d.Registry.ListProjects()
@@ -88,38 +63,20 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 	return identity.Project, nil
 }
 
-// ledgerSince is the earliest grant that puts sessionID in the project's ledger scope.
-func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, grants map[string]time.Time) (time.Time, bool, error) {
-	scope, err := store.Scope(target.key)
-	if err != nil || scope.State == ledger.LedgerDisabled {
-		return time.Time{}, false, err
-	}
-	since, inScope := scope.Since, scope.State == ledger.LedgerEnabled
-	consider := func(at time.Time) {
-		if !inScope || at.Before(since) {
-			since, inScope = at, true
-		}
-	}
-	if at, ok := grants[target.key]; ok {
-		consider(at)
-	}
-	if target.localID == "" {
-		return since, inScope, nil
-	}
-	at, coordinator, err := d.Registry.CoordinatorSince(target.localID, sessionID)
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	if coordinator {
-		consider(at)
-	}
-	return since, inScope, nil
-}
-
 func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalPayload) {
+	if reason, ok := notPersonPrompt(payload); ok {
+		d.notPerson.add(payload.PromptID, time.Now())
+		d.reclassifyHookCapture(session, ledger.PromptRef(payload.PromptID), reason)
+		return
+	}
 	ref := journalPromptRef(payload)
 	if ref == "" {
 		return
+	}
+	if ledger.IsPromptRef(ref) && payload.MessageID != "" {
+		if delivered := ledger.DeliveryRef(payload.MessageID); d.recordedFor(session, delivered) {
+			ref = delivered
+		}
 	}
 	at, err := time.Parse(time.RFC3339Nano, payload.TS)
 	if err != nil {
@@ -129,6 +86,20 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, CapturedBy: ledger.CapturedByJournal}); err != nil {
 		d.log.Printf("ledger backfill: record %s for %s: %s", ref, session.ID, err)
 	}
+}
+
+func (d *Daemon) recordedFor(session surface.Session, ref string) bool {
+	store := d.ledgerStore()
+	targets, _, err := d.ledgerTargets(store, session)
+	if err != nil {
+		return false
+	}
+	for _, target := range targets {
+		if found, err := store.HasRef(target.key, ref); err == nil && found {
+			return true
+		}
+	}
+	return false
 }
 
 func journalPromptRef(payload sessionJournalPayload) string {

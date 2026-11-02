@@ -188,6 +188,7 @@ Intent ledger:
   ledger asks                    List all asks
   ledger ask <ask_id>            Show one ask with its clauses
   ledger enable [@session]       Capture the person's words in this project, or for one session
+                                 and the forks made from it afterwards
   ledger disable [@session]      Stop capturing
 
 Dashboard (optional):
