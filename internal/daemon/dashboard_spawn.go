@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
-	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -23,33 +22,6 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 		},
 		PersonCapture: d.personCapture,
 	}
-}
-
-func (d *Daemon) personCapture(sessionID, sessionCwd, message string) {
-	if sessionCwd == "" {
-		return
-	}
-	projects, err := d.Registry.ListProjects()
-	if err != nil {
-		return
-	}
-	var projectKey string
-	for _, p := range projects {
-		if p.Key != "" && strings.HasPrefix(sessionCwd, p.WorkspaceRoot) {
-			projectKey = p.Key
-			break
-		}
-	}
-	if projectKey == "" {
-		return
-	}
-	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
-	capture := ledger.PersonCapture(store)
-	capture(ledger.CaptureInput{
-		ProjectKey: projectKey,
-		SessionID:  surface.PersonSessionID,
-		Text:       message,
-	})
 }
 
 func (d *Daemon) createNotionThread(ctx context.Context, message string, name registry.AliasReservation, model string) (*delivery.Receipt, error) {

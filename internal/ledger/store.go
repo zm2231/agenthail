@@ -97,11 +97,12 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 	return events, rows.Err()
 }
 
-func (s *Store) RecordUtterance(projectKey, messageID, sessionID, surface, text string) (Event, error) {
+func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surface, text string) (Event, error) {
 	payload := UtterancePayload{
 		Text:      text,
 		MessageID: messageID,
 		SessionID: sessionID,
+		TargetID:  targetID,
 		Surface:   surface,
 		TS:        time.Now().UTC().Format(time.RFC3339),
 	}

@@ -4,19 +4,24 @@ type CaptureInput struct {
 	ProjectKey string
 	MessageID  string
 	SessionID  string
+	TargetID   string
 	Surface    string
 	Text       string
 }
 
-func PersonCapture(store *Store) func(CaptureInput) {
-	return func(input CaptureInput) {
+func PersonCapture(store *Store) func(CaptureInput) error {
+	return func(input CaptureInput) error {
 		if input.ProjectKey == "" || input.Text == "" {
-			return
+			return nil
 		}
 		enabled, err := store.Enabled(input.ProjectKey)
-		if err != nil || !enabled {
-			return
+		if err != nil {
+			return err
 		}
-		store.RecordUtterance(input.ProjectKey, input.MessageID, input.SessionID, input.Surface, input.Text)
+		if !enabled {
+			return nil
+		}
+		_, err = store.RecordUtterance(input.ProjectKey, input.MessageID, input.SessionID, input.TargetID, input.Surface, input.Text)
+		return err
 	}
 }

@@ -30,7 +30,15 @@ type Receipt struct {
 	WaitingOn *surface.Waiting `json:"waitingOn,omitempty"`
 }
 
-type PersonCaptureFunc func(sessionID, sessionCwd, message string)
+type PersonCaptureContext struct {
+	TargetSessionID string
+	TargetCwd       string
+	TargetSurface   string
+	DeliveryKey     string
+	Message         string
+}
+
+type PersonCaptureFunc func(PersonCaptureContext)
 
 type Dispatcher struct {
 	Registry         *registry.Registry
@@ -257,7 +265,13 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, err
 		}
 		if d.PersonCapture != nil && options.SourceSessionID == surface.PersonSessionID {
-			d.PersonCapture(session.ID, session.Cwd, message)
+			d.PersonCapture(PersonCaptureContext{
+				TargetSessionID: session.ID,
+				TargetCwd:       session.Cwd,
+				TargetSurface:   string(session.Surface),
+				DeliveryKey:     deliveryKey,
+				Message:         message,
+			})
 		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)

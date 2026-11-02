@@ -73,7 +73,7 @@ func TestRecordUtterance(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewStore(db, db)
 
-	event, err := s.RecordUtterance("proj-1", "msg-1", "sess-1", "claude", "build me a widget")
+	event, err := s.RecordUtterance("proj-1", "msg-1", "sess-1", "target-1", "claude", "build me a widget")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +100,10 @@ func TestEventsFilterByProject(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewStore(db, db)
 
-	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "claude", "first"); err != nil {
+	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "", "claude", "first"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RecordUtterance("proj-2", "m2", "s2", "claude", "second"); err != nil {
+	if _, err := s.RecordUtterance("proj-2", "m2", "s2", "", "claude", "second"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,10 +125,10 @@ func TestLatestSeq(t *testing.T) {
 		t.Fatalf("expected 0 for empty, got %d err=%v", seq, err)
 	}
 
-	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "claude", "hello"); err != nil {
+	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "", "claude", "hello"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RecordUtterance("proj-1", "m2", "s1", "claude", "world"); err != nil {
+	if _, err := s.RecordUtterance("proj-1", "m2", "s1", "", "claude", "world"); err != nil {
 		t.Fatal(err)
 	}
 

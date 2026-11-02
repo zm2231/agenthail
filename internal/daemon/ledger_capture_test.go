@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -55,7 +56,7 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 
 	_, err = d.dispatcher().DeliverWithOptions(
 		context.Background(), fake, &target,
-		"remember to test the ledger", "",
+		"remember to test the ledger", "delivery-key-1",
 		surface.SendOptions{Author: surface.AuthorPerson},
 	)
 	if err != nil {
@@ -74,6 +75,19 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 	}
 	if events[0].ActorSessionID != surface.PersonSessionID {
 		t.Fatalf("expected actor %s, got %s", surface.PersonSessionID, events[0].ActorSessionID)
+	}
+	var payload ledger.UtterancePayload
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.TargetID != "target-session" {
+		t.Fatalf("expected targetId target-session, got %s", payload.TargetID)
+	}
+	if payload.Surface != string(surface.KindCodex) {
+		t.Fatalf("expected surface %s, got %s", surface.KindCodex, payload.Surface)
+	}
+	if payload.MessageID != "delivery-key-1" {
+		t.Fatalf("expected messageId delivery-key-1, got %s", payload.MessageID)
 	}
 }
 
@@ -131,5 +145,103 @@ func TestPersonSendSkipsDisabledLedger(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("expected 0 ledger events for disabled project, got %d", len(events))
+	}
+}
+
+func TestPersonSendCapturesNestedProject(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+
+	outerDir := t.TempDir()
+	innerDir := t.TempDir()
+	if err := r.AddProject(registry.ProjectRecord{
+		ID: "outer", WorkspaceRoot: outerDir, Title: "Outer", Key: "outer-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddProject(registry.ProjectRecord{
+		ID: "inner", WorkspaceRoot: innerDir, Title: "Inner", Key: "inner-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
+	if err := store.Enable("inner-key"); err != nil {
+		t.Fatal(err)
+	}
+
+	target := surface.Session{
+		ID: "nested-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop,
+		Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: innerDir,
+	}
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &daemonSurface{
+		sessions:     map[string]surface.Session{"nested-target": target},
+		observations: map[string]*surface.TurnObservation{},
+		accepted:     true,
+	}
+	d := newTestDaemon(t, r, []surface.Surface{fake})
+
+	_, err = d.dispatcher().DeliverWithOptions(
+		context.Background(), fake, &target,
+		"nested project message", "",
+		surface.SendOptions{Author: surface.AuthorPerson},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	innerEvents, err := store.Events("inner-key", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(innerEvents) != 1 {
+		t.Fatalf("expected 1 event for inner project, got %d", len(innerEvents))
+	}
+
+	outerEvents, err := store.Events("outer-key", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outerEvents) != 0 {
+		t.Fatalf("expected 0 events for outer project, got %d", len(outerEvents))
+	}
+}
+
+func TestPersonSendSkipsNoProject(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+
+	target := surface.Session{
+		ID: "orphan", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop,
+		Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Cwd: t.TempDir(),
+	}
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &daemonSurface{
+		sessions:     map[string]surface.Session{"orphan": target},
+		observations: map[string]*surface.TurnObservation{},
+		accepted:     true,
+	}
+	d := newTestDaemon(t, r, []surface.Surface{fake})
+
+	_, err = d.dispatcher().DeliverWithOptions(
+		context.Background(), fake, &target,
+		"no project here", "",
+		surface.SendOptions{Author: surface.AuthorPerson},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

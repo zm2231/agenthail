@@ -4,6 +4,7 @@ type UtterancePayload struct {
 	Text      string `json:"text"`
 	MessageID string `json:"messageId"`
 	SessionID string `json:"sessionId"`
+	TargetID  string `json:"targetId"`
 	Surface   string `json:"surface"`
 	TS        string `json:"ts"`
 }
