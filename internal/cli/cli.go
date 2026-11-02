@@ -207,6 +207,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdPermissions(rest)
 	case "person":
 		return a.cmdPerson(rest)
+	case "ledger":
+		return a.cmdLedger(rest)
 	case "ui":
 		return a.cmdUI(rest)
 	case "dashboard":

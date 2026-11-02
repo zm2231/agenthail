@@ -148,6 +148,13 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks uninstall codex         Remove them
   hooks status codex            Show whether they are installed
 
+Intent ledger:
+  ledger                         Show open asks and clauses for the current project
+  ledger asks                    List all asks
+  ledger ask <ask_id>            Show one ask with its clauses
+  ledger enable                  Enable the ledger for the current project
+  ledger disable                 Disable the ledger
+
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
   dashboard disable             Disable the dashboard listener
