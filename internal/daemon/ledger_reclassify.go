@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -48,6 +49,9 @@ func (d *Daemon) reclassifyHookCapture(session surface.Session, ref, reason stri
 			d.noticeRetractions(store, target.key, ref)
 		}
 	}
+	d.checks.mu.Lock()
+	defer d.checks.mu.Unlock()
+	d.releaseVoidCheck(context.Background(), store, time.Now())
 }
 
 func (d *Daemon) noticeRetractions(store *ledger.Store, key, ref string) {

@@ -66,6 +66,7 @@ func (d *Daemon) sweepLedgerChecks(ctx context.Context, now time.Time) {
 	if r := d.checks.running; r != nil && !r.reported && now.Sub(r.started) >= checkTimeout {
 		d.finishCheck(ctx, store, r.project, r.run, ledger.CheckTimedOut, "no report within "+checkTimeout.String(), now)
 	}
+	d.releaseVoidCheck(ctx, store, now)
 	for _, key := range keys {
 		if enabled, err := store.Enabled(key); err != nil || !enabled {
 			continue

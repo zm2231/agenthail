@@ -256,6 +256,47 @@ func TestACheckerThatNeverReportsTimesOutAndOnlyItIsStopped(t *testing.T) {
 	}
 }
 
+func TestACheckerWhoseWordsAreReclassifiedIsStoppedAndTheNextCheckStarts(t *testing.T) {
+	f := newCheckerFixture(t)
+	f.goal(t, "claude-prompt:1", "Search", "build search", "build search")
+	start := time.Now().Add(6 * time.Minute)
+	f.d.sweepLedgerChecks(t.Context(), start)
+	started, _ := f.fake.snapshot()
+	if len(started) != 1 {
+		t.Fatalf("started = %d", len(started))
+	}
+	billing := f.goal(t, "claude-prompt:2", "Billing", "add invoices", "add invoices")
+	f.d.checks.mu.Lock()
+	f.d.checks.enqueue(checkTarget{project: f.project.key, goal: billing}, false)
+	f.d.checks.mu.Unlock()
+
+	f.d.reclassifyHookCapture(f.worker, "claude-prompt:1", "scheduled")
+
+	started, stopped := f.fake.snapshot()
+	if len(stopped) != 1 || stopped[0] != started[0].Run {
+		t.Fatalf("stopped = %v, want the voided checker %s at once", stopped, started[0].Run)
+	}
+	if len(started) != 2 || !strings.Contains(started[1].Message, billing) {
+		t.Fatalf("the queued check did not start: %+v", started)
+	}
+	archived, err := f.r.ArchiveState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := archived.Sessions[started[0].Run]; !ok {
+		t.Fatalf("the voided checker %s is not archived", started[0].Run)
+	}
+	if rec := f.report(reportBody(started[0], started[0].Token, `"missing":[{"breadth":"typo tolerance","from":"claude-prompt:1"}]`)); rec.Code != http.StatusConflict {
+		t.Fatalf("the voided checker's report = %d %s", rec.Code, rec.Body)
+	}
+	f.d.checks.mu.Lock()
+	running := f.d.checks.running
+	f.d.checks.mu.Unlock()
+	if running == nil || running.run != started[1].Run {
+		t.Fatalf("running = %+v, want the billing check", running)
+	}
+}
+
 func TestARestartFinishesAnInterruptedCheckByItsRecordedSession(t *testing.T) {
 	f := newCheckerFixture(t)
 	goal := f.goal(t, "claude-prompt:1", "Search", "build search", "build search")
