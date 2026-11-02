@@ -38,6 +38,15 @@ func (s *Store) Enabled(projectKey string) (bool, error) {
 	return enabled == LedgerEnabled, nil
 }
 
+func (s *Store) AnyEnabled() (bool, error) {
+	var one int
+	err := s.read.QueryRow(`SELECT 1 FROM ledger_state WHERE enabled=? LIMIT 1`, LedgerEnabled).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 type Scope struct {
 	State int
 	Since time.Time

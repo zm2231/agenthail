@@ -108,6 +108,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	}
 	view := newBoardView(board)
 	g2, g2Err := a.ledgerG2(key)
+	hookProblems, hookErr := ledgerPromptHookProblems(a.registry())
 
 	if hasFlag(args, "--json") {
 		out := map[string]any{
@@ -132,10 +133,21 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		} else {
 			out["g2"] = g2
 		}
+		if hookErr != nil {
+			out["promptHooksError"] = hookErr.Error()
+		} else {
+			out["promptHookProblems"] = append([]promptHookProblem{}, hookProblems...)
+		}
 		return emit(out)
 	}
 
 	fmt.Println(coverage)
+	for _, problem := range hookProblems {
+		fmt.Println(problem)
+	}
+	if hookErr != nil {
+		fmt.Printf("prompt hooks: unknown (%s)\n", hookErr)
+	}
 	fmt.Println(g2Line(g2, g2Err))
 	view.print(attachment)
 	return nil

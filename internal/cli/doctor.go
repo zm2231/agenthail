@@ -175,13 +175,21 @@ func (a *App) cmdDoctor(args []string) error {
 		grants = &report
 	}
 	personName, personSet := "", false
+	hookProblems := []promptHookProblem{}
+	var hookErr error
 	if r := a.registry(); r != nil {
 		personName, _ = r.PersonName()
 		setting, _ := r.PersonNameSetting()
 		personSet = setting != ""
+		var problems []promptHookProblem
+		problems, hookErr = ledgerPromptHookProblems(r)
+		hookProblems = append(hookProblems, problems...)
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		if hookErr != nil {
+			report["ledgerPromptHooksError"] = hookErr.Error()
+		}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
 		}
@@ -218,6 +226,12 @@ func (a *App) cmdDoctor(args []string) error {
 			if state, ok := remoteControl[root]; ok {
 				fmt.Printf("  remote control at startup: %s\n", state)
 			}
+		}
+		for _, problem := range hookProblems {
+			fmt.Println(problem)
+		}
+		if hookErr != nil {
+			fmt.Printf("ledger prompt hooks: unknown (%s)\n", hookErr)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
