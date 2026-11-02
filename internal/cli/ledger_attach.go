@@ -17,7 +17,10 @@ type ledgerWriteArgs struct {
 }
 
 var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--clause": true, "--type": true, "--source": true, "--session": true, "--project": true, "--from": true,
-	"--recommendation": true, "--default": true, "--deadline": true, "--kind": true, "--reason": true, "--ref": true, "--condition": true}
+	"--recommendation": true, "--default": true, "--deadline": true, "--kind": true, "--reason": true, "--ref": true, "--condition": true,
+	"--on": true, "--utterance": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true}
+
+var ledgerRepeatableFlags = map[string]bool{"--clause": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true}
 
 var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true}
 
@@ -33,7 +36,7 @@ func parseLedgerWrite(args []string) (ledgerWriteArgs, error) {
 			if i+1 >= len(args) {
 				return parsed, fmt.Errorf("flag %s requires a value", arg)
 			}
-			if arg != "--clause" && len(parsed.values[arg]) > 0 {
+			if !ledgerRepeatableFlags[arg] && len(parsed.values[arg]) > 0 {
 				return parsed, fmt.Errorf("flag %s may only be specified once", arg)
 			}
 			parsed.values[arg] = append(parsed.values[arg], args[i+1])

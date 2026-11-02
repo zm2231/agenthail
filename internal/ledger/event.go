@@ -30,6 +30,7 @@ const (
 	EventClauseSource  EventType = "clause.source"
 	EventQuestionEsc   EventType = "question.escalated"
 	EventGate          EventType = "gate"
+	EventWorkItemDep   EventType = "work_item.dep"
 )
 
 const (

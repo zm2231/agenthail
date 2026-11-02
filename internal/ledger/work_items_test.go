@@ -64,7 +64,7 @@ func TestWorkItemTransitionsAreGuarded(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"})
-	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1"}, "is open; done needs it in_progress")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W1"}, "is open; submit needs it in_progress")
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W1"}, "block needs --reason")
 	workRefused(t, s, ledger.WorkRequest{Action: "finish", ItemID: "widget-W1"}, "unknown work action")
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W9"}, "is not a work item")
@@ -73,15 +73,16 @@ func TestWorkItemTransitionsAreGuarded(t *testing.T) {
 		t.Fatalf("claimed = %+v", claimed.Item)
 	}
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: "other"}, "is in_progress; claim needs it open")
-	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", SessionID: "other"}, "only its assignee closes it")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W1", SessionID: "other"}, "only its assignee submits it")
 	blocked := work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W1", Reason: "waiting on the schema", SessionID: "helper"})
 	if blocked.Item.State != ledger.WorkBlocked || blocked.Item.Reason != "waiting on the schema" || blocked.Item.Assignee != "helper" {
 		t.Fatalf("blocked = %+v", blocked.Item)
 	}
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnblock, ItemID: "widget-W1", SessionID: "helper"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: "helper"})
-	done := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", SessionID: "helper"})
-	if done.Item.State != ledger.WorkDone || done.Readback != "intent ledger: widget-W1 done (widget-C1)" {
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W1", SessionID: "helper"})
+	done := work(t, s, ledger.WorkRequest{Action: ledger.WorkApprove, ItemID: "widget-W1", SessionID: "reviewer"})
+	if done.Item.State != ledger.WorkDone || done.Item.Reviewer != "reviewer" || done.Readback != "intent ledger: widget-W1 done (widget-C1) reviewed by reviewer" {
 		t.Fatalf("done = %+v", done)
 	}
 	if reopened := work(t, s, ledger.WorkRequest{Action: ledger.WorkReopen, ItemID: "widget-W1"}); reopened.Item.State != ledger.WorkOpen {
@@ -95,7 +96,8 @@ func TestClosingEveryWorkItemNeverClosesTheClause(t *testing.T) {
 	for _, text := range []string{"add the index", "wire the endpoint"} {
 		item := work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: text}).Item
 		work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: item.ID})
-		work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: item.ID})
+		work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: item.ID})
+		work(t, s, ledger.WorkRequest{Action: ledger.WorkApprove, ItemID: item.ID, SessionID: "reviewer"})
 	}
 	b := board(t, s)
 	c := clause(t, b, "widget-C1")

@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -13,6 +12,7 @@ const (
 	WorkOpen       WorkState = "open"
 	WorkInProgress WorkState = "in_progress"
 	WorkBlocked    WorkState = "blocked"
+	WorkInReview   WorkState = "in_review"
 	WorkDone       WorkState = "done"
 )
 
@@ -23,9 +23,25 @@ const (
 	WorkClaim   WorkAction = "claim"
 	WorkBlock   WorkAction = "block"
 	WorkUnblock WorkAction = "unblock"
-	WorkClose   WorkAction = "done"
+	WorkSubmit  WorkAction = "submit"
+	WorkApprove WorkAction = "approve"
+	WorkReject  WorkAction = "reject"
 	WorkReopen  WorkAction = "reopen"
+	WorkHandoff WorkAction = "handoff"
+	WorkDep     WorkAction = "dep"
 )
+
+type Handoff struct {
+	Done      []string `json:"done,omitempty"`
+	Remaining []string `json:"remaining,omitempty"`
+	Decisions []string `json:"decisions,omitempty"`
+	Uncertain []string `json:"uncertain,omitempty"`
+	By        string   `json:"by,omitempty"`
+}
+
+func (h Handoff) empty() bool {
+	return len(h.Done)+len(h.Remaining)+len(h.Decisions)+len(h.Uncertain) == 0
+}
 
 type WorkItem struct {
 	ID        string    `json:"id"`
@@ -35,16 +51,22 @@ type WorkItem struct {
 	Assignee  string    `json:"assignee,omitempty"`
 	CreatedBy string    `json:"createdBy"`
 	Reason    string    `json:"reason,omitempty"`
+	Reviewer  string    `json:"reviewer,omitempty"`
+	DependsOn []string  `json:"dependsOn,omitempty"`
+	Handoff   *Handoff  `json:"handoff,omitempty"`
 }
 
 type WorkRequest struct {
-	ProjectKey string     `json:"projectKey"`
-	SessionID  string     `json:"sessionId"`
-	Action     WorkAction `json:"action"`
-	ClauseID   string     `json:"clauseId,omitempty"`
-	ItemID     string     `json:"itemId,omitempty"`
-	Text       string     `json:"text,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
+	ProjectKey  string     `json:"projectKey"`
+	SessionID   string     `json:"sessionId"`
+	Action      WorkAction `json:"action"`
+	ClauseID    string     `json:"clauseId,omitempty"`
+	ItemID      string     `json:"itemId,omitempty"`
+	Text        string     `json:"text,omitempty"`
+	Reason      string     `json:"reason,omitempty"`
+	DependsOn   string     `json:"dependsOn,omitempty"`
+	UtteranceID string     `json:"utteranceId,omitempty"`
+	Handoff     Handoff    `json:"handoff,omitempty"`
 }
 
 type WorkResult struct {
@@ -52,15 +74,10 @@ type WorkResult struct {
 	Readback string   `json:"readback"`
 }
 
-var workTransitions = map[WorkAction]struct {
-	from []WorkState
-	to   WorkState
-}{
-	WorkClaim:   {from: []WorkState{WorkOpen}, to: WorkInProgress},
-	WorkBlock:   {from: []WorkState{WorkOpen, WorkInProgress}, to: WorkBlocked},
-	WorkUnblock: {from: []WorkState{WorkBlocked}, to: WorkOpen},
-	WorkClose:   {from: []WorkState{WorkInProgress}, to: WorkDone},
-	WorkReopen:  {from: []WorkState{WorkDone}, to: WorkOpen},
+type WorkDepPayload struct {
+	ItemID    string `json:"itemId"`
+	DependsOn string `json:"dependsOn"`
+	Actor     string `json:"actor"`
 }
 
 func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
@@ -81,58 +98,6 @@ func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 	}
 	defer release()
 	return WorkResult{Item: *board.workItems[id], Readback: "intent ledger: " + readback}, nil
-}
-
-func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string, error) {
-	if req.Action == WorkAdd {
-		c := b.clauses[req.ClauseID]
-		if c == nil {
-			return "", nil, "", refuse("a work item hangs off a clause; %q is not a clause in %s", req.ClauseID, req.ProjectKey)
-		}
-		if c.State == StateRejected || clauseFullyCut(c) {
-			return "", nil, "", refuse("%s is no longer in scope; work items hang off live clauses", c.ID)
-		}
-		text := strings.TrimSpace(req.Text)
-		if text == "" {
-			return "", nil, "", refuse("a work item needs its text")
-		}
-		id, err := ids.next(EventWorkItem, "W")
-		if err != nil {
-			return "", nil, "", err
-		}
-		return EventWorkItem, WorkItemPayload{ItemID: id, ClauseID: c.ID, Text: text, CreatedBy: req.SessionID}, fmt.Sprintf("+%s on %s", id, c.ID), nil
-	}
-	transition, ok := workTransitions[req.Action]
-	if !ok {
-		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, done or reopen", req.Action)
-	}
-	item := b.workItems[req.ItemID]
-	if item == nil {
-		return "", nil, "", refuse("%q is not a work item in %s", req.ItemID, req.ProjectKey)
-	}
-	allowed := false
-	for _, from := range transition.from {
-		allowed = allowed || item.State == from
-	}
-	if !allowed {
-		return "", nil, "", refuse("%s is %s; %s needs it %s", item.ID, item.State, req.Action, joinStates(transition.from))
-	}
-	reason := strings.TrimSpace(req.Reason)
-	assignee := item.Assignee
-	switch req.Action {
-	case WorkClaim:
-		assignee = req.SessionID
-	case WorkClose:
-		if item.Assignee != req.SessionID {
-			return "", nil, "", refuse("%s is claimed by %s; only its assignee closes it", item.ID, item.Assignee)
-		}
-	case WorkBlock:
-		if reason == "" {
-			return "", nil, "", refuse("block needs --reason: what %s waits on", item.ID)
-		}
-	}
-	payload := WorkItemStatePayload{ItemID: item.ID, FromState: item.State, ToState: transition.to, Actor: req.SessionID, Assignee: assignee, Reason: reason}
-	return EventWorkItemState, payload, fmt.Sprintf("%s %s (%s)", item.ID, transition.to, item.ClauseID), nil
 }
 
 func joinStates(states []WorkState) string {
@@ -161,8 +126,27 @@ func (b *Board) applyWorkItemState(data []byte) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
+	item := b.workItems[p.ItemID]
+	if item == nil {
+		return nil
+	}
+	item.State, item.Assignee, item.Reason = p.ToState, p.Assignee, p.Reason
+	if p.Reviewer != "" {
+		item.Reviewer = p.Reviewer
+	}
+	if p.Handoff != nil {
+		item.Handoff = p.Handoff
+	}
+	return nil
+}
+
+func (b *Board) applyWorkDep(data []byte) error {
+	var p WorkDepPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
 	if item := b.workItems[p.ItemID]; item != nil {
-		item.State, item.Assignee, item.Reason = p.ToState, p.Assignee, p.Reason
+		item.DependsOn = append(item.DependsOn, p.DependsOn)
 	}
 	return nil
 }

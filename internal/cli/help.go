@@ -167,8 +167,15 @@ Intent ledger:
   ledger work [--mine]           List work items
   ledger work add <clause_id> "<text>"
                                  Add a work item under a clause; closing work never closes the clause
-  ledger work <claim|block|unblock|done|reopen> <item_id> [--reason "..."]
-                                 Move a work item; block needs a reason, only the assignee closes it
+  ledger work <claim|block|unblock|submit|reopen> <item_id> [--reason "..."]
+                                 Move a work item; claim waits for its dependencies, block needs a reason
+  ledger work <approve|reject> <item_id> [--utterance <id>] [--reason "..."]
+                                 Review submitted work: another session, or the person's own words
+  ledger work dep <item_id> --on <item_id>
+                                 Record that one work item waits on another
+  ledger work handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
+                                 Hand off a claimed item with its state; it reopens for the next session
+  ledger work critical-path      Longest chain of unfinished work items
   ledger own <clause_id> [--session <id>]
                                  Take ownership of a clause (or give it to a session)
   ledger progress <clause_id> --ref <commit|file|PR|evidence>
