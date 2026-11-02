@@ -164,6 +164,9 @@ func (b *Board) DueChecks(now time.Time, idle time.Duration) []string {
 		if b.goals[id] == nil || g.changedSeq <= g.startedSeq || now.Sub(g.changedAt) < idle || b.openCheck(id) {
 			continue
 		}
+		if in, _ := b.checkInput(id); len(in.Utterances) == 0 {
+			continue
+		}
 		due = append(due, id)
 	}
 	sort.Slice(due, func(i, j int) bool { return idNumber(due[i]) < idNumber(due[j]) })

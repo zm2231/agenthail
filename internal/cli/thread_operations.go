@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -111,6 +112,11 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		lifecycle, ok := adapter.(surface.SessionLifecycle)
 		if !ok {
 			return surface.ErrUnsupported
+		}
+		if operation == "resume" {
+			if daemonOwned, ownerErr := a.registry().StartedByDaemon(session.ID); ownerErr != nil || daemonOwned {
+				return errors.Join(ownerErr, registry.ErrDaemonSession)
+			}
 		}
 		addressed := *session
 		output, err = lifecycle.SessionAction(ctx, session, operation)

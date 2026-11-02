@@ -22,8 +22,8 @@ type Expiry struct {
 	Effects    []string      `json:"effects,omitempty"`
 }
 
-func (s *Store) ProjectsWithQuestions() ([]string, error) {
-	rows, err := s.read.Query(`SELECT DISTINCT project_key FROM ledger_events WHERE type=?`, string(EventQuestion))
+func (s *Store) ProjectsWith(typ EventType) ([]string, error) {
+	rows, err := s.read.Query(`SELECT DISTINCT project_key FROM ledger_events WHERE type=?`, string(typ))
 	if err != nil {
 		return nil, err
 	}

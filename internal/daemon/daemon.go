@@ -90,6 +90,7 @@ type Daemon struct {
 	catalogIdentities *catalogIdentityCache
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
+	checks            checkerRunner
 	g2                *g2Counter
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
@@ -301,7 +302,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
-	go d.runLedgerQuestions(ctx)
+	go d.runLedgerSweeps(ctx)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})
 	go func() {

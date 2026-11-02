@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -185,7 +186,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 }
 
 func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := delivery.EnsureDeliverable(ctx, a.registry(), adapter, session); err != nil {
 		return err
 	}
 	isSyntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))

@@ -67,16 +67,21 @@ type Hello struct {
 }
 
 type OpenRequest struct {
-	SessionID      string `json:"sessionId,omitempty"`
-	Resume         string `json:"resume,omitempty"`
-	Cwd            string `json:"cwd"`
-	Model          string `json:"model,omitempty"`
-	PermissionMode string `json:"permissionMode,omitempty"`
-	Effort         string `json:"effort,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	Name           string `json:"name,omitempty"`
-	Worktree       string `json:"worktree,omitempty"`
-	ConfigDir      string `json:"configDir,omitempty"`
+	SessionID      string       `json:"sessionId,omitempty"`
+	Resume         string       `json:"resume,omitempty"`
+	Cwd            string       `json:"cwd"`
+	Model          string       `json:"model,omitempty"`
+	PermissionMode string       `json:"permissionMode,omitempty"`
+	Effort         string       `json:"effort,omitempty"`
+	Agent          string       `json:"agent,omitempty"`
+	Name           string       `json:"name,omitempty"`
+	Worktree       string       `json:"worktree,omitempty"`
+	ConfigDir      string       `json:"configDir,omitempty"`
+	Checker        *CheckerOpen `json:"checker,omitempty"`
+}
+
+type CheckerOpen struct {
+	Run string `json:"run"`
 }
 
 type Session struct {
@@ -87,6 +92,7 @@ type Session struct {
 	OpenedAt       string       `json:"openedAt"`
 	PermissionMode string       `json:"permissionMode"`
 	Model          string       `json:"model"`
+	Checker        string       `json:"checker,omitempty"`
 	ContextWindow  int64        `json:"contextWindow"`
 	ContextModel   string       `json:"contextModel"`
 	AutoCompact    *AutoCompact `json:"autoCompact"`

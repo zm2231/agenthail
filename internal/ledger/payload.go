@@ -91,15 +91,15 @@ type WorkItemPayload struct {
 }
 
 type WorkItemStatePayload struct {
-	ItemID    string    `json:"itemId"`
-	FromState WorkState `json:"fromState"`
-	ToState   WorkState `json:"toState"`
-	Actor     string    `json:"actor"`
-	Assignee  string    `json:"assignee,omitempty"`
-	Reason    string    `json:"reason,omitempty"`
-	Reviewer    string   `json:"reviewer,omitempty"`
-	UtteranceID string   `json:"utteranceId,omitempty"`
-	Handoff     *Handoff `json:"handoff,omitempty"`
+	ItemID      string    `json:"itemId"`
+	FromState   WorkState `json:"fromState"`
+	ToState     WorkState `json:"toState"`
+	Actor       string    `json:"actor"`
+	Assignee    string    `json:"assignee,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Reviewer    string    `json:"reviewer,omitempty"`
+	UtteranceID string    `json:"utteranceId,omitempty"`
+	Handoff     *Handoff  `json:"handoff,omitempty"`
 }
 
 type DelegationPayload struct {

@@ -13,6 +13,14 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func daemonSessionAction(action string) bool {
+	switch action {
+	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive", "session-unarchive":
+		return true
+	}
+	return false
+}
+
 func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
 	if request.SessionID == "" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId is required")
@@ -21,6 +29,10 @@ func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, 
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
+		return
+	}
+	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned && !daemonSessionAction(request.Action) {
+		writeAPIError(w, http.StatusConflict, "daemon_session", fmt.Sprint(errors.Join(err, registry.ErrDaemonSession)))
 		return
 	}
 	if request.Action == "limit-resume" || request.Action == "limit-resume-cancel" {

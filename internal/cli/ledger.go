@@ -51,6 +51,10 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerClause(ledger.ClauseProgress, args)
 	case "wait":
 		return a.ledgerClause(ledger.ClauseWait, args)
+	case "check":
+		return a.ledgerCheck(args)
+	case "check-report":
+		return a.ledgerCheckReport(args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -116,6 +120,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"questions":          view.questions,
 			"targetCuts":         view.targetCuts,
 			"g2Waivers":          view.waivers,
+			"checks":             board.GoalChecks(),
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
 		}
