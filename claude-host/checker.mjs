@@ -48,8 +48,22 @@ export function carried(configDir) {
   return { model: typeof settings.model === 'string' ? settings.model : '', env, auth };
 }
 
-export function reportArgs(run, session, report) {
-  const argv = ['ledger', 'check-report', run, '--from', session, '--json'];
+const RUNTIME_ENV = ['HOME', 'USER', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'CLAUDE_CONFIG_DIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR'];
+
+// checkerEnv is the checker's whole environment, built from an allow-list:
+// what Claude needs to run and reach its API, never the rest of the host's.
+// AGENTHAIL_CLAUDE_HOST_CHECKER_ENV names further variables to pass.
+export function checkerEnv(hostEnv, settingsEnv) {
+  const env = {};
+  const extra = (hostEnv.AGENTHAIL_CLAUDE_HOST_CHECKER_ENV ?? '').split(',').filter(Boolean);
+  for (const [name, value] of Object.entries(hostEnv)) {
+    if (typeof value === 'string' && (RUNTIME_ENV.includes(name) || extra.includes(name) || AUTH_ENV.test(name))) env[name] = value;
+  }
+  return { ...env, ...settingsEnv, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...CHECKER_ENV };
+}
+
+export function reportArgs(run, report) {
+  const argv = ['ledger', 'check-report', run, '--json'];
   if (report.none) return [...argv, '--none'];
   for (const item of report.missing ?? []) argv.push('--missing', item.breadth, '--in', item.from);
   return argv;
@@ -59,7 +73,7 @@ function deny(toolName) {
   return { behavior: 'deny', message: `${DENIED} ${toolName} is not available.` };
 }
 
-export function checkerOptions({ run, sessionId, configDir, agenthail }) {
+export function checkerOptions({ run, token, configDir, agenthail }) {
   const report = tool(
     'report',
     'Report what the clauses miss: each missing piece of breadth with the utterance id it comes from, or none.',
@@ -72,7 +86,8 @@ export function checkerOptions({ run, sessionId, configDir, agenthail }) {
     (input) =>
       new Promise((resolve) => {
         if (!agenthail) return resolve({ isError: true, content: [{ type: 'text', text: 'agenthail is not available to this host' }] });
-        execFile(agenthail, reportArgs(run, sessionId, input), { timeout: REPORT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (error, stdout, stderr) => {
+        const env = { ...process.env, AGENTHAIL_CHECK_TOKEN: token };
+        execFile(agenthail, reportArgs(run, input), { env, timeout: REPORT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (error, stdout, stderr) => {
           const text = (error ? stderr || error.message : stdout).trim();
           resolve({ isError: Boolean(error), content: [{ type: 'text', text: text || 'reported' }] });
         });
@@ -80,7 +95,7 @@ export function checkerOptions({ run, sessionId, configDir, agenthail }) {
   );
   const { model, env, auth } = carried(configDir);
   return {
-    env: { ...env, ...CHECKER_ENV },
+    env: checkerEnv(process.env, env),
     ...(Object.keys(auth).length ? { settings: auth } : {}),
     tools: [],
     allowedTools: [REPORT_TOOL],

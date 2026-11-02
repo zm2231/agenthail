@@ -15,7 +15,7 @@ import (
 
 func daemonSessionAction(action string) bool {
 	switch action {
-	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive", "session-unarchive":
+	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive":
 		return true
 	}
 	return false

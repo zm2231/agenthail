@@ -81,7 +81,9 @@ type OpenRequest struct {
 }
 
 type CheckerOpen struct {
-	Run string `json:"run"`
+	Run    string `json:"run"`
+	Token  string `json:"token"`
+	Prompt string `json:"prompt"`
 }
 
 type Session struct {

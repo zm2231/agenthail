@@ -409,7 +409,9 @@ async function open(params) {
   }
   if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
   if (params.checker !== undefined) {
-    if (typeof params.checker?.run !== 'string' || !params.checker.run) throw new HostError('invalid', 'a checker names its run');
+    for (const name of ['run', 'token', 'prompt']) {
+      if (typeof params.checker?.[name] !== 'string' || !params.checker[name].trim()) throw new HostError('invalid', `a checker names its run, token and prompt; ${name} is missing`);
+    }
     if (params.resume || params.permissionMode || params.agent || params.worktree) {
       throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode, agent or worktree');
     }
@@ -429,7 +431,7 @@ async function open(params) {
   // model, so a resume without them reopens in the ones it last ran with here.
   const kept = params.resume ? settings.get(id) : undefined;
   if (kept?.checker) throw new HostError('invalid', `session ${id} was a narrowing checker; it is not resumed`);
-  const checker = params.checker ? checkerOptions({ run: params.checker.run, sessionId: id, configDir: params.configDir, agenthail: args.agenthail }) : null;
+  const checker = params.checker ? checkerOptions({ run: params.checker.run, token: params.checker.token, configDir: params.configDir, agenthail: args.agenthail }) : null;
   const permissionMode = checker?.permissionMode || params.permissionMode || kept?.permissionMode || '';
   const model = params.model || checker?.model || kept?.model || '';
   const s = new Session(id, cwd, permissionMode, model);
@@ -471,11 +473,8 @@ async function open(params) {
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
         env: {
-          CLAUDE_CODE_ENABLE_TODO_TOOLS: '1',
-          ...process.env,
-          CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
+          ...(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
           ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}),
-          ...checkerEnv,
         },
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
@@ -498,6 +497,7 @@ async function open(params) {
   s.setCommands(init.commands);
   if (params.permissionMode || params.model || s.checker) s.remember();
   s.setState('idle');
+  if (s.checker) await take(s, { uuid: randomUUID(), text: params.checker.prompt });
   return s.describe();
 }
 
@@ -744,6 +744,11 @@ function decide({ request, input, suggestions }, decision) {
 
 async function send(params) {
   const s = session(params.sessionId);
+  if (s.checker) throw new HostError('invalid', `session ${s.id} is a narrowing checker; it takes no messages`);
+  return take(s, params);
+}
+
+async function take(s, params) {
   if (typeof params.uuid !== 'string' || !UUID.test(params.uuid)) throw new HostError('invalid', 'uuid must be a uuid');
   const images = params.images ?? [];
   if (!Array.isArray(images)) throw new HostError('invalid', 'images must be a list');

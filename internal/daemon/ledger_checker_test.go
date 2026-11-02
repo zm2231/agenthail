@@ -23,19 +23,29 @@ type checkerSurface struct {
 	started  []surface.CheckerStart
 	stopped  []string
 	startErr error
+	onStart  func(surface.CheckerStart)
+	stopGate chan struct{}
 }
 
 func (s *checkerSurface) StartChecker(_ context.Context, start surface.CheckerStart) (*surface.Session, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.startErr != nil {
+		s.mu.Unlock()
 		return nil, s.startErr
 	}
 	s.started = append(s.started, start)
-	return &surface.Session{ID: start.Run, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Cwd: start.Cwd, Status: surface.StatusIdle}, nil
+	onStart := s.onStart
+	s.mu.Unlock()
+	if onStart != nil {
+		onStart(start)
+	}
+	return &surface.Session{ID: start.Run, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Cwd: start.Cwd, Status: surface.StatusBusy}, nil
 }
 
 func (s *checkerSurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+	if action == "stop" && s.stopGate != nil {
+		<-s.stopGate
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if action == "stop" {
@@ -90,14 +100,17 @@ func (f checkerFixture) goal(t *testing.T, ref, name, words, clause string) stri
 	return g.ID
 }
 
-func (f checkerFixture) report(t *testing.T, body string) *httptest.ResponseRecorder {
-	t.Helper()
+func (f checkerFixture) report(body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	f.d.apiLedgerCheckReportHandler(rec, httptest.NewRequest(http.MethodPost, "/api/v1/ledger/check-report", strings.NewReader(body)))
 	return rec
 }
 
-func TestOneCheckerRunsAtATimeAndItsReportRaisesCuts(t *testing.T) {
+func reportBody(start surface.CheckerStart, token, rest string) string {
+	return `{"run":"` + start.Run + `","token":"` + token + `",` + rest + `}`
+}
+
+func TestOneCheckerRunsAtATimeAndOnlyItsTokenReports(t *testing.T) {
 	f := newCheckerFixture(t)
 	first := f.goal(t, "claude-prompt:1", "Search", "build search with typo tolerance and a csv export", "build search")
 	second := f.goal(t, "claude-prompt:2", "Billing", "add invoices and refunds", "add invoices")
@@ -112,7 +125,10 @@ func TestOneCheckerRunsAtATimeAndItsReportRaisesCuts(t *testing.T) {
 		t.Fatalf("checkers started = %d, want one per host", len(started))
 	}
 	run := started[0]
-	if !strings.Contains(run.Message, "build search with typo tolerance and a csv export") || !strings.Contains(run.Message, "widget-C1: build search") || !strings.Contains(run.Message, run.Run) {
+	if len(run.Token) != 64 || strings.Contains(run.Message, run.Token) {
+		t.Fatalf("run token %q is not a secret kept out of the prompt", run.Token)
+	}
+	if !strings.Contains(run.Message, "build search with typo tolerance and a csv export") || !strings.Contains(run.Message, "widget-C1: build search") {
 		t.Fatalf("checker input = %q", run.Message)
 	}
 	if run.Cwd != checkerDir(f.r) || strings.HasPrefix(run.Cwd, f.project.dir) {
@@ -131,28 +147,54 @@ func TestOneCheckerRunsAtATimeAndItsReportRaisesCuts(t *testing.T) {
 	if _, err := f.d.dispatcher().Deliver(t.Context(), f.fake, checker, "do something else", ""); !errors.Is(err, registry.ErrDaemonSession) {
 		t.Fatalf("delivery to the checker = %v", err)
 	}
+	for _, action := range []string{"session-unarchive", "session-lifecycle-resume", "session-fork"} {
+		rec := httptest.NewRecorder()
+		f.d.dashboardSessionAction(rec, httptest.NewRequest(http.MethodPost, "/", nil), dashboardActionRequest{SessionID: run.Run, Action: action})
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "daemon_session") {
+			t.Fatalf("%s on the checker = %d %s", action, rec.Code, rec.Body)
+		}
+	}
 	f.d.sweepLedgerChecks(t.Context(), later.Add(time.Minute))
 	if started, _ := f.fake.snapshot(); len(started) != 1 {
 		t.Fatal("a second checker started while one runs")
 	}
 
-	if rec := f.report(t, `{"run":"`+run.Run+`","sessionId":"someone-else","none":true}`); rec.Code != http.StatusConflict {
-		t.Fatalf("report from another session = %d %s", rec.Code, rec.Body)
+	for _, body := range []string{
+		reportBody(run, "", `"none":true`),
+		reportBody(run, strings.Repeat("0", 64), `"none":true`),
+		`{"run":"not-running","token":"` + run.Token + `","none":true}`,
+	} {
+		if rec := f.report(body); rec.Code != http.StatusConflict {
+			t.Fatalf("report %s = %d %s", body, rec.Code, rec.Body)
+		}
 	}
-	if rec := f.report(t, `{"run":"not-running","sessionId":"not-running","none":true}`); rec.Code != http.StatusConflict {
-		t.Fatalf("report for a run that is not running = %d %s", rec.Code, rec.Body)
-	}
-	rec := f.report(t, `{"run":"`+run.Run+`","sessionId":"`+run.Run+`","missing":[{"breadth":"typo tolerance","from":"claude-prompt:1"},{"breadth":"csv export","from":"claude-prompt:1"}]}`)
+	stopping := make(chan struct{})
+	f.fake.stopGate = stopping
+	rec := f.report(reportBody(run, run.Token, `"missing":[{"breadth":"typo tolerance","from":"claude-prompt:1"},{"breadth":"csv export","from":"claude-prompt:1"}]`))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cuts":["widget-X1","widget-X2"]`) {
 		t.Fatalf("report = %d %s", rec.Code, rec.Body)
+	}
+	sweeping := make(chan struct{})
+	go func() {
+		f.d.sweepLedgerChecks(context.Background(), later.Add(2*time.Minute))
+		close(sweeping)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if started, _ := f.fake.snapshot(); len(started) != 1 {
+		t.Fatal("the next checker started before the reported one was stopped")
+	}
+	close(stopping)
+	<-sweeping
+	if again := f.report(reportBody(run, run.Token, `"none":true`)); again.Code != http.StatusConflict {
+		t.Fatalf("second report = %d %s", again.Code, again.Body)
 	}
 	testkit.Eventually(t, "the checker to be stopped and the next goal checked", 5*time.Second, func() bool {
 		started, stopped := f.fake.snapshot()
 		return len(stopped) == 1 && stopped[0] == run.Run && len(started) == 2
 	})
 	started, _ = f.fake.snapshot()
-	if !strings.Contains(started[1].Message, second) || strings.Contains(started[1].Message, first) {
-		t.Fatalf("second checker input = %q", started[1].Message)
+	if !strings.Contains(started[1].Message, second) || strings.Contains(started[1].Message, first) || started[1].Token == run.Token {
+		t.Fatalf("second checker = %+v", started[1])
 	}
 	archived, err := f.r.ArchiveState()
 	if err != nil {
@@ -168,6 +210,24 @@ func TestOneCheckerRunsAtATimeAndItsReportRaisesCuts(t *testing.T) {
 	if checks := board.GoalChecks(); len(checks) != 2 || checks[0].CutsRaised != 2 {
 		t.Fatalf("goal checks = %+v", checks)
 	}
+}
+
+func TestACheckerThatReportsWhileItIsStillStartingIsHeard(t *testing.T) {
+	f := newCheckerFixture(t)
+	f.goal(t, "claude-prompt:1", "Search", "build search", "build search")
+	reported := make(chan int, 1)
+	f.fake.onStart = func(start surface.CheckerStart) {
+		go func() { reported <- f.report(reportBody(start, start.Token, `"none":true`)).Code }()
+		time.Sleep(50 * time.Millisecond)
+	}
+	f.d.sweepLedgerChecks(t.Context(), time.Now().Add(6*time.Minute))
+	if code := <-reported; code != http.StatusOK {
+		t.Fatalf("a report sent while the checker started = %d", code)
+	}
+	testkit.Eventually(t, "the reported checker to be stopped", 5*time.Second, func() bool {
+		_, stopped := f.fake.snapshot()
+		return len(stopped) == 1
+	})
 }
 
 func TestACheckerThatNeverReportsTimesOutAndOnlyItIsStopped(t *testing.T) {
@@ -190,6 +250,9 @@ func TestACheckerThatNeverReportsTimesOutAndOnlyItIsStopped(t *testing.T) {
 	}
 	if run, ok := board.CheckRun(started[0].Run); !ok || run.Result != ledger.CheckTimedOut {
 		t.Fatalf("run = %+v", run)
+	}
+	if rec := f.report(reportBody(started[0], started[0].Token, `"none":true`)); rec.Code != http.StatusConflict {
+		t.Fatalf("a report after the timeout = %d", rec.Code)
 	}
 }
 
@@ -229,5 +292,8 @@ func TestACheckerThatCannotStartIsRecordedAsFailed(t *testing.T) {
 	checks := board.GoalChecks()
 	if len(checks) != 1 || checks[0].GoalID != goal || len(board.OpenChecks()) != 0 {
 		t.Fatalf("checks = %+v open %+v", checks, board.OpenChecks())
+	}
+	if f.d.checks.running != nil {
+		t.Fatal("a failed start still holds the checker slot")
 	}
 }

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"slices"
 	"time"
@@ -36,27 +37,33 @@ func (d *Daemon) apiLedgerCheckHandler(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"projectKey": req.ProjectKey, "goalId": req.GoalID, "queued": queued})
 }
 
+type checkReportRequest struct {
+	ledger.CheckReport
+	Token string `json:"token"`
+}
+
 func (d *Daemon) apiLedgerCheckReportHandler(w http.ResponseWriter, r *http.Request) {
-	var req ledger.CheckReport
+	var req checkReportRequest
 	if !decodeLedgerWrite(w, r, &req) {
 		return
 	}
 	now := time.Now()
 	d.checks.mu.Lock()
 	running := d.checks.running
-	if running == nil || running.run != req.Run {
+	if running == nil || running.reported || running.run != req.Run || subtle.ConstantTimeCompare([]byte(running.token), []byte(req.Token)) != 1 {
 		d.checks.mu.Unlock()
-		writeLedgerError(w, &ledger.Refusal{Reason: req.Run + " is not the check running on this host"})
+		writeLedgerError(w, &ledger.Refusal{Reason: "only the checker of the run in progress reports it"})
 		return
 	}
-	req.ProjectKey = running.project
-	outcome, err := d.ledgerStore().ReportCheck(req, now)
+	report := req.CheckReport
+	report.ProjectKey, report.SessionID = running.project, running.run
+	outcome, err := d.ledgerStore().ReportCheck(report, now)
 	if err != nil {
 		d.checks.mu.Unlock()
 		writeLedgerError(w, err)
 		return
 	}
-	d.checks.running = nil
+	running.reported = true
 	d.checks.mu.Unlock()
 	d.publishEvent("ledger.check."+outcome.Result, req.Run, outcome)
 	writeDashboardJSON(w, http.StatusOK, outcome)

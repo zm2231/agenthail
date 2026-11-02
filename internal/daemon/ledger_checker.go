@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,8 +29,10 @@ type checkTarget struct {
 
 type runningCheck struct {
 	checkTarget
-	run     string
-	started time.Time
+	run      string
+	token    string
+	started  time.Time
+	reported bool
 }
 
 type checkerRunner struct {
@@ -59,7 +63,7 @@ func (d *Daemon) sweepLedgerChecks(ctx context.Context, now time.Time) {
 		d.recoverChecks(ctx, store, keys, now)
 		d.checks.recovered = true
 	}
-	if r := d.checks.running; r != nil && now.Sub(r.started) >= checkTimeout {
+	if r := d.checks.running; r != nil && !r.reported && now.Sub(r.started) >= checkTimeout {
 		d.finishCheck(ctx, store, r.project, r.run, ledger.CheckTimedOut, "no report within "+checkTimeout.String(), now)
 	}
 	for _, key := range keys {
@@ -121,17 +125,30 @@ func (d *Daemon) startNextCheck(ctx context.Context, store *ledger.Store, now ti
 			d.log.Printf("ledger checks: start %s: %s", target.goal, err)
 			return
 		}
-		if err := d.launchChecker(ctx, run, input); err != nil {
+		token, err := checkToken()
+		if err != nil {
+			d.finishCheck(ctx, store, target.project, run, ledger.CheckFailed, err.Error(), now)
+			return
+		}
+		d.checks.running = &runningCheck{checkTarget: target, run: run, token: token, started: now}
+		if err := d.launchChecker(ctx, run, token, input); err != nil {
 			d.log.Printf("ledger checks: launch for %s: %s", target.goal, err)
 			d.finishCheck(ctx, store, target.project, run, ledger.CheckFailed, err.Error(), now)
 			continue
 		}
-		d.checks.running = &runningCheck{checkTarget: target, run: run, started: now}
 		d.publishEvent("ledger.check.started", run, map[string]string{"projectKey": target.project, "goalId": target.goal, "run": run})
 	}
 }
 
-func (d *Daemon) launchChecker(ctx context.Context, run string, input ledger.CheckInput) error {
+func checkToken() (string, error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(secret), nil
+}
+
+func (d *Daemon) launchChecker(ctx context.Context, run, token string, input ledger.CheckInput) error {
 	starter, ok := d.adapters().ForSurface(surface.KindClaude).(surface.CheckerStarter)
 	if !ok {
 		return errors.New("the Claude host is not available to run the checker")
@@ -140,7 +157,7 @@ func (d *Daemon) launchChecker(ctx context.Context, run string, input ledger.Che
 	if err := mkdirPrivate(dir); err != nil {
 		return err
 	}
-	session, err := starter.StartChecker(ctx, surface.CheckerStart{Run: run, Cwd: dir, Message: checkerMessage(run, input)})
+	session, err := starter.StartChecker(ctx, surface.CheckerStart{Run: run, Token: token, Cwd: dir, Message: checkerMessage(run, input)})
 	if err != nil {
 		return err
 	}
@@ -158,11 +175,13 @@ func (d *Daemon) finishCheck(ctx context.Context, store *ledger.Store, project, 
 	d.publishEvent("ledger.check."+result, run, map[string]string{"projectKey": project, "run": run, "reason": reason})
 }
 
-// endChecker stops and archives only the session recorded for this run.
+// endChecker stops and archives only the session recorded for this run, then frees the slot.
 func (d *Daemon) endChecker(ctx context.Context, run string, now time.Time) {
-	if r := d.checks.running; r != nil && r.run == run {
-		d.checks.running = nil
-	}
+	defer func() {
+		if r := d.checks.running; r != nil && r.run == run {
+			d.checks.running = nil
+		}
+	}()
 	session, err := d.Registry.Session(run)
 	if err != nil {
 		return

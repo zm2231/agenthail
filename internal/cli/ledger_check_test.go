@@ -27,14 +27,19 @@ func TestCheckCommandsPostWhatTheCheckerAndTheProposerSay(t *testing.T) {
 		}
 		return out
 	}
-	if out := run("check-report", "run-1", "--from", "run-1", "--missing", "typo tolerance", "--in", "claude-prompt:2", "--missing", "csv export", "--in", "claude-prompt:2"); !strings.Contains(out, "pending cuts widget-X1") {
+	t.Setenv("AGENTHAIL_CHECK_TOKEN", "")
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"check-report", "run-1", "--none"}) }); err == nil || !strings.Contains(err.Error(), "only the checker") {
+		t.Fatalf("check-report without the run token: %v", err)
+	}
+	t.Setenv("AGENTHAIL_CHECK_TOKEN", "run-secret")
+	if out := run("check-report", "run-1", "--missing", "typo tolerance", "--in", "claude-prompt:2", "--missing", "csv export", "--in", "claude-prompt:2"); !strings.Contains(out, "pending cuts widget-X1") {
 		t.Fatalf("check-report output %q", out)
 	}
 	run("check", "widget-G1")
 	run("attach", "claude-prompt:2", "--as", "extends", "--to", "widget-A1", "--clause", "typo tolerance", "--covers", "widget-X1")
 	got := *calls
 	report, _ := json.Marshal(got[0]["missing"])
-	if got[0]["run"] != "run-1" || got[0]["sessionId"] != "run-1" || string(report) != `[{"breadth":"typo tolerance","from":"claude-prompt:2"},{"breadth":"csv export","from":"claude-prompt:2"}]` {
+	if got[0]["run"] != "run-1" || got[0]["token"] != "run-secret" || got[0]["sessionId"] != nil || string(report) !=`[{"breadth":"typo tolerance","from":"claude-prompt:2"},{"breadth":"csv export","from":"claude-prompt:2"}]` {
 		t.Fatalf("check-report request %v", got[0])
 	}
 	if got[1]["path"] != "/api/v1/ledger/check" || got[1]["goalId"] != "widget-G1" || got[1]["sessionId"] != "s1" {
@@ -44,10 +49,10 @@ func TestCheckCommandsPostWhatTheCheckerAndTheProposerSay(t *testing.T) {
 		t.Fatalf("attach request %v", got[2])
 	}
 	for _, args := range [][]string{
-		{"check-report", "run-1", "--from", "run-1"},
-		{"check-report", "run-1", "--from", "run-1", "--none", "--missing", "x", "--in", "u"},
-		{"check-report", "run-1", "--from", "run-1", "--missing", "x"},
-		{"check-report", "run-1", "--none"},
+		{"check-report", "run-1"},
+		{"check-report", "run-1", "--none", "--missing", "x", "--in", "u"},
+		{"check-report", "run-1", "--missing", "x"},
+		{"check-report", "--none"},
 	} {
 		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil || !strings.Contains(err.Error(), "usage") {
 			t.Fatalf("%v: %v", args, err)

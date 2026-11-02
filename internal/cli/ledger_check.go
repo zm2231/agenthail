@@ -3,13 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
 const ledgerCheckUsage = `usage: agenthail ledger check <goal_id>
-       agenthail ledger check-report <run> --from <checker session> (--none | --missing "<breadth>" --in <utterance_id> ...)`
+       agenthail ledger check-report <run> (--none | --missing "<breadth>" --in <utterance_id> ...)`
 
 func (a *App) ledgerCheck(args []string) error {
 	w, err := parseLedgerWrite(args)
@@ -48,13 +49,19 @@ func (a *App) ledgerCheckReport(args []string) error {
 		return err
 	}
 	missing, from := w.values["--missing"], w.values["--in"]
-	if len(w.positional) != 2 || w.value("--from") == "" || len(missing) != len(from) || w.bools["--none"] == (len(missing) > 0) {
+	if len(w.positional) != 2 || len(missing) != len(from) || w.bools["--none"] == (len(missing) > 0) {
 		return fmt.Errorf("%s", ledgerCheckUsage)
 	}
-	req := ledger.CheckReport{Run: w.positional[1], SessionID: w.value("--from"), None: w.bools["--none"]}
-	for i, breadth := range missing {
-		req.Missing = append(req.Missing, ledger.Omission{Breadth: breadth, From: from[i]})
+	token := os.Getenv("AGENTHAIL_CHECK_TOKEN")
+	if token == "" {
+		return fmt.Errorf("check-report is the narrowing checker's own command; only the checker Agenthail started can report")
 	}
+	req := map[string]any{"run": w.positional[1], "token": token, "none": w.bools["--none"]}
+	var omissions []ledger.Omission
+	for i, breadth := range missing {
+		omissions = append(omissions, ledger.Omission{Breadth: breadth, From: from[i]})
+	}
+	req["missing"] = omissions
 	var outcome ledger.CheckOutcome
 	if err := a.ledgerPost(context.Background(), "/api/v1/ledger/check-report", req, &outcome); err != nil {
 		return err

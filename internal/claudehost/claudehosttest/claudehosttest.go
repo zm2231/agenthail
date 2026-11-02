@@ -102,6 +102,7 @@ func (f *Fixture) launch(t testing.TB, script, version string, env ...string) cl
 	}
 	owner := OwnerEnv()
 	env = append(append(inherited, "FAKE_CLAUDE_DIR="+f.ClaudeDir, "FAKE_CLAUDE_RECORD=1", "HOME="+f.Home, owner[0],
+		"AGENTHAIL_CLAUDE_HOST_CHECKER_ENV=FAKE_CLAUDE_DIR,FAKE_CLAUDE_RECORD,AGENTHAIL_TEST_OWNER_PIDS",
 		owner[1]+" --report-on-signal --report-signal=SIGUSR2 --report-directory="+f.reportDir()), env...)
 	return claudehost.Launch{
 		Node:    node,

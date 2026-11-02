@@ -4,6 +4,7 @@ import "context"
 
 type CheckerStart struct {
 	Run     string
+	Token   string
 	Cwd     string
 	Message string
 }
