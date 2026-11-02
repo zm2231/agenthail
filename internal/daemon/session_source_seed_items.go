@@ -49,6 +49,7 @@ func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.Stre
 		Operation:        operation,
 		TurnID:           item.TurnID,
 		MessageID:        item.MessageID,
+		PromptID:         item.PromptID,
 		CallID:           item.CallID,
 		Attachment:       item.Attachment,
 		Files:            item.Files,
@@ -95,6 +96,7 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	mergeSeedField(&merged.Status, item.Status)
 	mergeSeedField(&merged.TurnID, item.TurnID)
 	mergeSeedField(&merged.MessageID, item.MessageID)
+	mergeSeedField(&merged.PromptID, item.PromptID)
 	mergeSeedField(&merged.CallID, item.CallID)
 	if body == item.Text && item.Truncated {
 		merged.Truncated = true
@@ -111,7 +113,7 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	if item.Turn != nil {
 		merged.Turn = item.Turn
 	}
-	if merged.Role == payload.Role && merged.Origin == payload.Origin && merged.Sender == payload.Sender && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.MessageID == payload.MessageID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) && reflect.DeepEqual(merged.Files, payload.Files) && reflect.DeepEqual(merged.Turn, payload.Turn) {
+	if merged.Role == payload.Role && merged.Origin == payload.Origin && merged.Sender == payload.Sender && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.MessageID == payload.MessageID && merged.PromptID == payload.PromptID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) && reflect.DeepEqual(merged.Files, payload.Files) && reflect.DeepEqual(merged.Turn, payload.Turn) {
 		return true
 	}
 	encoded, err := json.Marshal(merged)
@@ -124,8 +126,14 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 		s.appendFailed = true
 		s.mu.Unlock()
 		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
-	} else if changed {
-		s.wakeFollowers()
+	} else {
+		if changed {
+			s.wakeFollowers()
+		}
+		if s.manager.prompts != nil {
+			merged.Body = body
+			s.manager.prompts(s.session, merged)
+		}
 	}
 	return true
 }

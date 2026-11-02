@@ -17,6 +17,12 @@ func NewStore(db, read *sql.DB) *Store {
 	return &Store{db: db, read: read}
 }
 
+const (
+	LedgerUnset    = 0
+	LedgerEnabled  = 1
+	LedgerDisabled = 2
+)
+
 func (s *Store) Enabled(projectKey string) (bool, error) {
 	if projectKey == "" {
 		return false, nil
@@ -29,14 +35,34 @@ func (s *Store) Enabled(projectKey string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return enabled == 1, nil
+	return enabled == LedgerEnabled, nil
+}
+
+type Scope struct {
+	State int
+	Since time.Time
+}
+
+func (s *Store) Scope(projectKey string) (Scope, error) {
+	var state int
+	var since int64
+	err := s.read.QueryRow(`SELECT enabled,since_ms FROM ledger_state WHERE project_key=?`, projectKey).Scan(&state, &since)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Scope{State: LedgerUnset}, nil
+	}
+	if err != nil {
+		return Scope{}, err
+	}
+	return Scope{State: state, Since: time.UnixMilli(since).UTC()}, nil
 }
 
 func (s *Store) Enable(projectKey string) error {
 	if projectKey == "" {
 		return fmt.Errorf("project key is required")
 	}
-	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled) VALUES(?,1) ON CONFLICT(project_key) DO UPDATE SET enabled=1`, projectKey)
+	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled,since_ms) VALUES(?,?,?)
+		ON CONFLICT(project_key) DO UPDATE SET since_ms=CASE WHEN enabled=excluded.enabled THEN since_ms ELSE excluded.since_ms END, enabled=excluded.enabled`,
+		projectKey, LedgerEnabled, time.Now().UnixMilli())
 	return err
 }
 
@@ -44,7 +70,7 @@ func (s *Store) Disable(projectKey string) error {
 	if projectKey == "" {
 		return fmt.Errorf("project key is required")
 	}
-	_, err := s.db.Exec(`UPDATE ledger_state SET enabled=0 WHERE project_key=?`, projectKey)
+	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled) VALUES(?,?) ON CONFLICT(project_key) DO UPDATE SET enabled=?`, projectKey, LedgerDisabled, LedgerDisabled)
 	return err
 }
 
@@ -55,20 +81,47 @@ func (s *Store) AppendEvent(event Event) (Event, error) {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.db.Exec(
-		`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,created_at) VALUES(?,?,?,?,?,?,?)`,
+	return insertEvent(s.db, `INSERT`, event)
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+const eventColumns = `seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at`
+
+// insertEvent returns Seq 0 when verb is INSERT OR IGNORE and the ref already exists.
+func insertEvent(db execer, verb string, event Event) (Event, error) {
+	result, err := db.Exec(
+		verb+` INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,ref,created_at) VALUES(?,?,?,?,?,?,?,?)`,
 		event.ProjectKey, string(event.Type), event.Payload, event.ActorSessionID, event.ActorHostID, event.OwnerSeq,
-		event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		event.Ref, event.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	)
 	if err != nil {
 		return Event{}, err
 	}
-	seq, err := result.LastInsertId()
-	if err != nil {
+	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return Event{}, err
 	}
-	event.Seq = seq
+	if event.Seq, err = result.LastInsertId(); err != nil {
+		return Event{}, err
+	}
 	return event, nil
+}
+
+func scanEvent(row rowScanner) (Event, error) {
+	var e Event
+	var typ, ts string
+	if err := row.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &e.Ref, &ts); err != nil {
+		return Event{}, err
+	}
+	e.Type = EventType(typ)
+	e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+	return e, nil
 }
 
 func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, error) {
@@ -76,7 +129,7 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 		limit = 100
 	}
 	rows, err := s.read.Query(
-		`SELECT seq,project_key,type,payload,actor_session_id,actor_host_id,owner_seq,created_at FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq LIMIT ?`,
+		`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? AND seq>? ORDER BY seq LIMIT ?`,
 		projectKey, afterSeq, limit,
 	)
 	if err != nil {
@@ -85,26 +138,20 @@ func (s *Store) Events(projectKey string, afterSeq int64, limit int) ([]Event, e
 	defer rows.Close()
 	var events []Event
 	for rows.Next() {
-		var e Event
-		var typ, ts string
-		if err := rows.Scan(&e.Seq, &e.ProjectKey, &typ, &e.Payload, &e.ActorSessionID, &e.ActorHostID, &e.OwnerSeq, &ts); err != nil {
+		e, err := scanEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		e.Type = EventType(typ)
-		e.CreatedAt, _ = time.Parse("2006-01-02T15:04:05Z", ts)
 		events = append(events, e)
 	}
 	return events, rows.Err()
 }
 
-func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surface, text string) (Event, error) {
-	payload := UtterancePayload{
-		Text:      text,
-		MessageID: messageID,
-		SessionID: sessionID,
-		TargetID:  targetID,
-		Surface:   surface,
-		TS:        time.Now().UTC().Format(time.RFC3339),
+func (s *Store) RecordGoal(projectKey, goalID, name, parentGoalID, actorSessionID string) (Event, error) {
+	payload := GoalPayload{
+		GoalID:       goalID,
+		Name:         name,
+		ParentGoalID: parentGoalID,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -112,10 +159,38 @@ func (s *Store) RecordUtterance(projectKey, messageID, sessionID, targetID, surf
 	}
 	return s.AppendEvent(Event{
 		ProjectKey:     projectKey,
-		Type:           EventUtterance,
+		Type:           EventGoal,
 		Payload:        data,
-		ActorSessionID: sessionID,
+		ActorSessionID: actorSessionID,
 	})
+}
+
+func (s *Store) UnattachedUtterances(projectKey string) ([]Event, error) {
+	events, err := s.Events(projectKey, 0, 100000)
+	if err != nil {
+		return nil, err
+	}
+	attached := map[string]bool{}
+	var utterances []Event
+	for _, e := range events {
+		switch e.Type {
+		case EventUtterance:
+			utterances = append(utterances, e)
+		case EventAsk:
+			var p AskPayload
+			if json.Unmarshal(e.Payload, &p) == nil && p.SourceUtterance != "" {
+				attached[p.SourceUtterance] = true
+			}
+		}
+	}
+	var unattached []Event
+	for _, u := range utterances {
+		var p UtterancePayload
+		if json.Unmarshal(u.Payload, &p) == nil && !attached[p.UtteranceID] {
+			unattached = append(unattached, u)
+		}
+	}
+	return unattached, nil
 }
 
 func (s *Store) LatestSeq(projectKey string) (int64, error) {

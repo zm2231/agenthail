@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
@@ -16,6 +17,8 @@ type claudeHookInput struct {
 	SessionID string `json:"session_id"`
 	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
+	Prompt    string `json:"prompt"`
+	PromptID  string `json:"prompt_id"`
 }
 
 // sessionContext is what the session-context hook adds to a Claude or Codex
@@ -71,8 +74,50 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 			text = agentcard.RenderChange(card)
 		}
 	}
-	if text == "" {
+	var ledgerContext string
+	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
+		ledgerContext = a.captureTerminalUtterance(ctx, session, hook.PromptID, hook.Prompt)
+	}
+
+	if text == "" && ledgerContext == "" {
 		return nil
 	}
-	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": text}}
+	combined := text
+	if ledgerContext != "" {
+		if combined != "" {
+			combined += "\n\n"
+		}
+		combined += ledgerContext
+	}
+	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
+}
+
+func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Session, promptID, prompt string) string {
+	var client *daemonAPIClient
+	var err error
+	if a.daemonAPIOverride != nil {
+		client, err = a.daemonAPIOverride()
+	} else {
+		client, err = newDaemonAPIClient()
+	}
+	if err != nil {
+		return ""
+	}
+	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/capture", nil, map[string]string{
+		"sessionId": session.ID,
+		"promptId":  promptID,
+		"prompt":    prompt,
+	}, nil)
+	if err != nil || status != http.StatusOK {
+		return ""
+	}
+	var result struct {
+		Captured   bool   `json:"captured"`
+		ProjectKey string `json:"projectKey"`
+		Ref        string `json:"ref"`
+	}
+	if json.Unmarshal(body, &result) != nil || !result.Captured {
+		return ""
+	}
+	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", result.Ref, result.ProjectKey)
 }

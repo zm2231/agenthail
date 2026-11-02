@@ -728,7 +728,7 @@ func TestOpenAddsCoordinatorsToARegistryAtTheVersionBefore(t *testing.T) {
 		t.Fatalf("replaced conversation's coordinator=%+v ok=%v err=%v", replaced, ok, err)
 	}
 	history, err := r.CoordinatorHistory(spec.ProjectID)
-	if err != nil || len(history) != 1 || history[0].SessionID != "first" {
+	if err != nil || len(history) != 2 || history[0].SessionID != "first" || history[1].Action != "replaced" || history[1].SessionID != "second" || history[1].PreviousSessionID != "first" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }

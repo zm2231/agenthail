@@ -466,15 +466,27 @@ CREATE TABLE IF NOT EXISTS ledger_events (
 	actor_session_id TEXT NOT NULL DEFAULT '',
 	actor_host_id TEXT NOT NULL DEFAULT '',
 	owner_seq INTEGER NOT NULL DEFAULT 0,
+	origin_seq INTEGER NOT NULL DEFAULT 0,
+	ref TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ledger_events_project ON ledger_events(project_key, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_events_ref ON ledger_events(project_key, ref) WHERE ref != '';
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_events_origin ON ledger_events(project_key, actor_host_id, origin_seq) WHERE origin_seq > 0;
+CREATE TABLE IF NOT EXISTS ledger_grants (
+	project_key TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	since_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, session_id)
+);
+CREATE INDEX IF NOT EXISTS ledger_grants_session ON ledger_grants(session_id);
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
 	enabled INTEGER NOT NULL DEFAULT 0,
 	owner_host_id TEXT NOT NULL DEFAULT '',
 	owner_cursor INTEGER NOT NULL DEFAULT 0,
 	deadline_ms INTEGER NOT NULL DEFAULT 0,
-	freeze_version TEXT NOT NULL DEFAULT ''
+	freeze_version TEXT NOT NULL DEFAULT '',
+	since_ms INTEGER NOT NULL DEFAULT 0
 );
 `

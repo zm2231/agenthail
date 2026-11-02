@@ -31,14 +31,18 @@ type Receipt struct {
 }
 
 type PersonCaptureContext struct {
-	TargetSessionID string
-	TargetCwd       string
-	TargetSurface   string
-	DeliveryKey     string
-	Message         string
+	Target     surface.Session
+	IntentUUID string
+	Message    string
 }
 
 type PersonCaptureFunc func(PersonCaptureContext)
+
+func (d Dispatcher) capturePerson(sourceID string, session *surface.Session, intentUUID, message string) {
+	if d.PersonCapture != nil && sourceID == surface.PersonSessionID && intentUUID != "" {
+		d.PersonCapture(PersonCaptureContext{Target: *session, IntentUUID: intentUUID, Message: message})
+	}
+}
 
 type Dispatcher struct {
 	Registry         *registry.Registry
@@ -193,6 +197,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			return nil, fmt.Errorf("persist submitted delivery intent: %w", err)
 		}
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
+		d.capturePerson(sourceID, session, intent.UUID, message)
 	}
 	return d.steer(ctx, adapter, session, message, target, sourceID, "steer", intent, false)
 }
@@ -234,7 +239,9 @@ func (d Dispatcher) queueForWaiting(session *surface.Session, message, target, s
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: sourceID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, MessageID: d.QueuedMessageID(deliveryID, session.ID), Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
+	messageID := d.QueuedMessageID(deliveryID, session.ID)
+	d.capturePerson(sourceID, session, messageID, message)
+	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, QueueID: queueID, DeliveryID: deliveryID, MessageID: messageID, Detail: fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target), WaitingOn: waiting}, nil
 }
 
 // failureKind keeps an uncertain outcome distinct from a confirmed failure so every surface shows the same evidence.
@@ -264,15 +271,6 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		if ctx, err = WithSender(ctx, d.Registry, options.SourceSessionID, options.PersonName); err != nil {
 			return nil, err
 		}
-		if d.PersonCapture != nil && options.SourceSessionID == surface.PersonSessionID {
-			d.PersonCapture(PersonCaptureContext{
-				TargetSessionID: session.ID,
-				TargetCwd:       session.Cwd,
-				TargetSurface:   string(session.Surface),
-				DeliveryKey:     deliveryKey,
-				Message:         message,
-			})
-		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
@@ -296,7 +294,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		if observation != nil && observation.Status == surface.StatusBusy {
 			if !syntheticNotion {
 				var intentErr error
-				intent, intentErr = d.prepareIntent(options.SourceSessionID, session.ID, message)
+				intent, intentErr = d.prepareIntent(options.SourceSessionID, session, message)
 				if intentErr != nil {
 					return nil, intentErr
 				}
@@ -327,7 +325,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if intent == nil && d.Registry != nil && !syntheticNotion {
 		var intentErr error
-		intent, intentErr = d.prepareIntent(options.SourceSessionID, session.ID, message)
+		intent, intentErr = d.prepareIntent(options.SourceSessionID, session, message)
 		if intentErr != nil {
 			return nil, intentErr
 		}
@@ -432,14 +430,15 @@ func WithSender(ctx context.Context, r *registry.Registry, sourceID, given strin
 	return surface.WithPersonName(ctx, given), nil
 }
 
-func (d Dispatcher) prepareIntent(sourceID, targetID, message string) (*registry.DeliveryIntent, error) {
+func (d Dispatcher) prepareIntent(sourceID string, session *surface.Session, message string) (*registry.DeliveryIntent, error) {
 	if d.Registry == nil {
 		return nil, nil
 	}
-	intent, err := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sourceID, TargetSessionID: targetID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	intent, err := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: sourceID, TargetSessionID: session.ID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 	if err != nil {
 		return nil, fmt.Errorf("persist submitted delivery intent: %w", err)
 	}
+	d.capturePerson(sourceID, session, intent.UUID, message)
 	return intent, nil
 }
 
@@ -504,7 +503,11 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
-	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, MessageID: d.QueuedMessageID(deliveryID, session.ID), Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
+	messageID := d.QueuedMessageID(deliveryID, session.ID)
+	if intent == nil {
+		d.capturePerson(options.SourceSessionID, session, messageID, message)
+	}
+	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, MessageID: messageID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
 	if waiting != nil {
 		receipt.Detail = fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target)
 	}

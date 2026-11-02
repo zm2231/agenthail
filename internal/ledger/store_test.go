@@ -5,42 +5,18 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
-	_ "modernc.org/sqlite"
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/registry/registrytest"
 )
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:?_pragma=foreign_keys(1)")
+	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
-	for _, stmt := range []string{
-		`CREATE TABLE ledger_events (
-			seq INTEGER PRIMARY KEY AUTOINCREMENT,
-			project_key TEXT NOT NULL,
-			type TEXT NOT NULL,
-			payload BLOB NOT NULL,
-			actor_session_id TEXT NOT NULL DEFAULT '',
-			actor_host_id TEXT NOT NULL DEFAULT '',
-			owner_seq INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX ledger_events_project ON ledger_events(project_key, seq)`,
-		`CREATE TABLE ledger_state (
-			project_key TEXT PRIMARY KEY,
-			enabled INTEGER NOT NULL DEFAULT 0,
-			owner_host_id TEXT NOT NULL DEFAULT '',
-			owner_cursor INTEGER NOT NULL DEFAULT 0,
-			deadline_ms INTEGER NOT NULL DEFAULT 0,
-			freeze_version TEXT NOT NULL DEFAULT ''
-		)`,
-	} {
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return db
+	t.Cleanup(func() { r.Close() })
+	return r.WriteDB()
 }
 
 func TestEnableDisable(t *testing.T) {
@@ -73,7 +49,7 @@ func TestRecordUtterance(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewStore(db, db)
 
-	event, err := s.RecordUtterance("proj-1", "msg-1", "sess-1", "target-1", "claude", "build me a widget")
+	event, _, err := s.RecordUtterance(ledger.Utterance{ProjectKey: "proj-1", Ref: "msg-1", SpeakerID: "sess-1", TargetID: "target-1", Surface: "claude", Text: "build me a widget", CapturedBy: ledger.CapturedByHook})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +76,10 @@ func TestEventsFilterByProject(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewStore(db, db)
 
-	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "", "claude", "first"); err != nil {
+	if _, _, err := s.RecordUtterance(ledger.Utterance{ProjectKey: "proj-1", Ref: "m1", SpeakerID: "s1", Text: "first", CapturedBy: ledger.CapturedByHook}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RecordUtterance("proj-2", "m2", "s2", "", "claude", "second"); err != nil {
+	if _, _, err := s.RecordUtterance(ledger.Utterance{ProjectKey: "proj-2", Ref: "m2", SpeakerID: "s2", Text: "second", CapturedBy: ledger.CapturedByHook}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,10 +101,10 @@ func TestLatestSeq(t *testing.T) {
 		t.Fatalf("expected 0 for empty, got %d err=%v", seq, err)
 	}
 
-	if _, err := s.RecordUtterance("proj-1", "m1", "s1", "", "claude", "hello"); err != nil {
+	if _, _, err := s.RecordUtterance(ledger.Utterance{ProjectKey: "proj-1", Ref: "m1", SpeakerID: "s1", Text: "hello", CapturedBy: ledger.CapturedByHook}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RecordUtterance("proj-1", "m2", "s1", "", "claude", "world"); err != nil {
+	if _, _, err := s.RecordUtterance(ledger.Utterance{ProjectKey: "proj-1", Ref: "m2", SpeakerID: "s1", Text: "world", CapturedBy: ledger.CapturedByHook}); err != nil {
 		t.Fatal(err)
 	}
 

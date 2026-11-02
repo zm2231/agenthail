@@ -169,6 +169,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		background:        newBackgroundWork(),
 		limitResumes:      newLimitResumer(),
 	}
+	d.sources.prompts = d.backfillPrompt
 	d.ui = newUIState(reg)
 	d.snapshots = newSnapshotRelay()
 	identity, err := reg.HostIdentity()

@@ -187,6 +187,8 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"coordinators", `UPDATE coordinators SET session_id=?2 WHERE session_id=?1`, false},
 		{"coordinator_history", `UPDATE coordinator_history SET session_id=?2 WHERE session_id=?1`, false},
 		{"coordinator_history", `UPDATE coordinator_history SET previous_session_id=?2 WHERE previous_session_id=?1`, false},
+		{"ledger_grants", `INSERT OR IGNORE INTO ledger_grants(project_key,session_id,since_ms) SELECT project_key,?2,since_ms FROM ledger_grants WHERE session_id=?1`, false},
+		{"ledger_grants", `DELETE FROM ledger_grants WHERE session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET session_id=?2 WHERE session_id=?1`, false},
 		{"message_queue", `UPDATE message_queue SET source_session_id=?2 WHERE source_session_id=?1`, false},
 		{"attention_items", `UPDATE attention_items SET session_id=?2 WHERE session_id=?1`, false},

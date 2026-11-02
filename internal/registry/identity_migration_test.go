@@ -67,6 +67,10 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	if err := r.db.QueryRow(`SELECT CAST(receipt AS TEXT) FROM action_receipts WHERE idempotency_key='fixture-key'`).Scan(&receipt); err != nil || !strings.Contains(receipt, `"sessionId":"conversation-worker"`) {
 		t.Fatalf("receipt=%s err=%v", receipt, err)
 	}
+	var granted bool
+	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM ledger_grants WHERE project_key='proj' AND session_id='conversation-worker')`).Scan(&granted); err != nil || !granted {
+		t.Fatalf("the rekeyed session lost its ledger grant: granted=%v err=%v", granted, err)
+	}
 	for alias, want := range map[string]string{"worker": "conversation-worker", "native": "conversation-native"} {
 		if owner, err := r.LookupAlias(alias); err != nil || owner != want {
 			t.Fatalf("alias %s owner=%q err=%v", alias, owner, err)
@@ -188,6 +192,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES('conversation-native',1)`)
 	for _, id := range []string{rekeyedBridge, collidedBridge} {
 		exec(`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,created_at) VALUES('proj','utterance',?,?,?)`, []byte(`{"sessionId":"`+id+`"}`), id, now)
+		exec(`INSERT INTO ledger_grants(project_key,session_id,since_ms) VALUES('proj',?,1)`, id)
 	}
 }
 

@@ -68,6 +68,9 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	if changed {
 		s.wakeFollowers()
 	}
+	if s.manager.prompts != nil {
+		s.manager.prompts(s.session, payload)
+	}
 }
 
 func (s *sessionSource) persist(payload sessionJournalPayload) (registry.SessionJournalEntry, bool, error) {

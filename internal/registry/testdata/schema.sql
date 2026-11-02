@@ -29,8 +29,17 @@ CREATE UNIQUE INDEX delivery_intents_uuid ON delivery_intents(uuid);
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
 
+-- index ledger_events_origin
+CREATE UNIQUE INDEX ledger_events_origin ON ledger_events(project_key, actor_host_id, origin_seq) WHERE origin_seq > 0;
+
 -- index ledger_events_project
 CREATE INDEX ledger_events_project ON ledger_events(project_key, seq);
+
+-- index ledger_events_ref
+CREATE UNIQUE INDEX ledger_events_ref ON ledger_events(project_key, ref) WHERE ref != '';
+
+-- index ledger_grants_session
+CREATE INDEX ledger_grants_session ON ledger_grants(session_id);
 
 -- index message_queue_delivery_key
 CREATE UNIQUE INDEX message_queue_delivery_key
@@ -317,7 +326,17 @@ CREATE TABLE ledger_events (
 	actor_session_id TEXT NOT NULL DEFAULT '',
 	actor_host_id TEXT NOT NULL DEFAULT '',
 	owner_seq INTEGER NOT NULL DEFAULT 0,
+	origin_seq INTEGER NOT NULL DEFAULT 0,
+	ref TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table ledger_grants
+CREATE TABLE ledger_grants (
+	project_key TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	since_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, session_id)
 );
 
 -- table ledger_state
@@ -327,7 +346,8 @@ CREATE TABLE ledger_state (
 	owner_host_id TEXT NOT NULL DEFAULT '',
 	owner_cursor INTEGER NOT NULL DEFAULT 0,
 	deadline_ms INTEGER NOT NULL DEFAULT 0,
-	freeze_version TEXT NOT NULL DEFAULT ''
+	freeze_version TEXT NOT NULL DEFAULT '',
+	since_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table limit_resumes
