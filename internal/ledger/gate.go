@@ -49,13 +49,13 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 		result.Result = GateDeferredPerson
 		return result, writeGate(tx, projectKey, GatePayload{Gate: GateG2, SessionID: sessionID, TurnID: turnID, Result: result.Result}, now)
 	}
-	progressed, err := progressSince(tx, projectKey, sessionID, board.gates.lastSeq[sessionID])
+	progressed, err := board.progressSince(tx, projectKey, sessionID, board.gates.lastSeq[sessionID])
 	if err != nil {
 		return GateResult{}, err
 	}
 	var open []string
 	for _, c := range owned {
-		if !progressed[c.ID] && !c.liveWait(sessionID, now) && !board.gates.waived[gateKey(sessionID, c.ID)] {
+		if !progressed[c.ID] && !c.liveWait(sessionID, now) && !board.blockedOnOthers(c, sessionID) && !board.gates.waived[gateKey(sessionID, c.ID)] {
 			open = append(open, c.ID)
 			result.Open = append(result.Open, c)
 		}
@@ -126,9 +126,9 @@ func (c Clause) liveWait(sessionID string, now time.Time) bool {
 	return false
 }
 
-func progressSince(q querier, projectKey, sessionID string, afterSeq int64) (map[string]bool, error) {
-	rows, err := q.Query(`SELECT type,payload FROM ledger_events WHERE project_key=? AND actor_session_id=? AND seq>? AND type IN (?,?)`,
-		projectKey, sessionID, afterSeq, string(EventClauseState), string(EventWait))
+func (b *Board) progressSince(q querier, projectKey, sessionID string, afterSeq int64) (map[string]bool, error) {
+	rows, err := q.Query(`SELECT type,payload FROM ledger_events WHERE project_key=? AND actor_session_id=? AND seq>? AND type IN (?,?,?)`,
+		projectKey, sessionID, afterSeq, string(EventClauseState), string(EventWait), string(EventWorkItemState))
 	if err != nil {
 		return nil, err
 	}
@@ -143,11 +143,17 @@ func progressSince(q querier, projectKey, sessionID string, afterSeq int64) (map
 		var p struct {
 			ClauseID    string `json:"clauseId"`
 			ProgressRef string `json:"progressRef"`
+			ItemID      string `json:"itemId"`
 		}
 		if json.Unmarshal(data, &p) != nil {
 			continue
 		}
-		if EventType(typ) == EventWait || p.ProgressRef != "" {
+		switch {
+		case EventType(typ) == EventWorkItemState:
+			if item := b.workItems[p.ItemID]; item != nil {
+				progressed[item.ClauseID] = true
+			}
+		case EventType(typ) == EventWait || p.ProgressRef != "":
 			progressed[p.ClauseID] = true
 		}
 	}

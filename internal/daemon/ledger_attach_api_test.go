@@ -80,8 +80,8 @@ func TestLedgerAPIWorkItemsMoveThroughTheDaemon(t *testing.T) {
 	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"}, &added); code != http.StatusOK || added.Item.ID != "widget-W1" {
 		t.Fatalf("add status=%d body=%s", code, body)
 	}
-	code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkClose, ItemID: "widget-W1"}, nil)
-	if code != http.StatusConflict || !strings.Contains(body, "done needs it in_progress") {
+	code, body := ledgerWrite(t, handler, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: p.key, SessionID: "s1", Action: ledger.WorkSubmit, ItemID: "widget-W1"}, nil)
+	if code != http.StatusConflict || !strings.Contains(body, "submit needs it in_progress") {
 		t.Fatalf("done before claim: status=%d body=%s", code, body)
 	}
 }

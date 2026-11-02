@@ -97,6 +97,7 @@ type Board struct {
 	workItems          map[string]*WorkItem
 	projectDefaultCuts int
 	gates              gateState
+	reviews            reviewState
 	applied            int64
 }
 
@@ -119,6 +120,7 @@ func (b *Board) reset() {
 	b.workItems = map[string]*WorkItem{}
 	b.projectDefaultCuts = 0
 	b.gates = newGateState()
+	b.reviews = newReviewState()
 	b.applied = 0
 }
 
@@ -171,6 +173,11 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyWorkItem(event.Payload)
 	case EventWorkItemState:
 		err = b.applyWorkItemState(event.Payload)
+	case EventWorkItemDep:
+		err = b.applyWorkDep(event.Payload)
+	}
+	if err == nil {
+		err = b.reviews.observe(event)
 	}
 	if err == nil {
 		b.applied = event.Seq
