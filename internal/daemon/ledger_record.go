@@ -10,28 +10,65 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
+type ledgerTarget struct {
+	key     string
+	localID string
+}
+
+// recordPersonWords records u in every project whose scope covers the session: its folder's project and any project it was opted into.
 func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) (string, bool, error) {
-	if session.Cwd == "" {
-		return "", false, nil
-	}
-	project, err := d.sessionProject(session)
-	if err != nil || project == nil || project.Key == "" {
+	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
+	targets, grants, err := d.ledgerTargets(store, session)
+	if err != nil {
 		return "", false, err
 	}
-	store := ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
-	since, inScope, err := d.ledgerSince(store, project, session.ID)
-	if err != nil || !inScope || u.At.Before(since) {
-		return project.Key, false, err
+	recordedKey := ""
+	for _, target := range targets {
+		since, inScope, err := d.ledgerSince(store, target, session.ID, grants)
+		if err != nil {
+			return target.key, false, err
+		}
+		if !inScope || u.At.Before(since) {
+			continue
+		}
+		u.ProjectKey, u.SpeakerID, u.TargetID = target.key, surface.PersonSessionID, session.ID
+		_, inserted, err := store.RecordUtterance(u)
+		if err != nil {
+			return target.key, false, err
+		}
+		if u.HookMissed(inserted) {
+			d.publishEvent(ledger.EventCaptureMissed, session.ID, map[string]string{"projectKey": target.key, "ref": u.Ref, "sessionId": session.ID, "reason": "unknown"})
+		}
+		if recordedKey == "" {
+			recordedKey = target.key
+		}
 	}
-	u.ProjectKey, u.SpeakerID, u.TargetID = project.Key, surface.PersonSessionID, session.ID
-	_, inserted, err := store.RecordUtterance(u)
+	return recordedKey, recordedKey != "", nil
+}
+
+func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]ledgerTarget, map[string]time.Time, error) {
+	var targets []ledgerTarget
+	if session.Cwd != "" {
+		project, err := d.sessionProject(session)
+		if err != nil {
+			return nil, nil, err
+		}
+		if project != nil && project.Key != "" {
+			targets = append(targets, ledgerTarget{key: project.Key, localID: project.LocalID})
+		}
+	}
+	grants, err := store.SessionGrants(session.ID)
 	if err != nil {
-		return project.Key, false, err
+		return nil, nil, err
 	}
-	if u.HookMissed(inserted) {
-		d.publishEvent(ledger.EventCaptureMissed, session.ID, map[string]string{"projectKey": project.Key, "ref": u.Ref, "sessionId": session.ID, "reason": "unknown"})
+	granted := map[string]time.Time{}
+	for _, grant := range grants {
+		granted[grant.ProjectKey] = grant.Since
+		if len(targets) == 0 || targets[0].key != grant.ProjectKey {
+			targets = append(targets, ledgerTarget{key: grant.ProjectKey})
+		}
 	}
-	return project.Key, true, nil
+	return targets, granted, nil
 }
 
 // sessionProject uses the catalog's cached identity so per-prompt capture does not run git on the stream callback.
@@ -49,21 +86,29 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 }
 
 // ledgerSince is the earliest grant that puts sessionID in the project's ledger scope.
-func (d *Daemon) ledgerSince(store *ledger.Store, project *CatalogProject, sessionID string) (time.Time, bool, error) {
-	scope, err := store.Scope(project.Key)
+func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, grants map[string]time.Time) (time.Time, bool, error) {
+	scope, err := store.Scope(target.key)
 	if err != nil || scope.State == ledger.LedgerDisabled {
 		return time.Time{}, false, err
 	}
 	since, inScope := scope.Since, scope.State == ledger.LedgerEnabled
-	if project.LocalID == "" {
+	consider := func(at time.Time) {
+		if !inScope || at.Before(since) {
+			since, inScope = at, true
+		}
+	}
+	if at, ok := grants[target.key]; ok {
+		consider(at)
+	}
+	if target.localID == "" {
 		return since, inScope, nil
 	}
-	at, coordinator, err := d.Registry.CoordinatorSince(project.LocalID, sessionID)
+	at, coordinator, err := d.Registry.CoordinatorSince(target.localID, sessionID)
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	if coordinator && (!inScope || at.Before(since)) {
-		since, inScope = at, true
+	if coordinator {
+		consider(at)
 	}
 	return since, inScope, nil
 }

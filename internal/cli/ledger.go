@@ -8,6 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (a *App) cmdLedger(args []string) error {
@@ -194,10 +195,33 @@ func (a *App) ledgerAsk(store *ledger.Store, askID string, args []string) error 
 	return fmt.Errorf("ask %s not found", askID)
 }
 
+func (a *App) ledgerSessionArg(args []string) (*surface.Session, error) {
+	positional := stripFlags(args)
+	if len(positional) < 2 {
+		return nil, nil
+	}
+	session, _, err := a.resolveTarget(context.Background(), positional[1])
+	return session, err
+}
+
 func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
 	if err != nil {
 		return err
+	}
+	session, err := a.ledgerSessionArg(args)
+	if err != nil {
+		return err
+	}
+	if session != nil {
+		if err := store.GrantSession(key, session.ID); err != nil {
+			return err
+		}
+		if hasFlag(args, "--json") {
+			return emit(map[string]any{"projectKey": key, "sessionId": session.ID, "granted": true})
+		}
+		fmt.Printf("ledger captures %s for %s\n", session.ID, key)
+		return nil
 	}
 	if err := store.Enable(key); err != nil {
 		return err
@@ -213,6 +237,20 @@ func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
 	if err != nil {
 		return err
+	}
+	session, err := a.ledgerSessionArg(args)
+	if err != nil {
+		return err
+	}
+	if session != nil {
+		if err := store.RevokeSession(key, session.ID); err != nil {
+			return err
+		}
+		if hasFlag(args, "--json") {
+			return emit(map[string]any{"projectKey": key, "sessionId": session.ID, "granted": false})
+		}
+		fmt.Printf("ledger no longer captures %s for %s\n", session.ID, key)
+		return nil
 	}
 	if err := store.Disable(key); err != nil {
 		return err

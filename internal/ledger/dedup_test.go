@@ -96,6 +96,25 @@ func TestOnlyAJournalFirstPromptIsAMissedHook(t *testing.T) {
 	}
 }
 
+func TestAReplayedOriginIsAcceptedOnce(t *testing.T) {
+	db := openTestDB(t)
+	insert := `INSERT INTO ledger_events(project_key,type,payload,actor_host_id,origin_seq) VALUES('p','goal','{}',?,?)`
+	if _, err := db.Exec(insert, "mac", 7); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(insert, "mac", 7); err == nil {
+		t.Fatal("the same host's event 7 was accepted twice")
+	}
+	for _, row := range []struct {
+		host string
+		seq  int
+	}{{"vps", 7}, {"mac", 8}, {"mac", 0}, {"mac", 0}} {
+		if _, err := db.Exec(insert, row.host, row.seq); err != nil {
+			t.Fatalf("host %s seq %d: %v", row.host, row.seq, err)
+		}
+	}
+}
+
 func TestUtteranceNeedsARef(t *testing.T) {
 	if _, _, err := newStore(t).RecordUtterance(said("", "no ref")); err == nil {
 		t.Fatal("an utterance without a ref was recorded")
