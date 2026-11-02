@@ -13,7 +13,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var resolveSessionProject = daemon.ResolvePathProject
+var (
+	resolveSessionProject = daemon.ResolvePathProject
+	localSessionPlaces    = (*registry.Registry).LocalSessionPlaces
+)
 
 type promptHookProblem struct {
 	Root  string `json:"root"`
@@ -80,7 +83,7 @@ func ledgerPromptHookProblems(ctx context.Context, r *registry.Registry) ([]prom
 	}
 	held, unresolved, err := enabledProjectsByRoot(ctx, r, roots, affected, enabled)
 	if err != nil {
-		return nil, err
+		return problems, err
 	}
 	for i := range problems {
 		problems[i].EnabledProject = held[problems[i].Root]
@@ -89,7 +92,7 @@ func ledgerPromptHookProblems(ctx context.Context, r *registry.Registry) ([]prom
 }
 
 func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []surface.ClaudeConfigRoot, affected map[string]bool, enabled map[string]bool) (map[string]string, []error, error) {
-	places, err := r.LocalSessionPlaces(ctx, surface.KindClaude)
+	places, err := localSessionPlaces(r, ctx, surface.KindClaude)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -193,6 +193,9 @@ func (a *App) cmdDoctor(args []string) error {
 			ledgerFailures++
 		}
 	}
+	if hookErr != nil && ledgerFailures == 0 {
+		ledgerFailures = 1
+	}
 	if hasFlag(args, "--json") {
 		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
@@ -322,7 +325,7 @@ func (a *App) cmdDoctor(args []string) error {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
 	}
 	if ledgerFailures > 0 {
-		return fmt.Errorf("doctor found %d Claude config root(s) where the enabled ledger captures no terminal words", ledgerFailures)
+		return fmt.Errorf("doctor found %d Claude config root(s) where the enabled ledger captures no terminal words, or could not check them", ledgerFailures)
 	}
 	return nil
 }

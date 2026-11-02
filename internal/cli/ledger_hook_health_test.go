@@ -190,3 +190,39 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 		t.Fatalf("doctor was ok while a problem root's ownership is unknown: %s", output)
 	}
 }
+
+func TestADeadlineOnTheSessionScanKeepsTheProblemAndFailsDoctor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	root := filepath.Join(home, ".claude")
+	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	dir := t.TempDir()
+	if err := store.AddProject(registry.ProjectRecord{ID: "proj-d", WorkspaceRoot: dir, Title: "proj-d", Key: "deadline-key"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("deadline-key"); err != nil {
+		t.Fatal(err)
+	}
+	places := localSessionPlaces
+	localSessionPlaces = func(*registry.Registry, context.Context, surface.SurfaceKind) ([]registry.SessionPlace, error) {
+		return nil, context.DeadlineExceeded
+	}
+	t.Cleanup(func() { localSessionPlaces = places })
+
+	var report struct {
+		OK       bool                `json:"ok"`
+		Problems []promptHookProblem `json:"ledgerPromptHookProblems"`
+		Err      string              `json:"ledgerPromptHooksError"`
+	}
+	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		t.Fatalf("doctor output=%s err=%v", output, err)
+	}
+	if report.OK || len(report.Problems) != 1 || report.Problems[0].Root != root || !strings.Contains(report.Err, "deadline") {
+		t.Fatalf("a scan deadline must keep the problem and fail doctor: %+v", report)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) }); err == nil || !strings.Contains(err.Error(), "enabled ledger") {
+		t.Fatalf("text doctor did not fail: %v", err)
+	}
+}
