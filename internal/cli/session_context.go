@@ -7,7 +7,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -16,6 +19,7 @@ type claudeHookInput struct {
 	SessionID string `json:"session_id"`
 	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
+	Prompt    string `json:"prompt"`
 }
 
 // sessionContext is what the session-context hook adds to a Claude or Codex
@@ -71,8 +75,41 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 			text = agentcard.RenderChange(card)
 		}
 	}
-	if text == "" {
+	var ledgerContext string
+	if hook.Event == claudePromptSubmit.event && hook.Prompt != "" && session.Cwd != "" {
+		ledgerContext = a.captureTerminalUtterance(ctx, store, session, hook.Prompt)
+	}
+
+	if text == "" && ledgerContext == "" {
 		return nil
 	}
-	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": text}}
+	combined := text
+	if ledgerContext != "" {
+		if combined != "" {
+			combined += "\n\n"
+		}
+		combined += ledgerContext
+	}
+	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": hook.Event, "additionalContext": combined}}
+}
+
+func (a *App) captureTerminalUtterance(ctx context.Context, store *registry.Registry, session *surface.Session, prompt string) string {
+	project, err := daemon.ResolvePathProject(ctx, store, session.Cwd)
+	if err != nil || project == nil || project.Key == "" {
+		return ""
+	}
+	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
+	captures, err := ls.CapturesForCoordinator(project.Key)
+	if err != nil || !captures {
+		enabled, err := ls.Enabled(project.Key)
+		if err != nil || !enabled {
+			return ""
+		}
+	}
+	messageID := uuid.NewString()
+	_, err = ls.RecordUtterance(project.Key, messageID, surface.PersonSessionID, session.ID, "terminal", prompt)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("[intent ledger] utterance %s captured for project %s", messageID, project.Key)
 }
