@@ -1,28 +1,50 @@
 package ledger
 
 type UtterancePayload struct {
-	Text      string `json:"text"`
-	MessageID string `json:"messageId"`
-	SessionID string `json:"sessionId"`
-	TargetID  string `json:"targetId"`
-	Surface   string `json:"surface"`
-	TS        string `json:"ts"`
+	Text       string `json:"text"`
+	MessageID  string `json:"messageId"`
+	SessionID  string `json:"sessionId"`
+	TargetID   string `json:"targetId"`
+	Surface    string `json:"surface"`
+	QuotedSpan string `json:"quotedSpan,omitempty"`
+	TS         string `json:"ts"`
+}
+
+type GoalPayload struct {
+	GoalID       string `json:"goalId"`
+	Name         string `json:"name"`
+	ParentGoalID string `json:"parentGoalId,omitempty"`
 }
 
 type AskPayload struct {
-	AskID            string   `json:"askId"`
-	Type             AskType  `json:"type"`
-	Principal        string   `json:"principal"`
-	SourceUtterance  string   `json:"sourceUtteranceId"`
-	Clauses          []string `json:"clauses"`
+	AskID           string   `json:"askId"`
+	GoalID          string   `json:"goalId,omitempty"`
+	Type            AskType  `json:"type"`
+	Principal       string   `json:"principal"`
+	SourceUtterance string   `json:"sourceUtteranceId"`
+	Clauses         []string `json:"clauses"`
 }
 
 type ClausePayload struct {
-	ClauseID       string      `json:"clauseId"`
-	AskID          string      `json:"askId"`
-	Text           string      `json:"text"`
-	State          ClauseState `json:"state"`
-	OwnerSessionID string      `json:"ownerSessionId,omitempty"`
+	ClauseID       string       `json:"clauseId"`
+	AskID          string       `json:"askId"`
+	Text           string       `json:"text"`
+	State          ClauseState  `json:"state"`
+	Source         ClauseSource `json:"source,omitempty"`
+	OwnerSessionID string       `json:"ownerSessionId,omitempty"`
+}
+
+type DelegationPayload struct {
+	AskID              string `json:"askId"`
+	DelegatorSessionID string `json:"delegatorSessionId"`
+	DelegateSessionID  string `json:"delegateSessionId"`
+}
+
+type SupersessionPayload struct {
+	ClauseID          string `json:"clauseId"`
+	OldVersion        string `json:"oldVersion"`
+	NewVersion        string `json:"newVersion"`
+	SourceUtteranceID string `json:"sourceUtteranceId"`
 }
 
 type ClauseStatePayload struct {

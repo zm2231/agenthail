@@ -5,24 +5,33 @@ import (
 	"sync"
 )
 
+type Goal struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ParentGoalID string `json:"parentGoalId,omitempty"`
+	Asks         []string `json:"asks,omitempty"`
+}
+
 type Ask struct {
-	ID              string      `json:"id"`
-	Type            AskType     `json:"type"`
-	Principal       string      `json:"principal"`
-	SourceUtterance string      `json:"sourceUtteranceId"`
-	Clauses         []*Clause   `json:"clauses"`
+	ID              string    `json:"id"`
+	GoalID          string    `json:"goalId,omitempty"`
+	Type            AskType   `json:"type"`
+	Principal       string    `json:"principal"`
+	SourceUtterance string    `json:"sourceUtteranceId"`
+	Clauses         []*Clause `json:"clauses"`
 }
 
 type Clause struct {
-	ID             string      `json:"id"`
-	AskID          string      `json:"askId"`
-	Text           string      `json:"text"`
-	State          ClauseState `json:"state"`
-	OwnerSessionID string      `json:"ownerSessionId,omitempty"`
-	SelfReported   bool        `json:"selfReported,omitempty"`
-	ProgressRef    string      `json:"progressRef,omitempty"`
-	Cuts           []Cut       `json:"cuts,omitempty"`
-	Waits          []Wait      `json:"waits,omitempty"`
+	ID             string       `json:"id"`
+	AskID          string       `json:"askId"`
+	Text           string       `json:"text"`
+	State          ClauseState  `json:"state"`
+	Source         ClauseSource `json:"source,omitempty"`
+	OwnerSessionID string       `json:"ownerSessionId,omitempty"`
+	SelfReported   bool         `json:"selfReported,omitempty"`
+	ProgressRef    string       `json:"progressRef,omitempty"`
+	Cuts           []Cut        `json:"cuts,omitempty"`
+	Waits          []Wait       `json:"waits,omitempty"`
 }
 
 type Cut struct {
@@ -46,6 +55,7 @@ type Decision struct {
 
 type Board struct {
 	mu        sync.RWMutex
+	goals     map[string]*Goal
 	asks      map[string]*Ask
 	clauses   map[string]*Clause
 	decisions map[string]*Decision
@@ -54,6 +64,7 @@ type Board struct {
 
 func NewBoard() *Board {
 	return &Board{
+		goals:     map[string]*Goal{},
 		asks:      map[string]*Ask{},
 		clauses:   map[string]*Clause{},
 		decisions: map[string]*Decision{},
@@ -65,6 +76,8 @@ func (b *Board) Apply(event Event) error {
 	defer b.mu.Unlock()
 	var err error
 	switch event.Type {
+	case EventGoal:
+		err = b.applyGoal(event.Payload)
 	case EventAsk:
 		err = b.applyAsk(event.Payload)
 	case EventClause:
@@ -125,6 +138,16 @@ func (b *Board) AllAsks() []Ask {
 	return result
 }
 
+func (b *Board) Goals() []Goal {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	result := make([]Goal, 0, len(b.goals))
+	for _, g := range b.goals {
+		result = append(result, *g)
+	}
+	return result
+}
+
 func (b *Board) Decisions() []Decision {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -158,6 +181,7 @@ func clauseFullyCut(c *Clause) bool {
 
 func (b *Board) Rebuild(events []Event) error {
 	b.mu.Lock()
+	b.goals = map[string]*Goal{}
 	b.asks = map[string]*Ask{}
 	b.clauses = map[string]*Clause{}
 	b.decisions = map[string]*Decision{}
@@ -171,16 +195,34 @@ func (b *Board) Rebuild(events []Event) error {
 	return nil
 }
 
+func (b *Board) applyGoal(data []byte) error {
+	var p GoalPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	b.goals[p.GoalID] = &Goal{
+		ID:           p.GoalID,
+		Name:         p.Name,
+		ParentGoalID: p.ParentGoalID,
+	}
+	return nil
+}
+
 func (b *Board) applyAsk(data []byte) error {
 	var p AskPayload
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
-	b.asks[p.AskID] = &Ask{
+	ask := &Ask{
 		ID:              p.AskID,
+		GoalID:          p.GoalID,
 		Type:            p.Type,
 		Principal:       p.Principal,
 		SourceUtterance: p.SourceUtterance,
+	}
+	b.asks[p.AskID] = ask
+	if g, ok := b.goals[p.GoalID]; ok {
+		g.Asks = append(g.Asks, p.AskID)
 	}
 	return nil
 }
@@ -195,6 +237,7 @@ func (b *Board) applyClause(data []byte) error {
 		AskID:          p.AskID,
 		Text:           p.Text,
 		State:          p.State,
+		Source:         p.Source,
 		OwnerSessionID: p.OwnerSessionID,
 	}
 	b.clauses[p.ClauseID] = c

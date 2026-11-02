@@ -15,10 +15,17 @@ const (
 	EventCutAck       EventType = "cut.ack"
 	EventWait         EventType = "wait"
 	EventWaitResolved EventType = "wait.resolved"
-	EventEvidence     EventType = "evidence"
-	EventCorrection   EventType = "correction"
-	EventWaiver       EventType = "waiver"
-	EventRedact       EventType = "redact"
+	EventEvidence      EventType = "evidence"
+	EventGoal          EventType = "goal"
+	EventDelegation    EventType = "delegation"
+	EventSupersession  EventType = "supersession"
+	EventWorkItem      EventType = "work_item"
+	EventWorkItemState EventType = "work_item.state"
+	EventQuestion      EventType = "question"
+	EventQuestionRes   EventType = "question.resolved"
+	EventCorrection    EventType = "correction"
+	EventWaiver        EventType = "waiver"
+	EventRedact        EventType = "redact"
 )
 
 type AskType string
@@ -41,6 +48,16 @@ const (
 	StateMerged      ClauseState = "merged"
 	StateVerifiedLive ClauseState = "verified-live"
 	StateReported    ClauseState = "reported"
+)
+
+type ClauseSource string
+
+const (
+	SourceStated    ClauseSource = "stated"
+	SourceProposed  ClauseSource = "proposed"
+	SourceAdopted   ClauseSource = "adopted"
+	SourceDelegated ClauseSource = "delegated"
+	SourceInferred  ClauseSource = "inferred"
 )
 
 type Event struct {
