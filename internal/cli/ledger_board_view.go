@@ -95,7 +95,7 @@ func cutStatus(cut ledger.Cut) string {
 	case cut.Acked:
 		return "acked"
 	case cut.Withdrawn:
-		return "withdrawn: its question was answered"
+		return "withdrawn: " + cut.WithdrawnBecause()
 	}
 	return "pending the person's ack"
 }
