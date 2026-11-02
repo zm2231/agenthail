@@ -43,7 +43,7 @@ func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall)
 		mu.Lock()
 		calls = append(calls, call)
 		mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID})
+		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID, "unattached": []string{"claude-prompt:earlier"}})
 	}))
 	t.Cleanup(server.Close)
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
@@ -67,8 +67,16 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 	if output == nil {
 		t.Fatal("expected hook output naming the capture")
 	}
-	if text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string); !strings.Contains(text, "claude-prompt:bb6af0fd") {
-		t.Fatalf("hook context %q does not name the capture", text)
+	text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
+	for _, want := range []string{
+		"utterance claude-prompt:bb6af0fd in test-key",
+		"agenthail ledger attach claude-prompt:bb6af0fd --as",
+		"Put each readback line attach prints in your reply",
+		"Still unattached from earlier: claude-prompt:earlier",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hook context %q lacks %q", text, want)
+		}
 	}
 }
 

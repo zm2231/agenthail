@@ -27,18 +27,40 @@ type AskPayload struct {
 }
 
 type ClausePayload struct {
+	ClauseID          string       `json:"clauseId"`
+	AskID             string       `json:"askId"`
+	GoalID            string       `json:"goalId,omitempty"`
+	Kind              string       `json:"kind,omitempty"`
+	Text              string       `json:"text"`
+	State             ClauseState  `json:"state"`
+	Source            ClauseSource `json:"source,omitempty"`
+	OwnerSessionID    string       `json:"ownerSessionId,omitempty"`
+	ProposedBy        string       `json:"proposedBy,omitempty"`
+	SourceUtteranceID string       `json:"sourceUtteranceId,omitempty"`
+}
+
+type ClauseSourcePayload struct {
 	ClauseID       string       `json:"clauseId"`
-	AskID          string       `json:"askId"`
-	Text           string       `json:"text"`
-	State          ClauseState  `json:"state"`
-	Source         ClauseSource `json:"source,omitempty"`
+	FromSource     ClauseSource `json:"fromSource"`
+	ToSource       ClauseSource `json:"toSource"`
+	UtteranceID    string       `json:"utteranceId"`
 	OwnerSessionID string       `json:"ownerSessionId,omitempty"`
+}
+
+type AttachPayload struct {
+	UtteranceID string   `json:"utteranceId,omitempty"`
+	SessionID   string   `json:"sessionId"`
+	As          AttachAs `json:"as"`
+	To          string   `json:"to,omitempty"`
+	GoalID      string   `json:"goalId,omitempty"`
+	Effects     []string `json:"effects,omitempty"`
 }
 
 type DelegationPayload struct {
 	AskID              string `json:"askId"`
 	DelegatorSessionID string `json:"delegatorSessionId"`
 	DelegateSessionID  string `json:"delegateSessionId"`
+	SourceUtteranceID  string `json:"sourceUtteranceId,omitempty"`
 }
 
 type SupersessionPayload struct {
@@ -59,6 +81,7 @@ type ClauseStatePayload struct {
 
 type DecisionPayload struct {
 	DecisionID      string `json:"decisionId"`
+	GoalID          string `json:"goalId,omitempty"`
 	Version         int    `json:"version"`
 	Text            string `json:"text"`
 	Principal       string `json:"principal"`

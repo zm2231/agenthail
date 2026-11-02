@@ -31,6 +31,14 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerEnable(store, args)
 	case "disable":
 		return a.ledgerDisable(store, args)
+	case "goal":
+		return a.ledgerGoal(args)
+	case "goals":
+		return a.ledgerGoals(store, args)
+	case "attach":
+		return a.ledgerAttach(args, false)
+	case "propose":
+		return a.ledgerAttach(args, true)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -74,21 +82,26 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
 	}
 
-	events, err := store.Events(key, 0, 10000)
+	board, err := store.Board(key)
 	if err != nil {
 		return err
 	}
-	board := ledger.NewBoard()
-	if err := board.Rebuild(events); err != nil {
+	attachment, err := store.Attachment(key, board)
+	if err != nil {
 		return err
 	}
+	view := newBoardView(board)
 
 	if hasFlag(args, "--json") {
 		out := map[string]any{
-			"projectKey": key,
-			"capture":    capture,
-			"asks":       board.OpenAsks(),
-			"decisions":  board.Decisions(),
+			"projectKey":         key,
+			"capture":            capture,
+			"goals":              view.goals,
+			"asks":               view.asks,
+			"decisions":          view.decisions,
+			"projectConstraints": view.constraints,
+			"unattached":         attachment.Unattached,
+			"attachedElsewhere":  attachment.Elsewhere,
 		}
 		if scope.State == ledger.LedgerEnabled {
 			out["captureSince"] = scope.Since
@@ -97,46 +110,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	}
 
 	fmt.Println(coverage)
-	asks := board.OpenAsks()
-	decisions := board.Decisions()
-	if len(asks) == 0 && len(decisions) == 0 {
-		fmt.Println("no open asks or decisions")
-		return nil
-	}
-	for _, ask := range asks {
-		fmt.Printf("%s [%s]\n", ask.ID, ask.Type)
-		for _, c := range ask.Clauses {
-			state := string(c.State)
-			if c.SelfReported {
-				state += " (self-reported)"
-			}
-			owner := c.OwnerSessionID
-			if owner == "" {
-				owner = "unassigned"
-			}
-			fmt.Printf("  %s: %s  [%s] owner=%s\n", c.ID, c.Text, state, owner)
-			for _, cut := range c.Cuts {
-				acked := ""
-				if cut.Acked {
-					acked = " (acked)"
-				}
-				fmt.Printf("    cut %s: %s%s\n", cut.ID, cut.Reason, acked)
-			}
-			for _, w := range c.Waits {
-				resolved := ""
-				if w.Resolved != "" {
-					resolved = " -> " + w.Resolved
-				}
-				fmt.Printf("    wait: %s%s\n", w.Condition, resolved)
-			}
-		}
-	}
-	if len(decisions) > 0 {
-		fmt.Println()
-		for _, d := range decisions {
-			fmt.Printf("%s v%d: %s [%s]\n", d.ID, d.Version, d.Text, d.Principal)
-		}
-	}
+	view.print(attachment)
 	return nil
 }
 
@@ -145,12 +119,8 @@ func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	events, err := store.Events(key, 0, 10000)
+	board, err := store.Board(key)
 	if err != nil {
-		return err
-	}
-	board := ledger.NewBoard()
-	if err := board.Rebuild(events); err != nil {
 		return err
 	}
 	asks := board.AllAsks()
@@ -172,12 +142,8 @@ func (a *App) ledgerAsk(store *ledger.Store, askID string, args []string) error 
 	if err != nil {
 		return err
 	}
-	events, err := store.Events(key, 0, 10000)
+	board, err := store.Board(key)
 	if err != nil {
-		return err
-	}
-	board := ledger.NewBoard()
-	if err := board.Rebuild(events); err != nil {
 		return err
 	}
 	for _, ask := range board.AllAsks() {

@@ -16,9 +16,27 @@ type ledgerCaptureRequest struct {
 }
 
 type ledgerCaptureResponse struct {
-	Captured   bool   `json:"captured"`
-	ProjectKey string `json:"projectKey,omitempty"`
-	Ref        string `json:"ref,omitempty"`
+	Captured   bool     `json:"captured"`
+	ProjectKey string   `json:"projectKey,omitempty"`
+	Ref        string   `json:"ref,omitempty"`
+	Unattached []string `json:"unattached,omitempty"`
+}
+
+const ledgerUnattachedShown = 5
+
+func (d *Daemon) unattachedBefore(key, sessionID, ref string) []string {
+	pending, err := d.ledgerStore().UnattachedFor(key, sessionID)
+	if err != nil {
+		d.log.Printf("ledger capture: list unattached words for %s in %s: %s", sessionID, key, err)
+		return nil
+	}
+	var refs []string
+	for _, u := range pending {
+		if u.ID != ref && len(refs) < ledgerUnattachedShown {
+			refs = append(refs, u.ID)
+		}
+	}
+	return refs
 }
 
 func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +73,11 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref})
+	writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref, Unattached: d.unattachedBefore(key, session.ID, ref)})
 }
 
 func (d *Daemon) registerLedgerRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/ledger/capture", d.apiV1Guard(dashboard, "control", d.apiLedgerCaptureHandler))
+	mux.HandleFunc("/api/v1/ledger/goal", d.apiV1Guard(dashboard, "control", d.apiLedgerGoalHandler))
+	mux.HandleFunc("/api/v1/ledger/attach", d.apiV1Guard(dashboard, "control", d.apiLedgerAttachHandler))
 }
