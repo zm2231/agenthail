@@ -67,6 +67,10 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	if err := r.db.QueryRow(`SELECT CAST(receipt AS TEXT) FROM action_receipts WHERE idempotency_key='fixture-key'`).Scan(&receipt); err != nil || !strings.Contains(receipt, `"sessionId":"conversation-worker"`) {
 		t.Fatalf("receipt=%s err=%v", receipt, err)
 	}
+	var granted bool
+	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM ledger_grants WHERE project_key='proj' AND session_id='conversation-worker')`).Scan(&granted); err != nil || !granted {
+		t.Fatalf("the rekeyed session lost its ledger grant: granted=%v err=%v", granted, err)
+	}
 	for alias, want := range map[string]string{"worker": "conversation-worker", "native": "conversation-native"} {
 		if owner, err := r.LookupAlias(alias); err != nil || owner != want {
 			t.Fatalf("alias %s owner=%q err=%v", alias, owner, err)
