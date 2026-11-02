@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -105,39 +106,46 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	if len(missed) != 1 || missed[0].EntityID != s.ID || !strings.Contains(string(missed[0].Payload), ledger.PromptRef("missed")) || !strings.Contains(string(missed[0].Payload), `"reason":"unknown"`) {
 		t.Fatalf("want one missed-capture event for the prompt the hook never saw, got %+v", missed)
 	}
+	var payload ledger.UtterancePayload
+	for _, event := range p.events(t) {
+		if event.Ref == ledger.PromptRef("missed") {
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if payload.CapturedBy != ledger.CapturedByJournal {
+		t.Fatalf("the missed prompt's utterance must record that the journal captured it, got %q", payload.CapturedBy)
+	}
+	d.publishEvent("state.changed", "", map[string]string{"source": "test"})
 	var live []apiEvent
 	for drained := false; !drained; {
 		select {
 		case event := <-stream:
-			if event.Type == ledger.EventCaptureMissed {
-				live = append(live, event)
-			}
+			live = append(live, event)
 		case <-time.After(200 * time.Millisecond):
 			drained = true
 		}
 	}
-	if len(live) != 1 || live[0].ID != missed[0].ID || live[0].EntityID != s.ID {
-		t.Fatalf("a live subscriber must see the persisted missed-capture event %d once, got %+v", missed[0].ID, live)
-	}
-}
-
-func TestRelayedEventsKeepTheHubInIDOrder(t *testing.T) {
-	d, r, _ := ledgerDaemon(t)
-	older, err := r.AppendDaemonEvent("test.older", "", []byte(`{}`), time.Now(), eventHistoryLimit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.publishEvent("test.newer", "", map[string]string{})
-	d.events.relay(older)
-	backlog, _, _, cancel := d.events.subscribe(0)
-	defer cancel()
-	for i := 1; i < len(backlog); i++ {
-		if backlog[i].ID <= backlog[i-1].ID {
-			t.Fatalf("history out of id order at %d: %+v", i, backlog)
+	var seen int
+	for i, event := range live {
+		if i > 0 && event.ID <= live[i-1].ID {
+			t.Fatalf("live event ids not increasing at %d: %+v", i, live)
+		}
+		if event.Type == ledger.EventCaptureMissed {
+			seen++
+			if event.ID != missed[0].ID || event.EntityID != s.ID {
+				t.Fatalf("live missed-capture event %+v does not match the persisted one %+v", event, missed[0])
+			}
 		}
 	}
-	if d.events.cursor() <= older.ID {
-		t.Fatalf("cursor %d moved behind the newer event", d.events.cursor())
+	if seen != 1 {
+		t.Fatalf("a live subscriber must see the missed-capture event once, saw %d in %+v", seen, live)
+	}
+	resumed, _, _, cancelResume := d.events.subscribe(missed[0].ID - 1)
+	defer cancelResume()
+	if len(resumed) == 0 || resumed[0].ID != missed[0].ID {
+		t.Fatalf("resuming before the missed-capture event must replay it first, got %+v", resumed)
 	}
 }
 

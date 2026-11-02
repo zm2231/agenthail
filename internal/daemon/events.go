@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
@@ -101,32 +100,6 @@ func (h *eventHub) publish(eventType, entityID string, value any) (apiEvent, err
 		}
 	}
 	return event, nil
-}
-
-// relay delivers an event another transaction already persisted, in id order.
-func (h *eventHub) relay(persisted registry.DaemonEvent) {
-	event := apiEvent{ID: persisted.ID, Type: persisted.Type, Timestamp: persisted.CreatedAt, EntityID: persisted.EntityID, Data: append(json.RawMessage(nil), persisted.Payload...)}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	at := len(h.history)
-	for at > 0 && h.history[at-1].ID > event.ID {
-		at--
-	}
-	h.history = slices.Insert(h.history, at, event)
-	if len(h.history) > eventHistoryLimit {
-		h.history = append([]apiEvent(nil), h.history[len(h.history)-eventHistoryLimit:]...)
-	}
-	if event.ID > h.nextID {
-		h.nextID = event.ID
-	}
-	for id, subscriber := range h.subscribers {
-		select {
-		case subscriber <- event:
-		default:
-			delete(h.subscribers, id)
-			close(subscriber)
-		}
-	}
 }
 
 func (h *eventHub) subscribe(after uint64) ([]apiEvent, <-chan apiEvent, bool, func()) {

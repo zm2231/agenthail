@@ -1,11 +1,16 @@
 package ledger
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+)
+
+const (
+	CapturedByHook     = "hook"
+	CapturedByDelivery = "delivery"
+	CapturedByJournal  = "journal"
 )
 
 type Utterance struct {
@@ -16,7 +21,7 @@ type Utterance struct {
 	Surface    string
 	Text       string
 	At         time.Time
-	Backfilled bool
+	CapturedBy string
 }
 
 const EventCaptureMissed = "ledger.capture.missed"
@@ -27,16 +32,13 @@ func PromptRef(promptID string) string { return promptRefPrefix + promptID }
 
 func DeliveryRef(intentUUID string) string { return "delivery:" + intentUUID }
 
-type MissedCapture struct {
-	ID        int64
-	SessionID string
-	Payload   []byte
-	At        time.Time
+func (u Utterance) HookMissed(inserted bool) bool {
+	return inserted && u.CapturedBy == CapturedByJournal && strings.HasPrefix(u.Ref, promptRefPrefix)
 }
 
-func (s *Store) RecordUtterance(u Utterance) (Event, *MissedCapture, error) {
-	if u.ProjectKey == "" || u.Text == "" || u.Ref == "" {
-		return Event{}, nil, fmt.Errorf("project key, ref and text are required")
+func (s *Store) RecordUtterance(u Utterance) (Event, bool, error) {
+	if u.ProjectKey == "" || u.Text == "" || u.Ref == "" || u.CapturedBy == "" {
+		return Event{}, false, fmt.Errorf("project key, ref, text and capturing producer are required")
 	}
 	if u.At.IsZero() {
 		u.At = time.Now()
@@ -47,14 +49,15 @@ func (s *Store) RecordUtterance(u Utterance) (Event, *MissedCapture, error) {
 		SessionID:   u.SpeakerID,
 		TargetID:    u.TargetID,
 		Surface:     u.Surface,
+		CapturedBy:  u.CapturedBy,
 		TS:          u.At.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		return Event{}, nil, err
+		return Event{}, false, err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return Event{}, nil, err
+		return Event{}, false, err
 	}
 	defer tx.Rollback()
 	e, err := insertEvent(tx, `INSERT OR IGNORE`, Event{
@@ -66,37 +69,16 @@ func (s *Store) RecordUtterance(u Utterance) (Event, *MissedCapture, error) {
 		CreatedAt:      time.Now().UTC(),
 	})
 	if err != nil {
-		return Event{}, nil, err
+		return Event{}, false, err
 	}
-	var missed *MissedCapture
-	if e.Seq == 0 {
+	inserted := e.Seq != 0
+	if !inserted {
 		if e, err = scanEvent(tx.QueryRow(`SELECT `+eventColumns+` FROM ledger_events WHERE project_key=? AND ref=?`, u.ProjectKey, u.Ref)); err != nil {
-			return Event{}, nil, err
-		}
-	} else if u.Backfilled && strings.HasPrefix(u.Ref, promptRefPrefix) {
-		if missed, err = recordCaptureMissed(tx, u); err != nil {
-			return Event{}, nil, err
+			return Event{}, false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return Event{}, nil, err
+		return Event{}, false, err
 	}
-	return e, missed, nil
-}
-
-func recordCaptureMissed(tx *sql.Tx, u Utterance) (*MissedCapture, error) {
-	payload, err := json.Marshal(map[string]string{"projectKey": u.ProjectKey, "ref": u.Ref, "sessionId": u.TargetID, "reason": "unknown"})
-	if err != nil {
-		return nil, err
-	}
-	at := time.Now().UTC()
-	result, err := tx.Exec(`INSERT INTO daemon_events (event_type,entity_id,payload,created_at) VALUES (?,?,?,?)`, EventCaptureMissed, u.TargetID, payload, at.Format(time.RFC3339Nano))
-	if err != nil {
-		return nil, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	return &MissedCapture{ID: id, SessionID: u.TargetID, Payload: payload, At: at}, nil
+	return e, inserted, nil
 }

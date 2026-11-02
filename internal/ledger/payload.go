@@ -7,6 +7,7 @@ type UtterancePayload struct {
 	TargetID    string `json:"targetId"`
 	Surface     string `json:"surface"`
 	QuotedSpan  string `json:"quotedSpan,omitempty"`
+	CapturedBy  string `json:"capturedBy"`
 	TS          string `json:"ts"`
 }
 
@@ -65,11 +66,11 @@ type DecisionPayload struct {
 }
 
 type CutPayload struct {
-	CutID          string `json:"cutId"`
-	ClauseID       string `json:"clauseId"`
-	Reason         string `json:"reason"`
-	AuthorSession  string `json:"authorSessionId"`
-	Acked          bool   `json:"acked"`
+	CutID         string `json:"cutId"`
+	ClauseID      string `json:"clauseId"`
+	Reason        string `json:"reason"`
+	AuthorSession string `json:"authorSessionId"`
+	Acked         bool   `json:"acked"`
 }
 
 type CutAckPayload struct {

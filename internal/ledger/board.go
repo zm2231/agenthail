@@ -6,9 +6,9 @@ import (
 )
 
 type Goal struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	ParentGoalID string `json:"parentGoalId,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	ParentGoalID string   `json:"parentGoalId,omitempty"`
 	Asks         []string `json:"asks,omitempty"`
 }
 

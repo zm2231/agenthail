@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -25,12 +24,12 @@ func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) 
 		return project.Key, false, err
 	}
 	u.ProjectKey, u.SpeakerID, u.TargetID = project.Key, surface.PersonSessionID, session.ID
-	_, missed, err := store.RecordUtterance(u)
+	_, inserted, err := store.RecordUtterance(u)
 	if err != nil {
 		return project.Key, false, err
 	}
-	if missed != nil && d.events != nil {
-		d.events.relay(registry.DaemonEvent{ID: uint64(missed.ID), Type: ledger.EventCaptureMissed, EntityID: missed.SessionID, Payload: missed.Payload, CreatedAt: missed.At})
+	if u.HookMissed(inserted) {
+		d.publishEvent(ledger.EventCaptureMissed, session.ID, map[string]string{"projectKey": project.Key, "ref": u.Ref, "sessionId": session.ID, "reason": "unknown"})
 	}
 	return project.Key, true, nil
 }
@@ -79,7 +78,7 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 		d.log.Printf("ledger backfill: prompt %s in %s has no time: %s", ref, session.ID, err)
 		return
 	}
-	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, Backfilled: true}); err != nil {
+	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, CapturedBy: ledger.CapturedByJournal}); err != nil {
 		d.log.Printf("ledger backfill: record %s for %s: %s", ref, session.ID, err)
 	}
 }

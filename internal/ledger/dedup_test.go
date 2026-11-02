@@ -14,7 +14,7 @@ func newStore(t *testing.T) *ledger.Store {
 }
 
 func said(ref, text string) ledger.Utterance {
-	return ledger.Utterance{ProjectKey: "p", Ref: ref, SpeakerID: "person", TargetID: "s1", Surface: "terminal", Text: text}
+	return ledger.Utterance{ProjectKey: "p", Ref: ref, SpeakerID: "person", TargetID: "s1", Surface: "terminal", Text: text, CapturedBy: ledger.CapturedByHook}
 }
 
 func utterances(t *testing.T, s *ledger.Store) []ledger.Event {
@@ -76,6 +76,23 @@ func TestConcurrentWritersOfOneOccurrenceRecordOne(t *testing.T) {
 	}
 	if got := utterances(t, s); len(got) != 1 {
 		t.Fatalf("want one utterance, got %d", len(got))
+	}
+}
+
+func TestOnlyAJournalFirstPromptIsAMissedHook(t *testing.T) {
+	journal := said(ledger.PromptRef("a"), "yes")
+	journal.CapturedBy = ledger.CapturedByJournal
+	delivered := said(ledger.DeliveryRef("b"), "yes")
+	delivered.CapturedBy = ledger.CapturedByJournal
+	for name, got := range map[string]bool{
+		"journal inserted a prompt":   journal.HookMissed(true),
+		"journal found the prompt":    journal.HookMissed(false),
+		"hook inserted the prompt":    said(ledger.PromptRef("a"), "yes").HookMissed(true),
+		"journal inserted a delivery": delivered.HookMissed(true),
+	} {
+		if got != (name == "journal inserted a prompt") {
+			t.Fatalf("%s: HookMissed=%v", name, got)
+		}
 	}
 }
 

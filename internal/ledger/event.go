@@ -5,16 +5,16 @@ import "time"
 type EventType string
 
 const (
-	EventUtterance    EventType = "utterance"
-	EventAsk          EventType = "ask"
-	EventClause       EventType = "clause"
-	EventClauseState  EventType = "clause.state"
-	EventDecision     EventType = "decision"
-	EventDecisionVer  EventType = "decision.version"
-	EventCut          EventType = "cut"
-	EventCutAck       EventType = "cut.ack"
-	EventWait         EventType = "wait"
-	EventWaitResolved EventType = "wait.resolved"
+	EventUtterance     EventType = "utterance"
+	EventAsk           EventType = "ask"
+	EventClause        EventType = "clause"
+	EventClauseState   EventType = "clause.state"
+	EventDecision      EventType = "decision"
+	EventDecisionVer   EventType = "decision.version"
+	EventCut           EventType = "cut"
+	EventCutAck        EventType = "cut.ack"
+	EventWait          EventType = "wait"
+	EventWaitResolved  EventType = "wait.resolved"
 	EventEvidence      EventType = "evidence"
 	EventGoal          EventType = "goal"
 	EventDelegation    EventType = "delegation"
@@ -39,15 +39,15 @@ const (
 type ClauseState string
 
 const (
-	StateCaptured    ClauseState = "captured"
-	StateReadBack    ClauseState = "read-back"
-	StateOwned       ClauseState = "owned"
-	StateBriefed     ClauseState = "briefed"
-	StateBuilt       ClauseState = "built"
-	StateConnected   ClauseState = "connected"
-	StateMerged      ClauseState = "merged"
+	StateCaptured     ClauseState = "captured"
+	StateReadBack     ClauseState = "read-back"
+	StateOwned        ClauseState = "owned"
+	StateBriefed      ClauseState = "briefed"
+	StateBuilt        ClauseState = "built"
+	StateConnected    ClauseState = "connected"
+	StateMerged       ClauseState = "merged"
 	StateVerifiedLive ClauseState = "verified-live"
-	StateReported    ClauseState = "reported"
+	StateReported     ClauseState = "reported"
 )
 
 type ClauseSource string
