@@ -36,6 +36,11 @@ func TestDeliveredWordsAndTheirPromptHookAreOneUtterance(t *testing.T) {
 		t.Fatalf("a delivery was claimed twice: %+v", resp)
 	}
 
+	now := time.Now()
+	journalSource(d, host, nil).append(liveEvent(typedPrompt(hostIntent, "claude-own-id", "ship it", now)))
+	journalSource(d, bridge, nil).append(liveEvent(typedPrompt(bridgeIntent, "bridge-prompt", "also this", now)))
+	journalSource(d, bridge, nil).append(liveEvent(typedPrompt(uuid.NewString(), "typed-again", "also this", now)))
+
 	events := p.events(t)
 	refs := map[string]int{}
 	for _, e := range events {

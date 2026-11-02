@@ -68,6 +68,11 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 	if ref == "" {
 		return
 	}
+	if ledger.IsPromptRef(ref) && payload.MessageID != "" {
+		if delivered := ledger.DeliveryRef(payload.MessageID); d.recordedFor(session, delivered) {
+			ref = delivered
+		}
+	}
 	at, err := time.Parse(time.RFC3339Nano, payload.TS)
 	if err != nil {
 		d.log.Printf("ledger backfill: prompt %s in %s has no time: %s", ref, session.ID, err)
@@ -76,6 +81,20 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 	if _, _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, CapturedBy: ledger.CapturedByJournal}); err != nil {
 		d.log.Printf("ledger backfill: record %s for %s: %s", ref, session.ID, err)
 	}
+}
+
+func (d *Daemon) recordedFor(session surface.Session, ref string) bool {
+	store := d.ledgerStore()
+	targets, _, err := d.ledgerTargets(store, session)
+	if err != nil {
+		return false
+	}
+	for _, target := range targets {
+		if found, err := store.HasRef(target.key, ref); err == nil && found {
+			return true
+		}
+	}
+	return false
 }
 
 func journalPromptRef(payload sessionJournalPayload) string {
