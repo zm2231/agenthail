@@ -31,7 +31,7 @@ func randomWordsLog(rng *rand.Rand) wordsLog {
 			l.retracted[ref] = "scheduled"
 		}
 	}
-	var asks, clauses, decisions []string
+	var asks, clauses, decisions, questions []string
 	versions := map[string]int{}
 	items := map[string]WorkState{}
 	var itemIDs []string
@@ -42,8 +42,49 @@ func randomWordsLog(rng *rand.Rand) wordsLog {
 		clauses = append(clauses, id)
 		add(EventClause, ClausePayload{ClauseID: id, AskID: ask, Text: id, State: StateOwned, Source: source, OwnerSessionID: pick(sessions), SourceUtteranceID: src})
 	}
-	for range 40 {
-		switch rng.Intn(10) {
+	var cuts []string
+	for range 60 {
+		switch rng.Intn(16) {
+		case 13:
+			if len(clauses) > 0 {
+				id := fmt.Sprintf("X%d", len(cuts)+1)
+				cuts = append(cuts, id)
+				from := ""
+				if rng.Intn(2) == 0 {
+					from = ref()
+				}
+				add(EventCut, CutPayload{CutID: id, ClauseID: pick(clauses), Reason: "narrowed", AuthorSession: pick(sessions), FromUtterance: from})
+			}
+		case 14:
+			if len(cuts) > 0 {
+				add(EventCutAck, CutAckPayload{CutID: pick(cuts), AckedBy: "person", SourceUtteranceID: ref()})
+			}
+		case 15:
+			if len(clauses) > 0 {
+				add(EventWait, WaitPayload{ClauseID: pick(clauses), SessionID: pick(sessions), Condition: "ci green", DeadlineMs: 1})
+			}
+		case 10:
+			targets := append(slices.Clone(asks), clauses...)
+			if len(targets) > 0 {
+				id := fmt.Sprintf("Q%d", len(questions)+1)
+				questions = append(questions, id)
+				kind := QuestionKind("")
+				if rng.Intn(2) == 0 {
+					kind = QuestionOutward
+				}
+				add(EventQuestion, QuestionPayload{QuestionID: id, Target: pick(targets), Kind: kind, Text: id, OwnerSessionID: pick(sessions)})
+			}
+		case 11:
+			if len(questions) > 0 {
+				add(EventQuestionRes, QuestionResolvedPayload{QuestionID: pick(questions), Answer: "yes", SourceUtteranceID: ref()})
+			}
+		case 12:
+			if len(questions) > 0 {
+				id := fmt.Sprintf("D%d", len(decisions)+1)
+				decisions = append(decisions, id)
+				versions[id] = 1
+				add(EventDecision, DecisionPayload{DecisionID: id, QuestionID: pick(questions), Version: 1, Text: id + " v1", Principal: "person", SourceUtterance: ref()})
+			}
 		case 0:
 			id := fmt.Sprintf("A%d", len(asks)+1)
 			asks = append(asks, id)
@@ -124,6 +165,7 @@ type oracleSource struct {
 	ref     string
 	created string
 	built   []string
+	rests   []string
 }
 
 func oracleSourceOf(e Event, askOf map[string]string) oracleSource {
@@ -140,31 +182,55 @@ func oracleSourceOf(e Event, askOf map[string]string) oracleSource {
 		var p ClausePayload
 		_ = json.Unmarshal(e.Payload, &p)
 		askOf[p.ClauseID] = p.AskID
-		return oracleSource{ref: p.SourceUtteranceID, created: "clause:" + p.ClauseID, built: []string{"ask:" + p.AskID}}
+		return oracleSource{ref: p.SourceUtteranceID, created: "clause:" + p.ClauseID, built: []string{"ask:" + p.AskID}, rests: []string{"ask:" + p.AskID}}
 	case EventDelegation:
 		var p DelegationPayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.SourceUtteranceID, built: []string{"ask:" + p.AskID}}
+		return oracleSource{ref: p.SourceUtteranceID, built: []string{"ask:" + p.AskID}, rests: []string{"ask:" + p.AskID}}
 	case EventSupersession:
 		var p SupersessionPayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.SourceUtteranceID, built: []string{"clause:" + p.ClauseID, "ask:" + askOf[p.ClauseID]}}
+		return oracleSource{ref: p.SourceUtteranceID, built: []string{"clause:" + p.ClauseID, "ask:" + askOf[p.ClauseID]}, rests: []string{"clause:" + p.ClauseID}}
 	case EventClauseSource:
 		var p ClauseSourcePayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.UtteranceID, built: []string{"clause:" + p.ClauseID, "ask:" + askOf[p.ClauseID]}}
+		return oracleSource{ref: p.UtteranceID, built: []string{"clause:" + p.ClauseID, "ask:" + askOf[p.ClauseID]}, rests: []string{"clause:" + p.ClauseID}}
 	case EventDecision:
 		var p DecisionPayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.SourceUtterance, created: "decision:" + p.DecisionID}
+		return oracleSource{ref: p.SourceUtterance, created: "decision:" + p.DecisionID, rests: []string{"question:" + p.QuestionID}}
 	case EventDecisionVer:
 		var p DecisionPayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.SourceUtterance, built: []string{"decision:" + p.DecisionID}}
+		return oracleSource{ref: p.SourceUtterance, built: []string{"decision:" + p.DecisionID}, rests: []string{"decision:" + p.DecisionID}}
+	case EventWorkItem:
+		var p WorkItemPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{created: "work-item:" + p.ItemID, rests: []string{"clause:" + p.ClauseID}}
 	case EventWorkItemState:
 		var p WorkItemStatePayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.UtteranceID}
+		return oracleSource{ref: p.UtteranceID, rests: []string{"work-item:" + p.ItemID}}
+	case EventQuestion:
+		var p QuestionPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{created: "question:" + p.QuestionID, rests: []string{"ask:" + p.Target, "clause:" + p.Target}}
+	case EventQuestionRes:
+		var p QuestionResolvedPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{ref: p.SourceUtteranceID, rests: []string{"question:" + p.QuestionID}}
+	case EventCut:
+		var p CutPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{ref: p.FromUtterance, created: "cut:" + p.CutID, rests: []string{"clause:" + p.ClauseID}}
+	case EventCutAck:
+		var p CutAckPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{ref: p.SourceUtteranceID, rests: []string{"cut:" + p.CutID}}
+	case EventWait:
+		var p WaitPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		return oracleSource{rests: []string{"clause:" + p.ClauseID}}
 	}
 	return oracleSource{}
 }
@@ -186,12 +252,20 @@ func neverCaptured(events []Event, retracted map[string]string) ([]Event, map[st
 	}
 	var out []Event
 	lines := 0
+	gone := map[string]bool{}
 	for _, e := range events {
 		if e.Type == EventReclassified {
 			continue
 		}
 		src := oracleSourceOf(e, askOf)
-		if _, gone := retracted[src.ref]; !gone || src.ref == "" {
+		if _, retractedWords := retracted[src.ref]; !retractedWords || src.ref == "" {
+			if slices.ContainsFunc(src.rests, func(key string) bool { return gone[key] }) {
+				if src.created != "" {
+					gone[src.created] = true
+					lines++
+				}
+				continue
+			}
 			out = append(out, e)
 			continue
 		}
@@ -200,6 +274,9 @@ func neverCaptured(events []Event, retracted map[string]string) ([]Event, map[st
 		}
 		to, ok := kept[src.created]
 		if src.created == "" || !ok {
+			if src.created != "" {
+				gone[src.created] = true
+			}
 			continue
 		}
 		var p map[string]any
@@ -230,6 +307,8 @@ func boardState(t *testing.T, b *Board) string {
 	slices.SortFunc(decisions, func(x, y Decision) int { return strings.Compare(x.ID, y.ID) })
 	items := b.WorkItems()
 	slices.SortFunc(items, func(x, y WorkItem) int { return strings.Compare(x.ID, y.ID) })
+	questions := b.Questions()
+	slices.SortFunc(questions, func(x, y Question) int { return strings.Compare(x.ID, y.ID) })
 	var utterances []string
 	for _, u := range b.Utterances() {
 		utterances = append(utterances, u.ID)
@@ -238,9 +317,11 @@ func boardState(t *testing.T, b *Board) string {
 		Asks       []Ask
 		Decisions  []Decision
 		Items      []WorkItem
+		Questions  []Question
+		TargetCuts []TargetCut
 		Utterances []string
 		Applied    int64
-	}{asks, decisions, items, utterances, b.AppliedSeq()})
+	}{asks, decisions, items, questions, b.TargetCuts(), utterances, b.AppliedSeq()})
 	if err != nil {
 		t.Fatal(err)
 	}

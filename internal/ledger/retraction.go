@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 const (
@@ -20,6 +21,8 @@ const (
 	RetractedRevision   = "revision"
 	RetractedClauseMove = "clause-state"
 	RetractedCut        = "cut"
+	RetractedQuestion   = "question"
+	RetractedWorkItem   = "work-item"
 )
 
 type Retraction struct {
@@ -29,12 +32,16 @@ type Retraction struct {
 	Reason      string   `json:"reason"`
 	AttachedBy  []string `json:"attachedBy,omitempty"`
 	ReSourcedTo string   `json:"reSourcedTo,omitempty"`
+	DependsOn   string   `json:"dependsOn,omitempty"`
 	// Outward marks an answer or approval that may already have let a session merge, deploy or send.
 	Outward bool `json:"authorizedOutward,omitempty"`
 }
 
 func (r Retraction) String() string {
 	line := fmt.Sprintf("retracted: %s %s built from %s words, not the person's (%s)", r.Kind, r.ID, r.Reason, r.UtteranceID)
+	if r.DependsOn != "" {
+		line = fmt.Sprintf("retracted: %s %s rests on %s, built from %s words, not the person's (%s)", r.Kind, r.ID, strings.Replace(r.DependsOn, ":", " ", 1), r.Reason, r.UtteranceID)
+	}
 	if r.ReSourcedTo != "" {
 		line += fmt.Sprintf("; kept only because the person built on it: re-sourced to %s", r.ReSourcedTo)
 	}
@@ -68,6 +75,8 @@ type eventSource struct {
 	CutID             string `json:"cutId"`
 	QuestionID        string `json:"questionId"`
 	ItemID            string `json:"itemId"`
+	DependsOn         string `json:"dependsOn"`
+	Target            string `json:"target"`
 	SessionID         string `json:"sessionId"`
 }
 
@@ -137,6 +146,12 @@ func createdKey(t EventType, src eventSource) string {
 		return skippedKey(RetractedClause, src.ClauseID)
 	case EventDecision:
 		return skippedKey(RetractedDecision, src.DecisionID)
+	case EventQuestion:
+		return skippedKey(RetractedQuestion, src.QuestionID)
+	case EventWorkItem:
+		return skippedKey(RetractedWorkItem, src.ItemID)
+	case EventCut:
+		return skippedKey(RetractedCut, src.CutID)
 	}
 	return ""
 }
@@ -151,32 +166,35 @@ func (b *Board) screen(event Event) (skip bool, resource func(), err error) {
 		return false, nil, nil
 	}
 	ref := src.ref()
-	if ref == "" {
-		return false, nil, nil
+	if reason, retracted := b.retracted[ref]; ref != "" && retracted {
+		skip, resource := b.screenRetracted(event, src, ref, reason)
+		return skip, resource, nil
 	}
-	reason, retracted := b.retracted[ref]
-	if !retracted {
+	if ref != "" && !b.replaying {
 		for _, key := range builtOn(event.Type, src, nil) {
-			if b.dropped[key] {
+			if _, ok := b.dropped[key]; ok {
 				return false, nil, fmt.Errorf("%w: %s builds on %s", errNeedsReplay, ref, key)
 			}
 		}
-		return false, nil, nil
 	}
+	return b.orphan(event.Type, src), nil, nil
+}
+
+func (b *Board) screenRetracted(event Event, src eventSource, ref, reason string) (bool, func()) {
 	r := b.retraction(event, src, ref, reason)
 	key := createdKey(event.Type, src)
 	if key != "" && b.kept[key] != "" {
 		r.ReSourcedTo = b.kept[key]
 		b.retractions = append(b.retractions, r)
-		return false, func() { b.resource(event.Type, src, r.ReSourcedTo) }, nil
+		return false, func() { b.resource(event.Type, src, r.ReSourcedTo) }
 	}
 	if key != "" {
-		b.dropped[key] = true
+		b.dropped[key] = ref
 	}
 	if r.Kind != "" {
 		b.retractions = append(b.retractions, r)
 	}
-	return true, nil, nil
+	return true, nil
 }
 
 func (b *Board) resource(t EventType, src eventSource, ref string) {

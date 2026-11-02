@@ -104,7 +104,9 @@ type Board struct {
 	checks             checkState
 	retracted          map[string]string
 	kept               map[string]string
-	dropped            map[string]bool
+	dropped            map[string]string
+	orphaned           map[string]string
+	replaying          bool
 	attachedBy         map[string][]string
 	retractions        []Retraction
 	applied            int64
@@ -133,7 +135,8 @@ func (b *Board) reset() {
 	b.checks = newCheckState()
 	b.retracted = map[string]string{}
 	b.kept = map[string]string{}
-	b.dropped = map[string]bool{}
+	b.dropped = map[string]string{}
+	b.orphaned = map[string]string{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
 	b.applied = 0
@@ -330,6 +333,8 @@ func (b *Board) Rebuild(events []Event) error {
 	if err := b.collectRetracted(events); err != nil {
 		return err
 	}
+	b.replaying = true
+	defer func() { b.replaying = false }()
 	for _, e := range events {
 		if err := b.apply(e); err != nil {
 			return err

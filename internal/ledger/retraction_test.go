@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"sort"
@@ -161,6 +162,47 @@ func TestADecisionKeepsTheVersionThePersonGave(t *testing.T) {
 				t.Fatalf("decisions = %+v", decisions)
 			}
 		})
+	}
+}
+
+func TestWhatRestsOnRetractedWordsGoesWithThem(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewCachedStore(db, db)
+	g := goal(t, s, "Search")
+	capture(t, s, project, "claude-prompt:wake", "build search")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:wake", As: ledger.AsNewAsk, To: g, Clauses: []string{"build search"}})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-A1", Text: "full-text or prefix?", DefaultAnswer: "prefix"})
+	items(t, s, "add the index")
+	capture(t, s, project, "claude-prompt:typed", "full-text")
+
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:wake", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	rebuilt, err := ledger.NewStore(db, db).Board(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string]*ledger.Board{"cached": board(t, s), "rebuilt": rebuilt} {
+		if len(b.Questions()) != 0 || len(b.WorkItems()) != 0 || len(b.AllAsks()) != 0 {
+			t.Fatalf("%s board keeps what rested on the retracted ask: questions %+v items %+v", name, b.Questions(), b.WorkItems())
+		}
+		lines := map[string]ledger.Retraction{}
+		for _, r := range b.Retractions() {
+			lines[r.Kind+" "+r.ID] = r
+		}
+		for _, want := range []string{"question " + q.ID, "work-item widget-W1"} {
+			r, ok := lines[want]
+			if !ok || r.UtteranceID != "claude-prompt:wake" || r.DependsOn == "" || len(r.AttachedBy) != 1 || !strings.Contains(r.String(), "rests on") {
+				t.Fatalf("%s board: no notice line for %s: %+v", name, want, b.Retractions())
+			}
+		}
+	}
+	var refusal *ledger.Refusal
+	if _, err := s.Attach(ledger.AttachRequest{ProjectKey: project, SessionID: "s1", UtteranceID: "claude-prompt:typed", As: ledger.AsAnswers, To: q.ID}); !errors.As(err, &refusal) {
+		t.Fatalf("answering the dropped question: want a refusal, got %v", err)
+	}
+	if _, err := s.Work(ledger.WorkRequest{ProjectKey: project, SessionID: "s1", Action: ledger.WorkClaim, ItemID: "widget-W1"}, time.Now()); !errors.As(err, &refusal) {
+		t.Fatalf("claiming the dropped work item: want a refusal, got %v", err)
 	}
 }
 
