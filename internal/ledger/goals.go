@@ -11,15 +11,16 @@ func (s *Store) EnsureGoal(projectKey, name, sessionID string) (Goal, bool, erro
 	if projectKey == "" || name == "" {
 		return Goal{}, false, refuse("project and goal name are required")
 	}
+	board, release, err := s.lockBoard(projectKey)
+	if err != nil {
+		return Goal{}, false, err
+	}
+	defer release()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Goal{}, false, err
 	}
 	defer tx.Rollback()
-	board, err := loadBoard(tx, projectKey)
-	if err != nil {
-		return Goal{}, false, err
-	}
 	if g := board.goalByName(name); g != nil {
 		return *g, false, nil
 	}
@@ -38,10 +39,6 @@ func (s *Store) EnsureGoal(projectKey, name, sessionID string) (Goal, bool, erro
 		return Goal{}, false, err
 	}
 	return Goal{ID: id, Name: name}, true, nil
-}
-
-func (s *Store) Board(projectKey string) (*Board, error) {
-	return loadBoard(s.read, projectKey)
 }
 
 func (s *Store) Attachment(projectKey string, board *Board) (Attachment, error) {

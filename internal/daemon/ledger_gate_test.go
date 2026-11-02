@@ -75,11 +75,35 @@ func TestG2QueuesTheOpenWorkIntoAManagedSessionAtTurnEnd(t *testing.T) {
 	f.ownClause(t, time.Now().Add(-time.Hour))
 	f.completeTurn(t, "turn-1")
 	all := strings.Join(f.fake.sent, "\n")
-	if !strings.Contains(all, "You ended your turn with open work") || !strings.Contains(all, "widget-C1: build search") {
+	if !strings.Contains(all, "You ended your turn with open work") || !strings.Contains(all, "    widget-C1: build search") {
 		t.Fatalf("no G2 notice delivered: %q", f.fake.sent)
 	}
 	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 1 || !strings.Contains(string(gates[0].Payload), `"result":"blocked"`) {
 		t.Fatalf("gate events = %+v", gates)
+	}
+}
+
+func TestG2GatesEachProjectTheSessionWorksIn(t *testing.T) {
+	f := newGateFixture(t, registry.OriginAgent, surface.RuntimeClaudeHost)
+	f.ownClause(t, time.Now().Add(-time.Hour))
+	other := addLedgerProject(t, f.r, "proj-other", "repo:github.com/acme/infra")
+	if err := other.store.GrantSession(other.key, f.session.ID); err != nil {
+		t.Fatal(err)
+	}
+	u := ledger.Utterance{ProjectKey: other.key, Ref: "claude-prompt:9", SpeakerID: surface.PersonSessionID, TargetID: f.session.ID, Text: "rotate keys", At: time.Now().Add(-time.Hour), CapturedBy: ledger.CapturedByHook}
+	if _, _, err := other.store.RecordUtterance(u); err != nil {
+		t.Fatal(err)
+	}
+	f.completeTurn(t, "turn-1")
+	if len(f.fake.sent) != 1 || f.r.QueueCount(f.session.ID) != 0 {
+		t.Fatalf("want one notice for the turn, got %d sent and %d queued", len(f.fake.sent), f.r.QueueCount(f.session.ID))
+	}
+	if notice := f.fake.sent[0]; !strings.Contains(notice, "in repo:github.com/acme/widget:\n    widget-C1: build search") || !strings.Contains(notice, "in repo:github.com/acme/infra:\n    claude-prompt:9") {
+		t.Fatalf("notice does not cover both projects: %q", notice)
+	}
+	f.completeTurn(t, "turn-1")
+	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 2 {
+		t.Fatalf("gate events = %d, want one per project and turn", len(gates))
 	}
 }
 

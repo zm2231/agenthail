@@ -1,7 +1,6 @@
 package ledger
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -35,33 +34,16 @@ func (s *Store) ClauseAction(req ClauseRequest, now time.Time) (ClauseResult, er
 	if req.ProjectKey == "" || req.SessionID == "" {
 		return ClauseResult{}, refuse("project and acting session are required")
 	}
-	tx, err := s.db.Begin()
+	var readback string
+	board, release, err := s.writePlanned(req.ProjectKey, req.SessionID, now, func(board *Board, _ *idIssuer) (EventType, any, error) {
+		typ, payload, text, err := board.planClauseAction(req, now)
+		readback = text
+		return typ, payload, err
+	})
 	if err != nil {
 		return ClauseResult{}, err
 	}
-	defer tx.Rollback()
-	board, err := loadBoard(tx, req.ProjectKey)
-	if err != nil {
-		return ClauseResult{}, err
-	}
-	typ, payload, readback, err := board.planClauseAction(req, now)
-	if err != nil {
-		return ClauseResult{}, err
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return ClauseResult{}, err
-	}
-	event, err := insertEvent(tx, `INSERT`, Event{ProjectKey: req.ProjectKey, Type: typ, Payload: data, ActorSessionID: req.SessionID, CreatedAt: now.UTC()})
-	if err != nil {
-		return ClauseResult{}, err
-	}
-	if err := board.Apply(event); err != nil {
-		return ClauseResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ClauseResult{}, err
-	}
+	defer release()
 	return ClauseResult{Clause: *board.clauses[req.ClauseID], Readback: "intent ledger: " + readback}, nil
 }
 

@@ -17,21 +17,23 @@ type GateResult struct {
 	Blocked    []string `json:"blocked,omitempty"`
 	Waived     []string `json:"waived,omitempty"`
 	Open       []Clause `json:"open,omitempty"`
+	Repeat     bool     `json:"repeat,omitempty"`
 }
 
 func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (GateResult, error) {
+	board, release, err := s.lockBoard(projectKey)
+	if err != nil {
+		return GateResult{}, err
+	}
+	defer release()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return GateResult{}, err
 	}
 	defer tx.Rollback()
-	board, err := loadBoard(tx, projectKey)
-	if err != nil {
-		return GateResult{}, err
-	}
 	result := GateResult{ProjectKey: projectKey}
 	if prev, ok := board.gates.turns[gateKey(sessionID, turnID)]; ok && turnID != "" {
-		result.Result, result.Blocked, result.Waived = prev.Result, prev.Blocked, prev.Waived
+		result.Result, result.Blocked, result.Waived, result.Repeat = prev.Result, prev.Blocked, prev.Waived, true
 		return result, nil
 	}
 	owned := board.ClausesOwnedBy(sessionID)

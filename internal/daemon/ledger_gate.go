@@ -37,42 +37,49 @@ func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
 		d.log.Printf("ledger G2: projects of %s: %s", session.ID, err)
 		return
 	}
+	var blocked []ledger.GateResult
 	for _, target := range targets {
 		result, err := store.GateTurn(target.key, session.ID, turnID, time.Now())
 		if err != nil {
 			d.log.Printf("ledger G2: gate %s in %s: %s", session.ID, target.key, err)
 			continue
 		}
-		if result.Result == "" {
+		if result.Result == "" || result.Repeat {
 			continue
 		}
 		d.publishEvent("ledger.gate", session.ID, result)
-		if result.Result != ledger.GateBlocked {
-			continue
+		if result.Result == ledger.GateBlocked {
+			blocked = append(blocked, result)
 		}
-		key := fmt.Sprintf("ledger:g2:%s:%s:%s", session.ID, turnID, target.key)
-		if _, err := d.Registry.QueueMessageWithKey(session.ID, gateNotice(result), key); err != nil {
-			d.log.Printf("ledger G2: queue for %s: %s", session.ID, err)
-		}
+	}
+	if len(blocked) == 0 {
+		return
+	}
+	key := fmt.Sprintf("ledger:g2:%s:%s", session.ID, turnID)
+	if _, err := d.Registry.QueueMessageWithKey(session.ID, gateNotice(blocked), key); err != nil {
+		d.log.Printf("ledger G2: queue for %s: %s", session.ID, err)
 	}
 }
 
-func gateNotice(result ledger.GateResult) string {
+func gateNotice(results []ledger.GateResult) string {
 	var lines []string
-	texts := map[string]string{}
-	for _, c := range result.Open {
-		texts[c.ID] = c.Text
-	}
-	for _, item := range result.Blocked {
-		if text, ok := texts[item]; ok {
-			lines = append(lines, fmt.Sprintf("  %s: %s", item, text))
-			continue
+	for _, result := range results {
+		texts := map[string]string{}
+		for _, c := range result.Open {
+			texts[c.ID] = c.Text
 		}
-		lines = append(lines, fmt.Sprintf("  %s: the person's words, not yet attached", item))
+		lines = append(lines, "  in "+result.ProjectKey+":")
+		for _, item := range result.Blocked {
+			if text, ok := texts[item]; ok {
+				lines = append(lines, fmt.Sprintf("    %s: %s", item, text))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("    %s: the person's words, not yet attached", item))
+		}
 	}
-	return fmt.Sprintf(`[intent ledger] You ended your turn with open work in %s and no progress on it:
+	return fmt.Sprintf(`[intent ledger] You ended your turn with open work and no progress on it:
 %s
-Before you stop: report what changed (agenthail ledger progress <clause> --ref <commit|file|PR|evidence>), declare what you are waiting on (agenthail ledger wait <clause> --condition "..." --deadline 30m), or attach the person's words (agenthail ledger attach <utterance> --as ...).`, result.ProjectKey, strings.Join(lines, "\n"))
+Before you stop: report what changed (agenthail ledger progress <clause> --ref <commit|file|PR|evidence>), declare what you are waiting on (agenthail ledger wait <clause> --condition "..." --deadline 30m), or attach the person's words (agenthail ledger attach <utterance> --as ...).`, strings.Join(lines, "\n"))
 }
 
 func (d *Daemon) apiLedgerClauseHandler(w http.ResponseWriter, r *http.Request) {

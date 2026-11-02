@@ -20,7 +20,8 @@ type ledgerGoalResponse struct {
 }
 
 func (d *Daemon) ledgerStore() *ledger.Store {
-	return ledger.NewStore(d.Registry.WriteDB(), d.Registry.ReadDB())
+	d.ledgerOnce.Do(func() { d.ledger = ledger.NewCachedStore(d.Registry.WriteDB(), d.Registry.ReadDB()) })
+	return d.ledger
 }
 
 func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {

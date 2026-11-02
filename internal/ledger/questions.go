@@ -28,15 +28,16 @@ func (s *Store) AskQuestion(req QuestionRequest, now time.Time) (Question, error
 	if err != nil {
 		return Question{}, err
 	}
+	board, release, err := s.lockBoard(req.ProjectKey)
+	if err != nil {
+		return Question{}, err
+	}
+	defer release()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Question{}, err
 	}
 	defer tx.Rollback()
-	board, err := loadBoard(tx, req.ProjectKey)
-	if err != nil {
-		return Question{}, err
-	}
 	if q.GoalID, err = board.targetGoal(req.To); err != nil {
 		return Question{}, err
 	}

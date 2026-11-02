@@ -56,15 +56,16 @@ func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
 	if req.ProjectKey == "" || req.SessionID == "" || req.As == "" {
 		return AttachResult{}, refuse("project, acting session and --as are required")
 	}
+	board, release, err := s.lockBoard(req.ProjectKey)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	defer release()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return AttachResult{}, err
 	}
 	defer tx.Rollback()
-	board, err := loadBoard(tx, req.ProjectKey)
-	if err != nil {
-		return AttachResult{}, err
-	}
 	plan := &attachPlan{req: req, board: board, ids: &idIssuer{q: tx, projectKey: req.ProjectKey}}
 	if err := plan.build(); err != nil {
 		return AttachResult{}, err
@@ -85,19 +86,18 @@ func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
 	now := time.Now().UTC()
 	for _, e := range append(plan.events, Event{Type: EventAttach, Payload: attach}) {
 		e.ProjectKey, e.ActorSessionID, e.CreatedAt = req.ProjectKey, req.SessionID, now
-		inserted, err := insertEvent(tx, `INSERT`, e)
-		if err != nil {
+		if _, err := insertEvent(tx, `INSERT`, e); err != nil {
 			return AttachResult{}, err
 		}
-		if err := board.Apply(inserted); err != nil {
-			return AttachResult{}, err
-		}
-	}
-	readback, err := plan.readback(tx, board)
-	if err != nil {
-		return AttachResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		return AttachResult{}, err
+	}
+	if err := s.catchUp(board, req.ProjectKey); err != nil {
+		return AttachResult{}, err
+	}
+	readback, err := plan.readback(s.read, board)
+	if err != nil {
 		return AttachResult{}, err
 	}
 	return AttachResult{ProjectKey: req.ProjectKey, GoalID: plan.goalID, Effects: plan.effects, Readback: readback}, nil
