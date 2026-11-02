@@ -63,6 +63,15 @@ func (d *Daemon) knownLedgerProject(w http.ResponseWriter, key string) bool {
 			return true
 		}
 	}
+	// A repository with no added project is an implicit project, known by the catalog that capture also resolves through.
+	implicit, err := d.Registry.LocalCatalogProjectKey(key)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "projects_unavailable", err.Error())
+		return false
+	}
+	if implicit {
+		return true
+	}
 	writeAPIError(w, http.StatusNotFound, "project_not_found", "No project "+key+" in this Agenthail; see agenthail projects.")
 	return false
 }
