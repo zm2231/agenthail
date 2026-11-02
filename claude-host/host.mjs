@@ -6,6 +6,7 @@
 // ({id, result} or {id, error: {code, message}}); a subscribed connection also
 // receives {event} lines.
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { CHECKER_ENV, checkerOptions } from './checker.mjs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -406,6 +407,12 @@ async function open(params) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
   if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
+  if (params.checker !== undefined) {
+    if (typeof params.checker?.run !== 'string' || !params.checker.run) throw new HostError('invalid', 'a checker names its run');
+    if (params.resume || params.permissionMode || params.agent || params.worktree) {
+      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode, agent or worktree');
+    }
+  }
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
     throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
   }
@@ -420,14 +427,36 @@ async function open(params) {
   // Claude starts a resumed conversation in the settings' default mode and
   // model, so a resume without them reopens in the ones it last ran with here.
   const kept = params.resume ? settings.get(id) : undefined;
-  const permissionMode = params.permissionMode || kept?.permissionMode || '';
-  const model = params.model || kept?.model || '';
+  const checker = params.checker ? checkerOptions({ run: params.checker.run, sessionId: id, configDir: params.configDir, agenthail: args.agenthail }) : null;
+  const permissionMode = checker?.permissionMode || params.permissionMode || kept?.permissionMode || '';
+  const model = params.model || checker?.model || kept?.model || '';
   const s = new Session(id, cwd, permissionMode, model);
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
   let init;
   try {
+    const conduct = checker
+      ? { ...checker, ...(model ? { model } : {}), sessionId: id }
+      : {
+          // Without a system prompt the SDK sends an empty one and Claude runs
+          // with a minimal prompt instead of Claude Code's. A conversation keeps
+          // the prompt it started with until it is compacted.
+          systemPrompt: { type: 'preset', preset: 'claude_code' },
+          settingSources: ['user', 'project', 'local'],
+          ...(params.resume ? { resume: id } : { sessionId: id }),
+          ...(permissionMode ? { permissionMode } : {}),
+          ...(model ? { model } : {}),
+          ...(params.effort ? { effort: params.effort } : {}),
+          ...(params.agent ? { agent: params.agent } : {}),
+          extraArgs,
+          // Every session may be switched into bypassPermissions later, which
+          // Claude allows only when it started with consent to it. Claude still
+          // asks canUseTool for questions in bypassPermissions.
+          allowDangerouslySkipPermissions: true,
+          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
+          canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        };
     s.query = query({
       prompt: s.input(),
       options: {
@@ -437,25 +466,15 @@ async function open(params) {
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
-        env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
+        env: {
+          CLAUDE_CODE_ENABLE_TODO_TOOLS: '1',
+          ...process.env,
+          CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
+          ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}),
+          ...(checker ? CHECKER_ENV : {}),
+        },
         pathToClaudeCodeExecutable: args.claude,
-        // Without a system prompt the SDK sends an empty one and Claude runs
-        // with a minimal prompt instead of Claude Code's. A conversation keeps
-        // the prompt it started with until it is compacted.
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
-        settingSources: ['user', 'project', 'local'],
-        ...(params.resume ? { resume: id } : { sessionId: id }),
-        ...(permissionMode ? { permissionMode } : {}),
-        ...(model ? { model } : {}),
-        ...(params.effort ? { effort: params.effort } : {}),
-        ...(params.agent ? { agent: params.agent } : {}),
-        extraArgs,
-        // Every session may be switched into bypassPermissions later, which
-        // Claude allows only when it started with consent to it. Claude still
-        // asks canUseTool for questions in bypassPermissions.
-        allowDangerouslySkipPermissions: true,
-        ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
-        canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },

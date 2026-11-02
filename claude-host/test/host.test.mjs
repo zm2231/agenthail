@@ -1311,3 +1311,65 @@ test('a listing that does not start in time is killed and refused, and folders a
   }
   c.close();
 });
+
+test('a checker runs sandboxed: no built-in tools, none of the person setup, and only its report', async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+process.stdout.write('{"result":"reported"}');
+`,
+    { mode: 0o755 },
+  );
+  const configDir = path.join(f.root, 'person-claude');
+  fs.mkdirSync(configDir);
+  fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({ model: 'claude-person-default', permissions: { allow: ['Bash(*)'] } }));
+  await startHost(f, { agenthail });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, checker: {} }), /names its run/);
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'bypassPermissions', checker: { run: id } }), /own sandbox/);
+  await c.call('open', { sessionId: id, cwd: f.cwd, configDir, checker: { run: id } });
+
+  const [spawned] = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const argv = spawned.argv;
+  const value = (flag) => {
+    const inline = argv.find((a) => a.startsWith(`${flag}=`));
+    if (inline !== undefined) return inline.slice(flag.length + 1);
+    const at = argv.indexOf(flag);
+    return at >= 0 ? argv[at + 1] : undefined;
+  };
+  assert.equal(value('--tools'), '', argv.join(' '));
+  assert.equal(value('--setting-sources'), '', argv.join(' '));
+  assert.ok(argv.includes('--strict-mcp-config'), argv.join(' '));
+  assert.equal(value('--permission-mode'), 'dontAsk', argv.join(' '));
+  assert.equal(value('--allowedTools'), 'mcp__ledger__report', argv.join(' '));
+  assert.equal(value('--model'), 'claude-person-default', argv.join(' '));
+  assert.equal(value('--mcp-config'), undefined, argv.join(' '));
+  const [initialized] = fs.readFileSync(path.join(f.claudeDir, 'initialize.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(initialized.sdkMcpServers, ['ledger']);
+  assert.match(String(initialized.systemPrompt), /no other tools/);
+  assert.ok(!argv.includes('--allow-dangerously-skip-permissions'), argv.join(' '));
+  assert.equal(spawned.todoTools, '0');
+  assert.equal(spawned.claudeaiMcp, 'false');
+
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: `CHECKER ${JSON.stringify({ missing: [{ breadth: 'typo tolerance', from: 'claude-prompt:2' }] })}`, origin: { kind: 'human' } });
+  await c.event(turnResult(id, uuid));
+  const reply = JSON.parse(transcript(f, id).at(-1).reply.slice('checker:'.length));
+  assert.deepEqual(reply.decisions, { Bash: 'deny', Read: 'deny', Write: 'deny', WebFetch: 'deny', mcp__other__run: 'deny', mcp__ledger__report: 'allow' });
+  const hooks = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(
+    hooks.filter((h) => h.event === 'PreToolUse').map((h) => h.output.hookSpecificOutput?.permissionDecision ?? 'allow'),
+    ['deny', 'deny', 'deny', 'deny', 'deny', 'allow'],
+  );
+  assert.ok(!hooks.some((h) => h.event === 'SessionStart' || h.event === 'UserPromptSubmit'), 'the checker runs none of the session-context hooks');
+  assert.match(JSON.stringify(reply.reported), /reported/);
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(ran, [['ledger', 'check-report', id, '--from', id, '--json', '--missing', 'typo tolerance', '--in', 'claude-prompt:2']]);
+  c.close();
+});
