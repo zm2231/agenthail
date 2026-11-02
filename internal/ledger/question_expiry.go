@@ -40,15 +40,16 @@ func (s *Store) ProjectsWithQuestions() ([]string, error) {
 }
 
 func (s *Store) ExpireQuestions(projectKey string, now time.Time) ([]Expiry, error) {
+	board, release, err := s.lockBoard(projectKey)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	board, err := loadBoard(tx, projectKey)
-	if err != nil {
-		return nil, err
-	}
 	var due []*Question
 	for _, q := range board.questions {
 		if q.Expired(now) && (q.AutoApplies() || !q.Escalated) {

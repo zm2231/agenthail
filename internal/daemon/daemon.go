@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/filewake"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
@@ -87,6 +88,9 @@ type Daemon struct {
 	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
+	ledgerOnce        sync.Once
+	ledger            *ledger.Store
+	g2                *g2Counter
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool
@@ -168,6 +172,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		uploads:           uploads.New(uploadsDir(reg)),
 		background:        newBackgroundWork(),
 		limitResumes:      newLimitResumer(),
+		g2:                newG2Counter(time.Now()),
 	}
 	d.sources.prompts = d.backfillPrompt
 	d.ui = newUIState(reg)

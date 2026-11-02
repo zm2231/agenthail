@@ -3,6 +3,7 @@ package ledger
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,15 @@ func ProjectSlug(projectKey string) string {
 		return "ledger"
 	}
 	return key
+}
+
+func idNumber(id string) int {
+	i := len(id)
+	for i > 0 && id[i-1] >= '0' && id[i-1] <= '9' {
+		i--
+	}
+	n, _ := strconv.Atoi(id[i:])
+	return n
 }
 
 type idIssuer struct {

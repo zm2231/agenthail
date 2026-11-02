@@ -10,7 +10,7 @@ import (
 
 func newStore(t *testing.T) *ledger.Store {
 	db := openTestDB(t)
-	return ledger.NewStore(db, db)
+	return ledger.NewCachedStore(db, db)
 }
 
 func said(ref, text string) ledger.Utterance {

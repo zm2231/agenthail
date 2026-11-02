@@ -45,6 +45,12 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerQuestions(store, args)
 	case "work":
 		return a.ledgerWork(store, args)
+	case "own":
+		return a.ledgerClause(ledger.ClauseOwn, args)
+	case "progress":
+		return a.ledgerClause(ledger.ClauseProgress, args)
+	case "wait":
+		return a.ledgerClause(ledger.ClauseWait, args)
 	default:
 		return fmt.Errorf("unknown ledger command %q", positional[0])
 	}
@@ -97,6 +103,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		return err
 	}
 	view := newBoardView(board)
+	g2, g2Err := a.ledgerG2(key)
 
 	if hasFlag(args, "--json") {
 		out := map[string]any{
@@ -108,16 +115,23 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"projectConstraints": view.constraints,
 			"questions":          view.questions,
 			"targetCuts":         view.targetCuts,
+			"g2Waivers":          view.waivers,
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
 		}
 		if scope.State == ledger.LedgerEnabled {
 			out["captureSince"] = scope.Since
 		}
+		if g2Err != nil {
+			out["g2Error"] = g2Err.Error()
+		} else {
+			out["g2"] = g2
+		}
 		return emit(out)
 	}
 
 	fmt.Println(coverage)
+	fmt.Println(g2Line(g2, g2Err))
 	view.print(attachment)
 	return nil
 }

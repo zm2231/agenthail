@@ -8,8 +8,9 @@ import (
 )
 
 type Store struct {
-	db   *sql.DB
-	read *sql.DB
+	db    *sql.DB
+	read  *sql.DB
+	cache *boardCache
 }
 
 func NewStore(db, read *sql.DB) *Store {

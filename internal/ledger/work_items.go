@@ -67,37 +67,19 @@ func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 	if req.ProjectKey == "" || req.SessionID == "" {
 		return WorkResult{}, refuse("project and acting session are required")
 	}
-	tx, err := s.db.Begin()
+	id, readback := req.ItemID, ""
+	board, release, err := s.writePlanned(req.ProjectKey, req.SessionID, now, func(board *Board, ids *idIssuer) (EventType, any, error) {
+		typ, payload, text, err := board.planWork(req, ids)
+		if p, ok := payload.(WorkItemPayload); ok {
+			id = p.ItemID
+		}
+		readback = text
+		return typ, payload, err
+	})
 	if err != nil {
 		return WorkResult{}, err
 	}
-	defer tx.Rollback()
-	board, err := loadBoard(tx, req.ProjectKey)
-	if err != nil {
-		return WorkResult{}, err
-	}
-	typ, payload, readback, err := board.planWork(req, &idIssuer{q: tx, projectKey: req.ProjectKey})
-	if err != nil {
-		return WorkResult{}, err
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return WorkResult{}, err
-	}
-	event, err := insertEvent(tx, `INSERT`, Event{ProjectKey: req.ProjectKey, Type: typ, Payload: data, ActorSessionID: req.SessionID, CreatedAt: now.UTC()})
-	if err != nil {
-		return WorkResult{}, err
-	}
-	if err := board.Apply(event); err != nil {
-		return WorkResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return WorkResult{}, err
-	}
-	id := req.ItemID
-	if p, ok := payload.(WorkItemPayload); ok {
-		id = p.ItemID
-	}
+	defer release()
 	return WorkResult{Item: *board.workItems[id], Readback: "intent ledger: " + readback}, nil
 }
 
