@@ -20,7 +20,8 @@ func snapshot(t *testing.T, b *ledger.Board) string {
 	data, err := json.Marshal(map[string]any{
 		"goals": goals, "asks": asks, "decisions": decisions, "questions": questions, "work": items,
 		"utterances": b.Utterances(), "targetCuts": b.TargetCuts(), "constraints": b.ProjectConstraints(),
-		"waivers": b.G2Waivers(), "applied": b.AppliedSeq(),
+		"waivers": b.G2Waivers(), "applied": b.AppliedSeq(), "checks": b.GoalChecks(), "openChecks": b.OpenChecks(),
+		"due": b.DueChecks(time.Now().Add(time.Hour), time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +58,14 @@ func TestTheCachedBoardEqualsABoardRebuiltFromTheLog(t *testing.T) {
 	work(t, cached, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C2", Text: "csv writer"})
 	clauseAction(t, cached, ledger.ClauseRequest{Action: ledger.ClauseProgress, ClauseID: "widget-C1", Ref: "commit abc"}, quiet)
 	gate(t, cached, "t1", quiet)
+	if _, err := cached.StartCheck(project, g, "run-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	checked, err := cached.ReportCheck(ledger.CheckReport{ProjectKey: project, Run: "run-1", SessionID: "run-1", Missing: []ledger.Omission{{Breadth: "excel export", From: "claude-prompt:2"}}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	attach(t, cached, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsExtends, To: "widget-A1", Clauses: []string{"excel export"}, Covers: checked.Cuts})
 	if _, err := cached.Attach(ledger.AttachRequest{ProjectKey: project, SessionID: "s1", UtteranceID: "claude-prompt:404", As: ledger.AsConversation}); err == nil {
 		t.Fatal("a refused attach was accepted")
 	}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -19,6 +20,7 @@ type boardView struct {
 	questions   []ledger.Question
 	targetCuts  []ledger.TargetCut
 	waivers     []ledger.GateWaiver
+	checks      map[string]ledger.GoalChecks
 }
 
 func ledgerIDNumber(id string) int {
@@ -36,7 +38,10 @@ func byLedgerID[T any](items []T, id func(T) string) {
 
 func newBoardView(board *ledger.Board) boardView {
 	v := boardView{goals: board.Goals(), asks: board.OpenAsks(), decisions: board.Decisions(), constraints: board.ProjectConstraints(),
-		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}}
+		questions: sortedQuestions(board, true), targetCuts: board.TargetCuts(), waivers: board.G2Waivers(), allAsks: map[string]ledger.Ask{}, checks: map[string]ledger.GoalChecks{}}
+	for _, c := range board.GoalChecks() {
+		v.checks[c.GoalID] = c
+	}
 	for _, ask := range board.AllAsks() {
 		v.allAsks[ask.ID] = ask
 	}
@@ -95,7 +100,7 @@ func cutStatus(cut ledger.Cut) string {
 	case cut.Acked:
 		return "acked"
 	case cut.Withdrawn:
-		return "withdrawn: its question was answered"
+		return "withdrawn: " + cut.WithdrawnBecause()
 	}
 	return "pending the person's ack"
 }
@@ -109,6 +114,9 @@ func (v boardView) print(attachment ledger.Attachment) {
 		}
 		if g.DefaultCuts > 0 {
 			fmt.Printf("  %d unanswered defaults became pending cuts", g.DefaultCuts)
+		}
+		if c, ok := v.checks[g.ID]; ok {
+			fmt.Printf("  checks: %d runs, %d cuts raised, last %s", c.Runs, c.CutsRaised, c.LastCheckAt.Local().Format(time.DateTime))
 		}
 		fmt.Println()
 		for _, c := range g.Constraints {

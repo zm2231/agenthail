@@ -6,6 +6,7 @@
 // ({id, result} or {id, error: {code, message}}); a subscribed connection also
 // receives {event} lines.
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { checkerOptions } from './checker.mjs';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -268,7 +269,7 @@ class Session {
   }
 
   remember() {
-    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, updatedAt: new Date().toISOString() });
+    settings.set(this.id, { permissionMode: this.permissionMode, model: this.model, ...(this.checker ? { checker: this.checker } : {}), updatedAt: new Date().toISOString() });
     writeSettings();
   }
 
@@ -281,6 +282,7 @@ class Session {
       openedAt: this.openedAt,
       permissionMode: this.permissionMode,
       model: this.model,
+      ...(this.checker ? { checker: this.checker } : {}),
       contextWindow: this.context?.window ?? 0,
       contextModel: this.context?.model ?? '',
       autoCompact: this.context?.autoCompact ?? null,
@@ -324,7 +326,7 @@ const methods = {
   },
   setModel: async ({ sessionId, model }) => {
     if (typeof model !== 'string' || model === '' || /\s/.test(model)) throw new HostError('invalid', 'model must be one model name');
-    const s = session(sessionId);
+    const s = unsandboxed(sessionId);
     await s.query.setModel(model);
     s.model = model;
     s.remember();
@@ -332,7 +334,7 @@ const methods = {
   },
   setPermissionMode: async ({ sessionId, permissionMode }) => {
     if (!PERMISSION_MODES.has(permissionMode)) throw new HostError('invalid', `unknown permission mode: ${permissionMode}`);
-    const s = session(sessionId);
+    const s = unsandboxed(sessionId);
     await s.query.setPermissionMode(permissionMode);
     s.permissionMode = permissionMode;
     s.remember();
@@ -406,6 +408,14 @@ async function open(params) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
   if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
+  if (params.checker !== undefined) {
+    for (const name of ['run', 'token', 'prompt']) {
+      if (typeof params.checker?.[name] !== 'string' || !params.checker[name].trim()) throw new HostError('invalid', `a checker names its run, token and prompt; ${name} is missing`);
+    }
+    if (params.resume || params.permissionMode || params.agent || params.worktree) {
+      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode, agent or worktree');
+    }
+  }
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
     throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
   }
@@ -420,14 +430,39 @@ async function open(params) {
   // Claude starts a resumed conversation in the settings' default mode and
   // model, so a resume without them reopens in the ones it last ran with here.
   const kept = params.resume ? settings.get(id) : undefined;
-  const permissionMode = params.permissionMode || kept?.permissionMode || '';
-  const model = params.model || kept?.model || '';
+  if (kept?.checker) throw new HostError('invalid', `session ${id} was a narrowing checker; it is not resumed`);
+  const checker = params.checker ? checkerOptions({ run: params.checker.run, token: params.checker.token, configDir: params.configDir, agenthail: args.agenthail }) : null;
+  const permissionMode = checker?.permissionMode || params.permissionMode || kept?.permissionMode || '';
+  const model = params.model || checker?.model || kept?.model || '';
   const s = new Session(id, cwd, permissionMode, model);
+  s.checker = params.checker?.run ?? '';
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
   let init;
   try {
+    const { env: checkerEnv, ...checkerQuery } = checker ?? {};
+    const conduct = checker
+      ? { ...checkerQuery, ...(model ? { model } : {}), sessionId: id }
+      : {
+          // Without a system prompt the SDK sends an empty one and Claude runs
+          // with a minimal prompt instead of Claude Code's. A conversation keeps
+          // the prompt it started with until it is compacted.
+          systemPrompt: { type: 'preset', preset: 'claude_code' },
+          settingSources: ['user', 'project', 'local'],
+          ...(params.resume ? { resume: id } : { sessionId: id }),
+          ...(permissionMode ? { permissionMode } : {}),
+          ...(model ? { model } : {}),
+          ...(params.effort ? { effort: params.effort } : {}),
+          ...(params.agent ? { agent: params.agent } : {}),
+          extraArgs,
+          // Every session may be switched into bypassPermissions later, which
+          // Claude allows only when it started with consent to it. Claude still
+          // asks canUseTool for questions in bypassPermissions.
+          allowDangerouslySkipPermissions: true,
+          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
+          canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        };
     s.query = query({
       prompt: s.input(),
       options: {
@@ -437,25 +472,12 @@ async function open(params) {
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
-        env: { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}) },
+        env: {
+          ...(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
+          ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}),
+        },
         pathToClaudeCodeExecutable: args.claude,
-        // Without a system prompt the SDK sends an empty one and Claude runs
-        // with a minimal prompt instead of Claude Code's. A conversation keeps
-        // the prompt it started with until it is compacted.
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
-        settingSources: ['user', 'project', 'local'],
-        ...(params.resume ? { resume: id } : { sessionId: id }),
-        ...(permissionMode ? { permissionMode } : {}),
-        ...(model ? { model } : {}),
-        ...(params.effort ? { effort: params.effort } : {}),
-        ...(params.agent ? { agent: params.agent } : {}),
-        extraArgs,
-        // Every session may be switched into bypassPermissions later, which
-        // Claude allows only when it started with consent to it. Claude still
-        // asks canUseTool for questions in bypassPermissions.
-        allowDangerouslySkipPermissions: true,
-        ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
-        canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
+        ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },
@@ -473,8 +495,9 @@ async function open(params) {
     throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
   }
   s.setCommands(init.commands);
-  if (params.permissionMode || params.model) s.remember();
+  if (params.permissionMode || params.model || s.checker) s.remember();
   s.setState('idle');
+  if (s.checker) await take(s, { uuid: randomUUID(), text: params.checker.prompt });
   return s.describe();
 }
 
@@ -721,6 +744,11 @@ function decide({ request, input, suggestions }, decision) {
 
 async function send(params) {
   const s = session(params.sessionId);
+  if (s.checker) throw new HostError('invalid', `session ${s.id} is a narrowing checker; it takes no messages`);
+  return take(s, params);
+}
+
+async function take(s, params) {
   if (typeof params.uuid !== 'string' || !UUID.test(params.uuid)) throw new HostError('invalid', 'uuid must be a uuid');
   const images = params.images ?? [];
   if (!Array.isArray(images)) throw new HostError('invalid', 'images must be a list');
@@ -900,6 +928,12 @@ function session(id) {
     refuseOrphaned(id);
     throw new HostError('not_open', `Claude session ${id} is not open in the host`);
   }
+  return s;
+}
+
+function unsandboxed(id) {
+  const s = session(id);
+  if (s.checker) throw new HostError('invalid', `session ${id} is a narrowing checker; its model and permissions do not change`);
   return s;
 }
 

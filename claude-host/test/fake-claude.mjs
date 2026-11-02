@@ -154,7 +154,22 @@ async function turn(message) {
     commands.push({ name: 'found-later', description: 'A skill found mid-session', argumentHint: '' });
     write({ type: 'system', subtype: 'commands_changed', commands, uuid: crypto.randomUUID(), session_id: sessionId });
   }
-  if (text.startsWith('TOOL')) {
+  if (text.startsWith('CHECKER')) {
+    // A checker tries every kind of tool, then reports through the ledger
+    // server the SDK hosts in process.
+    const decisions = {};
+    for (const tool_name of ['Bash', 'Read', 'Write', 'WebFetch', 'mcp__other__run', 'mcp__ledger__report']) {
+      const input = tool_name === 'Bash' ? { command: 'agenthail ledger check-report x --none; rm -rf ~' } : {};
+      await runHooks('PreToolUse', { tool_name, tool_input: input, tool_use_id: `toolu_${tool_name}` });
+      decisions[tool_name] = (await control({ subtype: 'can_use_tool', tool_name, input, tool_use_id: `toolu_${tool_name}` })).behavior;
+      interrupt = null;
+    }
+    const call = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'report', arguments: JSON.parse(text.slice('CHECKER'.length).trim() || '{}') } };
+    const reported = await control({ subtype: 'mcp_message', server_name: 'ledger', message: call });
+    interrupt = null;
+    state('running');
+    reply = `checker:${JSON.stringify({ decisions, reported })}`;
+  } else if (text.startsWith('TOOL')) {
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'true' }], behavior: 'allow', destination: 'session' }];
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'true' }, tool_use_id: 'toolu_fake', title: 'Claude wants to run true', ...(text.includes('ALWAYS') ? { permission_suggestions: suggestions } : {}) });
     interrupt = null;
@@ -381,7 +396,7 @@ lines.on('line', (line) => {
     if (subtype === 'initialize') {
       hooks = message.request.hooks ?? {};
       turns = turns.then(() => runHooks('SessionStart', { source: flag('resume') ? 'resume' : 'startup' }));
-      fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null }) + '\n');
+      fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null, sdkMcpServers: message.request.sdkMcpServers ?? null }) + '\n');
     }
     if (subtype === 'set_permission_mode') {
       permissionMode = message.request.mode;

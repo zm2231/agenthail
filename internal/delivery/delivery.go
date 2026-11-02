@@ -44,6 +44,23 @@ func (d Dispatcher) capturePerson(sourceID string, session *surface.Session, int
 	}
 }
 
+func (d Dispatcher) ensureDeliverable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
+	return EnsureDeliverable(ctx, d.Registry, adapter, session)
+}
+
+func EnsureDeliverable(ctx context.Context, reg *registry.Registry, adapter surface.Surface, session *surface.Session) error {
+	if reg != nil {
+		daemonOwned, err := reg.StartedByDaemon(session.ID)
+		if err != nil {
+			return err
+		}
+		if daemonOwned {
+			return surface.DeliveryTerminal(registry.ErrDaemonSession, surface.DeliveryInvalidRequest)
+		}
+	}
+	return surface.EnsureWritableSession(ctx, adapter, session)
+}
+
 type Dispatcher struct {
 	Registry         *registry.Registry
 	ProblemCommitted func()
@@ -63,7 +80,7 @@ func (d Dispatcher) DeliverWithoutQueue(ctx context.Context, adapter surface.Sur
 }
 
 func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, session *surface.Session) (*Receipt, error) {
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
 	if adapter.Name() == surface.KindClaude && d.Registry != nil {
@@ -88,7 +105,7 @@ func (d Dispatcher) GoalSet(ctx context.Context, adapter surface.Surface, sessio
 	if objective == "" {
 		return nil, surface.DeliveryTerminal(errors.New("goal objective is required"), surface.DeliveryInvalidRequest)
 	}
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
 	if err := goalSettable(adapter, session); err != nil {
@@ -112,7 +129,7 @@ func (d Dispatcher) GoalSet(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) GoalClear(ctx context.Context, adapter surface.Surface, session *surface.Session) (*Receipt, error) {
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
 	if err := goalSettable(adapter, session); err != nil {
@@ -179,7 +196,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, sourceID)
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
 	observation, err := adapter.Observe(ctx, session)
@@ -273,7 +290,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		}
 	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}

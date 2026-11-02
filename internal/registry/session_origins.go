@@ -12,6 +12,7 @@ const (
 	OriginPerson      OriginVia = "person"
 	OriginAgent       OriginVia = "agent"
 	OriginCoordinator OriginVia = "coordinator"
+	OriginDaemon      OriginVia = "daemon"
 )
 
 type SessionOrigin struct {
@@ -45,7 +46,7 @@ func (origin SessionOrigin) valid() error {
 		if origin.CreatorID == "" {
 			return errors.New("a session started by an agent names its creator")
 		}
-	case OriginPerson, OriginCoordinator:
+	case OriginPerson, OriginCoordinator, OriginDaemon:
 		if origin.CreatorID != "" {
 			return fmt.Errorf("a session started by %s names no creator session", origin.Via)
 		}
@@ -68,3 +69,10 @@ func (r *Registry) SessionOrigin(sessionID string) (SessionOrigin, bool, error) 
 	origin.Via = OriginVia(via)
 	return origin, true, nil
 }
+
+func (r *Registry) StartedByDaemon(sessionID string) (bool, error) {
+	origin, found, err := r.SessionOrigin(sessionID)
+	return found && origin.Via == OriginDaemon, err
+}
+
+var ErrDaemonSession = errors.New("this session is Agenthail's narrowing checker; only Agenthail drives it")

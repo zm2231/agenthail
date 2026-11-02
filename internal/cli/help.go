@@ -155,7 +155,10 @@ Intent ledger:
   ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."]
                                  Attach the person's words: new-ask, extends, constrains, refines,
                                  reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
-                                 decides, conversation
+                                 decides, conversation; --covers <cut> withdraws a checker's cut
+                                 with a clause from the words it was raised from
+  ledger check <goal_id>         Queue a narrowing check: a sandboxed session compares the goal's
+                                 clauses with the person's words and raises what they miss as cuts
   ledger propose --to <id|project> --clause "..."
                                  Propose clauses; they bind once the person adopts them
   ledger question --to <id|project> "<question>" --recommendation "..." --default "..."

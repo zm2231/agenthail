@@ -91,15 +91,15 @@ type WorkItemPayload struct {
 }
 
 type WorkItemStatePayload struct {
-	ItemID    string    `json:"itemId"`
-	FromState WorkState `json:"fromState"`
-	ToState   WorkState `json:"toState"`
-	Actor     string    `json:"actor"`
-	Assignee  string    `json:"assignee,omitempty"`
-	Reason    string    `json:"reason,omitempty"`
-	Reviewer    string   `json:"reviewer,omitempty"`
-	UtteranceID string   `json:"utteranceId,omitempty"`
-	Handoff     *Handoff `json:"handoff,omitempty"`
+	ItemID      string    `json:"itemId"`
+	FromState   WorkState `json:"fromState"`
+	ToState     WorkState `json:"toState"`
+	Actor       string    `json:"actor"`
+	Assignee    string    `json:"assignee,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Reviewer    string    `json:"reviewer,omitempty"`
+	UtteranceID string    `json:"utteranceId,omitempty"`
+	Handoff     *Handoff  `json:"handoff,omitempty"`
 }
 
 type DelegationPayload struct {
@@ -117,10 +117,10 @@ type SupersessionPayload struct {
 }
 
 type ClauseStatePayload struct {
-	ClauseID    string      `json:"clauseId"`
-	FromState   ClauseState `json:"fromState"`
-	ToState     ClauseState `json:"toState"`
-	EvidenceRef string      `json:"evidenceRef,omitempty"`
+	ClauseID       string      `json:"clauseId"`
+	FromState      ClauseState `json:"fromState"`
+	ToState        ClauseState `json:"toState"`
+	EvidenceRef    string      `json:"evidenceRef,omitempty"`
 	ProgressRef    string      `json:"progressRef,omitempty"`
 	OwnerSessionID string      `json:"ownerSessionId,omitempty"`
 	Actor          string      `json:"actor"`
@@ -133,6 +133,24 @@ type GatePayload struct {
 	Result    string   `json:"result"`
 	Blocked   []string `json:"blocked,omitempty"`
 	Waived    []string `json:"waived,omitempty"`
+}
+
+type CheckPayload struct {
+	Gate       string   `json:"gate"`
+	Run        string   `json:"run"`
+	GoalID     string   `json:"goalId"`
+	SessionID  string   `json:"sessionId"`
+	Result     string   `json:"result"`
+	Utterances []string `json:"utterances,omitempty"`
+	Cuts       []string `json:"cuts,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+}
+
+type CutWithdrawnPayload struct {
+	CutID       string   `json:"cutId"`
+	ClauseIDs   []string `json:"clauseIds"`
+	UtteranceID string   `json:"utteranceId"`
+	SessionID   string   `json:"sessionId"`
 }
 
 type DecisionPayload struct {
@@ -153,6 +171,8 @@ type CutPayload struct {
 	Reason        string `json:"reason"`
 	AuthorSession string `json:"authorSessionId"`
 	Acked         bool   `json:"acked"`
+	CheckRun      string `json:"checkRun,omitempty"`
+	FromUtterance string `json:"fromUtterance,omitempty"`
 }
 
 type CutAckPayload struct {

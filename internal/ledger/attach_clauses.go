@@ -52,7 +52,7 @@ func (p *attachPlan) addClauses() error {
 	}
 	p.effects = append(p.effects, ids...)
 	p.summary = p.clauseSummary(askID, kind, ids, source)
-	return nil
+	return p.cover(ids, source)
 }
 
 func (p *attachPlan) clauseTarget() (string, string, error) {

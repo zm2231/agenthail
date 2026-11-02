@@ -31,10 +31,19 @@ const (
 	EventQuestionEsc   EventType = "question.escalated"
 	EventGate          EventType = "gate"
 	EventWorkItemDep   EventType = "work_item.dep"
+	EventCutWithdrawn  EventType = "cut.withdrawn"
 )
 
 const (
-	GateG2 = "G2"
+	GateG2    = "G2"
+	GateCheck = "G-check"
+
+	CheckStarted     = "started"
+	CheckReported    = "reported"
+	CheckNone        = "none"
+	CheckTimedOut    = "timed-out"
+	CheckInterrupted = "interrupted"
+	CheckFailed      = "failed"
 
 	GatePass           = "pass"
 	GateBlocked        = "blocked"

@@ -35,6 +35,7 @@ type AttachRequest struct {
 	Reject      bool         `json:"reject,omitempty"`
 	Ack         bool         `json:"ack,omitempty"`
 	Delegate    string       `json:"delegate,omitempty"`
+	Covers      []string     `json:"covers,omitempty"`
 }
 
 type AttachResult struct {
@@ -134,8 +135,8 @@ func (p *attachPlan) build() error {
 	default:
 		return refuse("unknown --as %q; use new-ask, extends, constrains, refines, reacts, delegates, decides, answers or conversation", req.As)
 	}
-	if req.Source != "" {
-		return refuse("--source applies only to new clauses (new-ask, extends, constrains)")
+	if req.Source != "" || len(req.Covers) > 0 {
+		return refuse("--source and --covers apply only to new clauses (new-ask, extends, constrains)")
 	}
 	if p.utterance == nil {
 		return refuse("--as %s needs the person's utterance it attaches", req.As)

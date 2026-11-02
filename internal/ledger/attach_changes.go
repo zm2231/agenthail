@@ -110,7 +110,7 @@ func (p *attachPlan) recordAck(cut Cut, target string) error {
 		return refuse("%s is already acked", cut.ID)
 	}
 	if cut.Withdrawn {
-		return refuse("%s was withdrawn when its question was answered", cut.ID)
+		return refuse("%s was withdrawn: %s", cut.ID, cut.WithdrawnBecause())
 	}
 	p.effects = append(p.effects, cut.ID, target)
 	p.summary = fmt.Sprintf("%s acked: %s is cut", cut.ID, target)

@@ -23,6 +23,8 @@ func (d *Daemon) ledgerManaged(session surface.Session) bool {
 	switch origin.Via {
 	case registry.OriginAgent, registry.OriginCoordinator:
 		return true
+	case registry.OriginDaemon:
+		return false
 	}
 	return session.RuntimeKind != surface.RuntimeClaudeCLI
 }

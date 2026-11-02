@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+	if err := delivery.EnsureDeliverable(ctx, d.Registry, adapter, session); err != nil {
 		return err
 	}
 	if err := d.Registry.RegisterSession(*session); err != nil {

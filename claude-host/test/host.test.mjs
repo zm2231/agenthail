@@ -1311,3 +1311,83 @@ test('a listing that does not start in time is killed and refused, and folders a
   }
   c.close();
 });
+
+test('a checker runs sandboxed: no built-in tools, none of the person setup, and only its report', async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ argv: process.argv.slice(2), token: process.env.AGENTHAIL_CHECK_TOKEN }) + '\\n');
+process.stdout.write('{"result":"reported"}');
+`,
+    { mode: 0o755 },
+  );
+  const configDir = path.join(f.root, 'person-claude');
+  fs.mkdirSync(configDir);
+  fs.writeFileSync(
+    path.join(configDir, 'settings.json'),
+    JSON.stringify({
+      model: 'claude-person-default',
+      permissions: { allow: ['Bash(*)'] },
+      apiKeyHelper: '/usr/bin/true',
+      env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', CHECKER_TEST_UNRELATED: 'x', ENABLE_TOOL_SEARCH: 'true' },
+    }),
+  );
+  await startHost(f, { agenthail, env: { CHECKER_HOST_LEAK: 'x', ENABLE_TOOL_SEARCH: 'true', AGENTHAIL_CLAUDE_HOST_CHECKER_ENV: 'ENABLE_TOOL_SEARCH,CHECKER_HOST_LEAK' } });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  const checker = { run: id, token: 'run-secret', prompt: `CHECKER ${JSON.stringify({ missing: [{ breadth: 'typo tolerance', from: 'claude-prompt:2' }] })}` };
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, checker: {} }), /names its run, token and prompt/);
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, permissionMode: 'bypassPermissions', checker }), /own sandbox/);
+  await c.call('open', { sessionId: id, cwd: f.cwd, configDir, checker });
+
+  const [spawned] = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const argv = spawned.argv;
+  const value = (flag) => {
+    const inline = argv.find((a) => a.startsWith(`${flag}=`));
+    if (inline !== undefined) return inline.slice(flag.length + 1);
+    const at = argv.indexOf(flag);
+    return at >= 0 ? argv[at + 1] : undefined;
+  };
+  assert.equal(value('--tools'), '', argv.join(' '));
+  assert.equal(value('--setting-sources'), '', argv.join(' '));
+  assert.ok(argv.includes('--strict-mcp-config'), argv.join(' '));
+  assert.equal(value('--permission-mode'), 'dontAsk', argv.join(' '));
+  assert.equal(value('--allowedTools'), 'mcp__ledger__report', argv.join(' '));
+  assert.equal(value('--model'), 'claude-person-default', argv.join(' '));
+  assert.equal(value('--mcp-config'), undefined, argv.join(' '));
+  const [initialized] = fs.readFileSync(path.join(f.claudeDir, 'initialize.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(initialized.sdkMcpServers, ['ledger']);
+  assert.match(String(initialized.systemPrompt), /no other tools/);
+  assert.ok(!argv.includes('--allow-dangerously-skip-permissions'), argv.join(' '));
+  assert.equal(spawned.todoTools, '0');
+  assert.equal(spawned.claudeaiMcp, 'false');
+  for (const name of ['ANTHROPIC_BASE_URL', 'HTTPS_PROXY']) assert.ok(spawned.env.includes(name), `${name} reaches the checker's Claude`);
+  for (const name of ['CHECKER_TEST_UNRELATED', 'ENABLE_TOOL_SEARCH', 'CHECKER_HOST_LEAK', 'AGENTHAIL_CLAUDE_HOST_CHECKER_ENV']) assert.ok(!spawned.env.includes(name), `${name} stays behind`);
+  assert.ok(spawned.env.includes('PATH') && spawned.env.includes('HOME'), spawned.env.join(' '));
+  assert.deepEqual(JSON.parse(value('--settings')), { apiKeyHelper: '/usr/bin/true' });
+  assert.ok(!argv.join(' ').includes('127.0.0.1:9'), 'auth values never go on the command line');
+  await assert.rejects(c.call('setPermissionMode', { sessionId: id, permissionMode: 'bypassPermissions' }), /narrowing checker/);
+  await assert.rejects(c.call('setModel', { sessionId: id, model: 'claude-other' }), /narrowing checker/);
+
+  await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message?.type === 'result');
+  await assert.rejects(c.call('send', { sessionId: id, uuid: randomUUID(), text: 'report none instead', origin: { kind: 'human' } }), /takes no messages/);
+  const reply = JSON.parse(transcript(f, id).at(-1).reply.slice('checker:'.length));
+  assert.deepEqual(reply.decisions, { Bash: 'deny', Read: 'deny', Write: 'deny', WebFetch: 'deny', mcp__other__run: 'deny', mcp__ledger__report: 'allow' });
+  const hooks = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(
+    hooks.filter((h) => h.event === 'PreToolUse').map((h) => h.output.hookSpecificOutput?.permissionDecision ?? 'allow'),
+    ['deny', 'deny', 'deny', 'deny', 'deny', 'allow'],
+  );
+  assert.ok(!hooks.some((h) => h.event === 'SessionStart' || h.event === 'UserPromptSubmit'), 'the checker runs none of the session-context hooks');
+  assert.match(JSON.stringify(reply.reported), /reported/);
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(ran, [{ argv: ['ledger', 'check-report', id, '--json', '--missing', 'typo tolerance', '--in', 'claude-prompt:2'], token: 'run-secret' }]);
+  assert.ok(!JSON.stringify(c.events).includes('run-secret'), 'the run token never leaves the host');
+  await c.call('close', { sessionId: id });
+  await assert.rejects(c.call('open', { resume: id, cwd: f.cwd }), /narrowing checker; it is not resumed/);
+  c.close();
+});

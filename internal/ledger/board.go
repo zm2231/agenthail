@@ -54,11 +54,14 @@ type UtteranceView struct {
 }
 
 type Cut struct {
-	ID         string `json:"id"`
-	Reason     string `json:"reason"`
-	Acked      bool   `json:"acked"`
-	Withdrawn  bool   `json:"withdrawn,omitempty"`
-	QuestionID string `json:"questionId,omitempty"`
+	ID            string   `json:"id"`
+	Reason        string   `json:"reason"`
+	Acked         bool     `json:"acked"`
+	Withdrawn     bool     `json:"withdrawn,omitempty"`
+	QuestionID    string   `json:"questionId,omitempty"`
+	CheckRun      string   `json:"checkRun,omitempty"`
+	FromUtterance string   `json:"fromUtterance,omitempty"`
+	CoveredBy     []string `json:"coveredBy,omitempty"`
 }
 
 type Wait struct {
@@ -98,6 +101,7 @@ type Board struct {
 	projectDefaultCuts int
 	gates              gateState
 	reviews            reviewState
+	checks             checkState
 	applied            int64
 }
 
@@ -121,6 +125,7 @@ func (b *Board) reset() {
 	b.projectDefaultCuts = 0
 	b.gates = newGateState()
 	b.reviews = newReviewState()
+	b.checks = newCheckState()
 	b.applied = 0
 }
 
@@ -175,9 +180,14 @@ func (b *Board) Apply(event Event) error {
 		err = b.applyWorkItemState(event.Payload)
 	case EventWorkItemDep:
 		err = b.applyWorkDep(event.Payload)
+	case EventCutWithdrawn:
+		err = b.applyCutWithdrawn(event.Payload)
 	}
 	if err == nil {
 		err = b.reviews.observe(event)
+	}
+	if err == nil {
+		err = b.checks.observe(event)
 	}
 	if err == nil {
 		b.applied = event.Seq
@@ -412,7 +422,7 @@ func (b *Board) applyCut(data []byte) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
 	}
-	cut := Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked, QuestionID: p.QuestionID}
+	cut := Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked, QuestionID: p.QuestionID, CheckRun: p.CheckRun, FromUtterance: p.FromUtterance}
 	b.countDefaultCut(p.QuestionID)
 	if c, ok := b.clauses[p.ClauseID]; ok {
 		c.Cuts = append(c.Cuts, cut)

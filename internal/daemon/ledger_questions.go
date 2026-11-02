@@ -25,23 +25,27 @@ func (d *Daemon) apiLedgerQuestionHandler(w http.ResponseWriter, r *http.Request
 	writeDashboardJSON(w, http.StatusOK, q)
 }
 
-func (d *Daemon) runLedgerQuestions(ctx context.Context) {
+func (d *Daemon) runLedgerSweeps(ctx context.Context) {
 	ticker := time.NewTicker(ledgerQuestionSweep)
 	defer ticker.Stop()
-	d.sweepLedgerQuestions(ctx, time.Now())
+	sweep := func(now time.Time) {
+		d.sweepLedgerQuestions(ctx, now)
+		d.sweepLedgerChecks(ctx, now)
+	}
+	sweep(time.Now())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			d.sweepLedgerQuestions(ctx, now)
+			sweep(now)
 		}
 	}
 }
 
 func (d *Daemon) sweepLedgerQuestions(ctx context.Context, now time.Time) {
 	store := d.ledgerStore()
-	keys, err := store.ProjectsWithQuestions()
+	keys, err := store.ProjectsWith(ledger.EventQuestion)
 	if err != nil {
 		d.log.Printf("ledger questions: list projects: %s", err)
 		return

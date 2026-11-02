@@ -17,6 +17,9 @@ type ledgerTarget struct {
 
 // recordPersonWords records u in every project whose scope covers the session: its folder's project and any project it was opted into.
 func (d *Daemon) recordPersonWords(session surface.Session, u ledger.Utterance) (string, bool, error) {
+	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned {
+		return "", false, err
+	}
 	store := d.ledgerStore()
 	targets, grants, err := d.ledgerTargets(store, session)
 	if err != nil {
