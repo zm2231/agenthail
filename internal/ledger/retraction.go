@@ -23,6 +23,7 @@ const (
 	RetractedCut        = "cut"
 	RetractedQuestion   = "question"
 	RetractedWorkItem   = "work-item"
+	RetractedCheck      = "check"
 )
 
 type Retraction struct {
@@ -65,19 +66,22 @@ func (b *Board) Retractions() []Retraction {
 var errNeedsReplay = errors.New("ledger: the board needs a replay")
 
 type eventSource struct {
-	UtteranceID       string `json:"utteranceId"`
-	SourceUtteranceID string `json:"sourceUtteranceId"`
-	FromUtterance     string `json:"fromUtterance"`
-	EvidenceRef       string `json:"evidenceRef"`
-	AskID             string `json:"askId"`
-	ClauseID          string `json:"clauseId"`
-	DecisionID        string `json:"decisionId"`
-	CutID             string `json:"cutId"`
-	QuestionID        string `json:"questionId"`
-	ItemID            string `json:"itemId"`
-	DependsOn         string `json:"dependsOn"`
-	Target            string `json:"target"`
-	SessionID         string `json:"sessionId"`
+	UtteranceID       string   `json:"utteranceId"`
+	SourceUtteranceID string   `json:"sourceUtteranceId"`
+	FromUtterance     string   `json:"fromUtterance"`
+	EvidenceRef       string   `json:"evidenceRef"`
+	AskID             string   `json:"askId"`
+	ClauseID          string   `json:"clauseId"`
+	DecisionID        string   `json:"decisionId"`
+	CutID             string   `json:"cutId"`
+	QuestionID        string   `json:"questionId"`
+	ItemID            string   `json:"itemId"`
+	DependsOn         string   `json:"dependsOn"`
+	Target            string   `json:"target"`
+	Run               string   `json:"run"`
+	CheckRun          string   `json:"checkRun"`
+	Utterances        []string `json:"utterances"`
+	SessionID         string   `json:"sessionId"`
 }
 
 func (s eventSource) ref() string {

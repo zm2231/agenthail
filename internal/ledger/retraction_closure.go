@@ -28,6 +28,10 @@ func dependencies(t EventType, src eventSource) []string {
 		add(RetractedCut, src.CutID)
 	}
 	add(RetractedWorkItem, src.DependsOn)
+	add(RetractedCheck, src.CheckRun)
+	if t == EventGate {
+		add(RetractedCheck, src.Run)
+	}
 	add(RetractedAsk, src.Target)
 	add(RetractedClause, src.Target)
 	return keys
@@ -35,6 +39,9 @@ func dependencies(t EventType, src eventSource) []string {
 
 // orphan drops an event that rests on something dropped as retracted, and anything it creates with it.
 func (b *Board) orphan(t EventType, src eventSource) bool {
+	if b.checkOnRetractedWords(t, src) {
+		return true
+	}
 	for _, dep := range dependencies(t, src) {
 		root, ok := b.dropped[dep]
 		if !ok {
@@ -49,6 +56,25 @@ func (b *Board) orphan(t EventType, src eventSource) bool {
 			b.retractions = append(b.retractions, Retraction{Kind: kind, ID: id, UtteranceID: root, Reason: b.retracted[root], DependsOn: dep})
 		}
 		return true
+	}
+	return false
+}
+
+// A checker run given reclassified words is void: its report would judge against words that are not the person's.
+func (b *Board) checkOnRetractedWords(t EventType, src eventSource) bool {
+	if t != EventGate || src.Run == "" {
+		return false
+	}
+	key := skippedKey(RetractedCheck, src.Run)
+	if _, ok := b.orphaned[key]; ok {
+		return false
+	}
+	for _, u := range src.Utterances {
+		if reason, ok := b.retracted[u]; ok {
+			b.orphaned[key] = u
+			b.retractions = append(b.retractions, Retraction{Kind: RetractedCheck, ID: src.Run, UtteranceID: u, Reason: reason, DependsOn: "words:" + u})
+			return true
+		}
 	}
 	return false
 }

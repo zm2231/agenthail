@@ -43,8 +43,25 @@ func randomWordsLog(rng *rand.Rand) wordsLog {
 		add(EventClause, ClausePayload{ClauseID: id, AskID: ask, Text: id, State: StateOwned, Source: source, OwnerSessionID: pick(sessions), SourceUtteranceID: src})
 	}
 	var cuts []string
+	runs := map[string][]string{}
+	var runIDs []string
 	for range 60 {
-		switch rng.Intn(16) {
+		switch rng.Intn(18) {
+		case 16:
+			id := fmt.Sprintf("R%d", len(runIDs)+1)
+			runIDs = append(runIDs, id)
+			given := []string{ref(), ref()}
+			runs[id] = given
+			add(EventGate, CheckPayload{Gate: GateCheck, Run: id, SessionID: id, Result: CheckStarted, Utterances: given})
+		case 17:
+			if len(runIDs) == 0 {
+				continue
+			}
+			run := pick(runIDs)
+			cut := fmt.Sprintf("X%d", len(cuts)+1)
+			cuts = append(cuts, cut)
+			add(EventCut, CutPayload{CutID: cut, Target: "G1", AuthorSession: run, CheckRun: run, FromUtterance: runs[run][0], Reason: "missing"})
+			add(EventGate, CheckPayload{Gate: GateCheck, Run: run, SessionID: run, Result: CheckReported, Utterances: runs[run], Cuts: []string{cut}})
 		case 13:
 			if len(clauses) > 0 {
 				id := fmt.Sprintf("X%d", len(cuts)+1)
@@ -222,7 +239,18 @@ func oracleSourceOf(e Event, askOf map[string]string) oracleSource {
 	case EventCut:
 		var p CutPayload
 		_ = json.Unmarshal(e.Payload, &p)
-		return oracleSource{ref: p.FromUtterance, created: "cut:" + p.CutID, rests: []string{"clause:" + p.ClauseID}}
+		return oracleSource{ref: p.FromUtterance, created: "cut:" + p.CutID, rests: []string{"clause:" + p.ClauseID, "check:" + p.CheckRun}}
+	case EventGate:
+		var p CheckPayload
+		_ = json.Unmarshal(e.Payload, &p)
+		if p.Result != CheckStarted {
+			return oracleSource{rests: []string{"check:" + p.Run}}
+		}
+		rests := []string{}
+		for _, u := range p.Utterances {
+			rests = append(rests, "words:"+u)
+		}
+		return oracleSource{created: "check:" + p.Run, rests: rests}
 	case EventCutAck:
 		var p CutAckPayload
 		_ = json.Unmarshal(e.Payload, &p)
@@ -253,6 +281,9 @@ func neverCaptured(events []Event, retracted map[string]string) ([]Event, map[st
 	var out []Event
 	lines := 0
 	gone := map[string]bool{}
+	for ref := range retracted {
+		gone["words:"+ref] = true
+	}
 	for _, e := range events {
 		if e.Type == EventReclassified {
 			continue
@@ -319,9 +350,10 @@ func boardState(t *testing.T, b *Board) string {
 		Items      []WorkItem
 		Questions  []Question
 		TargetCuts []TargetCut
+		Checks     []GoalChecks
 		Utterances []string
 		Applied    int64
-	}{asks, decisions, items, questions, b.TargetCuts(), utterances, b.AppliedSeq()})
+	}{asks, decisions, items, questions, b.TargetCuts(), b.GoalChecks(), utterances, b.AppliedSeq()})
 	if err != nil {
 		t.Fatal(err)
 	}

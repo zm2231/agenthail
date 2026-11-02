@@ -206,6 +206,49 @@ func TestWhatRestsOnRetractedWordsGoesWithThem(t *testing.T) {
 	}
 }
 
+func TestACheckGivenReclassifiedWordsIsVoid(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewCachedStore(db, db)
+	g := fuzzySearch(t, s)
+	if _, err := s.StartCheck(project, g, "run-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:2", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	var refusal *ledger.Refusal
+	for _, report := range []ledger.CheckReport{
+		{ProjectKey: project, Run: "run-1", SessionID: "run-1", Missing: []ledger.Omission{{Breadth: "typo tolerance", From: "claude-prompt:2"}}},
+		{ProjectKey: project, Run: "run-1", SessionID: "run-1", None: true},
+	} {
+		if _, err := s.ReportCheck(report, time.Now()); !errors.As(err, &refusal) {
+			t.Fatalf("a report on a check given reclassified words: want a refusal, got %v", err)
+		}
+	}
+	rebuilt, err := ledger.NewStore(db, db).Board(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string]*ledger.Board{"cached": board(t, s), "rebuilt": rebuilt} {
+		if _, ok := b.CheckRun("run-1"); ok || len(b.OpenChecks()) != 0 || len(b.TargetCuts()) != 0 {
+			t.Fatalf("%s board keeps the void check: open %+v cuts %+v", name, b.OpenChecks(), b.TargetCuts())
+		}
+		var voided bool
+		for _, r := range b.Retractions() {
+			voided = voided || (r.Kind == ledger.RetractedCheck && r.ID == "run-1" && r.UtteranceID == "claude-prompt:2")
+		}
+		if !voided {
+			t.Fatalf("%s board: no line for the void check: %+v", name, b.Retractions())
+		}
+	}
+	if !reflect.DeepEqual(sortedRetractions(rebuilt.Retractions()), sortedRetractions(board(t, s).Retractions())) {
+		t.Fatal("cached and rebuilt retractions differ")
+	}
+	if _, err := s.StartCheck(project, g, "run-2", time.Now()); err != nil {
+		t.Fatalf("the goal cannot be checked again on the person's words: %v", err)
+	}
+}
+
 func sortedRetractions(rs []ledger.Retraction) []ledger.Retraction {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Kind+rs[i].ID < rs[j].Kind+rs[j].ID })
 	return rs
