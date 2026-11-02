@@ -1,0 +1,309 @@
+package ledger
+
+import (
+	"encoding/json"
+	"sync"
+)
+
+type Ask struct {
+	ID              string      `json:"id"`
+	Type            AskType     `json:"type"`
+	Principal       string      `json:"principal"`
+	SourceUtterance string      `json:"sourceUtteranceId"`
+	Clauses         []*Clause   `json:"clauses"`
+}
+
+type Clause struct {
+	ID             string      `json:"id"`
+	AskID          string      `json:"askId"`
+	Text           string      `json:"text"`
+	State          ClauseState `json:"state"`
+	OwnerSessionID string      `json:"ownerSessionId,omitempty"`
+	SelfReported   bool        `json:"selfReported,omitempty"`
+	ProgressRef    string      `json:"progressRef,omitempty"`
+	Cuts           []Cut       `json:"cuts,omitempty"`
+	Waits          []Wait      `json:"waits,omitempty"`
+}
+
+type Cut struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+	Acked  bool   `json:"acked"`
+}
+
+type Wait struct {
+	Condition  string `json:"condition"`
+	DeadlineMs int64  `json:"deadlineMs"`
+	Resolved   string `json:"resolved,omitempty"`
+}
+
+type Decision struct {
+	ID        string `json:"id"`
+	Version   int    `json:"version"`
+	Text      string `json:"text"`
+	Principal string `json:"principal"`
+}
+
+type Board struct {
+	mu        sync.RWMutex
+	asks      map[string]*Ask
+	clauses   map[string]*Clause
+	decisions map[string]*Decision
+	applied   int64
+}
+
+func NewBoard() *Board {
+	return &Board{
+		asks:      map[string]*Ask{},
+		clauses:   map[string]*Clause{},
+		decisions: map[string]*Decision{},
+	}
+}
+
+func (b *Board) Apply(event Event) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var err error
+	switch event.Type {
+	case EventAsk:
+		err = b.applyAsk(event.Payload)
+	case EventClause:
+		err = b.applyClause(event.Payload)
+	case EventClauseState:
+		err = b.applyClauseState(event.Payload)
+	case EventDecision:
+		err = b.applyDecision(event.Payload)
+	case EventDecisionVer:
+		err = b.applyDecisionVersion(event.Payload)
+	case EventCut:
+		err = b.applyCut(event.Payload)
+	case EventCutAck:
+		err = b.applyCutAck(event.Payload)
+	case EventWait:
+		err = b.applyWait(event.Payload)
+	case EventWaitResolved:
+		err = b.applyWaitResolved(event.Payload)
+	}
+	if err == nil {
+		b.applied = event.Seq
+	}
+	return err
+}
+
+func (b *Board) AppliedSeq() int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.applied
+}
+
+func (b *Board) OpenAsks() []Ask {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	var result []Ask
+	for _, ask := range b.asks {
+		hasOpen := false
+		for _, c := range ask.Clauses {
+			if c.State != StateReported && !clauseFullyCut(c) {
+				hasOpen = true
+				break
+			}
+		}
+		if hasOpen {
+			result = append(result, *ask)
+		}
+	}
+	return result
+}
+
+func (b *Board) AllAsks() []Ask {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	result := make([]Ask, 0, len(b.asks))
+	for _, ask := range b.asks {
+		result = append(result, *ask)
+	}
+	return result
+}
+
+func (b *Board) Decisions() []Decision {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	result := make([]Decision, 0, len(b.decisions))
+	for _, d := range b.decisions {
+		result = append(result, *d)
+	}
+	return result
+}
+
+func (b *Board) ClausesOwnedBy(sessionID string) []Clause {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	var result []Clause
+	for _, c := range b.clauses {
+		if c.OwnerSessionID == sessionID && c.State != StateReported && !clauseFullyCut(c) {
+			result = append(result, *c)
+		}
+	}
+	return result
+}
+
+func clauseFullyCut(c *Clause) bool {
+	for _, cut := range c.Cuts {
+		if cut.Acked {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Board) Rebuild(events []Event) error {
+	b.mu.Lock()
+	b.asks = map[string]*Ask{}
+	b.clauses = map[string]*Clause{}
+	b.decisions = map[string]*Decision{}
+	b.applied = 0
+	b.mu.Unlock()
+	for _, e := range events {
+		if err := b.Apply(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *Board) applyAsk(data []byte) error {
+	var p AskPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	b.asks[p.AskID] = &Ask{
+		ID:              p.AskID,
+		Type:            p.Type,
+		Principal:       p.Principal,
+		SourceUtterance: p.SourceUtterance,
+	}
+	return nil
+}
+
+func (b *Board) applyClause(data []byte) error {
+	var p ClausePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c := &Clause{
+		ID:             p.ClauseID,
+		AskID:          p.AskID,
+		Text:           p.Text,
+		State:          p.State,
+		OwnerSessionID: p.OwnerSessionID,
+	}
+	b.clauses[p.ClauseID] = c
+	if ask, ok := b.asks[p.AskID]; ok {
+		ask.Clauses = append(ask.Clauses, c)
+	}
+	return nil
+}
+
+func (b *Board) applyClauseState(data []byte) error {
+	var p ClauseStatePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c, ok := b.clauses[p.ClauseID]
+	if !ok {
+		return nil
+	}
+	c.State = p.ToState
+	if p.ProgressRef != "" {
+		c.ProgressRef = p.ProgressRef
+		c.SelfReported = true
+	}
+	return nil
+}
+
+func (b *Board) applyDecision(data []byte) error {
+	var p DecisionPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	b.decisions[p.DecisionID] = &Decision{
+		ID:        p.DecisionID,
+		Version:   p.Version,
+		Text:      p.Text,
+		Principal: p.Principal,
+	}
+	return nil
+}
+
+func (b *Board) applyDecisionVersion(data []byte) error {
+	var p DecisionPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	if d, ok := b.decisions[p.DecisionID]; ok {
+		d.Version = p.Version
+		d.Text = p.Text
+		d.Principal = p.Principal
+	}
+	return nil
+}
+
+func (b *Board) applyCut(data []byte) error {
+	var p CutPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c, ok := b.clauses[p.ClauseID]
+	if !ok {
+		return nil
+	}
+	c.Cuts = append(c.Cuts, Cut{ID: p.CutID, Reason: p.Reason, Acked: p.Acked})
+	return nil
+}
+
+func (b *Board) applyCutAck(data []byte) error {
+	var p CutAckPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	for _, c := range b.clauses {
+		for i := range c.Cuts {
+			if c.Cuts[i].ID == p.CutID {
+				c.Cuts[i].Acked = true
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Board) applyWait(data []byte) error {
+	var p WaitPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c, ok := b.clauses[p.ClauseID]
+	if !ok {
+		return nil
+	}
+	c.Waits = append(c.Waits, Wait{Condition: p.Condition, DeadlineMs: p.DeadlineMs})
+	return nil
+}
+
+func (b *Board) applyWaitResolved(data []byte) error {
+	var p WaitResolvedPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	c, ok := b.clauses[p.ClauseID]
+	if !ok {
+		return nil
+	}
+	for i := range c.Waits {
+		if c.Waits[i].Resolved == "" {
+			c.Waits[i].Resolved = p.Resolution
+			break
+		}
+	}
+	return nil
+}

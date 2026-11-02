@@ -1,4 +1,4 @@
--- schemaVersion 40
+-- schemaVersion 41
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -28,6 +28,9 @@ CREATE UNIQUE INDEX delivery_intents_uuid ON delivery_intents(uuid);
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
+
+-- index ledger_events_project
+CREATE INDEX ledger_events_project ON ledger_events(project_key, seq);
 
 -- index message_queue_delivery_key
 CREATE UNIQUE INDEX message_queue_delivery_key
@@ -303,6 +306,28 @@ CREATE TABLE launcher_pending (
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table ledger_events
+CREATE TABLE ledger_events (
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_key TEXT NOT NULL,
+	type TEXT NOT NULL,
+	payload BLOB NOT NULL,
+	actor_session_id TEXT NOT NULL DEFAULT '',
+	actor_host_id TEXT NOT NULL DEFAULT '',
+	owner_seq INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table ledger_state
+CREATE TABLE ledger_state (
+	project_key TEXT PRIMARY KEY,
+	enabled INTEGER NOT NULL DEFAULT 0,
+	owner_host_id TEXT NOT NULL DEFAULT '',
+	owner_cursor INTEGER NOT NULL DEFAULT 0,
+	deadline_ms INTEGER NOT NULL DEFAULT 0,
+	freeze_version TEXT NOT NULL DEFAULT ''
 );
 
 -- table limit_resumes

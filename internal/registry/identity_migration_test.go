@@ -186,6 +186,9 @@ func seedVersion13(t *testing.T, r *Registry) {
 	}
 	exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES('conversation-native','{}','{}',?)`, now)
 	exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES('conversation-native',1)`)
+	for _, id := range []string{rekeyedBridge, collidedBridge} {
+		exec(`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,created_at) VALUES('proj','utterance',?,?,?)`, []byte(`{"sessionId":"`+id+`"}`), id, now)
+	}
 }
 
 type sessionColumn struct{ table, column string }
