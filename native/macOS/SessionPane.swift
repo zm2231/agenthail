@@ -23,6 +23,7 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
     @Published private(set) var newSession: NewSessionDraft?
+    @Published private(set) var shownProjectID: String?
     @Published var archivedTab: SessionState? {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
@@ -178,12 +179,18 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     var selectedSession: SessionState? { model.knownSessions.first { $0.id == selectedSessionID } }
-    var displayedSession: SessionState? { selectedSession ?? removedSession }
+    var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
+
+    func showProject(_ id: String) {
+        guard !closed else { return }
+        shownProjectID = id
+    }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
     /// Shows a session. With tabs, it opens in the preview tab unless kept,
     /// or switches to the tab it is already in.
     func select(_ id: String, keep: Bool = false) {
+        shownProjectID = nil
         let id = model.resolveSessionID(id)
         if tabsEnabled, !closed {
             tabs.open(id, keep: keep, preview: model.interface.config.tabPreview)
@@ -196,6 +203,7 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Shows New Session: with tabs, in its own tab, opened once.
     func openNewSession(message: String? = nil) {
         guard !closed else { return }
+        shownProjectID = nil
         if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
         if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if let message { newSession?.take(message) }

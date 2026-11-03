@@ -36,6 +36,8 @@ SOURCES=(
   RequestNotifications.swift
   SessionSelection.swift
   ProjectActions.swift
+  ProjectContents.swift
+  SessionRowTime.swift
   HostNames.swift
   ClaudeRootLabels.swift
   SessionTree.swift

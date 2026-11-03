@@ -199,6 +199,7 @@ struct SessionSidebar: View {
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
                             ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.listedSessionCount)
+                                .opensProject(project.identity?.id, model: model, pane: pane)
                                 .contextMenu {
                                     if let identity = project.identity {
                                         Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
@@ -230,6 +231,7 @@ struct SessionSidebar: View {
                     }
                     ForEach(projectsWithoutSessions(tree)) { project in
                         ProjectHeaderView(name: project.displayName, hosts: ProjectMenu.hosts(of: project), branch: nil, dirty: false, archived: false)
+                            .opensProject(project.id, model: model, pane: pane)
                             .contextMenu {
                                 Button("Archive Project") { model.setProjectArchived(project.id, true) }
                                 Divider()
@@ -673,7 +675,11 @@ struct ConversationPane: View {
     private var band: Bool { holdsWindowButtons && chromeTop == 0 }
 
     var body: some View {
-        if let session = pane.displayedSession {
+        if let projectID = pane.shownProjectID, let project = model.projects.first(where: { $0.id == projectID }) {
+            ProjectPane(model: model, pane: pane, project: project)
+                .contentTitleBand(band, toggle: showsSidebarToggle ? pane : nil)
+                .solidContentPane(gaps: gaps)
+        } else if let session = pane.displayedSession {
             TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
                 .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
