@@ -177,13 +177,37 @@ func TestAReplacementLeadStartsInTheReplacedLeadsRoot(t *testing.T) {
 		t.Fatalf("settings status=%d", code)
 	}
 	root := f.daemon.coordinator().ClaudeRoot
-	if got := root(f.claudeSessionIn("old-lead", f.second)); got != f.second {
-		t.Fatalf("a replacement goes where the old lead lived, not the default: %q", got)
+	if got, err := root(f.claudeSessionIn("old-lead", f.second)); err != nil || got != f.second {
+		t.Fatalf("a replacement goes where the old lead lived, not the default: %q err=%v", got, err)
 	}
-	if got := root(""); got != "" {
-		t.Fatalf("a first lead starts in the default root, here the primary: %q", got)
+	if got, err := root(""); err != nil || got != "" {
+		t.Fatalf("a first lead starts in the default root, here the primary: %q err=%v", got, err)
 	}
 	if n := f.reads.Load(); n != 0 {
 		t.Fatalf("placing a lead read claude.ai %d times", n)
+	}
+}
+
+func TestNoSessionStartsWhenTheDefaultRootCannotBeRead(t *testing.T) {
+	f := newPickFixture(t, true)
+	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999,"claude":{"defaultRoot":"work"}}`})
+	request := map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": f.host.Cwd}
+	if code := f.call(http.MethodPost, "/api/v1/actions", request, nil); code != http.StatusInternalServerError {
+		t.Fatalf("a create that cannot read the default must refuse, not start in the primary: %d", code)
+	}
+	if code := f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, nil); code != http.StatusInternalServerError {
+		t.Fatalf("the preview must not claim the primary: %d", code)
+	}
+	if _, err := f.daemon.coordinator().ClaudeRoot(""); err == nil {
+		t.Fatal("a lead start must not fall back to the primary")
+	}
+	sessions, err := f.daemon.Registry.ListSessions(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.Surface == surface.KindClaude {
+			t.Fatalf("a Claude session started anyway: %s", session.ID)
+		}
 	}
 }

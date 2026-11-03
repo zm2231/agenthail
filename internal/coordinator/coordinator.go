@@ -24,7 +24,7 @@ type Service struct {
 	Adapters     surface.Adapters
 	Dispatcher   delivery.Dispatcher
 	// ClaudeRoot is the root of a lead conversation that replaces previous, which is empty for a first start.
-	ClaudeRoot   func(previous string) string
+	ClaudeRoot   func(previous string) (string, error)
 	LeadsChanged func()
 	// Replaced runs after a handover is recorded, so its notices go out.
 	Replaced func()
@@ -317,7 +317,12 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if spec.Surface == string(surface.KindClaude) {
 		options.Name, options.PermissionMode = spec.Name, spec.PermissionMode
 		if s.ClaudeRoot != nil {
-			options.ConfigRoot = s.ClaudeRoot(previous)
+			root, err := s.ClaudeRoot(previous)
+			if err != nil {
+				_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: failureKind(err), SessionID: previous, Message: message, Error: fmt.Sprintf("start coordinator: %s", err)})
+				return nil, err
+			}
+			options.ConfigRoot = root
 		}
 	}
 	messageUUID := surface.MessageUUID(ctx)

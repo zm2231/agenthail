@@ -9,13 +9,13 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) placeClaudeSession(creator, previous string) claudepick.Pick {
+func (d *Daemon) placeClaudeSession(creator, previous string) (claudepick.Pick, error) {
 	config, err := LoadDashboardConfig()
 	if err != nil {
-		d.log.Printf("read the default Claude root: %s", err)
+		return claudepick.Pick{}, fmt.Errorf("read the default Claude root, so the session would not start where it should: %w", err)
 	}
 	origin := claudepick.Origin{CreatorTranscript: d.sessionTranscript(creator), PreviousTranscript: d.sessionTranscript(previous)}
-	return claudepick.Place(d.claudeConfigRoots(), config.ClaudeDefaultRoot(), origin)
+	return claudepick.Place(d.claudeConfigRoots(), config.ClaudeDefaultRoot(), origin), nil
 }
 
 func (d *Daemon) sessionTranscript(id string) string {
@@ -29,13 +29,16 @@ func (d *Daemon) sessionTranscript(id string) string {
 	return session.Transcript
 }
 
-func (d *Daemon) resolveClaudeStart(kind surface.SurfaceKind, creator string, options *surface.SessionStartOptions) *claudepick.Pick {
+func (d *Daemon) resolveClaudeStart(kind surface.SurfaceKind, creator string, options *surface.SessionStartOptions) (*claudepick.Pick, error) {
 	if kind != surface.KindClaude || options.ConfigRoot != "" {
-		return nil
+		return nil, nil
 	}
-	pick := d.placeClaudeSession(creator, "")
+	pick, err := d.placeClaudeSession(creator, "")
+	if err != nil {
+		return nil, err
+	}
 	options.ConfigRoot = pick.Root
-	return &pick
+	return &pick, nil
 }
 
 func (d *Daemon) claudeRootNames() []string {
@@ -58,5 +61,10 @@ func (d *Daemon) claudeRootPickHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"pick": d.placeClaudeSession("", "")})
+	pick, err := d.placeClaudeSession("", "")
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"pick": pick})
 }
