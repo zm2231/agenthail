@@ -10,18 +10,18 @@ import (
 
 type sessionViewPlan struct {
 	view     SessionView
-	rows     map[string]dashboardSession
+	rows     map[string]*dashboardSession
 	roots    map[string]string
 	children map[string][]string
 	working  map[string]int
 	now      time.Time
 }
 
-func presentationCurrent(row dashboardSession) bool {
+func presentationCurrent(row *dashboardSession) bool {
 	return !row.Archived && (row.Current && row.CurrentReason != "queued" || presentationWorking(row) || row.QueueCount > 0 || row.WaitingOn != nil || row.Attention != nil)
 }
 
-func presentationMatches(row dashboardSession, scope string, now time.Time) bool {
+func presentationMatches(row *dashboardSession, scope string, now time.Time) bool {
 	if scope == "archived" {
 		return row.Archived
 	}
@@ -41,18 +41,18 @@ func presentationMatches(row dashboardSession, scope string, now time.Time) bool
 	return false
 }
 
-func presentationPinned(row dashboardSession) bool {
+func presentationPinned(row *dashboardSession) bool {
 	return presentationWorking(row) || row.QueueCount > 0 || row.WaitingOn != nil || row.Attention != nil
 }
 
 func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionViewFilters, now time.Time) sessionViewPlan {
-	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: map[string]dashboardSession{}, roots: map[string]string{}, children: map[string][]string{}, working: map[string]int{}, now: now}
+	p := sessionViewPlan{view: SessionView{Scope: scope, Filters: filters, AsOf: now, Counts: map[string]SessionViewCount{}, Projects: []SessionViewProject{}, Families: []SessionViewFamily{}, Surfaces: []SessionViewSurface{}}, rows: make(map[string]*dashboardSession, len(rows)), roots: map[string]string{}, children: map[string][]string{}, working: map[string]int{}, now: now}
 	for _, row := range rows {
 		if row.Display == nil {
 			display := sessionDisplay(row, now)
 			row.Display = &display
 		}
-		p.rows[row.ID] = row
+		p.rows[row.ID] = &row
 	}
 	for _, row := range rows {
 		seen := map[string]bool{}
@@ -87,7 +87,7 @@ func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionVi
 	}
 	for parent := range p.children {
 		sort.Slice(p.children[parent], func(i, j int) bool {
-			return presentationBefore(p.rows[p.children[parent][i]], p.rows[p.children[parent][j]])
+			return presentationBefore(*p.rows[p.children[parent][i]], *p.rows[p.children[parent][j]])
 		})
 	}
 	for _, candidate := range catalogScopes {
@@ -130,9 +130,9 @@ func presentationBefore(a, b dashboardSession) bool {
 	return a.ID < b.ID
 }
 
-func (p *sessionViewPlan) qualifies(row dashboardSession, scope string, filters SessionViewFilters) bool {
+func (p *sessionViewPlan) qualifies(row *dashboardSession, scope string, filters SessionViewFilters) bool {
 	root := p.rows[p.roots[row.ID]]
-	if root.ID == "" {
+	if root == nil {
 		return false
 	}
 	if row.ID != root.ID && !row.Archived && !presentationMatches(row, "recent", p.now) {
@@ -141,7 +141,7 @@ func (p *sessionViewPlan) qualifies(row dashboardSession, scope string, filters 
 	if filters.ProjectID != "" && (root.Project == nil || root.Project.ID != filters.ProjectID) {
 		return false
 	}
-	return presentationMatches(row, scope, p.now) && (filters.Surface == "" || string(row.Surface) == filters.Surface) && (filters.Status == "" || row.Display.Kind == filters.Status) && (!filters.Attention || row.Attention != nil) && (filters.Query == "" || strings.Contains(presentationSearch(row), filters.Query))
+	return presentationMatches(row, scope, p.now) && (filters.Surface == "" || string(row.Surface) == filters.Surface) && (filters.Status == "" || row.Display.Kind == filters.Status) && (!filters.Attention || row.Attention != nil) && (filters.Query == "" || strings.Contains(presentationSearch(*row), filters.Query))
 }
 
 func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []SessionViewFamily {

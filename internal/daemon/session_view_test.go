@@ -37,7 +37,7 @@ func TestPresentationScopesCountsAndCollapse(t *testing.T) {
 		t.Fatalf("archived=%+v", archived.view.Families)
 	}
 	boundary := dashboardSession{ID: "boundary", LastActive: now.Add(-24 * time.Hour)}
-	if !presentationMatches(boundary, "recent", now) || presentationMatches(boundary, "recent", now.Add(time.Nanosecond)) {
+	if !presentationMatches(&boundary, "recent", now) || presentationMatches(&boundary, "recent", now.Add(time.Nanosecond)) {
 		t.Fatal("recent boundary")
 	}
 }

@@ -114,7 +114,7 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 	return SessionDisplay{Kind: "idle", Label: label}
 }
 
-func presentationWorking(row dashboardSession) bool {
+func presentationWorking(row *dashboardSession) bool {
 	return row.Status == surface.StatusBusy || surface.BackgroundRunning(row.BackgroundTasks) || row.ObservedSubagents != nil && row.ObservedSubagents.Working > 0
 }
 
