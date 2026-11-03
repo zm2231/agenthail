@@ -25,7 +25,7 @@ func (d *Daemon) coordinator() coordinator.Service {
 	return coordinator.Service{Registry: d.Registry, Adapters: d.adapters(), Dispatcher: d.dispatcher(), ClaudeRoot: func(ctx context.Context) string {
 		pick, _ := d.claudeRootPick(ctx, false)
 		return pick.Root
-	}, LeadsChanged: d.coordinatorStarted}
+	}, LeadsChanged: d.syncLeads}
 }
 
 // restartCoordinator delivers a queued message by starting the coordinator

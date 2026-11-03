@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 
@@ -13,10 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-const (
-	pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
-	leadCapability            = "control.project"
-)
+const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
 
 // Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
 type daemonMCPCredentials struct {
@@ -39,11 +35,7 @@ func (c *daemonMCPCredentials) remember(token string) {
 func (c *daemonMCPCredentials) URL() string { return c.url }
 
 func (c *daemonMCPCredentials) Pending(ctx context.Context) (string, string, error) {
-	capabilities := defaultSessionCapabilities
-	if surface.IsLeadStart(ctx) {
-		capabilities = append(slices.Clone(defaultSessionCapabilities), leadCapability)
-	}
-	return c.issuePending(capabilities, pendingCredentialLifetime)
+	return c.issuePending(sessionCapabilities(surface.IsLeadStart(ctx)), pendingCredentialLifetime)
 }
 
 func (c *daemonMCPCredentials) issuePending(capabilities []string, lifetime time.Duration) (string, string, error) {
@@ -87,11 +79,11 @@ func (c *daemonMCPCredentials) Live(sessionID string) (string, bool) {
 }
 
 func (c *daemonMCPCredentials) Rotate(sessionID string) (string, error) {
-	session, err := c.d.Registry.Session(sessionID)
+	capabilities, err := c.d.capabilitiesOf(sessionID)
 	if err != nil {
-		return "", fmt.Errorf("session %s: %w", sessionID, err)
+		return "", fmt.Errorf("permissions of %s: %w", sessionID, err)
 	}
-	issued, err := c.d.Registry.RotateSessionCredential(session.ID, c.d.sessionCapabilities(*session), json.RawMessage(`{}`), time.Now())
+	issued, err := c.d.Registry.RotateSessionCredential(sessionID, capabilities, json.RawMessage(`{}`), time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -101,16 +93,6 @@ func (c *daemonMCPCredentials) Rotate(sessionID string) (string, error) {
 
 func (c *daemonMCPCredentials) Unattached(sessionID string, err error) {
 	c.d.log.Printf("mcp: %s has no agenthail MCP server: %s", c.d.resolveDisplay(sessionID), err)
-}
-
-func (d *Daemon) sessionCapabilities(session surface.Session) []string {
-	capabilities := append([]string(nil), defaultSessionCapabilities...)
-	if project, _ := d.sessionProject(session); project != nil {
-		if spec, err := d.Registry.Coordinator(project.ID); err == nil && spec.SessionID == session.ID {
-			capabilities = append(capabilities, leadCapability)
-		}
-	}
-	return capabilities
 }
 
 func (d *Daemon) attachMCPCredentials(listen string) {
@@ -127,11 +109,6 @@ func (d *Daemon) attachMCPCredentials(listen string) {
 		d.log.Printf("mcp: prune pending credentials: %s", err)
 	}
 	d.pruneLaunchCredentials()
-	if live, err := d.Registry.LiveCredentialSessions(); err != nil {
-		d.log.Printf("mcp: list live credentials: %s", err)
-	} else {
-		d.leads.unsettle(live...)
-	}
 }
 
 func (d *Daemon) pruneLaunchCredentials() {

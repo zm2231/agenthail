@@ -24,7 +24,7 @@ type Service struct {
 	Adapters     surface.Adapters
 	Dispatcher   delivery.Dispatcher
 	ClaudeRoot   func(context.Context) string
-	LeadsChanged func(started string)
+	LeadsChanged func()
 }
 
 type Outcome struct {
@@ -286,7 +286,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		return nil, startErr
 	}
 	if s.LeadsChanged != nil {
-		defer s.LeadsChanged(session.ID)
+		defer s.LeadsChanged()
 	}
 	if err := s.Registry.RegisterSession(*session); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be registered: %w", session.ID, err))

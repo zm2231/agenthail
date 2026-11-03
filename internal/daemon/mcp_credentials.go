@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -10,6 +11,25 @@ import (
 
 var defaultSessionCapabilities = []string{"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write"}
 
+const leadCapability = "control.project"
+
+func sessionCapabilities(lead bool) []string {
+	capabilities := slices.Clone(defaultSessionCapabilities)
+	if lead {
+		capabilities = append(capabilities, leadCapability)
+	}
+	return capabilities
+}
+
+func (d *Daemon) capabilitiesOf(sessionID string) ([]string, error) {
+	lead, err := d.Registry.IsLocalLead(sessionID)
+	return sessionCapabilities(lead), err
+}
+
 func (d *Daemon) issueSessionCredential(session surface.Session) (registry.IssuedCredential, error) {
-	return d.Registry.IssueSessionCredential(session.ID, d.sessionCapabilities(session), json.RawMessage(`{}`), time.Now())
+	capabilities, err := d.capabilitiesOf(session.ID)
+	if err != nil {
+		return registry.IssuedCredential{}, err
+	}
+	return d.Registry.IssueSessionCredential(session.ID, capabilities, json.RawMessage(`{}`), time.Now())
 }

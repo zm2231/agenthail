@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -106,6 +107,29 @@ func TestALeadThatStepsDownWhileAgenthailIsStoppedLosesProjectControlOnRestart(t
 	fixture.daemon.syncLeads()
 	if !refusedAsRevoked(t, fixture.server, first) {
 		t.Fatal("a lead credential outlived its lead across a restart")
+	}
+}
+
+func TestACredentialWhoseCapabilitiesAreWrongWhenAgenthailStartsIsFixedWithinOneTick(t *testing.T) {
+	fixture := newMCPCodexFixture(t)
+	code, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": t.TempDir()})
+	session, _ := created["session"].(map[string]any)
+	id, _ := session["id"].(string)
+	if code >= 300 || id == "" {
+		t.Fatalf("create status=%d", code)
+	}
+	wrong, err := fixture.registry.RotateSessionCredential(id, sessionCapabilities(true), json.RawMessage(`{}`), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.restartAgenthail(t)
+	fixture.daemon.syncLeads()
+	if !refusedAsRevoked(t, fixture.server, wrong.Token) {
+		t.Fatal("a credential granting project control to a non-lead survived a tick")
+	}
+	held, err := fixture.registry.LiveCredentials()
+	if err != nil || !sameCapabilities(held[id], sessionCapabilities(false)) {
+		t.Fatalf("live capabilities=%v err=%v", held[id], err)
 	}
 }
 
