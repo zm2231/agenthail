@@ -15,10 +15,8 @@ type mcpCredentialReplacer interface {
 }
 
 func (d *Daemon) coordinatorStarted(sessionID string) {
+	d.leads.unsettle(sessionID)
 	d.syncLeads()
-	if err := d.reconcileSessionCredential(sessionID); err != nil {
-		d.log.Printf("mcp: %s", err)
-	}
 }
 
 func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) error {

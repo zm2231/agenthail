@@ -285,18 +285,17 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: failureKind(startErr), SessionID: previous, Message: message, Error: fmt.Sprintf("start coordinator: %s", startErr)})
 		return nil, startErr
 	}
+	if s.LeadsChanged != nil {
+		defer s.LeadsChanged(session.ID)
+	}
 	if err := s.Registry.RegisterSession(*session); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be registered: %w", session.ID, err))
 	}
 	if err := s.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: session.ID, Via: registry.OriginCoordinator}); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded as the coordinator's: %w", session.ID, err))
 	}
-	handOverErr := s.Registry.HandOverCoordinator(spec, previous, session.ID)
-	if s.LeadsChanged != nil {
-		s.LeadsChanged(session.ID)
-	}
-	if handOverErr != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, handOverErr))
+	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {

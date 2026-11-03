@@ -36,8 +36,13 @@ func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T)
 		t.Fatal(err)
 	}
 	spawns := host.Spawns(t, session.ID)
-	if len(spawns) != 1 || !strings.Contains(spawnMCPConfig(spawns[0]), "Bearer ahs_pending") || !slices.Contains(spawns[0].Argv, "mcp__agenthail") && !slices.Contains(spawns[0].Argv, "--allowedTools=mcp__agenthail") {
-		t.Fatalf("spawn argv=%v", spawns)
+	if len(spawns) != 1 {
+		t.Fatalf("spawns=%d", len(spawns))
+	}
+	bearer := strings.Contains(spawnMCPConfig(spawns[0]), "Bearer ahs_pending")
+	allowed := slices.Contains(spawns[0].Argv, "mcp__agenthail") || slices.Contains(spawns[0].Argv, "--allowedTools=mcp__agenthail")
+	if !bearer || !allowed {
+		t.Fatalf("pending bearer passed=%v, agenthail tools allowed=%v", bearer, allowed)
 	}
 	if len(credentials.claims) != 1 || credentials.claims[0] != "ref-1="+session.ID {
 		t.Fatalf("claims=%v", credentials.claims)
@@ -56,7 +61,7 @@ func TestACheckerOpensWithoutTheAgenthailServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	if spawns := host.Spawns(t, run); len(spawns) != 1 || strings.Contains(spawnMCPConfig(spawns[0]), "agenthail") || len(credentials.claims) != 0 {
-		t.Fatalf("checker spawn=%v claims=%v", spawns, credentials.claims)
+		t.Fatalf("checker spawns=%d claims=%d, a checker must not get the agenthail server", len(spawns), len(credentials.claims))
 	}
 }
 
