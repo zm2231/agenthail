@@ -47,8 +47,8 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	if err := d.hostTransit(ctx, host); err != nil {
 		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
 	}
-	if state, _ := host.status(); state == hostStateIncompatible {
-		return replyWith(func(w http.ResponseWriter) { writeIncompatibleHost(w, host) })
+	if err := incompatibleHost(host); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
 	}
 	body, _ := json.Marshal(request)
 	return d.forwardHostAction(ctx, p, key, host, request, body)
