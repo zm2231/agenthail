@@ -123,7 +123,7 @@ func (r *Registry) AckMessage(id int64) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not inflight", id)
+		return queueItemNotInflight(id)
 	}
 	return r.ReconcileAttentionItems(r.now())
 }
@@ -146,7 +146,7 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not inflight", id)
+		return queueItemNotInflight(id)
 	}
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentSent, evidence, providerKey); err != nil {
 		return err
@@ -196,7 +196,10 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 1 && status == "dead" {
+	if n, _ := res.RowsAffected(); n != 1 {
+		return queueItemNotInflight(id)
+	}
+	if status == "dead" {
 		if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return err
 		}
@@ -233,7 +236,7 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (int64, er
 		return 0, err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return 0, tx.Commit()
+		return 0, queueItemNotInflight(id)
 	}
 	if began {
 		if err := queueDeliveryRefusalNotice(tx, id, refusal, message); err != nil {
@@ -308,7 +311,7 @@ func deadLetterInflight(tx *sql.Tx, id int64, message string, now time.Time) err
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not inflight", id)
+		return queueItemNotInflight(id)
 	}
 	return nil
 }

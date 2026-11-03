@@ -49,13 +49,20 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 
 // ReleasePeerMessage records that Claude queued a held message for its model
 // after all, which takes it off the problem list. It counts as delivered, so a
-// host replaying its events cannot hold it again.
+// host replaying its events cannot hold it again, and its queued retry is
+// settled so the outbox cannot send it a second time.
 func (r *Registry) ReleasePeerMessage(m PeerMessage) (bool, error) {
-	return r.peerTransition(m, func(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
+	changed, err := r.peerTransition(m, func(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 		if intent.Status != DeliveryIntentHeld {
 			return false, nil
 		}
 		if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure='',updated_at=datetime('now') WHERE id=?`, DeliveryIntentDelivered, surface.EvidenceDelivered, intent.ID); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=(SELECT queue_id FROM delivery_intents WHERE id=?) AND status IN ('pending','inflight')`, surface.EvidenceDelivered, intent.ID); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE delivery_key=? AND status='pending'`, fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries)); err != nil {
 			return false, err
 		}
 		payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID})
@@ -65,6 +72,10 @@ func (r *Registry) ReleasePeerMessage(m PeerMessage) (bool, error) {
 		_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.released:%d:%d", intent.ID, intent.Retries), Type: "delivery.dismissed", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: time.Now().UTC()})
 		return true, err
 	})
+	if err != nil || !changed {
+		return changed, err
+	}
+	return true, r.ReconcileAttentionItems(r.now())
 }
 
 // DropPeerMessage records that Claude will never pass the message to its
