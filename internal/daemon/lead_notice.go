@@ -1,32 +1,28 @@
 package daemon
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type noticeRecipient struct {
-	lead      *registry.CoordinatorSpec
 	sessionID string
 	role      string
 }
 
+// A coordinator that has never started a conversation leads nothing yet, so the spawner hears instead.
 func (d *Daemon) noticeRecipient(session surface.Session) (noticeRecipient, bool) {
 	service := d.coordinator()
 	if _, coordinates := service.Of(session.ID); !coordinates {
 		if project, err := d.sessionProject(session); err == nil && project != nil {
 			if spec, err := service.ProjectLead(project.ID, project.DisplayName); err == nil {
-				leadSession := ""
-				if spec.HostID == "" {
-					leadSession, _ = d.Registry.CoordinatorSessionID(spec)
-				}
-				if spec.HostID != "" || leadSession != session.ID {
-					return noticeRecipient{lead: &spec, sessionID: leadSession, role: "lead"}, true
+				if lead := d.leadSession(spec); lead != "" && lead != session.ID {
+					return noticeRecipient{sessionID: lead, role: "lead"}, true
 				}
 			}
 		}
@@ -38,19 +34,40 @@ func (d *Daemon) noticeRecipient(session surface.Session) (noticeRecipient, bool
 	return noticeRecipient{sessionID: origin.CreatorID, role: "spawner"}, true
 }
 
-// Keys stay unique after delivery, so a keyed notice is sent once and can be withdrawn while pending.
-func (d *Daemon) sendNotice(ctx context.Context, to noticeRecipient, from surface.Session, message, key string) error {
-	options := surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: string(deliverypolicy.Steer)}
-	switch {
-	case to.lead != nil && to.lead.HostID != "":
-		_, err := daemonBroadcastDelivery{d: d}.PeerCoordinator(ctx, *to.lead, message, from.ID)
-		return err
-	case to.lead != nil && to.sessionID == "":
-		_, err := d.coordinator().Deliver(ctx, *to.lead, message, options)
-		return err
+func (d *Daemon) leadSession(spec registry.CoordinatorSpec) string {
+	if spec.HostID == "" {
+		id, err := d.Registry.CoordinatorSessionID(spec)
+		if err != nil {
+			return ""
+		}
+		return id
 	}
-	_, err := d.Registry.QueueMessageWithOptions(to.sessionID, message, key, options)
-	return err
+	id := spec.SessionID
+	if host, target, ok := hosts.Split(id); ok {
+		if host != spec.HostID {
+			return ""
+		}
+		id = target
+	}
+	if owner, err := d.Registry.SessionHost(id); err != nil || id == "" || owner != spec.HostID {
+		return ""
+	}
+	return id
+}
+
+func (d *Daemon) sendNotice(to noticeRecipient, from surface.Session, message, key string) (bool, error) {
+	if used, err := d.Registry.DeliveryKeyUsed(key); err != nil || used {
+		return false, err
+	}
+	busy := string(deliverypolicy.Steer)
+	if owner, err := d.Registry.SessionHost(to.sessionID); err != nil {
+		return false, err
+	} else if owner != "" {
+		_, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: to.sessionID, Message: message, Key: key, SourceSessionID: from.ID, BusyDelivery: busy})
+		return err == nil, err
+	}
+	_, err := d.Registry.QueueMessageWithOptions(to.sessionID, message, key, surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: busy})
+	return err == nil, err
 }
 
 func (d *Daemon) answerTarget(sessionID string) string {
@@ -75,13 +92,13 @@ func waitingNotice(name, target string, waiting surface.Waiting, runtime surface
 	return fmt.Sprintf("[agenthail] %s is blocked on a prompt: %s\nAnswer it: agenthail answer %s <allow|deny|\"answer\"> --request %s\nThe person was notified too; the first answer settles it.", name, asks, target, request.ID)
 }
 
-func (d *Daemon) noticeWaiting(ctx context.Context, session surface.Session, waiting surface.Waiting, request surface.Request, open bool) {
+func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting, request surface.Request, open bool) {
 	to, ok := d.noticeRecipient(session)
 	if !ok {
 		return
 	}
 	message := waitingNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), waiting, session.RuntimeKind, request, open)
-	if err := d.sendNotice(ctx, to, session, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
+	if _, err := d.sendNotice(to, session, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
 		d.log.Printf("tell the %s that %s is waiting: %s", to.role, d.resolveDisplay(session.ID), err)
 	}
 }

@@ -5,6 +5,10 @@ import (
 	"errors"
 )
 
+func (r *Registry) DeliveryKeyUsed(deliveryKey string) (bool, error) {
+	return r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE delivery_key=? AND delivery_key!='')`, deliveryKey)
+}
+
 func (r *Registry) CancelPendingByKey(deliveryKey string) (bool, error) {
 	if deliveryKey == "" {
 		return false, nil

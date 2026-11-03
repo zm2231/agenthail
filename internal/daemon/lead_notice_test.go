@@ -76,8 +76,8 @@ func (f noticeFixture) notices(t *testing.T) []registry.QueueRow {
 func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
 	notices := f.notices(t)
 	if len(notices) != 1 || notices[0].SessionID != "lead" || notices[0].Status != "pending" {
 		t.Fatalf("notices=%+v", notices)
@@ -91,7 +91,7 @@ func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) 
 
 func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {
 	f := newNoticeFixture(t)
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
 	if notices := f.notices(t); len(notices) != 1 || notices[0].SessionID != "spawner" {
 		t.Fatalf("notices=%+v", notices)
 	}
@@ -100,7 +100,7 @@ func TestAPromptGoesToTheSpawnerWhenTheProjectHasNoLead(t *testing.T) {
 func TestALeadsOwnPromptGoesToItsSpawner(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "worker")
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
 	if notices := f.notices(t); len(notices) != 1 || notices[0].SessionID != "spawner" {
 		t.Fatalf("notices=%+v", notices)
 	}
@@ -110,7 +110,7 @@ func TestAPromptWithNoLeadAndNoSpawnerTellsNoAgent(t *testing.T) {
 	f := newNoticeFixture(t)
 	orphan := f.worker
 	orphan.ID = "lead"
-	f.d.noticeWaiting(context.Background(), orphan, f.waiting, f.request, true)
+	f.d.noticeWaiting(orphan, f.waiting, f.request, true)
 	rows, err := f.reg.ListQueue(true, nil)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
@@ -120,22 +120,46 @@ func TestAPromptWithNoLeadAndNoSpawnerTellsNoAgent(t *testing.T) {
 func TestAnAnsweredPromptWithdrawsItsPendingNoticeAndIsNotNoticedAgain(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
 	f.d.withdrawWaitingNow(context.Background(), f.worker.ID, f.waiting)
 	notices := f.notices(t)
 	if len(notices) != 1 || notices[0].Status != "canceled" {
 		t.Fatalf("notices=%+v", notices)
 	}
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, f.request, true)
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
 	if again := f.notices(t); len(again) != 1 || again[0].Status != "canceled" {
 		t.Fatalf("a withdrawn notice was sent again: %+v", again)
+	}
+}
+
+func TestAPromptNoticedBeforeARestartIsNotNoticedAgainAfterIt(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	restarted := newTestDaemon(t, f.reg, f.d.Surfaces)
+	restarted.noticeWaiting(f.worker, f.waiting, f.request, true)
+	if notices := f.notices(t); len(notices) != 1 {
+		t.Fatalf("notices=%+v", notices)
+	}
+}
+
+func TestACoordinatorThatNeverStartedLeavesThePromptToTheSpawner(t *testing.T) {
+	f := newNoticeFixture(t)
+	f.setLead(t, "")
+	f.d.noticeWaiting(f.worker, f.waiting, f.request, true)
+	notices := f.notices(t)
+	if len(notices) != 1 || notices[0].SessionID != "spawner" {
+		t.Fatalf("notices=%+v", notices)
+	}
+	if id, err := f.reg.CoordinatorSessionID(registry.CoordinatorSpec{Name: "widget-lead"}); err != nil || id != "" {
+		t.Fatalf("the notice started the coordinator: %q %v", id, err)
 	}
 }
 
 func TestAPromptAgenthailCannotReadStillTellsTheLeadWhatIsWaiting(t *testing.T) {
 	f := newNoticeFixture(t)
 	f.setLead(t, "lead")
-	f.d.noticeWaiting(context.Background(), f.worker, f.waiting, surface.Request{}, false)
+	f.d.noticeWaiting(f.worker, f.waiting, surface.Request{}, false)
 	notices := f.notices(t)
 	if len(notices) != 1 || !strings.Contains(notices[0].Message, "needs your approval") {
 		t.Fatalf("notices=%+v", notices)

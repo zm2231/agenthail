@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -78,6 +79,68 @@ func TestAWorkersBlockedGoalReachesItsLeadOnceAndThePerson(t *testing.T) {
 	}
 	if desktop.Load() != 1 {
 		t.Fatalf("the person was notified %d times", desktop.Load())
+	}
+}
+
+func TestAGoalReadThatFailsIsReadAgainOnTheNextSweep(t *testing.T) {
+	f, goals, _ := goalSweepFixture(t)
+	now := time.Now()
+	goals.goalErr = errors.New("app-server unreachable")
+	f.d.sweepStoppedGoals(context.Background(), now)
+	goals.goalErr = nil
+	f.d.sweepStoppedGoals(context.Background(), now.Add(goalSweepEvery))
+	f.d.sweepStoppedGoals(context.Background(), now.Add(2*goalSweepEvery))
+	if notices := f.notices(t); len(notices) != 1 {
+		t.Fatalf("notices=%+v", notices)
+	}
+}
+
+func TestANoticeThatFailsToQueueIsQueuedOnTheNextSweep(t *testing.T) {
+	f, _, _ := goalSweepFixture(t)
+	loner := f.worker
+	loner.ID = "loner"
+	f.fake.sessions[loner.ID] = loner
+	if err := f.reg.RegisterSession(loner); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reg.RecordSessionOrigin(registry.OriginOf(loner.ID, "late-spawner")); err != nil {
+		t.Fatal(err)
+	}
+	f.d.discoverCatalog(context.Background())
+	var desktop atomic.Int32
+	f.d.notifyDesktop = func(_, _, sessionID, _, _ string, _ []surface.RequestAction) error {
+		if sessionID == loner.ID {
+			desktop.Add(1)
+		}
+		return nil
+	}
+	f.worker = loner
+	now := time.Now()
+	f.d.sweepStoppedGoals(context.Background(), now)
+	if notices := f.notices(t); len(notices) != 0 || desktop.Load() != 0 {
+		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())
+	}
+	spawner := f.fake.sessions["spawner"]
+	spawner.ID = "late-spawner"
+	if err := f.reg.RegisterSession(spawner); err != nil {
+		t.Fatal(err)
+	}
+	f.d.sweepStoppedGoals(context.Background(), now.Add(goalSweepEvery))
+	f.d.sweepStoppedGoals(context.Background(), now.Add(2*goalSweepEvery))
+	if notices := f.notices(t); len(notices) != 1 || notices[0].SessionID != "late-spawner" || desktop.Load() != 1 {
+		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())
+	}
+}
+
+func TestARestartDoesNotRepeatAStoppedGoalToTheLeadOrThePerson(t *testing.T) {
+	f, _, desktop := goalSweepFixture(t)
+	f.setLead(t, "lead")
+	f.d.sweepStoppedGoals(context.Background(), time.Now())
+	restarted := newTestDaemon(t, f.reg, f.d.Surfaces)
+	restarted.notifyDesktop = f.d.notifyDesktop
+	restarted.sweepStoppedGoals(context.Background(), time.Now())
+	if notices := f.notices(t); len(notices) != 1 || desktop.Load() != 1 {
+		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())
 	}
 }
 

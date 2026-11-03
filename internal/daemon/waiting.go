@@ -203,7 +203,7 @@ func (d *Daemon) announceWaiting(session surface.Session, waiting surface.Waitin
 		mobile := mobileNotification{Title: "Agenthail", Message: mobileMessage, SessionID: conversationID, TurnID: questionID, EventType: "session.waiting", CollapseID: key}
 		var actions []surface.RequestAction
 		request, open := d.waitingRequest(notificationCtx, session, waiting)
-		d.noticeWaiting(notificationCtx, session, waiting, request, open)
+		d.noticeWaiting(session, waiting, request, open)
 		if open {
 			// A notification's buttons answer the session it names, so one
 			// that carries a request names the session that holds it.
