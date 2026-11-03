@@ -54,7 +54,7 @@ func mcpSession(t *testing.T, server *httptest.Server, token string) *mcp.Client
 
 func callMCP(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any) (map[string]any, bool) {
 	t.Helper()
-	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: tool, Arguments: args})
+	result, err := session.CallTool(t.Context(), callParams(tool, args))
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -67,6 +67,13 @@ func callMCP(t *testing.T, session *mcp.ClientSession, tool string, args map[str
 		t.Fatalf("%s structured content %s: %v", tool, encoded, err)
 	}
 	return out, result.IsError
+}
+
+func callParams(tool string, args map[string]any) *mcp.CallToolParams {
+	if args == nil {
+		args = map[string]any{}
+	}
+	return &mcp.CallToolParams{Name: tool, Arguments: args}
 }
 
 func postMCP(t *testing.T, server *httptest.Server, headers map[string]string) (int, map[string]any) {

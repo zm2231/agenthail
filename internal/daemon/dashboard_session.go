@@ -13,6 +13,25 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func (d *Daemon) readSessionPage(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int, operationTimeout time.Duration) (*surface.SessionReadResult, error) {
+	if historyBefore, provider := decodeProviderHistoryCursor(before); provider {
+		historyCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+		defer cancel()
+		return d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
+	}
+	if before > 0 {
+		return d.readJournalPage(session.ID, uint64(before), limit)
+	}
+	seedCtx, cancel := context.WithTimeout(ctx, min(operationTimeout, sessionPageCatchUpWait))
+	seedErr := d.sources.seed(seedCtx, session, adapter)
+	cancel()
+	read, err := d.readJournalPage(session.ID, 0, limit)
+	if err == nil && seedErr != nil && read.JournalSeq == 0 {
+		err = seedErr
+	}
+	return read, err
+}
+
 func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request) {
 	d.dashboardSessionHandlerWithTimeout(w, r, surfaceOperationTimeout)
 }
@@ -62,23 +81,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	var sessionRead *surface.SessionReadResult
-	var sessionReadErr error
-	if historyBefore, provider := decodeProviderHistoryCursor(timelineBefore); provider {
-		historyCtx, cancel := context.WithTimeout(r.Context(), operationTimeout)
-		sessionRead, sessionReadErr = d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
-		cancel()
-	} else if timelineBefore > 0 {
-		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
-	} else {
-		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, sessionPageCatchUpWait))
-		seedErr := d.sources.seed(seedCtx, session, adapter)
-		cancel()
-		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
-		if sessionReadErr == nil && seedErr != nil && sessionRead.JournalSeq == 0 {
-			sessionReadErr = seedErr
-		}
-	}
+	sessionRead, sessionReadErr := d.readSessionPage(r.Context(), session, adapter, timelineBefore, limit, operationTimeout)
 	var historyGap *registry.SessionJournalHistoryGapError
 	if errors.As(sessionReadErr, &historyGap) {
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{
