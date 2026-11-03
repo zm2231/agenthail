@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -121,6 +123,82 @@ func TestSettingAndReplacingALeadPublishesBothRowsAndMovesTheBaseTag(t *testing.
 	}
 	if moved := base(tag); moved.Code != http.StatusOK || moved.Header().Get("ETag") == tag {
 		t.Fatalf("a replaced lead kept the base tag: %d", moved.Code)
+	}
+}
+
+type leadProbe struct {
+	*httptest.ResponseRecorder
+	seen    bool
+	observe func()
+}
+
+func (p *leadProbe) WriteHeader(status int) {
+	if !p.seen {
+		p.seen = true
+		p.observe()
+	}
+	p.ResponseRecorder.WriteHeader(status)
+}
+
+func (p *leadProbe) Write(body []byte) (int, error) {
+	if !p.seen {
+		p.seen = true
+		p.observe()
+	}
+	return p.ResponseRecorder.Write(body)
+}
+
+func TestACoordinatorActionAnswersOnlyAfterTheLeadIsPublished(t *testing.T) {
+	for _, route := range []string{"/api/v1/actions", "/api/action"} {
+		t.Run(route, func(t *testing.T) { assertLeadPublishedBeforeAnswer(t, route) })
+	}
+}
+
+func assertLeadPublishedBeforeAnswer(t *testing.T, route string) {
+	d, reg, fake, _, _, _ := baseFixture(t)
+	for _, id := range []string{"from", "to"} {
+		session := fake.sessions[id]
+		session.LastActive = time.Now().Add(-5 * 24 * time.Hour)
+		fake.sessions[id] = session
+		if err := reg.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.discoverCatalog(context.Background())
+	d.syncLeads()
+	handler := dashboardRouter(d)
+	lead := func(id string) bool {
+		row := storedProjection(t, reg, id)
+		return row.Current && row.CurrentReason == "lead"
+	}
+	act := func(body map[string]any) (bool, bool) {
+		t.Helper()
+		encoded, _ := json.Marshal(body)
+		request := httptest.NewRequest(http.MethodPost, route, bytes.NewReader(encoded))
+		if route == "/api/action" {
+			request.Host = "example.test"
+			request.Header.Set("Origin", "http://example.test")
+			addBrowserCookie(handler, request)
+		} else {
+			request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+		}
+		var to, from bool
+		probe := &leadProbe{ResponseRecorder: httptest.NewRecorder(), observe: func() { to, from = lead("to"), lead("from") }}
+		handler.ServeHTTP(probe, request)
+		if probe.Code != http.StatusOK {
+			t.Fatalf("%v: %d %s", body["action"], probe.Code, probe.Body.String())
+		}
+		return to, from
+	}
+	if to, from := act(map[string]any{"action": "coordinator-set", "sessionId": "to", "name": "lead-a"}); !to || from {
+		t.Fatalf("set answered with to=%t from=%t", to, from)
+	}
+	if to, from := act(map[string]any{"action": "coordinator-set", "sessionId": "from", "name": "lead-a", "replace": true}); to || !from {
+		t.Fatalf("replace answered with to=%t from=%t", to, from)
+	}
+	project := storedProjection(t, reg, "from").Project
+	if to, from := act(map[string]any{"action": "coordinator-clear", "projectId": project.ID}); to || from {
+		t.Fatalf("clear answered with to=%t from=%t", to, from)
 	}
 }
 
