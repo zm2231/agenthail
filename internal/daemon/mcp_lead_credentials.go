@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -12,41 +14,43 @@ type mcpCredentialReplacer interface {
 	ReplaceMCPCredential(ctx context.Context, sessionID, url, token string) error
 }
 
-func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) {
+func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) error {
+	var failed []error
 	for id := range previous {
 		if !current[id] {
-			d.reconcileSessionCredential(id)
+			failed = append(failed, d.reconcileSessionCredential(id))
 		}
 	}
 	for id := range current {
 		if !previous[id] {
-			d.reconcileSessionCredential(id)
+			failed = append(failed, d.reconcileSessionCredential(id))
 		}
 	}
+	return errors.Join(failed...)
 }
 
-func (d *Daemon) reconcileSessionCredential(sessionID string) {
+func (d *Daemon) reconcileSessionCredential(sessionID string) error {
 	credentials := d.mcpCredentials.Load()
 	if credentials == nil {
-		return
+		return nil
 	}
 	held, live, err := d.Registry.LiveCredentialCapabilities(sessionID)
 	if err != nil || !live {
-		return
+		return err
 	}
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
-		return
+		return fmt.Errorf("load %s: %w", sessionID, err)
 	}
 	if slices.Equal(slices.Compact(slices.Sorted(slices.Values(held))), slices.Compact(slices.Sorted(slices.Values(d.sessionCapabilities(*session))))) {
-		return
+		return nil
 	}
 	token, err := credentials.Rotate(sessionID)
 	if err != nil {
-		d.log.Printf("mcp: rotate %s after its permissions changed: %s", d.resolveDisplay(sessionID), err)
-		return
+		return fmt.Errorf("rotate %s after its permissions changed: %w", d.resolveDisplay(sessionID), err)
 	}
 	d.deliverRotatedCredential(*session, credentials.URL(), token)
+	return nil
 }
 
 func (d *Daemon) deliverRotatedCredential(session surface.Session, url, token string) {

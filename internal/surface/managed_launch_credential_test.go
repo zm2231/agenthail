@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 func launchCredentialRun(t *testing.T, outcome error) (*processLauncher, *string) {
@@ -62,6 +63,31 @@ func TestALaunchThatNeverStartsRemovesItsCredential(t *testing.T) {
 	path, _ := ManagedCodexLaunchCredentialPath(*session)
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("credential file left behind: %v", err)
+	}
+}
+
+func TestLaunchCredentialFilesNobodyTookAreSweptOnceTheirLaunchExpires(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	old, err := writeManagedCodexLaunchCredential("agenthail-old", &LaunchMCPCredential{URL: "u", Token: "t", Ref: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := writeManagedCodexLaunchCredential("agenthail-fresh", &LaunchMCPCredential{URL: "u", Token: "t", Ref: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := PruneManagedCodexLaunchCredentials(time.Now().Add(-5 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired launch file kept: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("live launch file removed: %v", err)
 	}
 }
 

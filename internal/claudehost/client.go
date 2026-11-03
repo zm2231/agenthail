@@ -101,6 +101,7 @@ type Session struct {
 	PermissionMode string       `json:"permissionMode"`
 	Model          string       `json:"model"`
 	Checker        string       `json:"checker,omitempty"`
+	MCPError       string       `json:"mcpError,omitempty"`
 	ContextWindow  int64        `json:"contextWindow"`
 	ContextModel   string       `json:"contextModel"`
 	AutoCompact    *AutoCompact `json:"autoCompact"`
@@ -322,7 +323,7 @@ func (c Client) Hello(ctx context.Context) (Hello, error) {
 
 // Open opens a session in a host of this build's protocol. A conversation a
 // retiring host still runs is held by the current one; Open returns it as that
-// host lists it.
+// host lists it, after handing that host the request's MCP credential.
 func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) {
 	var out Session
 	hello, err := c.Hello(ctx)
@@ -341,6 +342,11 @@ func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) 
 	}
 	for _, session := range listing.Sessions {
 		if session.SessionID == request.Resume {
+			if request.MCP != nil {
+				if _, replaceErr := c.ReplaceMCP(ctx, session.SessionID, *request.MCP); replaceErr != nil {
+					session.MCPError = replaceErr.Error()
+				}
+			}
 			return session, nil
 		}
 	}

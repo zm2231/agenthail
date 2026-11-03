@@ -89,7 +89,12 @@ func TestStartAndForkCarryAPendingCredential(t *testing.T) {
 		client := &scriptedThreadClient{}
 		_, err := c.codexThreadRequest(context.Background(), client, method, nil, map[string]any{"cwd": "/w"}, time.Second)
 		if err != nil || bearerOf(client.calls[0].params) != "Bearer ahs_pending" || client.calls[0].params["cwd"] != "/w" {
-			t.Fatalf("%s: err=%v params=%v", method, err, client.calls[0].params)
+			t.Fatalf("%s: err=%v, the call did not carry the pending bearer and its own params", method, err)
+		}
+		config, _ := client.calls[0].params["config"].(map[string]any)
+		servers, _ := config["mcp_servers"].(map[string]any)
+		if server, _ := servers[mcpServerName].(map[string]any); server["default_tools_approval_mode"] != "approve" {
+			t.Fatalf("%s: the agenthail tools would wait for approval", method)
 		}
 		if len(credentials.claims) != 1 || credentials.claims[0] != "ref-1=new-thread" {
 			t.Fatalf("%s: claims=%v", method, credentials.claims)
@@ -163,7 +168,7 @@ func TestWithoutCredentialsThreadRequestsPassThrough(t *testing.T) {
 	client := &scriptedThreadClient{}
 	_, err := (&Codex{}).codexThreadRequest(context.Background(), client, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second)
 	if err != nil || bearerOf(client.calls[0].params) != "" {
-		t.Fatalf("err=%v params=%v", err, client.calls[0].params)
+		t.Fatalf("err=%v, a call without credentials carried a bearer", err)
 	}
 	if _, err := (&Codex{}).codexThreadRequest(context.Background(), client, "thread/read", nil, nil, time.Second); err != nil {
 		t.Fatalf("pass-through refused: %v", err)

@@ -130,6 +130,60 @@ func TestACreatedClaudeHostSessionReachesTheMCPServerAsItself(t *testing.T) {
 	}
 }
 
+func (f *mcpClaudeFixture) addProject(t *testing.T) {
+	t.Helper()
+	root, err := canonicalCatalogPath(f.host.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	f.addProject(t)
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-new","surface":"claude","cwd":%q,"name":"captain"}`, f.host.Cwd))
+	sent := f.action(t, `{"action":"coordinator-send","name":"captain","message":"hello"}`)
+	if sent["started"] != true {
+		t.Fatalf("send did not start the coordinator: %s", redacted(sent))
+	}
+	spec, err := f.registry.CoordinatorNamed("captain")
+	if err != nil || spec.SessionID == "" {
+		t.Fatalf("spec=%+v err=%v", spec, err)
+	}
+	replaced := f.replacedTokens(t, spec.SessionID)
+	if len(replaced) != 1 || !slices.Contains(f.capabilities(t, replaced[0]), any("control.project")) {
+		t.Fatalf("the started coordinator still runs a non-lead credential: replaced=%s", redacted(replaced))
+	}
+}
+
+func TestALeadChangeWhoseRotationFailsIsRetriedUntilItTakes(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	f.addProject(t)
+	id, first := f.create(t)
+	if _, err := f.registry.WriteDB().Exec(`CREATE TRIGGER fail_rotation BEFORE UPDATE OF revoked_at_ms ON session_credentials BEGIN SELECT RAISE(ABORT, 'injected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
+	f.daemon.syncLeads()
+	if len(f.replacedTokens(t, id)) != 0 || slices.Contains(f.capabilities(t, first), any("control.project")) {
+		t.Fatal("a failed rotation was reported as done")
+	}
+	if _, err := f.registry.WriteDB().Exec(`DROP TRIGGER fail_rotation`); err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.syncLeads()
+	replaced := f.replacedTokens(t, id)
+	if len(replaced) != 1 || !slices.Contains(f.capabilities(t, replaced[0]), any("control.project")) {
+		t.Fatalf("the lead change was not retried: replaced=%s", redacted(replaced))
+	}
+	if status, body := postMCP(t, f.server, map[string]string{"Authorization": "Bearer " + first}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
+		t.Fatalf("old token status=%d body=%v", status, body)
+	}
+}
+
 func TestBecomingAndLeavingCoordinatorRotatesAHostedSessionsCredentialLive(t *testing.T) {
 	f := newMCPClaudeFixture(t)
 	root, err := canonicalCatalogPath(f.host.Cwd)
@@ -146,7 +200,7 @@ func TestBecomingAndLeavingCoordinatorRotatesAHostedSessionsCredentialLive(t *te
 	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
 	replaced := f.replacedTokens(t, id)
 	if len(replaced) != 1 || replaced[0] == first {
-		t.Fatalf("replaced tokens=%v", replaced)
+		t.Fatalf("replaced tokens=%s", redacted(replaced))
 	}
 	if status, body := postMCP(t, f.server, map[string]string{"Authorization": "Bearer " + first}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
 		t.Fatalf("old token status=%d body=%v", status, body)
@@ -157,6 +211,6 @@ func TestBecomingAndLeavingCoordinatorRotatesAHostedSessionsCredentialLive(t *te
 	f.action(t, `{"action":"coordinator-clear","projectId":"p-lead"}`)
 	replaced = f.replacedTokens(t, id)
 	if len(replaced) != 2 || slices.Contains(f.capabilities(t, replaced[1]), any("control.project")) {
-		t.Fatalf("after clearing: replaced=%v", replaced)
+		t.Fatalf("after clearing: replaced=%s", redacted(replaced))
 	}
 }

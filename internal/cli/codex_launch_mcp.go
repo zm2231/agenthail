@@ -38,6 +38,9 @@ func (c launchMCPCredentials) Unattached(threadID string, err error) {
 
 func (a *App) managedCodexForLaunch(launchID string) (*surfaces.Codex, error) {
 	codex := surfaces.NewCodex("")
+	if launchID == "" {
+		return codex, nil
+	}
 	credential, err := surface.TakeManagedCodexLaunchCredential(launchID)
 	if err != nil || credential == nil {
 		return codex, err

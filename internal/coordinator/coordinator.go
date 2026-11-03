@@ -20,10 +20,11 @@ import (
 // delivered or queued for the running conversation, or it starts a new one
 // from the saved spec when the old conversation is gone.
 type Service struct {
-	Registry   *registry.Registry
-	Adapters   surface.Adapters
-	Dispatcher delivery.Dispatcher
-	ClaudeRoot func(context.Context) string
+	Registry     *registry.Registry
+	Adapters     surface.Adapters
+	Dispatcher   delivery.Dispatcher
+	ClaudeRoot   func(context.Context) string
+	LeadsChanged func()
 }
 
 type Outcome struct {
@@ -292,6 +293,9 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	}
 	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
+	}
+	if s.LeadsChanged != nil {
+		s.LeadsChanged()
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {

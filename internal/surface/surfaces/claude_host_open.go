@@ -24,7 +24,11 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 		return c.host.client.Open(ctx, request)
 	}
 	request.MCP = &claudehost.MCPServer{URL: credentials.URL(), Token: token}
-	return c.host.client.Open(ctx, request)
+	opened, err := c.host.client.Open(ctx, request)
+	if err == nil && opened.MCPError != "" {
+		credentials.Unattached(id, errors.New(opened.MCPError))
+	}
+	return opened, err
 }
 
 func (c *Claude) ReplaceMCPCredential(ctx context.Context, sessionID, url, token string) error {

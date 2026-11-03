@@ -448,7 +448,8 @@ async function open(params) {
   const existing = sessions.get(id);
   if (existing) {
     if (params.mcp && params.mcp.token !== existing.mcpToken) {
-      await existing.attachAgenthail(params.mcp).catch((error) => log(`session ${id} kept its agenthail MCP server: ${error.message}`));
+      const failed = await existing.attachAgenthail(params.mcp).then(() => '', (error) => error.message);
+      if (failed) return { ...existing.describe(), mcpError: failed };
     }
     return existing.describe();
   }

@@ -67,10 +67,34 @@ func TestATerminalLaunchStartsItsThreadWithTheLaunchCredentialAndClaimsIt(t *tes
 	server0, _ := servers["agenthail"].(map[string]any)
 	headers, _ := server0["http_headers"].(map[string]any)
 	if len(starts) != 1 || server0["url"] != "http://127.0.0.1:7412/mcp" || headers["Authorization"] != "Bearer ahs_launch" {
-		t.Fatalf("thread/start config=%v", starts[0]["config"])
+		t.Fatalf("thread/start calls=%d did not carry the launch credential and url", len(starts))
 	}
 	if len(claims) != 1 || claims[0]["ref"] != "ref-launch" || claims[0]["threadId"] != "thread-launched" {
 		t.Fatalf("claims=%v", claims)
+	}
+}
+
+func TestALaunchThatFailsBeforeCodexStartsLeavesNoCredentialFile(t *testing.T) {
+	home := codextest.Home(t)
+	t.Setenv("PATH", filepath.Join(home, "no-codex-here"))
+	launchID := "agenthail-preflight"
+	t.Setenv("AGENTHAIL_CODEX_LAUNCH_ID", launchID)
+	path, err := surface.ManagedCodexLaunchCredentialPath(launchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"url":"http://127.0.0.1:7412/mcp","token":"ahs_launch","ref":"ref-launch"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	if err := app.cmdCodex(nil); err == nil {
+		t.Fatal("agenthail codex started without a Codex to run")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("launch credential left on disk after a failed preflight: %v", err)
 	}
 }
 

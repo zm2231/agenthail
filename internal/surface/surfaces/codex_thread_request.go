@@ -18,6 +18,7 @@ const (
 func mcpServerConfig(url, token string) map[string]any {
 	return map[string]any{"mcp_servers": map[string]any{mcpServerName: map[string]any{
 		"url": url, "http_headers": map[string]any{"Authorization": "Bearer " + token}, "tool_timeout_sec": mcpToolTimeoutSec,
+		"default_tools_approval_mode": "approve",
 	}}}
 }
 
@@ -60,7 +61,17 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 // A loaded thread ignores a resume's config, so a held token rides every resume; without one, the thread's MCP status shows whether it loaded bare.
 func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
-		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
+		response, err := client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
+		if err != nil || !c.staleMCP(session.ID) {
+			return response, err
+		}
+		if reattached, err := c.reattachWith(ctx, client, credentials, session.ID, params, token, wait); err != nil {
+			credentials.Unattached(session.ID, err)
+		} else {
+			c.clearStaleMCP(session.ID)
+			response = reattached
+		}
+		return response, nil
 	}
 	response, err := client.Request(ctx, codexThreadResume, params, wait)
 	if err != nil {
@@ -87,6 +98,11 @@ func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials
 	if err != nil {
 		return nil, fmt.Errorf("rotate the credential: %w", err)
 	}
+	c.clearStaleMCP(threadID)
+	return c.reattachWith(ctx, client, credentials, threadID, params, token, wait)
+}
+
+func (c *Codex) reattachWith(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, token string, wait time.Duration) (map[string]any, error) {
 	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/unsubscribe: %w", err)
 	}

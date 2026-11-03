@@ -50,6 +50,7 @@ func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.Sur
 	if agent != surface.KindCodex || (launcher != surface.LauncherTMUX && launcher != surface.LauncherCMUX) {
 		return nil, nil
 	}
+	c.d.pruneLaunchCredentials()
 	token, ref, err := c.issuePending(pendingLaunchLifetime)
 	if err != nil {
 		return nil, err
@@ -115,5 +116,12 @@ func (d *Daemon) attachMCPCredentials(listen string) {
 	}
 	if err := d.Registry.PrunePendingCredentials(time.Now()); err != nil {
 		d.log.Printf("mcp: prune pending credentials: %s", err)
+	}
+	d.pruneLaunchCredentials()
+}
+
+func (d *Daemon) pruneLaunchCredentials() {
+	if err := surface.PruneManagedCodexLaunchCredentials(time.Now().Add(-pendingLaunchLifetime)); err != nil {
+		d.log.Printf("mcp: remove expired launch credential files: %s", err)
 	}
 }

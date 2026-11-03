@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
 )
@@ -26,6 +27,34 @@ func ManagedCodexLaunchCredentialPath(launchID string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(receipt, ".json") + ".mcp", nil
+}
+
+func PruneManagedCodexLaunchCredentials(cutoff time.Time) error {
+	dir, err := managedCodexLaunchReceiptDir()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var failed []error
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "agenthail-") || !strings.HasSuffix(entry.Name(), ".mcp") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			failed = append(failed, err)
+		}
+	}
+	return errors.Join(failed...)
 }
 
 func writeManagedCodexLaunchCredential(launchID string, credential *LaunchMCPCredential) (string, error) {

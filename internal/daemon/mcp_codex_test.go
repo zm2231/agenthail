@@ -101,11 +101,11 @@ func TestACreatedCodexThreadStartsWithItsOwnCredential(t *testing.T) {
 	}
 	starts := fixture.lifecycle.Daemon().Calls("thread/start")
 	if len(starts) != 1 {
-		t.Fatalf("thread/start=%v", starts)
+		t.Fatalf("thread/start=%s", redacted(starts))
 	}
 	token := codexBearer(starts[0])
 	if !strings.HasPrefix(token, registry.SessionTokenPrefix) {
-		t.Fatalf("thread/start carried no credential: %v", starts[0]["config"])
+		t.Fatalf("thread/start carried no credential: %s", redacted(starts[0]["config"]))
 	}
 	if whoami, refused := fixture.whoami(t, token); refused || whoami["sessionId"] != id {
 		t.Fatalf("whoami=%v refused=%v", whoami, refused)
@@ -124,14 +124,14 @@ func TestAResumedCodexThreadKeepsItsCredentialWhileTheDaemonHoldsIt(t *testing.T
 	}
 	resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
 	if len(resumes) != 1 || codexBearer(resumes[0]) != started {
-		t.Fatalf("resume carried %q, want the start credential", codexBearer(resumes[len(resumes)-1]))
+		t.Fatalf("resumes=%d, the last did not carry the start credential", len(resumes))
 	}
 	if whoami, refused := fixture.whoami(t, started); refused || whoami["sessionId"] != id {
 		t.Fatalf("whoami=%v", whoami)
 	}
 }
 
-func TestACodexThreadWhosePermissionsChangeGetsItsNewCredentialOnItsNextResume(t *testing.T) {
+func TestALoadedCodexThreadWhosePermissionsChangeIsReloadedWithItsNewCredentialOnItsNextInput(t *testing.T) {
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
 	root, err := canonicalCatalogPath(cwd)
@@ -151,14 +151,20 @@ func TestACodexThreadWhosePermissionsChangeGetsItsNewCredentialOnItsNextResume(t
 		t.Fatalf("old credential status=%d body=%v", status, body)
 	}
 	fixture.lifecycle.Daemon().CompleteTurn(id, "done")
-	fixture.lifecycle.Daemon().Unload(id)
+	unsubscribed := len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe"))
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Again"}); code != http.StatusOK {
 		t.Fatalf("send status=%d body=%v", code, body)
 	}
 	resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
+	if len(resumes) == 0 || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != unsubscribed+1 {
+		t.Fatalf("the loaded thread was not reloaded with its new credential: resumes=%d", len(resumes))
+	}
 	rotated := codexBearer(resumes[len(resumes)-1])
 	if rotated == "" || rotated == started {
-		t.Fatalf("resume carried %q", rotated)
+		t.Fatalf("resume carried %s", redacted(rotated))
+	}
+	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Once more"}); code != http.StatusOK || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != unsubscribed+1 {
+		t.Fatalf("a second send reloaded the thread again: status=%d body=%v", code, body)
 	}
 	whoami, refused := fixture.whoami(t, rotated)
 	capabilities, _ := whoami["capabilities"].([]any)
@@ -180,11 +186,11 @@ func TestAfterAnAgenthailRestartAResumeThatLoadsTheThreadBareRotatesAndReattache
 	}
 	resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
 	if len(resumes) != 2 || codexBearer(resumes[0]) != "" {
-		t.Fatalf("resumes=%d first bearer=%q", len(resumes), codexBearer(resumes[0]))
+		t.Fatalf("resumes=%d first bearer=%s", len(resumes), redacted(codexBearer(resumes[0])))
 	}
 	rotated := codexBearer(resumes[1])
 	if rotated == "" || rotated == started || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != 1 {
-		t.Fatalf("re-attach bearer=%q unsubscribes=%d", rotated, len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")))
+		t.Fatalf("re-attach bearer=%s unsubscribes=%d", redacted(rotated), len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")))
 	}
 	if status, body := postMCP(t, fixture.server, map[string]string{"Authorization": "Bearer " + started}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
 		t.Fatalf("old credential status=%d body=%v", status, body)

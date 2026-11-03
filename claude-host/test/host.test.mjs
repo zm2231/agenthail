@@ -313,6 +313,21 @@ test('a session opened with its agenthail credential has the agenthail MCP serve
   c.close();
 });
 
+test('a new credential that the agenthail server refuses is reported, not taken as replaced', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_MCP_SET_ERROR: 'connection refused' } });
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const url = 'http://127.0.0.1:7412/mcp';
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  const reopened = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
+  assert.match(reopened.mcpError, /connection refused/);
+  await assert.rejects(c.call('replaceMcp', { sessionId: id, mcp: { url, token: 'ahs_third' } }), /connection refused/);
+  const again = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
+  assert.match(again.mcpError, /connection refused/, 'a failed swap is retried, not remembered as done');
+  c.close();
+});
+
 test('a session opened in a Claude config root runs its Claude there', async () => {
   const f = fixture();
   await startHost(f);
