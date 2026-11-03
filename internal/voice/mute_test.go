@@ -23,10 +23,10 @@ func TestAMutedCallRefusesVoiceActionsAndAnOlderReportCannotUnmuteIt(t *testing.
 	if v := muteCall(t, f, false, 1); !v.InputMuted || v.InputRevision != 2 {
 		t.Fatalf("an older report unmuted the call: %+v", v)
 	}
-	for _, tool := range []string{"voice_transfer", "voice_return_to_orchestrator", "voice_send_to_lead"} {
-		f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": tool, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": "target-a", "project": "p", "message": "m"}}})
+	for _, tool := range []string{"voice_transfer", "voice_return_to_orchestrator"} {
+		f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": tool, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": "target-a"}}})
 	}
-	testkit.Eventually(t, "the refusals", 5*time.Second, func() bool { return len(p.answers()) == 3 })
+	testkit.Eventually(t, "the refusals", 5*time.Second, func() bool { return len(p.answers()) == 2 })
 	p.mu.Lock()
 	for _, call := range p.toolCalls {
 		if call.success || !strings.Contains(call.text, "Microphone input is muted") {
@@ -39,23 +39,9 @@ func TestAMutedCallRefusesVoiceActionsAndAnOlderReportCannotUnmuteIt(t *testing.
 	}
 	muteCall(t, f, false, 3)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "after", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
-	testkit.Eventually(t, "the unmuted transfer", 5*time.Second, func() bool { return len(p.answers()) == 4 })
+	testkit.Eventually(t, "the unmuted transfer", 5*time.Second, func() bool { return len(p.answers()) == 3 })
 	if got := f.View().Target; got == nil || got.ID != "target-a" {
 		t.Fatalf("an unmuted call could not transfer: %+v", got)
-	}
-}
-
-func TestAMutedCallStillAnswersReadingTools(t *testing.T) {
-	f, p := fixture(t)
-	f.service.SetProjects(gatedProjects{})
-	connectFixture(t, f)
-	muteCall(t, f, true, 1)
-	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "read", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}})
-	testkit.Eventually(t, "the projects answer", 5*time.Second, func() bool { return len(p.answers()) == 1 })
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.toolCalls[0].success {
-		t.Fatalf("a muted call refused a reading tool: %+v", p.toolCalls[0])
 	}
 }
 
@@ -110,7 +96,7 @@ func TestAMuteDuringASpokenTransferStopsItBeforeVoiceMoves(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}}
 			f := newFixture(t, fixtureOptions{target: target})
-			f.service.SetProjects(gatedProjects{gate: f.gate})
+			f.service.SetLeads(gatedLeads{gate: f.gate})
 			p := f.provider
 			connectFixture(t, f)
 			before := appendTexts(p)

@@ -7,7 +7,7 @@ import (
 
 type mcpChannelSendInput struct {
 	mcpWrite
-	Channel string `json:"channel" jsonschema:"A channel or project name, as agenthail channel list shows it."`
+	Channel string `json:"channel" jsonschema:"A channel or project name, as agenthail_channel's list or agenthail_projects shows it."`
 	Message string `json:"message"`
 }
 

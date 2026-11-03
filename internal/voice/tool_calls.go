@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// toolTimeout bounds a voice tool other than a send to a lead.
+// toolTimeout bounds a voice tool.
 const toolTimeout = 8 * time.Second
 
 // runTool runs one Codex tool call as service work, so a slow tool delays
@@ -29,13 +29,9 @@ func (s *Service) runTool(e Event) {
 	callCtx, cancel := s.callContext(s.background)
 	started := s.spawn(func() {
 		defer cancel()
-		timeout := toolTimeout
-		if tool == "voice_send_to_lead" {
-			timeout = leadSendTimeout
-		}
-		ctx, done := context.WithTimeout(callCtx, timeout)
+		ctx, done := context.WithTimeout(callCtx, toolTimeout)
 		defer done()
-		message, err := s.callTool(ctx, tool, arguments, source)
+		message, err := s.callTool(ctx, tool, arguments)
 		answerCtx, answered := context.WithTimeout(context.WithoutCancel(ctx), toolTimeout)
 		defer answered()
 		if err != nil {

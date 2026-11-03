@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,14 +30,10 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if codex, ok := d.adapters().ForSurface(surface.KindCodex).(*surfaces.Codex); ok {
 		provider = &surfaces.CodexVoice{Codex: codex}
 	}
-	commandPath, err := os.Executable()
-	if err != nil {
-		provider = nil
-	}
-	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.registerVoiceOperator, commandPath, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
+	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.registerVoiceOperator, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
 	}, daemonVoiceStreamProvider{daemon: d})
-	s.SetProjects(voiceProjects{d: d})
+	s.SetLeads(voiceLeads{d: d})
 	s.SetLog(d.log.Printf)
 	s.SetBriefer(voiceBriefs{d: d})
 	if dashboard.voice != nil {

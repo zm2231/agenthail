@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-type gatedProjects struct{ gate *gate }
+type gatedLeads struct{ gate *gate }
 
 // gatedStream prepares a session stream whose Cancel is held.
 type gatedStream struct{ gate func() *gate }
@@ -25,17 +25,11 @@ func (s gatedStream) PrepareSessionStream(context.Context, *surface.Session) (se
 	}}, nil
 }
 
-func (p gatedProjects) List(ctx context.Context) ([]Project, error) {
-	return []Project{}, p.gate.wait(ctx, "List")
-}
-func (p gatedProjects) LeadSession(ctx context.Context, project string) (string, error) {
+func (p gatedLeads) LeadSession(ctx context.Context, project string) (string, error) {
 	if project == "" {
 		return "", errors.New("no lead")
 	}
 	return project, p.gate.wait(ctx, "LeadSession")
-}
-func (gatedProjects) SendToLead(context.Context, string, string, string) (LeadReceipt, error) {
-	return LeadReceipt{}, errors.New("no lead")
 }
 
 // Held I/O ends only on release, so returning first proves no wait.
@@ -130,11 +124,11 @@ func TestNoHeldCallMakesAHeartbeatAHangupOrAViewWait(t *testing.T) {
 			_, err := f.Apply(Action{Action: "target-interrupt", AttemptID: "call-a"})
 			return err
 		}},
-		{name: "tool call", held: "List", call: true, setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
-			f.service.SetProjects(gatedProjects{gate: f.gate})
+		{name: "tool call", held: "LeadSession", call: true, setup: func(t *testing.T, f *voiceFixture, _ *targetFixture) {
+			f.service.SetLeads(gatedLeads{gate: f.gate})
 			connectFixture(t, f)
 		}, run: func(f *voiceFixture) error {
-			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}})
+			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"project": "widget"}}})
 			return nil
 		}},
 		{name: "delegated speech", held: "thread/realtime/appendText", call: true, setup: func(t *testing.T, f *voiceFixture, target *targetFixture) {
@@ -291,7 +285,7 @@ func TestAToolCallAfterCloseIsAnsweredThatVoiceIsShuttingDown(t *testing.T) {
 	f.service.mu.Lock()
 	f.service.closed = true
 	f.service.unlock()
-	f.service.runTool(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}})
+	f.service.runTool(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.toolCalls) != 1 || p.toolCalls[0].success || !strings.Contains(p.toolCalls[0].text, "shutting down") {
@@ -330,7 +324,7 @@ func TestDelegatedSpeechThatFinishesAfterTheCallEndedOrMovedRecordsNothing(t *te
 func TestAProjectTransferKeepsItsPlaceAheadOfALaterTransfer(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}}
 	f := newFixture(t, fixtureOptions{target: target})
-	f.service.SetProjects(gatedProjects{gate: f.gate})
+	f.service.SetLeads(gatedLeads{gate: f.gate})
 	connectFixture(t, f)
 	f.gate.hold("LeadSession")
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "project", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"project": "target-a"}}})
@@ -358,7 +352,7 @@ func TestARestartWithAnActiveCallHoldsTheOperatorSourceOnce(t *testing.T) {
 	f := newFixture(t, fixtureOptions{})
 	connectFixture(t, f)
 	held := make(chan string, 4)
-	reopened := NewWithTargetsAndOperatorSourceAndStream(f.path, f.provider, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
+	reopened := NewWithTargetsAndOperatorSourceAndStream(f.path, f.provider, nil, nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
 		held <- session.ID + ":" + strconv.FormatBool(active)
 	}, nil)
 	if v := reopened.View("phone"); v.Phase != "unknown" {

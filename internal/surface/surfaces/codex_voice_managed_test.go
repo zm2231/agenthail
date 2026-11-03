@@ -107,8 +107,8 @@ func TestAManagedCallCarriesItsEventsAndAnswersToolCallsWithTheirOriginalIDs(t *
 	daemon.Notify("thread/realtime/sdp", map[string]any{"threadId": session.ID, "sdp": "v=0 answer"})
 	daemon.Notify("thread/realtime/outputAudio/delta", map[string]any{"threadId": session.ID, "audio": "excluded"})
 	daemon.Notify("thread/realtime/sdp", map[string]any{"threadId": "another-thread", "sdp": "excluded"})
-	daemon.Request(7, "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}, "callId": "c1", "turnId": "t1"})
-	daemon.Request("named-request", "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}, "callId": "c2", "turnId": "t1"})
+	daemon.Request(7, "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}, "callId": "c1", "turnId": "t1"})
+	daemon.Request("named-request", "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}, "callId": "c2", "turnId": "t1"})
 
 	batch := pollUntil(t, v, cursor, session.ID, 3)
 	var methods, requests []string
@@ -239,7 +239,7 @@ func TestAManagedPollReturnsAToolCallAsSoonAsCodexSendsIt(t *testing.T) {
 	}
 	sent := time.Now()
 	var after voice.Cursor
-	daemon.Request(7, "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}, "callId": "c1", "turnId": "t1"})
+	daemon.Request(7, "item/tool/call", map[string]any{"threadId": session.ID, "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}, "callId": "c1", "turnId": "t1"})
 	select {
 	case got := <-done:
 		if got.err != nil || len(got.batch.Events) != 1 || got.batch.Events[0].Method != "item/tool/call" {
@@ -319,7 +319,7 @@ func TestAVoiceOperatorUsesDesktopOnlyWhileDesktopHasItLoaded(t *testing.T) {
 
 func TestAVoiceCallRunsEndToEndOnTheAppServerWithoutDesktop(t *testing.T) {
 	daemon := startManagedCodex(t, signedIn(chatgptAccount))
-	service := voice.New(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: isolatedManagedRuntime(t)}, nil, "/fixture/agenthail")
+	service := voice.New(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: isolatedManagedRuntime(t)}, nil)
 	t.Cleanup(service.Close)
 	ctx := context.Background()
 	if _, err := service.Apply(ctx, "phone", voice.Action{Action: "prepare"}); err != nil {
@@ -422,7 +422,7 @@ func TestASignedOutCallAndAServiceShutdownEachCloseTheCallsConnection(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			daemon := startManagedCodex(t, signedIn(test.account))
 			provider := &CodexVoice{Codex: isolatedManagedRuntime(t)}
-			service := voice.New(t.TempDir()+"/voice/operator.json", provider, nil, "/fixture/agenthail")
+			service := voice.New(t.TempDir()+"/voice/operator.json", provider, nil)
 			t.Cleanup(service.Close)
 			ctx := context.Background()
 			if _, err := service.Apply(ctx, "phone", voice.Action{Action: "prepare"}); err != nil {
@@ -458,7 +458,7 @@ func TestASignedOutCallAndAServiceShutdownEachCloseTheCallsConnection(t *testing
 func TestAStartWhoseStateCannotBeSavedClosesTheCallsConnection(t *testing.T) {
 	daemon := startManagedCodex(t, signedIn(chatgptAccount))
 	path := t.TempDir() + "/voice/operator.json"
-	service := voice.New(path, &CodexVoice{Codex: isolatedManagedRuntime(t)}, nil, "/fixture/agenthail")
+	service := voice.New(path, &CodexVoice{Codex: isolatedManagedRuntime(t)}, nil)
 	t.Cleanup(service.Close)
 	ctx := context.Background()
 	if _, err := service.Apply(ctx, "phone", voice.Action{Action: "prepare"}); err != nil {
@@ -499,7 +499,7 @@ func TestASpokenRequestOnASessionBoundCallReachesOnlyTheSession(t *testing.T) {
 		}
 		return &voice.Target{Session: session, Adapter: codex}, nil
 	}
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: codex}, nil, "/fixture/agenthail", resolve, delivery.Dispatcher{}, nil, quietJournal{})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(t.TempDir()+"/voice/operator.json", &CodexVoice{Codex: codex}, nil, resolve, delivery.Dispatcher{}, nil, quietJournal{})
 	t.Cleanup(service.Close)
 	ctx := context.Background()
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "select", TargetID: targetID}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {

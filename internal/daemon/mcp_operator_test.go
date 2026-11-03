@@ -28,11 +28,13 @@ func asOperator(t *testing.T, d *Daemon, server *httptest.Server, sessionID stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	token, err := d.mcpCredentials.Load().Rotate(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	makeVoiceOperator(t, d, *session)
-	d.leadsChanged()
-	token, ok := d.mcpCredentials.Load().Live(sessionID)
-	if !ok || !slices.Contains(liveCapabilities(t, d.Registry, sessionID), "control.all") {
-		t.Fatalf("%s did not become the operator", sessionID)
+	if caps := callerCapabilities(t, server, token); !slices.Contains(caps, any("control.all")) {
+		t.Fatalf("%s did not become the operator: capabilities=%v", sessionID, caps)
 	}
 	return mcpSession(t, server, token)
 }

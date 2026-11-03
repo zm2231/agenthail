@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,11 +40,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	if statePath == "" {
 		statePath = filepath.Join(t.TempDir(), "operator.json")
 	}
-	commandPath := os.Getenv("AGENTHAIL_VOICE_SMOKE_CLI")
-	if commandPath == "" || !filepath.IsAbs(commandPath) {
-		t.Fatal("AGENTHAIL_VOICE_SMOKE_CLI must name the matching built CLI by absolute path")
-	}
-	s := voice.New(statePath, &surfaces.CodexVoice{Codex: codex}, nil, commandPath)
+	s := voice.New(statePath, &surfaces.CodexVoice{Codex: codex}, nil)
 	defer s.Close()
 	if s.View("").Session == nil {
 		t.Fatal("provide an existing test-owned operator state; this evaluation must not create tasks")
@@ -171,12 +166,12 @@ func TestLiveCodexVoice(t *testing.T) {
 			continue
 		}
 		operatorItems = append(operatorItems, item)
-		if item.Kind == "toolCall" && strings.Contains(item.Text, "agenthail") {
-			if strings.Contains(item.Text, "thread create") {
+		if item.Kind == "toolCall" {
+			if strings.Contains(item.Title, "agenthail_create") {
 				t.Fatal("evaluation created a task")
 			}
-			listEvidence = listEvidence || strings.Contains(item.Text, " list")
-			sendEvidence = sendEvidence || strings.Contains(item.Text, " send")
+			listEvidence = listEvidence || strings.Contains(item.Title, "agenthail_sessions")
+			sendEvidence = sendEvidence || strings.Contains(item.Title, "agenthail_send")
 		}
 		if item.Kind == "toolResult" && strings.Contains(item.Text, workerID) {
 			workerEvidence = true
@@ -184,19 +179,6 @@ func TestLiveCodexVoice(t *testing.T) {
 	}
 	if !listEvidence || !sendEvidence || !workerEvidence || workerID == v.Session.ID {
 		t.Fatalf("handoff evidence incomplete: list=%v send=%v worker=%v", listEvidence, sendEvidence, workerEvidence)
-	}
-	output, err := exec.CommandContext(ctx, commandPath, "last", workerID, "3", "--full", "--json").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reply struct {
-		Session   string `json:"session"`
-		Exchanges []struct {
-			Assistant string `json:"assistant"`
-		} `json:"exchanges"`
-	}
-	if json.Unmarshal(output, &reply) != nil || reply.Session != workerID {
-		t.Fatal("worker reply identity missing")
 	}
 	workerTimeline, err := codex.ReadSession(ctx, workerSession, surface.SessionReadRequest{})
 	if err != nil {
@@ -215,7 +197,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	if !workerTool || !workerAnswer {
 		t.Fatal("the existing worker must perform real tool work and return an answer")
 	}
-	data, err := json.MarshalIndent(map[string]any{"operatorId": v.Session.ID, "workerId": workerID, "attemptId": v.AttemptID, "voiceEvents": v.Events, "operatorActivity": operatorItems, "workerActivity": workerItems, "workerReply": json.RawMessage(output), "semanticReview": "required: compare requested work, actual commands and results, and spoken summary", "physicalIOS": "not tested"}, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{"operatorId": v.Session.ID, "workerId": workerID, "attemptId": v.AttemptID, "voiceEvents": v.Events, "operatorActivity": operatorItems, "workerActivity": workerItems, "semanticReview": "required: compare requested work, actual commands and results, and spoken summary", "physicalIOS": "not tested"}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

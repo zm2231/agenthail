@@ -85,9 +85,11 @@ func (f *mcpAnswerFixture) asProjectLead(t *testing.T, sessionID string) *mcp.Cl
 		t.Fatalf("coordinator-set status=%d %s", reply.Status, reply.Body)
 	}
 	f.d.attachMCPCredentials(strings.TrimPrefix(f.server.URL, "http://"))
-	f.d.leadsChanged()
-	token, ok := f.d.mcpCredentials.Load().Live(sessionID)
-	if !ok || !slices.Contains(liveCapabilities(t, f.r, sessionID), "control.project") {
+	token, err := f.d.mcpCredentials.Load().Rotate(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(callerCapabilities(t, f.server, token), any("control.project")) {
 		t.Fatalf("%s did not become its project's coordinator", sessionID)
 	}
 	return mcpSession(t, f.server, token)

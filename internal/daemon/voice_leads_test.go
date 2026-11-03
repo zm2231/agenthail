@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -129,8 +130,8 @@ func connectToolVoice(t *testing.T, node *federationNode) (*voice.Service, *tool
 	node.fake.mu.Lock()
 	node.fake.sessions["operator"] = surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Transport: "desktop", Status: surface.StatusIdle}
 	node.fake.mu.Unlock()
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, node.daemon.registerVoiceOperator, "/fixture/agenthail", node.daemon.resolveVoiceTarget, node.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: node.daemon})
-	service.SetProjects(voiceProjects{d: node.daemon})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, node.daemon.registerVoiceOperator, node.daemon.resolveVoiceTarget, node.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: node.daemon})
+	service.SetLeads(voiceLeads{d: node.daemon})
 	t.Cleanup(service.Close)
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {
 		if _, err := service.Apply(context.Background(), "phone", action); err != nil {
@@ -152,7 +153,21 @@ func setLead(t *testing.T, node *federationNode, project, root, name, sessionID 
 	}
 }
 
-func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testing.T) {
+func sendToProject(t *testing.T, operator *mcp.ClientSession, project, message, key string) (coordinatorSendReply, string, bool) {
+	t.Helper()
+	out, refused := callMCP(t, operator, "agenthail_send", map[string]any{"project": project, "message": message, "clientRequestId": key})
+	if refused {
+		text, _ := out["message"].(string)
+		return coordinatorSendReply{}, text, false
+	}
+	var reply coordinatorSendReply
+	if err := json.Unmarshal([]byte(mustJSONString(t, out)), &reply); err != nil {
+		t.Fatalf("send to %s: %v in %v", project, err, out)
+	}
+	return reply, "", true
+}
+
+func TestTheOperatorReachesProjectLeadsOnBothHostsByProjectName(t *testing.T) {
 	local, remote, _ := pairedFederation(t)
 	now := time.Now()
 	widget := widgetRepo(t, "https://github.com/example/widget.git")
@@ -181,18 +196,19 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	setLead(t, local, "repo:github.com/example/sprocket", sprocket, "laptop-sprocket", "sprocket-a", registry.CoordinatorChange{Replace: true, OverPeers: true})
 	local.daemon.discoverCatalog(context.Background())
 	service, call := connectToolVoice(t, local)
+	operator := asOperator(t, local.daemon, mcpServer(t, local.daemon), "operator")
 
-	listed := call.call(t, "voice_projects", map[string]any{})
-	var answer struct{ Projects []voice.Project }
-	if !listed.success || json.Unmarshal([]byte(listed.text), &answer) != nil {
-		t.Fatalf("voice_projects: %+v", listed)
+	listed, refused := callMCP(t, operator, "agenthail_projects", nil)
+	var answer struct{ Projects []projectEntry }
+	if refused || json.Unmarshal([]byte(mustJSONString(t, listed)), &answer) != nil {
+		t.Fatalf("agenthail_projects: %+v", listed)
 	}
-	byName := map[string][]voice.Project{}
+	byName := map[string][]projectEntry{}
 	for _, project := range answer.Projects {
 		byName[project.Name] = append(byName[project.Name], project)
 	}
 	here := local.daemon.hostIdentity().Name
-	if got := byName["widget"]; len(got) != 1 || got[0].ID != "repo:github.com/example/widget" || got[0].Conflict || len(got[0].Coordinators) != 1 || got[0].Coordinators[0] != (voice.Lead{Ref: "@widget-lead", Host: here, SessionID: "lead"}) {
+	if got := byName["widget"]; len(got) != 1 || got[0].ID != "repo:github.com/example/widget" || got[0].Conflict || len(got[0].Coordinators) != 1 || got[0].Coordinators[0] != (leadEntry{Ref: "@widget-lead", Host: here, SessionID: "lead"}) {
 		t.Fatalf("widget=%+v", got)
 	}
 	if got := byName["gadget"]; len(got) != 1 || len(got[0].Coordinators) != 1 || got[0].Coordinators[0].Ref != "vps::@gadget-lead" || got[0].Coordinators[0].Host != "vps" {
@@ -209,31 +225,35 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 	}
 
 	localSent, remoteSent, started := len(local.fake.delivered()), len(remote.fake.delivered()), len(local.fake.startOptions)
+	for index, refusal := range []struct{ project, reason string }{
+		{"tool", `"tool" names several projects: `},
+		{"bare", "bare has no coordinator"},
+		{"sprocket", "sprocket has coordinators "},
+		{"nothing", `no project is named "nothing"`},
+	} {
+		if _, text, ok := sendToProject(t, operator, refusal.project, "standup", fmt.Sprintf("refused-%d", index)); ok || !strings.Contains(text, refusal.reason) {
+			t.Fatalf("send to %s: ok=%v %q", refusal.project, ok, text)
+		}
+	}
+	if _, text, _ := sendToProject(t, operator, "sprocket", "standup", "conflict"); !strings.Contains(text, "@laptop-sprocket") || !strings.Contains(text, "vps::@vps-sprocket") {
+		t.Fatalf("the conflict did not name both coordinators: %q", text)
+	}
 	for _, refused := range []struct {
-		tool      string
 		arguments map[string]any
 		reason    string
 	}{
-		{"voice_send_to_lead", map[string]any{"project": "tool", "message": "standup"}, `"tool" names several projects: `},
-		{"voice_send_to_lead", map[string]any{"project": "bare", "message": "standup"}, "bare has no coordinator"},
-		{"voice_send_to_lead", map[string]any{"project": "sprocket", "message": "standup"}, "sprocket has coordinators "},
-		{"voice_send_to_lead", map[string]any{"project": "nothing", "message": "standup"}, `no project is named "nothing"`},
-		{"voice_transfer", map[string]any{"project": "sprocket"}, "sprocket has coordinators "},
-		{"voice_transfer", map[string]any{"project": "tool"}, `"tool" names several projects: `},
-		{"voice_transfer", map[string]any{"project": "gadget"}, "@gadget-lead runs on host vps"},
-		{"voice_transfer", map[string]any{"project": "fresh"}, "@fresh-lead has no conversation yet"},
-		{"voice_transfer", map[string]any{"project": "widget", "targetId": "lead"}, "give exactly one of targetId or project"},
+		{map[string]any{"project": "sprocket"}, "sprocket has coordinators "},
+		{map[string]any{"project": "tool"}, `"tool" names several projects: `},
+		{map[string]any{"project": "gadget"}, "@gadget-lead runs on host vps"},
+		{map[string]any{"project": "fresh"}, "@fresh-lead has no conversation yet"},
+		{map[string]any{"project": "widget", "targetId": "lead"}, "give exactly one of targetId or project"},
 	} {
-		got := call.call(t, refused.tool, refused.arguments)
-		if got.success || !strings.Contains(got.text, refused.reason) {
-			t.Fatalf("%s %v: %+v", refused.tool, refused.arguments, got)
+		if got := call.call(t, "voice_transfer", refused.arguments); got.success || !strings.Contains(got.text, refused.reason) {
+			t.Fatalf("voice_transfer %v: %+v", refused.arguments, got)
 		}
 	}
-	if conflict := call.call(t, "voice_send_to_lead", map[string]any{"project": "sprocket", "message": "standup"}); !strings.Contains(conflict.text, "@laptop-sprocket") || !strings.Contains(conflict.text, "vps::@vps-sprocket") {
-		t.Fatalf("the conflict did not name both coordinators: %+v", conflict)
-	}
 	if service.View("phone").Target != nil || len(local.fake.delivered()) != localSent || len(remote.fake.delivered()) != remoteSent || len(local.fake.startOptions) != started {
-		t.Fatalf("a refused tool call acted: target=%+v local=%q remote=%q", service.View("phone").Target, local.fake.delivered(), remote.fake.delivered())
+		t.Fatalf("a refused call acted: target=%+v local=%q remote=%q", service.View("phone").Target, local.fake.delivered(), remote.fake.delivered())
 	}
 
 	if transferred := call.call(t, "voice_transfer", map[string]any{"project": "widget"}); !transferred.success {
@@ -244,24 +264,18 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 		return target != nil && target.ID == "lead"
 	})
 
-	sent := call.call(t, "voice_send_to_lead", map[string]any{"project": "widget", "message": "ship the widget"})
-	var receipt voice.LeadReceipt
-	if !sent.success || json.Unmarshal([]byte(sent.text), &receipt) != nil || receipt.Ref != "@widget-lead" || receipt.Started || receipt.Receipt == nil {
-		t.Fatalf("send to widget: %+v", sent)
+	if reply, text, ok := sendToProject(t, operator, "widget", "ship the widget", "widget"); !ok || reply.Ref != "@widget-lead" || reply.Started || reply.Result == nil {
+		t.Fatalf("send to widget: %+v %q", reply, text)
 	}
 	delivered := local.fake.delivered()
 	if len(delivered) != localSent+1 || !strings.HasSuffix(delivered[len(delivered)-1], "ship the widget") || local.fake.senders()[len(local.fake.senders())-1] != "operator" {
 		t.Fatalf("local delivered=%q senders=%q", delivered, local.fake.senders())
 	}
-
-	startedLead := call.call(t, "voice_send_to_lead", map[string]any{"project": "fresh", "message": "begin"})
-	if !startedLead.success || json.Unmarshal([]byte(startedLead.text), &receipt) != nil || receipt.Ref != "@fresh-lead" || !receipt.Started || len(local.fake.startOptions) != started+1 || !strings.HasSuffix(local.fake.startOptions[started].Message, "begin") {
-		t.Fatalf("send to an unstarted coordinator: %+v starts=%+v", startedLead, local.fake.startOptions)
+	if reply, text, ok := sendToProject(t, operator, "fresh", "begin", "fresh"); !ok || reply.Ref != "@fresh-lead" || !reply.Started || len(local.fake.startOptions) != started+1 || !strings.HasSuffix(local.fake.startOptions[started].Message, "begin") {
+		t.Fatalf("send to an unstarted coordinator: %+v %q starts=%+v", reply, text, local.fake.startOptions)
 	}
-
-	peer := call.call(t, "voice_send_to_lead", map[string]any{"project": "#gadget", "message": "ship the gadget"})
-	if !peer.success || json.Unmarshal([]byte(peer.text), &receipt) != nil || receipt.Ref != "vps::@gadget-lead" || receipt.Receipt == nil {
-		t.Fatalf("send to the paired host's lead: %+v", peer)
+	if reply, text, ok := sendToProject(t, operator, "#gadget", "ship the gadget", "gadget"); !ok || reply.Ref != "vps::@gadget-lead" || reply.Result == nil {
+		t.Fatalf("send to the paired host's lead: %+v %q", reply, text)
 	}
 	testkit.Eventually(t, "the paired host's lead received the message", 10*time.Second, func() bool {
 		delivered := remote.fake.delivered()
@@ -278,16 +292,25 @@ func TestVoiceToolsListProjectLeadsOnBothHostsAndReachThemByProjectName(t *testi
 		})
 	}
 	t.Cleanup(release)
-	held := call.ask("voice_send_to_lead", map[string]any{"project": "gadget", "message": "while held"})
+	type heldSend struct {
+		reply coordinatorSendReply
+		text  string
+		ok    bool
+	}
+	held := make(chan heldSend, 1)
+	go func() {
+		reply, text, ok := sendToProject(t, operator, "gadget", "while held", "held")
+		held <- heldSend{reply, text, ok}
+	}()
 	testkit.Eventually(t, "the relay to the paired host is held", 10*time.Second, func() bool { return hold.waiting.Load() == 1 })
-	if listed := call.call(t, "voice_projects", map[string]any{}); !listed.success {
-		t.Fatalf("voice_projects while a relay is held: %+v", listed)
+	if listed, refused := callMCP(t, operator, "agenthail_projects", nil); refused {
+		t.Fatalf("agenthail_projects while a relay is held: %+v", listed)
 	}
 	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "heartbeat", AttemptID: "call-a"}); err != nil {
 		t.Fatal(err)
 	}
 	release()
-	if answer := call.await(t, "voice_send_to_lead", held); !answer.success || !strings.Contains(answer.text, "vps::@gadget-lead") {
+	if answer := <-held; !answer.ok || answer.reply.Ref != "vps::@gadget-lead" {
 		t.Fatalf("the held send: %+v", answer)
 	}
 }

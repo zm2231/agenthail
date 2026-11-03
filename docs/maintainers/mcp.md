@@ -1,4 +1,4 @@
-# MCP server: session credentials, injection, read tools, scope and limits
+# MCP server: session credentials, injection, tools, scope and limits
 
 The daemon serves an MCP server named `agenthail` at `/mcp` on its own listener (`127.0.0.1:7412` by default). It uses the official Go SDK (`github.com/modelcontextprotocol/go-sdk`) over streamable HTTP in stateless mode with JSON responses: every request carries its own bearer, and no `Mcp-Session-Id` state is kept.
 
@@ -67,9 +67,10 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 
 - **Default capabilities:** `read.self`, `read.project`, `spawn`, `control.descendants`, `requests.answer`, `ledger.read` and `ledger.write`.
 - **Project lead:** a session in the registry's local lead set (`LocalLeadSessions`) also holds `control.project`.
-- **Ceiling:** unbounded (`{}`) for every local session.
+- **Voice operator:** the session holding the `@voice` alias that voice registered (with a `session_origins` row `via='voice'`) also holds `control.all` and `read.all`. A replaced operator loses them on its next call.
+- **Ceiling:** the session's row in `session_ceilings`, or unbounded (`{}`) when it has none, as for every session a person starts (see [Ceiling](#ceiling)).
 
-A lead change, made by the daemon, by another process writing the registry, or while the daemon was stopped, applies to the session's next call with the same token. No token is minted or pushed, so a runtime the daemon cannot reach (a Codex thread another client keeps loaded, a conversation no host has open) is never left holding a refused token. A coordinator whose start fails before the handover never enters the lead set, so its token never gains `control.project`.
+A lead or operator change, made by the daemon, by another process writing the registry, or while the daemon was stopped, applies to the session's next call with the same token. No token is minted or pushed, so a runtime the daemon cannot reach (a Codex thread another client keeps loaded, a conversation no host has open) is never left holding a refused token. A coordinator whose start fails before the handover never enters the lead set, so its token never gains `control.project`.
 
 `tools/list` returns every tool. A call the caller's capabilities do not cover is refused with `capability_missing`, so a session that gains or loses a role needs no new tool list.
 
@@ -96,6 +97,60 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 
 `agenthail_read` and `/api/v1/session` share `readSessionPage`, and `agenthail_requests` and `/api/v1/requests` share `openRequests`.
 
+| Tool | What it does | Needs |
+| --- | --- | --- |
+| `agenthail_projects` | The projects on this host and its paired hosts with their coordinators; `conflict` marks a project with coordinators on two hosts | any session |
+| `agenthail_history` | Delivery history (`view: history`, optionally one `sessionId`) or the delivery queue (`view: queue`), newest first and paged with `before` | `read.all` |
+| `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` (default) or `now` | control scope; see below |
+| `agenthail_steer`, `agenthail_interrupt` | Steer or interrupt a running turn | control scope, down only |
+| `agenthail_goal` | Set, edit, clear, pause or resume a Codex session's goal, or change its token budget | control scope, down only |
+| `agenthail_answer` | Allow or deny an open request; `always` keeps allowing with the rule the request offers | `requests.answer`, control scope, down only; `always` needs `control.all` |
+| `agenthail_session_settings` | Change a session's model, permission mode or effort, or compact it | control scope, down only; a permission mode stays within the target's ceiling unless the caller has `control.all` |
+| `agenthail_alias` | Name a session | control scope, down only |
+| `agenthail_archive` | Archive or restore a session | control scope, down only |
+| `agenthail_create` | Start a Claude or Codex session with a first message, within the caller's ceiling, or a Notion thread | `spawn`; Notion needs `control.all` |
+| `agenthail_channel_send` | Post to a channel or project as the caller | any session |
+| `agenthail_channel` | Create, delete, rename or list channels and change their members | `control.all` |
+| `agenthail_relay` | Add, remove or list relays | `control.all` |
+| `agenthail_queue` | Retry or cancel one queued instruction, or clear a session's pending ones | `control.all` |
+| `agenthail_coordinator` | Set or clear a project's coordinator | `control.all` |
+| `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set | `ledger.write` |
+
+Every write runs the same shared operation as the dashboard and CLI (`performAction` with the session's principal), so it is validated, refused and recorded the same way. A write never carries a person author: a message from a session is attributed to that session (`sourceSessionId`), as the CLI's `agenthail send` from a session is.
+
+### Control scope
+
+`mcpControlTarget` decides whether a caller may act on a target, in this order:
+
+1. The caller's own session is `invalid`; a session owned by another host is `out_of_scope` (reach a project's coordinator there with `agenthail_send` and `project`).
+2. A session above the caller (its spawner chain through `session_origins`) is reachable only by a queued `agenthail_send`; every other write refuses it with `out_of_scope`. This comes before any capability, so a coordinator never controls the session that spawned it, even in its own project.
+3. `control.all` reaches every other local session.
+4. `control.descendants` reaches the sessions the caller spawned, transitively, and `control.project` reaches its project's live sessions, each only when the target's ceiling is within the caller's (`exceeds_ceiling` otherwise).
+5. The caller's project coordinator on this host is reachable only by a queued `agenthail_send`.
+
+`agenthail_send` with `project` is allowed for the caller's own project, or any project with `control.all`; `mode: now` to the caller's own coordinator is refused without `control.all`.
+
+### Ceiling
+
+A ceiling bounds what a session started over MCP may do: `permission` (ranked `plan` < `ask` < `edits` < `auto` < `full`) and `roots` (folders). An empty axis is unbounded.
+
+- Claude modes rank `plan` → plan, `default`/`manual`/`dontAsk` → ask, `acceptEdits` → edits, `auto` → auto, `bypassPermissions` → full. Codex approvals rank `untrusted` → ask, `on-request` → edits, `never` → full; Codex has no plan rank.
+- `agenthail_create` refuses a permission mode above the caller's rank, or a `cwd` outside its roots, with `exceeds_ceiling` and `detail.axis`. Without a mode, the child starts at the caller's rank. The child's ceiling is that rank and the caller's roots, or its own `cwd` when the caller has none.
+- The ceiling is recorded in `pending_ceilings` against the pending credential minted for the start and moves into `session_ceilings` when the session registers; a person-started session has no row. It is read at each call, so the token never carries it.
+- Sessions nest at most 3 deep below the one a person started (`depth_limit`), and a spawner runs at most 8 children at once (`children_limit`, retryable). The count is taken under a per-spawner lock, so racing creates cannot pass it.
+
+### Idempotency
+
+Every write takes a `clientRequestId`. The action receipt is keyed `<tool>:<clientRequestId>` per calling session: a repeat with the same arguments replays the first result, and a repeat with different arguments is `idempotency_conflict`. A first request still running, or one whose outcome was not recorded, answers `busy` with `detail.outcome: "unknown"`; retrying with the same id reads its result.
+
+### Audit
+
+Each write the shared operation receives records a history entry with kind `mcp`: the target session, the caller as source, `"<tool> <clientRequestId>"` and the outcome (`ok` or the refusal code). A refusal made before the operation runs (scope, capability, ceiling, missing fields) is not recorded. An answer is also recorded by the shared operation as `request-<outcome>`, `answered by session <id>`.
+
+### The voice operator
+
+The voice operator has no command-line path. Its developer instructions name the `agenthail_*` tools, and its own call tools are only `voice_transfer` and `voice_return_to_orchestrator`. An operator created before this keeps its old instructions and tool set until the person chooses **New conversation**; the voice screen says so once.
+
 ## Output limits
 
 - Every tool result is at most 16 KiB of JSON. A paged list (`agenthail_sessions`, the ledger lists, `agenthail_read`) stops at the byte budget and returns `truncated: true` with a `nextCursor`. A result that still exceeds the cap is refused with `invalid`.
@@ -106,8 +161,9 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 
 ## Tool refusals
 
-A tool that refuses returns an MCP tool error (`isError: true`) whose structured content is `{code, message, retryable, detail}`. Errors from the shared operations map onto these codes by explicit rules in `mcpCodeFor`:
+A tool that refuses returns an MCP tool error (`isError: true`) whose structured content is `{code, message, retryable, detail}`. The tools' own checks refuse with `invalid`, `not_found`, `out_of_scope`, `capability_missing`, `exceeds_ceiling` (with `detail.axis`), `depth_limit`, `children_limit`, `unsupported_surface` and `idempotency_conflict`. Errors from the shared operations map onto these codes by explicit rules in `mcpCodeFor`:
 
+- `ledger_owner_unreachable` → `owner_unreachable`, retryable;
 - any `400` → `invalid`; any `404` → `not_found`;
 - `409 stale` → `not_found` with `detail.stale`;
 - `409 move_busy` and `session_adopt_busy` → `busy`, retryable;

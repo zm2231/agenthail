@@ -83,7 +83,7 @@ func (c *voiceCall) said(text string) bool {
 func connectVoice(t *testing.T, f *orphanFixture, target string) (*voice.Service, *voiceCall) {
 	t.Helper()
 	call := &voiceCall{}
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, f.daemon.registerVoiceOperator, "/fixture/agenthail", f.daemon.resolveVoiceTarget, f.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: f.daemon})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), call, f.daemon.registerVoiceOperator, f.daemon.resolveVoiceTarget, f.daemon.dispatcher(), nil, daemonVoiceStreamProvider{daemon: f.daemon})
 	t.Cleanup(service.Close)
 	for _, action := range []voice.Action{{Action: "prepare"}, {Action: "select", TargetID: target}, {Action: "start", AttemptID: "call-a", SDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"}} {
 		if _, err := service.Apply(context.Background(), "phone", action); err != nil {
@@ -232,7 +232,7 @@ func TestPrepareRegistersASavedOperatorAsItsSurfaceCarriesItNow(t *testing.T) {
 	if err := os.WriteFile(path, []byte(saved), 0600); err != nil {
 		t.Fatal(err)
 	}
-	service := voice.NewWithTargetsAndOperatorSourceAndStream(path, &voiceCall{}, d.registerVoiceOperator, "/fixture/agenthail", d.resolveVoiceTarget, d.dispatcher(), nil, daemonVoiceStreamProvider{daemon: d})
+	service := voice.NewWithTargetsAndOperatorSourceAndStream(path, &voiceCall{}, d.registerVoiceOperator, d.resolveVoiceTarget, d.dispatcher(), nil, daemonVoiceStreamProvider{daemon: d})
 	t.Cleanup(service.Close)
 	if _, err := service.Apply(context.Background(), "phone", voice.Action{Action: "prepare"}); err != nil {
 		t.Fatalf("prepare: %v", err)

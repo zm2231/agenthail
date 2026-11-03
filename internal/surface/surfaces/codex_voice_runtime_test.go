@@ -59,7 +59,7 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   const quiet=await bridge.voiceEvents(bridge.sequence,'operator',10);
   assert.deepEqual([quiet.events.length,quiet.lost],[0,false]);
   assert.equal(bridge.waiters.size,0);
-  emit({type:'mcp-request',hostId:'local',request:{id:42,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects',arguments:{}}}});
+  emit({type:'mcp-request',hostId:'local',request:{id:42,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_return_to_orchestrator',arguments:{}}}});
   await assert.rejects(bridge.respondDynamicToolCall('42','other',true,'[]'),/thread does not match/);
   await bridge.respondDynamicToolCall('42','operator',true,'[]');
   assert.equal(sent[1].response.id,42);
@@ -68,13 +68,13 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   assert.equal(JSON.parse(await vm.runInContext(programs.voice,context)).lost,true);
 
   // A request being answered stays answerable however many follow it.
-  emit({type:'mcp-request',hostId:'local',request:{id:900,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead'}}});
-  for(let i=0;i<300;i++)emit({type:'mcp-request',hostId:'local',request:{id:1000+i,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
+  emit({type:'mcp-request',hostId:'local',request:{id:900,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer'}}});
+  for(let i=0;i<300;i++)emit({type:'mcp-request',hostId:'local',request:{id:1000+i,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_return_to_orchestrator'}}});
   await bridge.respondDynamicToolCall('900','operator',true,'sent');
   assert.equal(sent[sent.length-1].response.id,900);
   // An expired request is neither offered to the service nor answerable.
   bridge.toolRequests.get('1000').at=0;
-  emit({type:'mcp-request',hostId:'local',request:{id:2000,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}});
+  emit({type:'mcp-request',hostId:'local',request:{id:2000,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_return_to_orchestrator'}}});
   const offered=JSON.parse(await vm.runInContext(programs.voice,context)).events.filter(e=>e.method==='item/tool/call').map(e=>e.params.requestId);
   assert.equal(offered.includes('1000'),false);
   assert.equal(offered.includes('2000'),true);
@@ -85,7 +85,7 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   // A hook an earlier daemon installed is replaced, keeping its event cursor.
   const oldListeners=[],oldSent=[];
   const upgraded=vm.createContext({window:{addEventListener:(name,f)=>oldListeners.push(f)},electronBridge:{sendMessageFromView:message=>{if(message.type==='mcp-response')void message.response.id;oldSent.push(message)}},setTimeout,clearTimeout});
-  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={abi:2,toolRequests:new Map([['77',{id:77,threadId:'operator'}]]),events:[{sequence:5,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'77'}},{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_send_to_lead',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
+  vm.runInContext("globalThis.__agenthailCodexDesktopRendererV2={abi:2,toolRequests:new Map([['77',{id:77,threadId:'operator'}]]),events:[{sequence:5,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',requestId:'77'}},{sequence:6,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',requestId:'5'}},{sequence:7,method:'turn/started',params:{threadId:'operator'}}],sequence:7,next:3,pending:new Map(),request(){}}",upgraded);
   let woken=0;
   upgraded.__agenthailCodexDesktopRendererV2.waiters=vm.runInContext('new Set()',upgraded).add(()=>{woken++});
   assert.equal(vm.runInContext(programs.hook,upgraded),'hooked');
@@ -100,7 +100,7 @@ assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
   await fresh.respondDynamicToolCall('77','operator',true,'sent');
   assert.equal(oldSent[0].response.id,77);
   oldSent.length=0;
-  oldListeners[oldListeners.length-1]({data:{type:'mcp-request',hostId:'local',request:{id:9,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_projects'}}}});
+  oldListeners[oldListeners.length-1]({data:{type:'mcp-request',hostId:'local',request:{id:9,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_return_to_orchestrator'}}}});
   assert.equal(fresh.sequence,8);
   await fresh.respondDynamicToolCall('9','operator',true,'[]');
   assert.equal(oldSent[0].response.id,9);

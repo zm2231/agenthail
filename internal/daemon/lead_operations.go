@@ -5,24 +5,36 @@ import (
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/voice"
 )
 
-func (d *Daemon) projectLeads(context.Context) ([]voice.Project, error) {
+type projectEntry struct {
+	Name         string      `json:"name"`
+	ID           string      `json:"id"`
+	Coordinators []leadEntry `json:"coordinators"`
+	Conflict     bool        `json:"conflict,omitempty"`
+}
+
+type leadEntry struct {
+	Ref       string `json:"ref"`
+	Host      string `json:"host"`
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+func (d *Daemon) projectLeads(context.Context) ([]projectEntry, error) {
 	known, err := broadcast.Projects(d.Registry)
 	if err != nil {
 		return nil, err
 	}
 	service := d.coordinator()
-	list := make([]voice.Project, 0, len(known))
+	list := make([]projectEntry, 0, len(known))
 	for _, item := range known {
 		specs, err := d.Registry.ProjectCoordinators(item.ID)
 		if err != nil {
 			return nil, err
 		}
-		project := voice.Project{Name: item.DisplayName, ID: item.ID, Coordinators: []voice.Lead{}, Conflict: len(specs) > 1}
+		project := projectEntry{Name: item.DisplayName, ID: item.ID, Coordinators: []leadEntry{}, Conflict: len(specs) > 1}
 		for _, spec := range specs {
-			lead := voice.Lead{Ref: service.Ref(spec), Host: d.hostIdentity().Name, SessionID: spec.SessionID}
+			lead := leadEntry{Ref: service.Ref(spec), Host: d.hostIdentity().Name, SessionID: spec.SessionID}
 			if spec.HostID != "" {
 				lead.Host = service.HostName(spec.HostID)
 			} else if id, err := d.Registry.CoordinatorSessionID(spec); err == nil {
