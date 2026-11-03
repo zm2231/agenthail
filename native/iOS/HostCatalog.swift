@@ -28,7 +28,8 @@ struct HostTarget: Equatable {
 /// `<owner>::<session>` whether its row came from the owner or from another
 /// computer that mirrors it, so the copies share one id. The owner's own row
 /// wins while the owner is reachable; otherwise a reachable mirror's row
-/// does. A session is unreachable only when no computer that serves it is.
+/// does. A session has no route only when no computer that serves it is
+/// reachable; a mirror's row still shows the owner as down when it says so.
 struct HostCatalog {
     static let separator = "::"
 
@@ -59,7 +60,8 @@ struct HostCatalog {
         merged.id = qualify(owner, row.id)
         if local { merged = qualifyFamily(merged, host: hostID) }
         let name = ownerName(owner) ?? row.host?.name ?? owner
-        merged.host = SessionHost(id: owner, name: name, state: reachable ? "connected" : "unreachable")
+        let ownerDown = !local && SessionDisplayKind.downHostStates.contains(row.host?.state ?? "")
+        merged.host = SessionHost(id: owner, name: name, state: !reachable ? "unreachable" : ownerDown ? row.host?.state ?? "unreachable" : "connected")
         return (merged, local)
     }
 

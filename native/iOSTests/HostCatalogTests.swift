@@ -46,6 +46,16 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertNotNil(catalog.route(for: "hlaptop::mine"))
     }
 
+    func testAMirroredSessionWhoseOwnerIsDownStaysUnavailableThroughTheComputerThatListsIt() {
+        var down = mirrored("hbuild", "build", "s9")
+        down.host = SessionHost(id: "hbuild", name: "build", state: "unreachable")
+        let catalog = HostCatalog(hosts: [host("hlaptop", "laptop", reachable: true, sessions: [down, mirrored("hother", "other", "s2")])])
+        let row = catalog.sessions.first { $0.id == "hbuild::s9" }
+        XCTAssertEqual(row?.host?.state, "unreachable")
+        XCTAssertEqual(row.map { SessionDisplayKind.of($0) }, .unavailable)
+        XCTAssertEqual(catalog.sessions.first { $0.id == "hother::s2" }?.host?.state, "connected")
+    }
+
     func testAMirroredSessionOfAComputerThePhoneIsNotPairedWithKeepsItsQualifiedID() {
         let catalog = HostCatalog(hosts: [host("hlaptop", "laptop", reachable: true, sessions: [mirrored("hbuild", "build", "s9")])])
         XCTAssertEqual(catalog.sessions.map(\.id), ["hbuild::s9"])

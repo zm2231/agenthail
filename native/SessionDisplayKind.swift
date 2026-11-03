@@ -6,6 +6,8 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static let downHostStates: Set<String> = ["unreachable", "unauthorized", "incompatible"]
+
     var label: String {
         switch self {
         case .unavailable: "Unavailable"
@@ -45,7 +47,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
     }
 
     static func of(_ session: SessionState, now: Date = Date()) -> SessionDisplayKind {
-        if ["unreachable", "unauthorized", "incompatible"].contains(session.host?.state ?? "") || ["unknown", "notLoaded"].contains(session.status) {
+        if downHostStates.contains(session.host?.state ?? "") || ["unknown", "notLoaded"].contains(session.status) {
             return .unavailable
         }
         if session.waitingOn != nil { return .waiting }
