@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -29,36 +28,6 @@ type actionReplay struct {
 	Body    []byte      `json:"body"`
 }
 
-type actionCaptureWriter struct {
-	header   http.Header
-	status   int
-	body     bytes.Buffer
-	overflow bool
-}
-
-func newActionCaptureWriter() *actionCaptureWriter {
-	return &actionCaptureWriter{header: make(http.Header)}
-}
-
-func (w *actionCaptureWriter) Header() http.Header { return w.header }
-
-func (w *actionCaptureWriter) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
-	}
-}
-
-func (w *actionCaptureWriter) Write(body []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	if w.body.Len()+len(body) > actionReplayBodyLimit {
-		w.overflow = true
-		return 0, fmt.Errorf("action response exceeds %d bytes", actionReplayBodyLimit)
-	}
-	return w.body.Write(body)
-}
-
 func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -74,53 +43,68 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 			writeAPIError(w, http.StatusBadRequest, "invalid_idempotency_key", "The Idempotency-Key is too long.")
 			return
 		}
-		body, canonical, err := canonicalActionBody(r.Body)
+		raw, err := io.ReadAll(io.LimitReader(r.Body, actionRequestBodyLimit+1))
+		r.Body.Close()
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		hash := sha256.Sum256(canonical)
-		principal := actionPrincipal(r)
-		reservation, err := d.Registry.ReserveActionReceipt(principal, key, hex.EncodeToString(hash[:]), time.Now().UTC())
-		if err != nil {
+		d.idempotentReply(principalFromRequest(r).ID, key, raw, func(body []byte) actionReply {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			recorder := newActionRecorder()
+			next(recorder, r)
+			return recorder.reply()
+		}).write(w)
+	}
+}
+
+func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, run func([]byte) actionReply) actionReply {
+	key := strings.TrimSpace(rawKey)
+	if key == "" {
+		return run(body)
+	}
+	if len(key) > registry.ActionReceiptKeyLimit {
+		return replyWith(func(w http.ResponseWriter) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_idempotency_key", "The Idempotency-Key is too long.")
+		})
+	}
+	body, canonical, err := canonicalActionBody(io.NopCloser(bytes.NewReader(body)))
+	if err != nil {
+		return replyWith(func(w http.ResponseWriter) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
+		})
+	}
+	hash := sha256.Sum256(canonical)
+	requestHash := hex.EncodeToString(hash[:])
+	reservation, err := d.Registry.ReserveActionReceipt(principalID, key, requestHash, time.Now().UTC())
+	if err != nil {
+		return replyWith(func(w http.ResponseWriter) {
 			writeAPIError(w, http.StatusInternalServerError, "action_reservation_failed", "The action reservation could not be recorded.")
-			return
-		}
-		if !reservation.Acquired {
-			if reservation.Receipt.RequestHash != hex.EncodeToString(hash[:]) {
+		})
+	}
+	if !reservation.Acquired {
+		return replyWith(func(w http.ResponseWriter) {
+			switch {
+			case reservation.Receipt.RequestHash != requestHash:
 				writeAPIError(w, http.StatusConflict, "action_idempotency_mismatch", "The Idempotency-Key was already used for a different action request.")
-				return
-			}
-			if reservation.Receipt.Status == registry.ActionReceiptCompleted {
+			case reservation.Receipt.Status == registry.ActionReceiptCompleted:
 				if err := replayActionReceipt(w, reservation.Receipt.Receipt); err != nil {
 					writeAPIError(w, http.StatusInternalServerError, "action_receipt_invalid", "The stored action receipt is invalid.")
 				}
-				return
+			default:
+				writeActionSubmitted(w)
 			}
-			writeActionSubmitted(w)
-			return
-		}
-
-		capture := newActionCaptureWriter()
-		next(capture, r)
-		status := capture.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-		replay, err := json.Marshal(actionReplay{Status: status, Headers: actionReplayHeaders(capture.header), Body: append([]byte(nil), capture.body.Bytes()...)})
-		if capture.overflow || err != nil || len(replay) > actionReplayBodyLimit {
-			writeActionSubmitted(w)
-			return
-		}
-		if err := d.Registry.CompleteActionReceipt(principal, key, hex.EncodeToString(hash[:]), replay, time.Now().UTC()); err != nil {
-			writeActionSubmitted(w)
-			return
-		}
-		copyHTTPHeader(w.Header(), capture.header)
-		w.WriteHeader(status)
-		_, _ = w.Write(capture.body.Bytes())
+		})
 	}
+	reply := run(body)
+	replay, err := json.Marshal(actionReplay{Status: reply.Status, Headers: actionReplayHeaders(reply.Header), Body: append([]byte(nil), reply.Body...)})
+	if len(reply.Body) > actionReplayBodyLimit || err != nil || len(replay) > actionReplayBodyLimit {
+		return replyWith(writeActionSubmitted)
+	}
+	if err := d.Registry.CompleteActionReceipt(principalID, key, requestHash, replay, time.Now().UTC()); err != nil {
+		return replyWith(writeActionSubmitted)
+	}
+	return reply
 }
 
 func canonicalActionBody(body io.ReadCloser) ([]byte, []byte, error) {
@@ -153,10 +137,6 @@ func canonicalActionBody(body io.ReadCloser) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	return raw, canonical, nil
-}
-
-func actionPrincipal(r *http.Request) string {
-	return principalFromRequest(r).ID
 }
 
 func replayActionReceipt(w http.ResponseWriter, encoded []byte) error {
