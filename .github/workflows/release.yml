@@ -409,10 +409,20 @@ jobs:
         env:
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          ASC_BUILD_NUMBER: ${{ github.run_number }}
+          ASC_MARKETING_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          ASC_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
         run: |
-          output="$(xcrun altool --upload-app -f ios/Agenthail.ipa -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1)"
+          set +e
+          node push-relay/scripts/wait-testflight-build.mjs --uploaded
+          uploaded=$?
+          set -e
+          if [ "$uploaded" -eq 0 ]; then exit 0; fi
+          if [ "$uploaded" -ne 3 ]; then exit "$uploaded"; fi
+          status=0
+          output="$(xcrun altool --upload-app -f ios/Agenthail.ipa -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1)" || status=$?
           printf '%s\n' "$output"
-          if grep -q 'ERROR:' <<<"$output"; then exit 1; fi
+          if [ "$status" -ne 0 ] || grep -q 'ERROR:' <<<"$output"; then exit 1; fi
       - name: Verify internal TestFlight delivery
         env:
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { generateKeyPairSync, verify } from "node:crypto"
 import test from "node:test"
-import { appLookupURL, buildLookupURL, createAppStoreToken, waitForProcessedBuild } from "../scripts/wait-testflight-build.mjs"
+import { appLookupURL, buildLookupURL, createAppStoreToken, findUploadedBuild, waitForProcessedBuild } from "../scripts/wait-testflight-build.mjs"
 
 const keys = generateKeyPairSync("ec", { namedCurve: "P-256" })
 const privateKey = keys.privateKey.export({ type: "pkcs8", format: "pem" })
@@ -164,4 +164,21 @@ test("processing and internal readiness share one timeout budget", async () => {
   const started = run.options.now()
   await assert.rejects(waitForInternalBuild({ ...run.options, groupId: "group-1" }), /Timed out waiting for internal/)
   assert.equal(run.options.now() - started, run.options.timeoutMs)
+})
+
+test("finds a build an earlier attempt already uploaded", async () => {
+  const run = harness([
+    response(200, { data: [{ id: "app-1" }] }),
+    response(200, { data: [{ id: "build-1", attributes: { processingState: "PROCESSING", expired: false } }] })
+  ])
+  const build = await findUploadedBuild(run.options)
+  assert.equal(build.id, "build-1")
+  assert.match(run.requests[1], /filter%5Bversion%5D=42/)
+})
+
+test("an absent or failed build counts as not uploaded", async () => {
+  for (const builds of [[], [{ id: "build-1", attributes: { processingState: "FAILED", expired: false } }]]) {
+    const run = harness([response(200, { data: [{ id: "app-1" }] }), response(200, { data: builds })])
+    assert.equal(await findUploadedBuild(run.options), null)
+  }
 })
