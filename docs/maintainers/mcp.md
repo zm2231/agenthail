@@ -47,17 +47,17 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_capabilities` | Capabilities, ceiling, read reach, configured surfaces and limits |
 | `agenthail_sessions` | Visible sessions with a `mine`, `project` or `all-visible` filter, paged with `cursor` |
 | `agenthail_read` | Timeline items of one visible session: the latest page; older pages through `before`; newer journal items through `since` (pass back `latestSeq`); a clipped item's full body through `bodyRef` and `offset` |
-| `agenthail_requests` | Every visible session that is waiting on a prompt or question, or every open request of one session; `requestId` for one request's longer prompt |
+| `agenthail_requests` | The visible sessions that are waiting on a prompt or question, or the open requests of one session, in one call without a cursor; `requestId` for one request's longer prompt |
 | `agenthail_ledger_read` | The caller's project ledger: the board (counts and goals), one list paged with `cursor` (`goals`, `asks`, `decisions`, `questions`, `work`), or the top of the ranked `ready` queue |
 
 `agenthail_read` and `/api/v1/session` share `readSessionPage`, and `agenthail_requests` and `/api/v1/requests` share `openRequests`.
 
 ## Output limits
 
-- Every tool result is at most 16 KiB of JSON. Lists stop at the byte budget and return `truncated: true` with a `nextCursor`. A result that still exceeds the cap is refused with `invalid`.
+- Every tool result is at most 16 KiB of JSON. A paged list (`agenthail_sessions`, the ledger lists, `agenthail_read`) stops at the byte budget and returns `truncated: true` with a `nextCursor`. A result that still exceeds the cap is refused with `invalid`.
 - An item's text longer than 4 KiB is clipped at a character boundary and marked `truncated`. When the journal kept the full body, the item carries a `bodyRef`, and `agenthail_read` pages through it in whole-character chunks of up to 8 KiB.
 - A list cursor continues one traversal. A traversal returns every entry that was in the list when it began, and is still in it, exactly once, and never repeats an entry. An entry that joins the list during a traversal may be missed; the next traversal from the start includes it. Cursors are keysets over an order that never changes for an entry: sessions by registry row order, ledger lists by id (each kind's ids count up in the order entries were made).
-- The lists an agent acts on are not paged. `agenthail_requests` returns every waiting session in one call, and every open request of one session in one call, clipping prompts so they all fit (at least 256 bytes each, `clipped: true` when cut); `requestId` returns one request with its prompt up to 4 KiB. `ready` is a ranked queue that reorders as work moves; it returns its first `limit` entries (at most 50) as compact rows with `total`.
+- The lists an agent acts on are not paged. `agenthail_requests` returns the waiting sessions, or one session's open requests, in one call, clipping prompts so they fit (at least 256 bytes each, `clipped: true` when cut); `requestId` returns one request with its prompt up to 4 KiB. When even the clipped rows exceed the 16 KiB cap, it returns the oldest that fit, with `total` and `truncated: true` and no cursor. `ready` is a ranked queue that reorders as work moves; it returns its first `limit` entries (at most 50) as compact rows with `total`.
 - A read-back cursor names the page and the oldest item already returned, so a page the byte cap cut resumes inside that page. If the session's latest page moved on in between, the read is refused as `not_found` with `detail.stale: true`. Following a cursor past the oldest retained history returns an empty, final page.
 
 ## Tool refusals
