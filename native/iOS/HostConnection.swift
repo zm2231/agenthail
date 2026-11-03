@@ -23,6 +23,7 @@ final class HostConnection {
     private(set) var snapshot: DashboardSnapshot?
     private(set) var reachable = false
     private(set) var holding = false
+    var shownReachable: Bool { reachable || holding }
     private(set) var reconnecting = false
     private(set) var connectionError: String?
     private(set) var pushRelayURL: URL?

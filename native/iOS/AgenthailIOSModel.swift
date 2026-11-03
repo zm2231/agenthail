@@ -395,7 +395,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
-        guard let hostID = problem.hostID, let connection = connections[hostID], connection.reachable else {
+        guard let hostID = problem.hostID, let connection = connections[hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
         }
         let key = "delivery:\(problem.id)"
@@ -460,7 +460,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.reachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await InboxPage.load(from: hosts, sessionID: sessionID, before: cursors, partial: partial)
     }
@@ -482,7 +482,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.reachable else {
+        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
         }
         let key = "queue:\(item.listID)"
@@ -674,7 +674,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func listingAPI(_ project: ListedProject) throws -> AgenthailAPI {
-        guard let connection = connections[project.hostID], connection.reachable else {
+        guard let connection = connections[project.hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("\(connections[project.hostID]?.name ?? "That computer") can't be reached.")
         }
         return connection.api

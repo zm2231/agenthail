@@ -145,6 +145,24 @@ final class HostDropTests: XCTestCase {
         for _ in 0..<200 where model.sendingSessionIDs.contains(session.id) { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(model.deliveryStatus[session.id], "Couldn’t complete request. Draft kept.")
     }
+
+    func testTheInboxAsksAComputerHeldThroughTheGraceAndReportsItsOwnError() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        HostDropProtocol.state.setDown(true)
+        HostDropProtocol.state.dropStreams()
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        for _ in 0..<200 where connection.reachable { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(connection.holding && !connection.reachable, "the computer is held through the grace")
+        do {
+            _ = try await model.inboxPage(sessionID: nil)
+            XCTFail("a down computer answered the inbox")
+        } catch AgenthailAPIError.unavailable(let message) {
+            XCTFail("the inbox refused a computer shown connected without asking it: \(message)")
+        } catch {
+            XCTAssertTrue(error is URLError, "the inbox reports the computer's own error, got \(error)")
+        }
+    }
 }
 
 final class HostDropProtocol: URLProtocol, @unchecked Sendable {
