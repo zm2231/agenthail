@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -17,6 +18,21 @@ func mcpRequestHash(ctx context.Context) string {
 }
 
 func (w mcpWrite) writeRequest() mcpWrite { return w }
+
+func mcpWriteIdentity(input any) ([]byte, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	if id, ok := fields["clientRequestId"].(string); ok {
+		fields["clientRequestId"] = strings.TrimSpace(id)
+	}
+	return json.Marshal(fields)
+}
 
 type mcpReplay struct {
 	done   bool
@@ -34,7 +50,7 @@ func (d *Daemon) replayMCPWrite(ctx context.Context, caller *mcpCaller, tool str
 	if err != nil {
 		return ctx, mcpReplay{}
 	}
-	encoded, err := json.Marshal(input)
+	encoded, err := mcpWriteIdentity(input)
 	if err != nil {
 		return ctx, mcpReplay{done: true, err: err}
 	}

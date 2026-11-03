@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -102,6 +106,75 @@ func TestAReplacedOperatorsRetryReplaysItsFirstResult(t *testing.T) {
 	channels, err := r.ListChannels()
 	if err != nil || len(channels) != 1 {
 		t.Fatalf("channels=%v err=%v, the retry acted twice", channels, err)
+	}
+}
+
+func postMCPToolCall(t *testing.T, server *httptest.Server, token, tool string, args map[string]any) (int, map[string]any) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/mcp", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(response.Body).Decode(&out)
+	return response.StatusCode, out
+}
+
+func TestAnEndedSessionsRetryIsRefusedNotReplayed(t *testing.T) {
+	for name, end := range map[string]func(*registry.Registry, string) error{
+		"archived": func(r *registry.Registry, id string) error { return r.ArchiveSession(id, time.Now()) },
+		"revoked": func(r *registry.Registry, id string) error {
+			return r.RevokeSessionCredentials(id, registry.RevokedByPerson, time.Now())
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, r, _, first, _ := daemonFixture(t)
+			server := mcpServer(t, d)
+			d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
+			token := issueMCPToken(t, d, first)
+			makeVoiceOperator(t, d, first)
+			args := map[string]any{"action": "create", "channel": "ops", "clientRequestId": "c1"}
+			if out, refused := callMCP(t, mcpSession(t, server, token), "agenthail_channel", args); refused {
+				t.Fatalf("create: %v", out)
+			}
+			if err := end(r, first.ID); err != nil {
+				t.Fatal(err)
+			}
+			status, body := postMCPToolCall(t, server, token, "agenthail_channel", args)
+			if status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
+				t.Fatalf("retry status=%d body=%v, want it refused before any replay", status, body)
+			}
+		})
+	}
+}
+
+func TestARetryWhoseRequestIDDiffersOnlyInSpacesReplays(t *testing.T) {
+	d, r, _, first, _ := daemonFixture(t)
+	server := mcpServer(t, d)
+	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
+	token := issueMCPToken(t, d, first)
+	makeVoiceOperator(t, d, first)
+	created, refused := callMCP(t, mcpSession(t, server, token), "agenthail_channel", map[string]any{"action": "create", "channel": "ops", "clientRequestId": " c1 "})
+	if refused {
+		t.Fatalf("create: %v", created)
+	}
+	if replayed, refused := callMCP(t, mcpSession(t, server, token), "agenthail_channel", map[string]any{"action": "create", "channel": "ops", "clientRequestId": "c1"}); refused || !reflect.DeepEqual(replayed, created) {
+		t.Fatalf("retry=%v refused=%v, want %v", replayed, refused, created)
+	}
+	if channels, err := r.ListChannels(); err != nil || len(channels) != 1 {
+		t.Fatalf("channels=%v err=%v", channels, err)
 	}
 }
 
