@@ -157,9 +157,9 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 
 // exitedHostSession creates a host session named host-replace through the CLI,
 // as `thread create --name` does, and ends its Claude process.
-func exitedHostSession(t *testing.T) (*coordinatorCLI, string) {
+func exitedHostSession(t *testing.T) (*hostCLI, string) {
 	t.Helper()
-	c := newCoordinatorCLI(t)
+	c := newHostCLI(t)
 	output, err := c.run(t, "thread", "create", "claude", "start the work", "--name", "host-replace", "--cwd", c.host.Cwd, "--json")
 	if err != nil {
 		t.Fatalf("output=%q err=%v", output, err)
@@ -178,7 +178,7 @@ func exitedHostSession(t *testing.T) (*coordinatorCLI, string) {
 }
 
 // end kills a session's Claude process and waits until the host has let it go.
-func end(t *testing.T, c *coordinatorCLI, conversation string) {
+func end(t *testing.T, c *hostCLI, conversation string) {
 	t.Helper()
 	spawns := c.host.Spawns(t, conversation)
 	pid := spawns[len(spawns)-1].PID

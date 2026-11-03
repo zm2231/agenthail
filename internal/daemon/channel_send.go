@@ -33,9 +33,20 @@ func (b daemonBroadcastDelivery) Session(ctx context.Context, sessionID, message
 	return b.sender.DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
 }
 
-func (b daemonBroadcastDelivery) PeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, error) {
-	receipt, _, err := b.d.sendToPeerCoordinator(ctx, spec, message, surface.SendOptions{SourceSessionID: source})
-	return receipt, err
+func (b daemonBroadcastDelivery) Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, string, error) {
+	options := surface.SendOptions{SourceSessionID: source}
+	if spec.HostID != "" {
+		receipt, _, err := b.d.sendToPeerCoordinator(ctx, spec, message, options)
+		return receipt, "", err
+	}
+	outcome, err := b.sender.Service.Deliver(ctx, spec, message, options)
+	if err != nil {
+		return nil, "", err
+	}
+	if outcome.Session == nil {
+		return outcome.Receipt, "", nil
+	}
+	return outcome.Receipt, outcome.Session.ID, nil
 }
 
 func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*delivery.Receipt, bool, error) {

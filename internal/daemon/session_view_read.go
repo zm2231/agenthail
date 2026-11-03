@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -17,8 +16,25 @@ import (
 
 type presentationClock struct {
 	sync.Mutex
-	epoch    string
-	sequence uint64
+	epoch        string
+	sequence     uint64
+	fingerprints presentationFingerprints
+}
+
+func (d *Daemon) readCatalogPresentation(ctx context.Context) (registry.CatalogPresentation, error) {
+	cache := &d.presentation.fingerprints
+	read, err := d.Registry.ReadCatalogPresentation(ctx, cache.stale)
+	if err != nil {
+		return read, err
+	}
+	if !cache.valid(read) {
+		cache.reset(read.HostEpoch)
+		if read, err = d.Registry.ReadCatalogPresentation(ctx, cache.stale); err != nil {
+			return read, err
+		}
+		cache.epoch = read.HostEpoch
+	}
+	return read, cache.adopt(read)
 }
 
 func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest) (SessionViewSnapshot, error) {
@@ -36,136 +52,128 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
-	now := time.Now().UTC()
-	result := SessionViewSnapshot{PresentationPosition: PresentationPosition{HostID: d.hostIdentity().ID, Epoch: d.presentation.epoch, Sequence: d.presentation.sequence}, Sessions: []dashboardSession{}, Counts: map[string]int{}}
-	var plan sessionViewPlan
-	internal := map[string]string{}
-	var selected []string
-	full, err := d.Registry.ReadCatalogPresentation(ctx, func(read registry.CatalogPresentation) ([]string, error) {
-		result.HostEpoch, result.CatalogSeq = read.HostEpoch, read.CatalogSeq
-		rows := make([]dashboardSession, 0, len(read.Rows))
-		for _, record := range read.Rows {
-			var row dashboardSession
-			if err := json.Unmarshal(record.Data, &row); err != nil {
-				return nil, fmt.Errorf("read presentation %s: %w", record.ID, err)
-			}
-			row.ID = hosts.Qualify(record.HostID, record.ID)
-			internal[row.ID] = record.ID
-			row.Freshness = &record.Freshness
-			row.ObservedAt = record.Freshness.ObservedAt
-			row.Display = nil
-			row.Attention = nil
-			if row.Subagent != nil {
-				row.Subagent.ParentID = hosts.Qualify(record.HostID, row.Subagent.ParentID)
-				row.Subagent.RootID = hosts.Qualify(record.HostID, row.Subagent.RootID)
-			}
-			if record.HostID == "" {
-				host := d.localHost()
-				row.Host = &host
-				session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}
-				adapter, adapterErr := d.adapters().For(&session)
-				if adapterErr == nil {
-					row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
-				}
-			}
-			if limit, ok := read.Limits[record.ID]; ok {
-				row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
-			} else if record.HostID == "" {
-				row.LimitResume = nil
-			}
-			display := sessionDisplay(row, now)
-			row.Display = &display
-			if !row.Archived && display.Kind != "unavailable" {
-				if n := read.Outgoing[record.ID]; n > 0 {
-					row.Attention = &SessionAttention{Kind: "outgoing", Reason: CountText(n, "message") + " not delivered"}
-				}
-				if display.Kind == "limited" && row.Attention == nil {
-					row.Attention = &SessionAttention{Kind: "usageLimit", Reason: display.Detail}
-				}
-				if record.Attention != "" {
-					row.Attention = &SessionAttention{Kind: "incoming", Reason: record.Attention}
-				}
-				if row.WaitingOn != nil {
-					row.Attention = &SessionAttention{Kind: "request", Reason: display.Detail}
-				}
-			}
-			rows = append(rows, row)
-		}
-		plan = newSessionViewPlan(rows, request.Scope, request.Filters, now)
-		plan.deadline(read.RefreshAt)
-		plan.view.CatalogHostID = result.PresentationPosition.HostID
-		for _, row := range rows {
-			if row.Surface == surface.KindCodex && !row.LastActive.IsZero() {
-				plan.deadline(row.LastActive.Add(time.Duration(config.CodexRecentHours)*time.Hour + time.Nanosecond))
-			}
-		}
-		semantic := plan.view
-		semantic.AsOf = time.Time{}
-		semantic.RefreshAt = nil
-		fingerprint, err := json.Marshal(struct {
-			Epoch string
-			Seq   uint64
-			View  SessionView
-			Rows  []dashboardSession
-		}{read.HostEpoch + ":" + d.presentation.epoch, read.CatalogSeq, semantic, revisionRows(rows)})
-		if err != nil {
-			return nil, err
-		}
-		sum := sha256.Sum256(fingerprint)
-		plan.view.Revision = hex.EncodeToString(sum[:])
-		if request.Revision != "" && request.Revision != plan.view.Revision {
-			return nil, errPresentationChanged
-		}
-		result.TotalSessions = plan.view.Counts[request.Scope].Sessions
-		for scope, count := range plan.view.Counts {
-			result.Counts[scope] = count.Families
-		}
-		if len(request.IDs) > 0 {
-			allowed := map[string]bool{}
-			for _, family := range plan.view.Families {
-				for _, member := range family.Members {
-					allowed[member.ID] = true
-				}
-			}
-			for _, id := range request.IDs {
-				if !allowed[id] {
-					return nil, errPresentationMember
-				}
-				selected = append(selected, id)
-			}
-			plan.view.Families = []SessionViewFamily{}
-		} else {
-			rest := familiesAfter(plan.view.Families, request.After)
-			end := min(request.Limit, len(rest))
-			if end < len(rest) {
-				result.NextCursor = encodeSessionViewCursor(request, rest[end-1].key)
-			}
-			plan.view.Families = rest[:end]
-			for _, family := range plan.view.Families {
-				if !request.Members {
-					selected = append(selected, family.RootID)
-					continue
-				}
-				for _, member := range family.Members {
-					selected = append(selected, member.ID)
-				}
-			}
-		}
-		ids := make([]string, 0, len(selected))
-		for _, id := range selected {
-			ids = append(ids, internal[id])
-		}
-		return ids, nil
-	})
+	read, err := d.readCatalogPresentation(ctx)
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
-	for _, id := range selected {
-		row := plan.rows[id]
-		var hydrated dashboardSession
-		if err := json.Unmarshal(full[internal[id]], &hydrated); err != nil {
+	now := time.Now().UTC()
+	result := SessionViewSnapshot{PresentationPosition: PresentationPosition{HostID: d.hostIdentity().ID, Epoch: d.presentation.epoch, Sequence: d.presentation.sequence}, Sessions: []dashboardSession{}, Counts: map[string]int{}}
+	result.HostEpoch, result.CatalogSeq = read.HostEpoch, read.CatalogSeq
+	internal := map[string]string{}
+	rows := make([]dashboardSession, 0, len(read.Rows))
+	revision := make([]revisionRow, 0, len(read.Rows))
+	for _, record := range read.Rows {
+		row, err := presentationRow(record, d.presentation.fingerprints.rows[record.ID])
+		if err != nil {
 			return SessionViewSnapshot{}, err
 		}
+		row.ID = hosts.Qualify(record.HostID, record.ID)
+		internal[row.ID] = record.ID
+		row.Freshness = &record.Freshness
+		row.ObservedAt = record.Freshness.ObservedAt
+		row.Display = nil
+		row.Attention = nil
+		if row.Subagent != nil {
+			row.Subagent.ParentID = hosts.Qualify(record.HostID, row.Subagent.ParentID)
+			row.Subagent.RootID = hosts.Qualify(record.HostID, row.Subagent.RootID)
+		}
+		if record.HostID == "" {
+			host := d.localHost()
+			row.Host = &host
+			session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}
+			adapter, adapterErr := d.adapters().For(&session)
+			if adapterErr == nil {
+				row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
+			}
+		}
+		if limit, ok := read.Limits[record.ID]; ok {
+			row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
+		} else if record.HostID == "" {
+			row.LimitResume = nil
+		}
+		display := sessionDisplay(row, now)
+		row.Display = &display
+		if !row.Archived && display.Kind != "unavailable" {
+			if n := read.Outgoing[record.ID]; n > 0 {
+				row.Attention = &SessionAttention{Kind: "outgoing", Reason: CountText(n, "message") + " not delivered"}
+			}
+			if display.Kind == "limited" && row.Attention == nil {
+				row.Attention = &SessionAttention{Kind: "usageLimit", Reason: display.Detail}
+			}
+			if record.Attention != "" {
+				row.Attention = &SessionAttention{Kind: "incoming", Reason: record.Attention}
+			}
+			if row.WaitingOn != nil {
+				row.Attention = &SessionAttention{Kind: "request", Reason: display.Detail}
+			}
+		}
+		rows = append(rows, row)
+		revision = append(revision, newRevisionRow(record, row))
+	}
+	plan := newSessionViewPlan(rows, request.Scope, request.Filters, now)
+	plan.deadline(read.RefreshAt)
+	plan.view.CatalogHostID = result.PresentationPosition.HostID
+	for _, row := range rows {
+		if row.Surface == surface.KindCodex && !row.LastActive.IsZero() {
+			plan.deadline(row.LastActive.Add(time.Duration(config.CodexRecentHours)*time.Hour + time.Nanosecond))
+		}
+	}
+	semantic := plan.view
+	semantic.AsOf = time.Time{}
+	semantic.RefreshAt = nil
+	fingerprint, err := json.Marshal(struct {
+		Epoch string
+		Seq   uint64
+		View  SessionView
+		Rows  []revisionRow
+	}{read.HostEpoch + ":" + d.presentation.epoch, read.CatalogSeq, semantic, revision})
+	if err != nil {
+		return SessionViewSnapshot{}, err
+	}
+	sum := sha256.Sum256(fingerprint)
+	plan.view.Revision = hex.EncodeToString(sum[:])
+	if request.Revision != "" && request.Revision != plan.view.Revision {
+		return SessionViewSnapshot{}, errPresentationChanged
+	}
+	result.TotalSessions = plan.view.Counts[request.Scope].Sessions
+	for scope, count := range plan.view.Counts {
+		result.Counts[scope] = count.Families
+	}
+	var selected []string
+	if len(request.IDs) > 0 {
+		allowed := map[string]bool{}
+		for _, family := range plan.view.Families {
+			for _, member := range family.Members {
+				allowed[member.ID] = true
+			}
+		}
+		for _, id := range request.IDs {
+			if !allowed[id] {
+				return SessionViewSnapshot{}, errPresentationMember
+			}
+			selected = append(selected, id)
+		}
+		plan.view.Families = []SessionViewFamily{}
+	} else {
+		rest := familiesAfter(plan.view.Families, request.After)
+		end := min(request.Limit, len(rest))
+		if end < len(rest) {
+			result.NextCursor = encodeSessionViewCursor(request, rest[end-1].key)
+		}
+		plan.view.Families = rest[:end]
+		for _, family := range plan.view.Families {
+			if !request.Members {
+				selected = append(selected, family.RootID)
+				continue
+			}
+			for _, member := range family.Members {
+				selected = append(selected, member.ID)
+			}
+		}
+	}
+	for _, id := range selected {
+		row := *plan.rows[id]
+		hydrated :=d.presentation.fingerprints.rows[internal[id]].row
 		row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot = hydrated.Holders, hydrated.Plan, hydrated.Runtime, hydrated.ClaudeConfigRoot
 		row.ConfiguredModel, row.PendingModel = hydrated.ConfiguredModel, hydrated.PendingModel
 		result.Sessions = append(result.Sessions, row)

@@ -13,25 +13,31 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+// cliBroadcastDelivery sends a channel's coordinators their message through
+// the daemon, and every other member directly.
 type cliBroadcastDelivery struct {
-	app    *App
-	sender coordinator.Sender
+	app     *App
+	service coordinator.Service
 }
 
 func (c cliBroadcastDelivery) Session(ctx context.Context, sessionID, message, source string) (*delivery.Receipt, error) {
+	if spec, coordinated := c.service.Of(sessionID); coordinated {
+		receipt, _, err := c.Coordinator(ctx, spec, message, source)
+		return receipt, err
+	}
 	session, adapter, err := c.app.resolveTarget(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return c.sender.DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
+	return delivery.Dispatcher{Registry: c.app.registry()}.DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
 }
 
-func (c cliBroadcastDelivery) PeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, error) {
-	answer, err := c.app.peerCoordinatorSend(ctx, spec, message, source, "")
+func (c cliBroadcastDelivery) Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, string, error) {
+	answer, err := c.app.coordinatorSend(ctx, spec, message, surface.SendOptions{SourceSessionID: source}, false)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &answer.Result, nil
+	return &answer.Result, answer.Result.SessionID, nil
 }
 
 func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) error {
@@ -53,7 +59,7 @@ func (a *App) channelSend(ctx context.Context, name, message, fromLabel string) 
 	if fromLabel == "" {
 		fromLabel = "the Agenthail CLI"
 	}
-	broadcaster := broadcast.Broadcaster{Registry: a.registry(), Coordinators: service, Delivery: cliBroadcastDelivery{app: a, sender: coordinator.Sender{Service: service}}}
+	broadcaster := broadcast.Broadcaster{Registry: a.registry(), Coordinators: service, Delivery: cliBroadcastDelivery{app: a, service: service}}
 	result, err := broadcaster.Send(ctx, target, message, fromLabel, sourceID)
 	if err != nil {
 		return err
