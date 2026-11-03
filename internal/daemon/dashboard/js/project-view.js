@@ -1,5 +1,5 @@
 import { app } from "./state.js";
-import { escape, labels } from "./format.js";
+import { escape, labels, timeAgo } from "./format.js";
 import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 
@@ -94,7 +94,8 @@ function leadCard(project, contents) {
     return `<button class="${style}" type="button" data-session="${id}">${action.kind === "open" ? "Open" : "Message"}</button>`;
   }).join("");
   const offline = !working && leadSession.unavailableReason ? `<p class="project-note">Resume needs ${escape(where || "its computer")} to be reachable.</p>` : "";
-  return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note" data-project-lead-status>${escape([labels[leadSession.surface] || leadSession.surface, where, status].filter(Boolean).join(" · "))}</p><div class="project-actions">${buttons}</div>${offline}`);
+  const replaced = lead.replaced ? `<p class="project-note" data-project-lead-replaced>Replaced ${escape(timeAgo(lead.replaced.at))} by ${escape(lead.replaced.changedBy)}: ${escape(lead.replaced.reason)}</p>` : "";
+  return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note" data-project-lead-status>${escape([labels[leadSession.surface] || leadSession.surface, where, status].filter(Boolean).join(" · "))}</p>${replaced}<div class="project-actions">${buttons}</div>${offline}`);
 }
 
 function folders(project) {

@@ -61,7 +61,7 @@ export function renderRequests() {
   const waiting = app.selected?.waitingOn;
   const cards = waiting && !waiting.answerable
     ? renderElsewhereWait(app.selected)
-    : (state.requests || []).map(renderRequestCard).join("");
+    : (state.requests || []).map((request) => renderReplacedNote(request) + renderRequestCard(request)).join("");
   panel.innerHTML = cards + failure + mode;
   panel.hidden = panel.innerHTML === "";
 }
@@ -78,6 +78,13 @@ export function renderElsewhereWait(session) {
   if (place === "restart") actions.push('<button class="primary-button" data-action="session-restart" type="button">Stop and resume</button>');
   if (session.runtime?.focusable) actions.push(`<button class="${actions.length ? "soft-button" : "primary-button"}" data-action="session-focus" type="button">Open session</button>`);
   return `<div class="request-card"><h3>${escape(displayName(session))} ${heading}</h3><p>${detail}</p>${actions.length ? `<div class="request-actions">${actions.join("")}</div>` : ""}</div>`;
+}
+
+export function renderReplacedNote(request) {
+  if (!request.replacedBy) return "";
+  const lead = app.state?.sessions?.find((session) => session.id === request.replacedBy);
+  const name = lead ? displayName(lead) : request.replacedBy;
+  return `<div class="request-replaced" role="note"><p>From a replaced lead. ${escape(name)} leads this project now, so this conversation's request no longer needs you.</p><button class="soft-button" type="button" data-request-withdraw="${escape(request.id)}">Withdraw</button></div>`;
 }
 
 export function renderRequestCard(request) {
@@ -160,7 +167,26 @@ export async function respondToRequest(requestId, decision) {
   if (app.selected) await selectSession(app.selected.id);
 }
 
+export async function withdrawRequest(requestId) {
+  try {
+    await action("request-withdraw", { requestId });
+    toast("Request withdrawn.");
+  } catch (error) {
+    toast(error.message);
+  }
+  app.requestsKey = "";
+  await load();
+  if (app.selected) await selectSession(app.selected.id);
+}
+
 export function bindRequestEvents() {
+  document.addEventListener("click", async (event) => {
+    const withdraw = event.target.closest("[data-request-withdraw]");
+    if (withdraw) {
+      withdraw.disabled = true;
+      await withdrawRequest(withdraw.dataset.requestWithdraw);
+    }
+  });
   document.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-request-respond]");
     if (!button) return;

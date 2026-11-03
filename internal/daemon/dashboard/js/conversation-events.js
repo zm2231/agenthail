@@ -10,7 +10,7 @@ import { selectSession } from "./session-selection.js";
 import { openVoice } from "./voice.js";
 import { cancelCodexSearch } from "./session-search.js";
 import { action } from "./actions.js";
-import { renderDeliveryProblems } from "./overview.js";
+import { renderDeliveryProblems, renderLeadReplacements } from "./overview.js";
 import { load } from "./dashboard-state.js";
 import { displayName } from "./session-labels.js";
 import { changeLead, openProjectDialog, projectChange } from "./project-dialog.js";
@@ -159,6 +159,20 @@ export function bindConversationEvents() {
     if (event.target.closest("[data-open-operations]"))
       return showView("operations");
     const retry = event.target.closest("[data-retry]");
+    const leadAck = event.target.closest("[data-lead-replacement-ack]");
+    if (leadAck) {
+      leadAck.disabled = true;
+      try {
+        const replacementId = Number(leadAck.dataset.leadReplacementAck);
+        await action("lead-replacement-ack", { replacementId });
+        app.state.leadReplacements = app.state.leadReplacements.filter(item => item.id !== replacementId);
+        renderLeadReplacements();
+      } catch (error) {
+        leadAck.disabled = false;
+        toast(friendlyError(error));
+      }
+      return;
+    }
     const deliveryDismiss = event.target.closest("[data-delivery-dismiss]");
     if (deliveryDismiss) {
       deliveryDismiss.disabled = true;

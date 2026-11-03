@@ -121,7 +121,14 @@ func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *follow
 		}
 		fake.sessions[session.ID] = session
 	}
-	if _, err := store.SetCoordinator(registry.CoordinatorSpec{ProjectID: "p-agenthail", ProjectRoot: "/work/agenthail", Name: "release-lead", Surface: string(surface.KindCodex), Cwd: "/work/agenthail"}, registry.CoordinatorChange{SessionID: "research", ChangedBy: "fixture"}); err != nil {
+	lead := registry.CoordinatorSpec{ProjectID: "p-agenthail", ProjectRoot: "/work/agenthail", Name: "release-lead", Surface: string(surface.KindCodex), Cwd: "/work/agenthail"}
+	if err := store.RegisterSession(surface.Session{ID: "lead-before", Name: "lead-before", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: "/work/agenthail", LastActive: now.Add(-48 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetCoordinator(lead, registry.CoordinatorChange{SessionID: "lead-before", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.HandOverCoordinator(lead, "lead-before", "research", registry.CoordinatorHandover{ChangedBy: "daemon", Reason: "gone: conversation lead-before no longer exists (nothing holds it and it was last seen 47h0m0s ago)"}); err != nil {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Stream: true}
