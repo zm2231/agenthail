@@ -44,11 +44,11 @@ func (d *Daemon) mcpControlTarget(caller *mcpCaller, ref string, upward bool) (*
 			return nil, err
 		}
 		if slices.Contains(descendants, session.ID) {
-			return session, nil
+			return session, d.mcpCeilingCovers(caller, session.ID)
 		}
 	}
 	if caller.has("control.project") && d.sameProject(caller, *session) {
-		return session, nil
+		return session, d.mcpCeilingCovers(caller, session.ID)
 	}
 	if upward {
 		above, err := d.mcpAbove(caller, session.ID)
@@ -79,6 +79,25 @@ func (d *Daemon) mcpAbove(caller *mcpCaller, sessionID string) (bool, error) {
 	}
 	lead, err := d.Registry.CoordinatorSessionID(spec)
 	return err == nil && lead == sessionID, nil
+}
+
+func (d *Daemon) mcpCeilingCovers(caller *mcpCaller, targetID string) error {
+	limit, err := parseCeiling(caller.ceiling)
+	if err != nil {
+		return err
+	}
+	raw, err := d.Registry.SessionCeiling(targetID)
+	if err != nil {
+		return err
+	}
+	target, err := parseCeiling(raw)
+	if err != nil {
+		return err
+	}
+	if !target.within(limit) {
+		return &mcpRefusal{Code: "exceeds_ceiling", Message: "That session may do more than you may, so you cannot control it.", Detail: map[string]any{"axis": "target", "limit": limit}}
+	}
+	return nil
 }
 
 func (d *Daemon) mcpIsAbove(caller *mcpCaller, sessionID string) bool {

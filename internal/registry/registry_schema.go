@@ -144,6 +144,14 @@ CREATE TABLE IF NOT EXISTS session_origins (
 	creator_session_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS session_ceilings (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	ceiling TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_ceilings (
+	credential_id INTEGER PRIMARY KEY REFERENCES session_credentials(id) ON DELETE CASCADE,
+	ceiling TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS session_context (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	fingerprint TEXT NOT NULL,

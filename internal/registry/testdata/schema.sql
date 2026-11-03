@@ -1,4 +1,4 @@
--- schemaVersion 46
+-- schemaVersion 47
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -435,6 +435,12 @@ CREATE TABLE paired_devices (
 	browser INTEGER NOT NULL DEFAULT 0
 );
 
+-- table pending_ceilings
+CREATE TABLE pending_ceilings (
+	credential_id INTEGER PRIMARY KEY REFERENCES session_credentials(id) ON DELETE CASCADE,
+	ceiling TEXT NOT NULL
+);
+
 -- table projects
 CREATE TABLE projects (
 	id TEXT PRIMARY KEY,
@@ -523,6 +529,12 @@ CREATE TABLE routes (
 CREATE TABLE session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL
+);
+
+-- table session_ceilings
+CREATE TABLE session_ceilings (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	ceiling TEXT NOT NULL
 );
 
 -- table session_context

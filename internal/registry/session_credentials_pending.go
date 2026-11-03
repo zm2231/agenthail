@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 )
 
@@ -13,7 +14,7 @@ type PendingCredential struct {
 }
 
 // A Codex thread has no id until thread/start returns, yet its token must be in that call; the id is claimed after and binds at registration.
-func (r *Registry) IssuePendingCredential(now time.Time, lifetime time.Duration) (PendingCredential, error) {
+func (r *Registry) IssuePendingCredential(ceiling json.RawMessage, now time.Time, lifetime time.Duration) (PendingCredential, error) {
 	token, err := newSessionToken()
 	if err != nil {
 		return PendingCredential{}, err
@@ -32,9 +33,19 @@ func (r *Registry) IssuePendingCredential(now time.Time, lifetime time.Duration)
 		return PendingCredential{}, err
 	}
 	idle, max := now.Add(CredentialIdleLifetime), now.Add(CredentialMaxLifetime)
-	if _, err := tx.Exec(`INSERT INTO session_credentials(pending_ref,pending_expires_at_ms,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?,?)`,
-		ref, now.Add(lifetime).UnixMilli(), HashSessionToken(token), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli()); err != nil {
+	result, err := tx.Exec(`INSERT INTO session_credentials(pending_ref,pending_expires_at_ms,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?,?)`,
+		ref, now.Add(lifetime).UnixMilli(), HashSessionToken(token), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli())
+	if err != nil {
 		return PendingCredential{}, err
+	}
+	if bounded(ceiling) {
+		id, err := result.LastInsertId()
+		if err != nil {
+			return PendingCredential{}, err
+		}
+		if _, err := tx.Exec(`INSERT INTO pending_ceilings(credential_id,ceiling) VALUES(?,?)`, id, string(ceiling)); err != nil {
+			return PendingCredential{}, err
+		}
 	}
 	return PendingCredential{Token: token, Ref: ref}, tx.Commit()
 }
@@ -93,6 +104,12 @@ func bindClaimedCredentialTx(tx *sql.Tx, sessionID string, now time.Time) error 
 	if _, err := tx.Exec(`UPDATE session_credentials SET revoked_at_ms=?,revoked_reason=? WHERE session_id=? AND revoked_at_ms=0`, now.UnixMilli(), RevokedRotated, sessionID); err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE session_credentials SET session_id=?,pending_ref=NULL,pending_expires_at_ms=0,claimed_session_id=NULL WHERE id=?`, sessionID, id)
+	if _, err := tx.Exec(`UPDATE session_credentials SET session_id=?,pending_ref=NULL,pending_expires_at_ms=0,claimed_session_id=NULL WHERE id=?`, sessionID, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO session_ceilings(session_id,ceiling) SELECT ?,ceiling FROM pending_ceilings WHERE credential_id=? ON CONFLICT(session_id) DO NOTHING`, sessionID, id); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DELETE FROM pending_ceilings WHERE credential_id=?`, id)
 	return err
 }

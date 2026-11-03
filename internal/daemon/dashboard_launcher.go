@@ -52,6 +52,9 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
+	if len(request.Ceiling) > 0 {
+		ctx = surface.WithStartCeiling(ctx, request.Ceiling)
+	}
 	options := startOptions(cwd)
 	var extra map[string]any
 	if pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options); pick != nil {

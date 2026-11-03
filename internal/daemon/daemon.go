@@ -116,6 +116,7 @@ type Daemon struct {
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
+	spawnLocks               keyedLocks
 	// launchCodex, when set, replaces running 'agenthail launch codex'.
 	launchCodex func(ctx context.Context, executable string) ([]byte, error)
 	// limitResumeEnabled, when set, replaces the host's resume after limit

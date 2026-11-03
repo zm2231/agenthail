@@ -23,6 +23,12 @@ func (r *Registry) SessionDescendants(sessionID string) ([]string, error) {
 		SELECT s.id FROM spawned JOIN sessions s ON s.id=spawned.id WHERE `+liveLocalSession, sessionID)
 }
 
+func (r *Registry) RunningChildren(creatorID string) (int, error) {
+	var running int
+	err := r.read.QueryRow(`SELECT COUNT(*) FROM session_origins o JOIN sessions s ON s.id=o.session_id WHERE o.creator_session_id=? AND s.status='busy' AND `+liveLocalSession, creatorID).Scan(&running)
+	return running, err
+}
+
 const maxSpawnerChain = 64
 
 // SessionAncestors is the spawner chain, nearest first; the depth bound ends a creator cycle.
