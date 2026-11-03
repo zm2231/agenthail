@@ -37,14 +37,21 @@ func dashboardStartCwd(value string) (string, error) {
 }
 
 func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.AliasReservation, bool) {
+	reservation, err := d.reserveName(name)
+	if err != nil {
+		writeActionResult(w, actionResult{}, err)
+		return registry.AliasReservation{}, false
+	}
+	return reservation, true
+}
+
+func (d *Daemon) reserveName(name string) (registry.AliasReservation, error) {
 	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surfaceOperationTimeout+startNameMargin))
 	if err == nil {
-		return reservation, true
+		return reservation, nil
 	}
 	if registry.AliasRefused(err) {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-	} else {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("reserve conversation name: %s", err))
+		return registry.AliasReservation{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	return registry.AliasReservation{}, false
+	return registry.AliasReservation{}, actionFailed(http.StatusInternalServerError, "internal_error", fmt.Sprintf("reserve conversation name: %s", err))
 }

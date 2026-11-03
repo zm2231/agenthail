@@ -21,189 +21,94 @@ func daemonSessionAction(action string) bool {
 	return false
 }
 
-func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func invalidRequest(message string) error {
+	return actionFailed(http.StatusBadRequest, "invalid_request", message)
+}
+
+func conflict(message string) error {
+	return actionFailed(http.StatusConflict, "conflict", message)
+}
+
+func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashboardActionRequest) (actionResult, error) {
 	if request.SessionID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId is required")
-		return
+		return actionResult{}, invalidRequest("sessionId is required")
 	}
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
-		return
+		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "session not found")
 	}
 	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned && !daemonSessionAction(request.Action) {
-		writeAPIError(w, http.StatusConflict, "daemon_session", fmt.Sprint(errors.Join(err, registry.ErrDaemonSession)))
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "daemon_session", fmt.Sprint(errors.Join(err, registry.ErrDaemonSession)))
 	}
-	if request.Action == "limit-resume" || request.Action == "limit-resume-cancel" {
-		d.limitResumeAction(w, session.ID, request.Action == "limit-resume")
-		return
-	}
-	if request.Action == "limit-move" {
-		d.limitMoveAction(w, r, session.ID, request.ConfigRoot, request.StopTerminal)
-		return
-	}
-	if request.Action == "session-focus" {
-		if session.Runtime == nil || !session.Runtime.Focusable || session.Runtime.Location == nil {
-			writeAPIError(w, http.StatusConflict, "conflict", "session is not focusable")
-			return
-		}
-		if d.transportResolver == nil {
-			writeAPIError(w, http.StatusConflict, "conflict", "launcher transport is unavailable")
-			return
-		}
-		launcher, ok := d.transportResolver.Launcher(session.Runtime.Launcher)
-		focuser, focusable := launcher.(surface.Focuser)
-		if !ok || !focusable {
-			writeAPIError(w, http.StatusConflict, "conflict", "launcher cannot focus sessions")
-			return
-		}
-		adapter, adapterErr := d.adapters().For(session)
-		if adapterErr != nil {
-			session.Runtime.Focusable = false
-			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			writeAPIError(w, http.StatusConflict, "conflict", "session surface is unavailable")
-			return
-		}
-		located, err := adapter.List(r.Context())
-		if err != nil {
-			session.Runtime.Focusable = false
-			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			writeAPIError(w, http.StatusConflict, "conflict", "session location is unavailable")
-			return
-		}
-		locations := launcher.Locate(r.Context(), located)
-		current, found := locations[session.ID]
-		if !found || current != *session.Runtime.Location {
-			session.Runtime.Focusable = false
-			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
-			writeAPIError(w, http.StatusConflict, "conflict", "session location is stale")
-			return
-		}
-		if err := focuser.Focus(r.Context(), *session.Runtime.Location); err != nil {
-			writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-			return
-		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID})
-		return
-	}
-	if request.Action == "session-archive" || request.Action == "session-unarchive" {
-		d.sessionArchiveAction(w, request.Action, session.ID)
-		return
-	}
-	if request.Action == "alias" {
-		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
-		if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "name must be 1 to 80 characters without spaces, /, or #")
-			return
-		}
-		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-			var taken registry.AliasTakenError
-			var reserved registry.AliasReservedError
-			if errors.As(err, &taken) {
-				writeAPIError(w, http.StatusConflict, "conflict", fmt.Sprintf("@%s is already used by another session", alias))
-				return
-			}
-			if errors.As(err, &reserved) {
-				writeAPIError(w, http.StatusConflict, "conflict", reserved.Error())
-				return
-			}
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("name conversation: %s", err))
-			return
-		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "identified", SessionID: session.ID, Result: "@" + alias})
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "alias": alias})
-		return
+	switch request.Action {
+	case "limit-resume", "limit-resume-cancel":
+		return d.doLimitResume(session.ID, request.Action == "limit-resume")
+	case "limit-move":
+		return d.doLimitMove(ctx, session.ID, request.ConfigRoot, request.StopTerminal)
+	case "session-focus":
+		return d.doSessionFocus(ctx, session)
+	case "session-archive", "session-unarchive":
+		return d.doSessionArchive(request.Action, session.ID)
+	case "alias":
+		return d.doSessionAlias(session, request.Alias)
 	}
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
-		writeAPIError(w, http.StatusConflict, "conflict", transportErr.Error())
-		return
+		return actionResult{}, conflict(transportErr.Error())
 	}
 	if request.PID != 0 {
-		if err := pinHolder(r.Context(), adapter, session, request.PID, request.PIDStartedAt); err != nil {
-			writeAPIError(w, http.StatusConflict, "conflict", err.Error())
-			return
+		if err := pinHolder(ctx, adapter, session, request.PID, request.PIDStartedAt); err != nil {
+			return actionResult{}, conflict(err.Error())
 		}
 	}
 	if request.Action == "session-adopt" {
-		d.dashboardSessionAdopt(w, r, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal})
-		return
+		return d.doSessionAdopt(ctx, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal})
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
-		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
-		return
+		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
 	}
-	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
-		writeAPIError(w, http.StatusConflict, "conflict", err.Error())
-		return
+	if err := d.ensureDashboardWritable(ctx, adapter, session); err != nil {
+		return actionResult{}, conflict(err.Error())
 	}
 	effective := surface.EffectiveCapabilities(adapter, session)
-	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	var result any
 	switch request.Action {
 	case "send":
 		if strings.TrimSpace(request.Message) == "" && len(request.Attachments) == 0 {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "message is required")
-			return
+			return actionResult{}, invalidRequest("message is required")
 		}
 		attached, uploadErr := d.resolveUploads(request.Attachments)
 		if uploadErr != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", uploadErr.Error())
-			return
+			return actionResult{}, invalidRequest(uploadErr.Error())
 		}
 		if len(attached) > 0 && !effective.Attach {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot take attached files")
-			return
+			return actionResult{}, invalidRequest("this session cannot take attached files")
 		}
-		if request.Author != "" && request.Author != surface.AuthorPerson {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" when set")
-			return
-		}
-		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a person's message cannot also name a source session")
-			return
-		}
-		if request.SourceSessionID != "" {
-			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
-				return
-			}
+		if err := checkMessageAuthor(d, request); err != nil {
+			return actionResult{}, err
 		}
 		if request.RelayHops != 0 {
 			if len(attached) > 0 {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", "a relay leg carries no attached files")
-				return
+				return actionResult{}, invalidRequest("a relay leg carries no attached files")
 			}
-			d.queueHostRelay(w, r, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
-			return
+			return d.doHostRelay(ctx, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops)
 		}
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
 		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
-			writeAPIError(w, http.StatusBadGateway, "bad_gateway", actionErr.Error())
-			return
+			return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", actionErr.Error())
 		}
 		result = receipt
 	case "steer":
 		if !effective.Steer || strings.TrimSpace(request.Message) == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be steered")
-			return
+			return actionResult{}, invalidRequest("this session cannot be steered")
 		}
-		if request.Author != "" && request.Author != surface.AuthorPerson {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" when set")
-			return
-		}
-		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a person's message cannot also name a source session")
-			return
+		if err := checkMessageAuthor(d, request); err != nil {
+			return actionResult{}, err
 		}
 		if request.SourceSessionID != "" {
-			if _, sourceErr := d.Registry.Session(request.SourceSessionID); sourceErr != nil {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
-				return
-			}
 			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
 		}
 		if request.PersonName != "" {
@@ -212,14 +117,12 @@ func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, 
 		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message, request.Author)
 	case "interrupt":
 		if !effective.Interrupt {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be interrupted")
-			return
+			return actionResult{}, invalidRequest("this session cannot be interrupted")
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "interrupt"})
 	case "compact":
 		if !effective.Compact {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session cannot be compacted")
-			return
+			return actionResult{}, invalidRequest("this session cannot be compacted")
 		}
 		result, err = d.dispatcher().Compact(ctx, adapter, session)
 	case "goal-set", "goal-edit":
@@ -229,43 +132,23 @@ func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, 
 	case "goal-pause", "goal-resume", "goal-budget":
 		controller, ok := adapter.(surface.GoalController)
 		if !effective.Goal || !ok {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support typed goal controls")
-			return
+			return actionResult{}, invalidRequest("this session does not support typed goal controls")
 		}
-		var update surface.GoalUpdate
-		switch request.Action {
-		case "goal-pause", "goal-resume":
-			status := surface.GoalStatusPaused
-			if request.Action == "goal-resume" {
-				status = surface.GoalStatusActive
-			}
-			update = surface.GoalUpdate{Status: &status}
-		case "goal-budget":
-			budget := strings.TrimSpace(request.Message)
-			if budget == "" {
-				update = surface.GoalUpdate{ClearTokenBudget: true}
-				break
-			}
-			value, parseErr := strconv.ParseInt(budget, 10, 64)
-			if parseErr != nil || value < 0 {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", "token budget must be a non-negative integer")
-				return
-			}
-			update = surface.GoalUpdate{TokenBudget: &value}
+		update, updateErr := goalUpdate(request)
+		if updateErr != nil {
+			return actionResult{}, updateErr
 		}
 		err = controller.UpdateGoal(ctx, session, update)
 	case "model":
 		if !effective.Model {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support model switching")
-			return
+			return actionResult{}, invalidRequest("this session does not support model switching")
 		}
 		if strings.TrimSpace(request.Model) == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "model is required")
-			return
+			return actionResult{}, invalidRequest("model is required")
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "model", Value: request.Model})
 		if err == nil {
-			d.recordSetting(session, "model", strings.TrimSpace(request.Model), actionActor(r))
+			d.recordSetting(session, "model", strings.TrimSpace(request.Model), p.actor())
 		}
 		if err == nil && session.Surface == surface.KindClaude {
 			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
@@ -274,38 +157,120 @@ func (d *Daemon) dashboardSessionAction(w http.ResponseWriter, r *http.Request, 
 		}
 	case "permission-mode":
 		if !effective.PermissionMode {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's permission mode cannot change while it runs")
-			return
+			return actionResult{}, invalidRequest("this session's permission mode cannot change while it runs")
 		}
 		mode := strings.TrimSpace(request.PermissionMode)
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: "permission-mode", Value: mode})
 		if err == nil {
-			d.recordSetting(session, "permission-mode", mode, actionActor(r))
+			d.recordSetting(session, "permission-mode", mode, p.actor())
 		}
 	case "respond":
-		d.respond(ctx, w, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, actionActor(r))
-		return
+		return d.respond(ctx, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, p.actor())
 	case "context", "usage", "status", "effort", "rename":
 		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session does not support Claude Remote Control commands")
-			return
+			return actionResult{}, invalidRequest("this session does not support Claude Remote Control commands")
 		}
 		result, err = d.control(ctx, adapter, session, surface.ControlRequest{Action: request.Action, Value: request.Message})
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unsupported dashboard action")
-		return
+		return actionResult{}, invalidRequest("unsupported dashboard action")
 	}
 	if err != nil {
 		if control, ok := result.(*surface.ControlResult); ok && control != nil {
-			writeAPIErrorWith(w, http.StatusBadGateway, "control_failed", err.Error(), map[string]any{"result": control})
-			return
+			return actionResult{}, &actionError{Status: http.StatusBadGateway, Code: "control_failed", Message: err.Error(), Extra: map[string]any{"result": control}}
 		}
 		if surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return actionResult{}, invalidRequest(err.Error())
 		}
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	return actionOK(map[string]any{"ok": true, "result": result}), nil
+}
+
+func checkMessageAuthor(d *Daemon, request dashboardActionRequest) error {
+	if request.Author != "" && request.Author != surface.AuthorPerson {
+		return invalidRequest("author must be \"person\" when set")
+	}
+	if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+		return invalidRequest("a person's message cannot also name a source session")
+	}
+	if request.SourceSessionID != "" {
+		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
+			return invalidRequest("source session not found")
+		}
+	}
+	return nil
+}
+
+func goalUpdate(request dashboardActionRequest) (surface.GoalUpdate, error) {
+	if request.Action != "goal-budget" {
+		status := surface.GoalStatusPaused
+		if request.Action == "goal-resume" {
+			status = surface.GoalStatusActive
+		}
+		return surface.GoalUpdate{Status: &status}, nil
+	}
+	budget := strings.TrimSpace(request.Message)
+	if budget == "" {
+		return surface.GoalUpdate{ClearTokenBudget: true}, nil
+	}
+	value, err := strconv.ParseInt(budget, 10, 64)
+	if err != nil || value < 0 {
+		return surface.GoalUpdate{}, invalidRequest("token budget must be a non-negative integer")
+	}
+	return surface.GoalUpdate{TokenBudget: &value}, nil
+}
+
+func (d *Daemon) doSessionFocus(ctx context.Context, session *surface.Session) (actionResult, error) {
+	if session.Runtime == nil || !session.Runtime.Focusable || session.Runtime.Location == nil {
+		return actionResult{}, conflict("session is not focusable")
+	}
+	if d.transportResolver == nil {
+		return actionResult{}, conflict("launcher transport is unavailable")
+	}
+	launcher, ok := d.transportResolver.Launcher(session.Runtime.Launcher)
+	focuser, focusable := launcher.(surface.Focuser)
+	if !ok || !focusable {
+		return actionResult{}, conflict("launcher cannot focus sessions")
+	}
+	unfocusable := func(message string) (actionResult, error) {
+		session.Runtime.Focusable = false
+		_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
+		return actionResult{}, conflict(message)
+	}
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		return unfocusable("session surface is unavailable")
+	}
+	located, err := adapter.List(ctx)
+	if err != nil {
+		return unfocusable("session location is unavailable")
+	}
+	current, found := launcher.Locate(ctx, located)[session.ID]
+	if !found || current != *session.Runtime.Location {
+		return unfocusable("session location is stale")
+	}
+	if err := focuser.Focus(ctx, *session.Runtime.Location); err != nil {
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
+	}
+	return actionOK(map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID}), nil
+}
+
+func (d *Daemon) doSessionAlias(session *surface.Session, requested string) (actionResult, error) {
+	alias := strings.TrimPrefix(strings.TrimSpace(requested), "@")
+	if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
+		return actionResult{}, invalidRequest("name must be 1 to 80 characters without spaces, /, or #")
+	}
+	if err := d.Registry.SetAlias(alias, session.ID); err != nil {
+		var taken registry.AliasTakenError
+		var reserved registry.AliasReservedError
+		if errors.As(err, &taken) {
+			return actionResult{}, conflict(fmt.Sprintf("@%s is already used by another session", alias))
+		}
+		if errors.As(err, &reserved) {
+			return actionResult{}, conflict(reserved.Error())
+		}
+		return actionResult{}, invalidRequest(fmt.Sprintf("name conversation: %s", err))
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "identified", SessionID: session.ID, Result: "@" + alias})
+	return actionOK(map[string]any{"ok": true, "alias": alias}), nil
 }

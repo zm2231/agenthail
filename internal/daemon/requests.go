@@ -74,38 +74,32 @@ func sessionResponder(adapter surface.Surface, session *surface.Session) (surfac
 // Either way the turn is observed again and the session's catalog row
 // published before the reply, so a client reading right after sees it no
 // longer waiting on the request.
-func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) {
+func (d *Daemon) respond(ctx context.Context, adapter surface.Surface, session *surface.Session, requestID string, decision surface.Decision, actor string) (actionResult, error) {
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
 	if decision.Choice != "" {
 		state, err := responder.Requests(ctx, session)
 		if err != nil {
-			writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-			return
+			return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 		}
 		request, open := openRequest(state, requestID)
 		if !open {
 			d.observeAfterAnswer(adapter, session)
-			writeStaleRequest(w)
-			return
+			return actionResult{}, staleRequest()
 		}
 		if decision, err = request.Choose(decision.Choice, decision.Message); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 		}
 	}
 	outcome, err := responder.Respond(ctx, session, requestID, decision)
 	if errors.Is(err, surface.ErrRequestStale) {
 		d.observeAfterAnswer(adapter, session)
-		writeStaleRequest(w)
-		return
+		return actionResult{}, staleRequest()
 	}
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
 	entry := registry.HistoryEntry{Kind: "request-" + outcome, SessionID: session.ID, Message: requestID, Result: "answered by " + actor}
 	record := func(context.Context) {
@@ -117,7 +111,7 @@ func (d *Daemon) respond(ctx context.Context, w http.ResponseWriter, adapter sur
 		record(ctx)
 	}
 	d.observeAfterAnswer(adapter, session)
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}})
+	return actionOK(map[string]any{"ok": true, "result": map[string]string{"requestId": requestID, "outcome": outcome}}), nil
 }
 
 // observeAfterAnswer records what the session waits on now and publishes its
@@ -151,8 +145,8 @@ func openRequest(state surface.RequestState, requestID string) (surface.Request,
 	return surface.Request{}, false
 }
 
-func writeStaleRequest(w http.ResponseWriter) {
-	writeAPIError(w, http.StatusConflict, "stale", surface.ErrRequestStale.Error())
+func staleRequest() error {
+	return actionFailed(http.StatusConflict, "stale", surface.ErrRequestStale.Error())
 }
 
 // recordSetting writes a model or permission-mode change into the session's

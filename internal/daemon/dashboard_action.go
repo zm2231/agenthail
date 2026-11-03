@@ -72,5 +72,6 @@ func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request das
 		d.dashboardRuntimeEnsure(w, r, request)
 		return
 	}
-	d.dashboardSessionAction(w, r, request)
+	result, err := d.doSessionAction(r.Context(), principalFromRequest(r), request)
+	writeActionResult(w, result, err)
 }

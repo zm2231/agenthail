@@ -81,11 +81,15 @@ func withActionKey(ctx context.Context, idempotencyKey string) context.Context {
 	return context.WithValue(ctx, actionKeyContextKey{}, idempotencyKey)
 }
 
+func actionKey(ctx context.Context) string {
+	key, _ := ctx.Value(actionKeyContextKey{}).(string)
+	return key
+}
+
 // doAction dispatches one decoded action and announces a state change when it succeeds.
 func (d *Daemon) doAction(ctx context.Context, p principal, request dashboardActionRequest) actionReply {
 	recorder := newActionRecorder()
-	key, _ := ctx.Value(actionKeyContextKey{}).(string)
-	d.routeAction(recorder, principalRequest(ctx, p, nil, key), request)
+	d.routeAction(recorder, principalRequest(ctx, p, nil, actionKey(ctx)), request)
 	reply := recorder.reply()
 	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
 		d.publishEvent("state.changed", "", map[string]string{"source": "action"})

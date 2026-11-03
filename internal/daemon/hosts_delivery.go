@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -50,26 +51,22 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": receipt})
 }
 
-func (d *Daemon) queueHostRelay(w http.ResponseWriter, r *http.Request, session *surface.Session, message, sourceID, busyDelivery string, hops int) {
-	if _, fromHost := requestingHost(r.Context()); !fromHost {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "relayHops is set only by a paired host forwarding a relay")
-		return
+func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, message, sourceID, busyDelivery string, hops int) (actionResult, error) {
+	if _, fromHost := requestingHost(ctx); !fromHost {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "relayHops is set only by a paired host forwarding a relay")
 	}
 	if hops < 1 || hops > maxRelayHops {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("a relay may take at most %d hops", maxRelayHops))
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("a relay may take at most %d hops", maxRelayHops))
 	}
-	key := r.Header.Get(actionIdempotencyHeader)
+	key := actionKey(ctx)
 	if key == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "a forwarded relay needs its idempotency key")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "a forwarded relay needs its idempotency key")
 	}
 	queueID, err := d.Registry.QueueRelayMessageWithOptions(session.ID, message, "host-relay:"+key, hops, surface.SendOptions{SourceSessionID: sourceID, BusyDelivery: busyDelivery})
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: session.ID, QueueID: queueID, Detail: "relay queued"}})
+	return actionOK(map[string]any{"ok": true, "result": delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: session.ID, QueueID: queueID, Detail: "relay queued"}}), nil
 }
 
 func (d *Daemon) apiRelaysHandler(w http.ResponseWriter, r *http.Request) {

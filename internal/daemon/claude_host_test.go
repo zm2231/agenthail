@@ -322,7 +322,8 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	if prompt == "QUESTION" {
 		decision.Answers = map[string]string{"Which color?": "Blue"}
 	}
-	d.respond(ctx, answer, claude, &session, request, decision, "the test")
+	result, err := d.respond(ctx, claude, &session, request, decision, "the test")
+	writeActionResult(answer, result, err)
 	if answer.Code != http.StatusConflict {
 		t.Fatalf("answer to the dead prompt = %d %s, want 409", answer.Code, answer.Body)
 	}
@@ -465,7 +466,8 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 				t.Fatalf("requests through the retiring protocol 2 host = %+v, %v", state, err)
 			}
 			answer := httptest.NewRecorder()
-			d.respond(ctx, answer, claude, &session, state.Requests[0].ID, test.decision, "the test")
+			result, err := d.respond(ctx, claude, &session, state.Requests[0].ID, test.decision, "the test")
+			writeActionResult(answer, result, err)
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer through the retiring protocol 2 host = %d %s", answer.Code, answer.Body)
 			}
@@ -772,7 +774,8 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 				t.Fatalf("requests after the updates = %+v, %v; want %s", state, err, request.ID)
 			}
 			answer := httptest.NewRecorder()
-			d.respond(ctx, answer, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+			result, err := d.respond(ctx, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+			writeActionResult(answer, result, err)
 			if answer.Code != http.StatusOK {
 				t.Fatalf("answer after the updates = %d %s", answer.Code, answer.Body)
 			}
@@ -939,7 +942,8 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 	answerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	answer := httptest.NewRecorder()
-	d.respond(answerCtx, answer, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+	result, err := d.respond(answerCtx, claude, &session, request.ID, surface.Decision{Behavior: "allow"}, "the test")
+	writeActionResult(answer, result, err)
 	if answer.Code != http.StatusOK {
 		t.Fatalf("answer beside a silent host = %d %s", answer.Code, answer.Body)
 	}

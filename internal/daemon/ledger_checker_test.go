@@ -148,10 +148,10 @@ func TestOneCheckerRunsAtATimeAndOnlyItsTokenReports(t *testing.T) {
 		t.Fatalf("delivery to the checker = %v", err)
 	}
 	for _, action := range []string{"session-unarchive", "session-lifecycle-resume", "session-fork"} {
-		rec := httptest.NewRecorder()
-		f.d.dashboardSessionAction(rec, httptest.NewRequest(http.MethodPost, "/", nil), dashboardActionRequest{SessionID: run.Run, Action: action})
-		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "daemon_session") {
-			t.Fatalf("%s on the checker = %d %s", action, rec.Code, rec.Body)
+		_, err := f.d.doSessionAction(t.Context(), principal{Kind: principalPerson}, dashboardActionRequest{SessionID: run.Run, Action: action})
+		var refused *actionError
+		if !errors.As(err, &refused) || refused.Status != http.StatusConflict || refused.Code != "daemon_session" {
+			t.Fatalf("%s on the checker = %v", action, err)
 		}
 	}
 	f.d.sweepLedgerChecks(t.Context(), later.Add(time.Minute))

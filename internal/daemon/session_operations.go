@@ -13,8 +13,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName, creator string, queue surface.NativeQueueRequest) {
-	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName, creator string, queue surface.NativeQueueRequest) (actionResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	var result any
 	var err error
@@ -27,32 +27,27 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		}
 		if creator != "" {
 			if _, lookupErr := d.Registry.Session(creator); lookupErr != nil {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("sourceSessionId %s is not a session here", creator))
-				return
+				return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("sourceSessionId %s is not a session here", creator))
 			}
 		}
 		if forkOptions.BeforeTurnID != "" {
 			if forkOptions.LastTurnID != "" {
-				writeAPIError(w, http.StatusBadRequest, "fork_point_conflict", "A fork takes lastTurnId or beforeTurnId, not both.")
-				return
+				return actionResult{}, actionFailed(http.StatusBadRequest, "fork_point_conflict", "A fork takes lastTurnId or beforeTurnId, not both.")
 			}
 			previous, found, lookupErr := d.Registry.JournalTurnBefore(session.ID, forkOptions.BeforeTurnID)
 			switch {
 			case lookupErr != nil:
-				writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("read the session's turns: %s", lookupErr))
-				return
+				return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", fmt.Sprintf("read the session's turns: %s", lookupErr))
 			case !found:
-				writeAPIError(w, http.StatusConflict, "fork_turn_unknown", "Agenthail no longer holds that part of this conversation, so it can't fork from there.")
-				return
+				return actionResult{}, actionFailed(http.StatusConflict, "fork_turn_unknown", "Agenthail no longer holds that part of this conversation, so it can't fork from there.")
 			case previous == "":
-				writeAPIError(w, http.StatusConflict, "fork_first_turn", "That prompt started the conversation, so there is nothing before it to fork.")
-				return
+				return actionResult{}, actionFailed(http.StatusConflict, "fork_first_turn", "That prompt started the conversation, so there is nothing before it to fork.")
 			}
 			forkOptions = surface.ForkOptions{Model: forkOptions.Model, LastTurnID: previous}
 		}
-		name, reserved := d.reserveStartName(w, forkName)
-		if !reserved {
-			return
+		name, reserveErr := d.reserveName(forkName)
+		if reserveErr != nil {
+			return actionResult{}, reserveErr
 		}
 		defer func() { _ = d.Registry.ReleaseAliasReservation(name) }()
 		var fork *surface.Session
@@ -98,14 +93,13 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 		if surface.IsDeliveryOutcomeUnknown(err) {
 			code = "session_operation_unknown"
 		}
-		writeAPIError(w, http.StatusBadGateway, code, err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, code, err.Error())
 	}
 	data, _ := json.Marshal(result)
 	if action != "session-lifecycle-status" && action != "session-lifecycle-logs" && !(action == "native-queue" && queue.Action == "list") {
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: action + ": " + string(data)})
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	return actionOK(map[string]any{"ok": true, "result": result}), nil
 }
 
 const sessionAdoptTimeout = 2 * time.Minute
@@ -113,13 +107,12 @@ const sessionAdoptTimeout = 2 * time.Minute
 // dashboardSessionAdopt opens a session that runs elsewhere on this computer
 // in the host. A busy session, or a terminal one without consent to stop it,
 // is refused with 409.
-func (d *Daemon) dashboardSessionAdopt(w http.ResponseWriter, r *http.Request, adapter surface.Surface, session *surface.Session, request surface.AdoptRequest) {
+func (d *Daemon) doSessionAdopt(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.AdoptRequest) (actionResult, error) {
 	adopter, ok := adapter.(surface.SessionAdopter)
 	if !ok {
-		writeAPIError(w, http.StatusBadRequest, "session_adopt_unsupported", fmt.Sprintf("%s sessions cannot be opened in Agenthail", session.Surface))
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "session_adopt_unsupported", fmt.Sprintf("%s sessions cannot be opened in Agenthail", session.Surface))
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), sessionAdoptTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sessionAdoptTimeout)
 	defer cancel()
 	result, err := adopter.AdoptSession(ctx, session, request)
 	if err != nil {
@@ -143,15 +136,13 @@ func (d *Daemon) dashboardSessionAdopt(w http.ResponseWriter, r *http.Request, a
 		if busy != nil {
 			extra["busy"] = busy.Reason
 		}
-		writeAPIErrorWith(w, status, code, err.Error(), extra)
-		return
+		return actionResult{}, &actionError{Status: status, Code: code, Message: err.Error(), Extra: extra}
 	}
 	if result.Session != nil {
 		if err := d.Registry.RegisterSession(*result.Session); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "session_adopt_unrecorded", fmt.Sprintf("session %s opened in Agenthail, but its registration failed: %s", session.ID, err))
-			return
+			return actionResult{}, actionFailed(http.StatusInternalServerError, "session_adopt_unrecorded", fmt.Sprintf("session %s opened in Agenthail, but its registration failed: %s", session.ID, err))
 		}
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "adopt"})
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	return actionOK(map[string]any{"ok": true, "result": result}), nil
 }

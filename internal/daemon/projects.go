@@ -641,7 +641,7 @@ func (d *Daemon) forwardProjectAction(r *http.Request, host *pairedHost, request
 	return answer.status, envelope.Error.Code, fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
 }
 
-func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID string) {
+func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
 	var err error
 	if action == "session-archive" {
 		err = d.Registry.ArchiveSession(sessionID, time.Now().UTC())
@@ -649,18 +649,16 @@ func (d *Daemon) sessionArchiveAction(w http.ResponseWriter, action, sessionID s
 		err = d.Registry.UnarchiveSession(sessionID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
-		return
+		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "session not found")
 	}
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	d.publishCatalogPresence()
 	// A catalog pass that read the archive state before this change may still
 	// publish its rows; the pass this requests runs after it and settles them.
 	d.requestCatalogDiscovery()
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"})
+	return actionOK(map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"}), nil
 }
 
 // addProject adds a folder as a project of this host. A folder in a linked
