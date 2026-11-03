@@ -78,6 +78,12 @@ type OpenRequest struct {
 	Worktree       string       `json:"worktree,omitempty"`
 	ConfigDir      string       `json:"configDir,omitempty"`
 	Checker        *CheckerOpen `json:"checker,omitempty"`
+	MCP            *MCPServer   `json:"mcp,omitempty"`
+}
+
+type MCPServer struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
 }
 
 type CheckerOpen struct {

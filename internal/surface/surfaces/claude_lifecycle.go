@@ -128,7 +128,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		return nil, nil, err
 	}
 	id := uuid.NewString()
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{
+	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
 		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
 		ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root),

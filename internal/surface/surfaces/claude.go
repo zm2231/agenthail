@@ -35,6 +35,7 @@ type Claude struct {
 	request      ClaudeRequest
 	webAccounts  claudeWebAccounts
 	localOnly    bool
+	mcpAttachment
 }
 
 type ClaudeRequest func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error)

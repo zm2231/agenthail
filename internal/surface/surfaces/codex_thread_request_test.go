@@ -60,6 +60,7 @@ type fakeCredentials struct {
 	rotations  int
 	unattached []error
 	claims     []string
+	rotateErr  error
 }
 
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
@@ -76,7 +77,7 @@ func (f *fakeCredentials) Live(id string) (string, bool) {
 }
 func (f *fakeCredentials) Rotate(id string) (string, error) {
 	f.rotations++
-	return "ahs_rotated", nil
+	return "ahs_rotated", f.rotateErr
 }
 func (f *fakeCredentials) Unattached(_ string, err error) { f.unattached = append(f.unattached, err) }
 

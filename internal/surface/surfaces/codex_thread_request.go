@@ -13,30 +13,7 @@ const (
 	codexThreadStart  = "thread/start"
 	codexThreadResume = "thread/resume"
 	codexThreadFork   = "thread/fork"
-	mcpServerName     = "agenthail"
-	mcpToolTimeoutSec = 3700
 )
-
-type MCPCredentials interface {
-	URL() string
-	Pending() (token, ref string, err error)
-	Claim(ref, threadID string) error
-	Live(sessionID string) (token string, ok bool)
-	Rotate(sessionID string) (token string, err error)
-	Unattached(sessionID string, err error)
-}
-
-func (c *Codex) SetMCPCredentials(credentials MCPCredentials) {
-	c.mcpMu.Lock()
-	defer c.mcpMu.Unlock()
-	c.mcp = credentials
-}
-
-func (c *Codex) mcpCredentials() MCPCredentials {
-	c.mcpMu.Lock()
-	defer c.mcpMu.Unlock()
-	return c.mcp
-}
 
 func mcpServerConfig(url, token string) map[string]any {
 	return map[string]any{"mcp_servers": map[string]any{mcpServerName: map[string]any{

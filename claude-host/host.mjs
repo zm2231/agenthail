@@ -23,6 +23,8 @@ const MAX_SUBSCRIBER_BUFFER = 8 << 20;
 const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
+const AGENTHAIL_MCP = 'agenthail';
+const AGENTHAIL_MCP_TIMEOUT_MS = 3_700_000;
 const TAKE_TIMEOUT_MS = 10_000;
 const HUMAN_KEPT = 64;
 // How long close waits for Claude to stop its turn and exit before it kills
@@ -122,6 +124,18 @@ class Session {
     this.offered = null;
     this.commands = null;
     this.terminalCommands = new Set();
+    this.mcpToken = '';
+  }
+
+  async attachAgenthail(mcp) {
+    try {
+      const result = await this.query.setMcpServers(agenthailServer(mcp));
+      const failed = result?.errors?.[AGENTHAIL_MCP];
+      if (failed) throw new Error(failed);
+      this.mcpToken = mcp.token;
+    } catch (error) {
+      log(`session ${this.id} kept its agenthail MCP server: ${error.message}`);
+    }
   }
 
   // setCommands keeps the commands a person can run in the session, without
@@ -421,12 +435,21 @@ async function open(params) {
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
     throw new HostError('invalid', `configDir must be an absolute path: ${params.configDir}`);
   }
+  if (params.mcp !== undefined) {
+    if (!/^https?:\/\//.test(params.mcp?.url ?? '') || typeof params.mcp?.token !== 'string' || !params.mcp.token) {
+      throw new HostError('invalid', 'mcp names the agenthail server url and the session token');
+    }
+    if (params.checker !== undefined) throw new HostError('invalid', 'a checker runs without the agenthail MCP server');
+  }
   const extraArgs = {
     ...(params.name ? { name: params.name } : {}),
     ...(params.worktree ? { worktree: params.worktree } : {}),
   };
   const existing = sessions.get(id);
-  if (existing) return existing.describe();
+  if (existing) {
+    if (params.mcp && params.mcp.token !== existing.mcpToken) await existing.attachAgenthail(params.mcp);
+    return existing.describe();
+  }
   refuseOrphaned(id);
 
   // Claude starts a resumed conversation in the settings' default mode and
@@ -438,6 +461,7 @@ async function open(params) {
   const model = params.model || checker?.model || kept?.model || '';
   const s = new Session(id, cwd, permissionMode, model);
   s.checker = params.checker?.run ?? '';
+  s.mcpToken = params.mcp?.token ?? '';
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
@@ -462,6 +486,7 @@ async function open(params) {
           // Claude allows only when it started with consent to it. Claude still
           // asks canUseTool for questions in bypassPermissions.
           allowDangerouslySkipPermissions: true,
+          ...(params.mcp ? { mcpServers: agenthailServer(params.mcp), allowedTools: [`mcp__${AGENTHAIL_MCP}`] } : {}),
           ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
           canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         };
@@ -818,6 +843,12 @@ function origin(value) {
 // session-context hook does for a terminal Claude. The command is keyed by the
 // Claude process, so a copy of it from the person's settings prints nothing
 // more. Every failure adds nothing.
+function agenthailServer(mcp) {
+  return {
+    [AGENTHAIL_MCP]: { type: 'http', url: mcp.url, headers: { Authorization: `Bearer ${mcp.token}` }, timeout: AGENTHAIL_MCP_TIMEOUT_MS },
+  };
+}
+
 function sessionContextHooks(s) {
   const run = (input, _toolUseID, { signal }) =>
     new Promise((resolve) => {

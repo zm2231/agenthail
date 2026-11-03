@@ -107,8 +107,10 @@ func (d *Daemon) attachMCPCredentials(listen string) {
 	credentials := newDaemonMCPCredentials(d, listen)
 	d.mcpCodex.Store(credentials)
 	for _, adapter := range d.Surfaces {
-		if codex, ok := adapter.(*surfaces.Codex); ok {
-			codex.SetMCPCredentials(credentials)
+		if attachable, ok := adapter.(interface {
+			SetMCPCredentials(surfaces.MCPCredentials)
+		}); ok {
+			attachable.SetMCPCredentials(credentials)
 		}
 	}
 	if err := d.Registry.PrunePendingCredentials(time.Now()); err != nil {

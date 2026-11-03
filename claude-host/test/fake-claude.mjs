@@ -402,7 +402,7 @@ lines.on('line', (line) => {
       permissionMode = message.request.mode;
       write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
     }
-    if (subtype === 'set_model' || subtype === 'set_permission_mode') {
+    if (subtype === 'set_model' || subtype === 'set_permission_mode' || subtype === 'mcp_set_servers') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
     }
     const responses = {
