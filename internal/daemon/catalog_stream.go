@@ -621,8 +621,12 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 		d.catalogSelected(session.ID)
 	}
 	stored := d.storedListing(session.ID)
+	leads, err := d.Registry.LocalLeadSessions()
+	if err != nil {
+		return false
+	}
 	for attempt := 0; attempt < 3; attempt++ {
-		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, config)
+		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
@@ -786,10 +790,15 @@ func (d *Daemon) publishCatalogPresence() {
 	if p.rows == nil {
 		p.rows = map[string]*presenceRow{}
 	}
+	leads, err := d.Registry.LocalLeadSessions()
+	if err != nil {
+		d.log.Printf("catalog leads: %s", err)
+		return
+	}
 	p.pass++
 	now := time.Now()
 	presence := func(adapter surface.Surface, session surface.Session, open bool, count int) (bool, string) {
-		return surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: count, Open: open, Now: now, CodexRecentHours: config.CodexRecentHours})
+		return surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: count, Open: open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[session.ID]})
 	}
 	p.pending = p.pending[:0]
 	var settling []dashboardSession
@@ -982,11 +991,11 @@ func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
 	return project
 }
 
-func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig) dashboardSession {
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open, lead bool, config DashboardConfig) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
-	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
+	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours, Lead: lead})
 	host := d.localHost()
 	effective := surface.EffectiveCapabilities(adapter, &session)
 	var configRoot *surface.SessionConfigRoot
