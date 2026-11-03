@@ -79,6 +79,15 @@ A Codex coordinator starts without a name or permission mode, which Codex thread
 
 Context growth is left to the agent's own compaction.
 
+## Stuck sessions
+
+A session that stops where an agent could help is told to one agent: its project's coordinator, or, when the project has none, its coordinator has never started a conversation, or the stuck session is the coordinator, the session that started it (`session_origins`). With neither, only the person hears. The person is notified in every case.
+
+Every notice is a keyed row in `message_queue`: an ordinary queue item for a local session, a held host send (`QueueHostSend`) for a paired host's coordinator. Keys stay unique after delivery and a held send is replayed under its key, so a notice is delivered once even when the daemon restarts mid-announcement. A notice never starts a coordinator conversation.
+
+- **Prompts.** `announceWaiting` resolves the request and queues a notice naming it and `agenthail answer <session> <allow|deny|"answer"> --request <id>`. The key is derived from the session and question; `withdrawWaitingNow` cancels the notice while it is still pending.
+- **Goals.** Every 30 seconds `sweepStoppedGoals` reads the goal of each goal-capable, non-busy session active in the last day whose activity advanced since its last successful read, skipping sessions a `goal_completed` relay already reports on. A failed goal read or notice leaves the session due, so the next pass retries it. A `blocked`, `usageLimited` or `budgetLimited` goal queues a notice keyed by session, goal, status and update time, so each stop is told once and a stop after resuming is told again. The person is notified before that notice is queued, because the queued key is what ends the retries: a stop is never marked handled before the person was told, and a daemon stopped in between tells the person again rather than never. Within one daemon an in-memory record keeps it to once per stop, which is also the only record when no agent is told.
+
 ## Limits
 
 A message that starts a new conversation loses its sender label, because the conversation is created with that message as its prompt.
