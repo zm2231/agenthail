@@ -24,7 +24,7 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit", "request-id", "withdraw", "host-tag", "push-id"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
@@ -209,9 +209,16 @@ export async function send(request, env) {
     payload.aps["mutable-content"] = 1
     payload.requestId = requestId
   }
+  // The app's notification service quotes pushId back to the computer as a receipt.
+  const pushId = receiptPushId(body)
+  if (pushId) {
+    payload.aps["mutable-content"] = 1
+    payload.pushId = pushId
+  }
   const headers = { "apns-push-type": "alert", "apns-priority": "10" }
   if (collapseID) headers["apns-collapse-id"] = collapseID
-  return deliver(env, device, headers, payload)
+  const response = await deliver(env, device, headers, payload)
+  return pushId && response.ok ? json({ ok: true, receipt: true }) : response
 }
 
 // withdraw asks the app, in the background, to remove the notification it
@@ -358,6 +365,11 @@ async function allowRequest(limiter, key) {
 function openRequestId(body) {
   const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : ""
   return /^[A-Za-z0-9._-]{1,120}$/.test(requestId) ? requestId : ""
+}
+
+function receiptPushId(body) {
+  const pushId = typeof body?.pushId === "string" ? body.pushId.trim() : ""
+  return /^[a-z0-9]{8,64}$/.test(pushId) ? pushId : ""
 }
 
 function clean(value, limit) {

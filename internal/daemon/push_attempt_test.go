@@ -51,7 +51,7 @@ func TestEveryPushAttemptIsLoggedAndItsOutcomeKeptPerDevice(t *testing.T) {
 	if line := logged.String(); !strings.Contains(line, "devices=1 delivered=1 failed=0") || strings.Contains(line, "errors:") {
 		t.Fatalf("a delivered push was not logged as delivered: %q", line)
 	}
-	statuses, err := reg.PushStatuses()
+	statuses, err := reg.PushStatuses(time.Now())
 	if err != nil || len(statuses) != 1 || statuses[0].SucceededAt == "" || statuses[0].Error != "" || statuses[0].EventType != "session.waiting" {
 		t.Fatalf("statuses=%+v err=%v", statuses, err)
 	}
@@ -63,7 +63,7 @@ func TestEveryPushAttemptIsLoggedAndItsOutcomeKeptPerDevice(t *testing.T) {
 	if line := logged.String(); !strings.Contains(line, "push turn.completed session=s1 request=- devices=1 delivered=0 failed=1 errors: "+device.ID[:8]+": relay returned 502") {
 		t.Fatalf("a failed push did not name its device and the relay's answer: %q", line)
 	}
-	statuses, err = reg.PushStatuses()
+	statuses, err = reg.PushStatuses(time.Now())
 	if err != nil || len(statuses) != 1 || statuses[0].SucceededAt != delivered || !strings.Contains(statuses[0].Error, "relay returned 502") || statuses[0].FailedAt == "" || statuses[0].EventType != "turn.completed" {
 		t.Fatalf("a failure did not keep the last delivery beside it: %+v err=%v", statuses, err)
 	}

@@ -182,7 +182,7 @@ func (a *App) cmdDoctor(args []string) error {
 	var push pushHealth
 	var pushErr error
 	if r := a.registry(); r != nil {
-		push, pushErr = pushHealthOf(r)
+		push, pushErr = pushHealthOf(r, time.Now())
 		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		syncHealth, syncErr = a.ledgerSyncHealth(callCtx, r)
 		cancel()

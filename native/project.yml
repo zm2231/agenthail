@@ -85,6 +85,7 @@ targets:
       - path: QuestionPagerView.swift
       - path: RequestCard.swift
       - path: PairedCredential.swift
+      - path: PushReceipts.swift
       - path: iOS
     settings:
       base:
@@ -137,6 +138,7 @@ targets:
     sources:
       - path: RequestNotifications.swift
       - path: PairedCredential.swift
+      - path: PushReceipts.swift
       - path: iOSNotificationService
     settings:
       base:

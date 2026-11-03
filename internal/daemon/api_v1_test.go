@@ -485,6 +485,7 @@ func TestAPIV1RoutesRejectUnsupportedMethodsWithTypedJSON(t *testing.T) {
 		"/api/v1/devices",
 		"/api/v1/device",
 		"/api/v1/device/push",
+		"/api/v1/device/push-receipts",
 		"/api/v1/pair",
 	}
 	for _, path := range paths {
@@ -493,7 +494,7 @@ func TestAPIV1RoutesRejectUnsupportedMethodsWithTypedJSON(t *testing.T) {
 			request.Header.Set("Authorization", "Bearer secret")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if path == "/api/v1/device/push" {
+			if path == "/api/v1/device/push" || path == "/api/v1/device/push-receipts" {
 				assertAPIV1Error(t, response, http.StatusUnauthorized, "device_unauthorized")
 				return
 			}
@@ -521,6 +522,7 @@ func TestAPIV1MutationFailuresUseTypedJSON(t *testing.T) {
 		{"complete pairing", http.MethodPost, "/api/v1/pair", `{`, http.StatusBadRequest, "invalid_request", ""},
 		{"self revoke", http.MethodDelete, "/api/v1/device", ``, http.StatusUnauthorized, "device_unauthorized", "invalid"},
 		{"push", http.MethodPut, "/api/v1/device/push", `{`, http.StatusUnauthorized, "device_unauthorized", "invalid"},
+		{"push receipts", http.MethodPost, "/api/v1/device/push-receipts", `{`, http.StatusUnauthorized, "device_unauthorized", "invalid"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

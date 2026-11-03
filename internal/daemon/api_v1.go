@@ -126,6 +126,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/dashboard/login-links", d.apiV1Guard(dashboard, "settings", d.apiLoginLinksHandler))
 	mux.HandleFunc("/api/v1/device", d.apiDeviceSelfHandler)
 	mux.HandleFunc("/api/v1/device/push", d.apiDevicePushHandler)
+	mux.HandleFunc("/api/v1/device/push-receipts", d.apiDevicePushReceiptsHandler)
 	mux.HandleFunc("/api/v1/pair", d.apiPairHandler)
 }
 

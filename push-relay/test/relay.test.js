@@ -181,6 +181,50 @@ test("send asks APNs to collapse a repeated notification into one", async () => 
   assert.equal("apns-collapse-id" in delivered[1].headers, false)
 })
 
+test("send passes a push id on for the app's receipt and says so", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+  const credential = "fixture-credential"
+  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({
+    token: "ab".repeat(32),
+    environment: "sandbox",
+    attestedAt: Date.now(),
+    appAttestKeyHash: "fixture-key-hash",
+    credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
+  }))
+  const delivered = []
+  const answers = []
+  let apnsStatus = 200
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    delivered.push(JSON.parse(init.body))
+    return new Response(apnsStatus === 200 ? null : JSON.stringify({ reason: "ExpiredProviderToken" }), { status: apnsStatus })
+  }
+  const notification = { installationId: "phone", credential, title: "Agenthail", message: "Finished", eventType: "turn.completed" }
+  try {
+    for (const extra of [{ pushId: "abcdefgh2345" }, { pushId: "UPPER-CASE" }, { pushId: "short" }, {}]) {
+      const response = await send(request("POST", { ...notification, ...extra }), env)
+      assert.equal(response.status, 200)
+      answers.push(await response.json())
+    }
+    apnsStatus = 403
+    const refused = await send(request("POST", { ...notification, pushId: "abcdefgh2345" }), env)
+    assert.equal(refused.status, 502)
+    assert.equal((await refused.json()).receipt, undefined)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.deepEqual(answers[0], { ok: true, receipt: true })
+  assert.equal(delivered[0].pushId, "abcdefgh2345")
+  assert.equal(delivered[0].aps["mutable-content"], 1)
+  for (const [index, payload] of delivered.slice(1, 4).entries()) {
+    assert.deepEqual(answers[index + 1], { ok: true })
+    assert.equal("pushId" in payload, false)
+    assert.equal("mutable-content" in payload.aps, false)
+  }
+})
+
 test("send marks a request's notification for the app to fetch and drops anything else the request asks", async () => {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
   const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
@@ -313,6 +357,7 @@ test("health reports the relay protocol and capabilities", async () => {
   assert.ok(health.capabilities.includes("app-attest"))
   assert.ok(health.capabilities.includes("registration-check"))
   assert.ok(health.capabilities.includes("request-id"))
+  assert.ok(health.capabilities.includes("push-id"))
   assert.equal(health.ok, false)
   assert.deepEqual(health.appAttest, { required: true, configured: false })
   assert.deepEqual(health.apns, { configured: false })
