@@ -219,7 +219,7 @@ func TestQueuedSendToAReplacedCoordinatorConversationNamesTheCurrentOne(t *testi
 	c := newCoordinatorCLI(t).withGoneCoordinator(t)
 	c.register(t, surface.Session{ID: replacedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: c.claude.PID, Status: surface.StatusBusy, Cwd: c.cwd, Transcript: c.claude.Transcript(replacedConversation, c.cwd)})
 	c.claude.RecordStatus(replacedConversation, c.cwd, "", "busy", "", time.Now())
-	if err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation); err != nil {
+	if _, err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation, registry.CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	c.answers(`{"ok":true,"result":{"evidence":"queued","status":"queued","sessionId":"` + replacedConversation + `","queueId":4}}`)
@@ -368,7 +368,7 @@ func TestAReplyToAReplacedLeadConversationGoesToTheCurrentOne(t *testing.T) {
 	c := newCoordinatorCLI(t).withGoneCoordinator(t)
 	c.register(t, surface.Session{ID: replacedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: c.claude.PID, Status: surface.StatusBusy, Cwd: c.cwd, Transcript: c.claude.Transcript(replacedConversation, c.cwd)})
 	c.claude.RecordStatus(replacedConversation, c.cwd, "", "busy", "", time.Now())
-	if err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation); err != nil {
+	if _, err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation, registry.CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	c.answers(`{"ok":true,"result":{"evidence":"queued","status":"queued","sessionId":"` + replacedConversation + `","queueId":5}}`)
@@ -384,7 +384,7 @@ func TestAReplyToAReplacedLeadConversationGoesToTheCurrentOne(t *testing.T) {
 func TestStartFromAReplacedCoordinatorConversationNamesTheNewOne(t *testing.T) {
 	c := newCoordinatorCLI(t).withGoneCoordinator(t)
 	c.register(t, surface.Session{ID: replacedConversation, Bridge: "session_replacement", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.cwd})
-	if err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation); err != nil {
+	if _, err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation, registry.CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	c.answers(startedAnswer)

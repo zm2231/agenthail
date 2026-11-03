@@ -116,6 +116,7 @@ type Daemon struct {
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
+	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	spawnLocks               keyedLocks
 	// launchCodex, when set, replaces running 'agenthail launch codex'.
@@ -323,6 +324,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
 	go d.runGoalSweeps(ctx)
+	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})

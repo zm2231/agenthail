@@ -73,6 +73,10 @@ type SessionAttention struct {
 	Reason string `json:"reason"`
 }
 
+// AttentionReplacedRequest is an open request of a conversation that is no
+// longer its project's lead; it is shown apart and does not count as needing the person.
+const AttentionReplacedRequest = "replacedRequest"
+
 type PresentationPosition struct {
 	HostID   string `json:"hostId"`
 	Epoch    string `json:"epoch"`

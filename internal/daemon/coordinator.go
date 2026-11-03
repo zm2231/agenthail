@@ -25,7 +25,7 @@ func (d *Daemon) coordinator() coordinator.Service {
 	return coordinator.Service{Registry: d.Registry, Adapters: d.adapters(), Dispatcher: d.dispatcher(), ClaudeRoot: func(ctx context.Context) string {
 		pick, _ := d.claudeRootPick(ctx, false)
 		return pick.Root
-	}, LeadsChanged: d.syncLeads, Now: d.coordinatorNow}
+	}, LeadsChanged: d.syncLeads, Replaced: d.announceReplacementsSoon, Now: d.coordinatorNow}
 }
 
 // restartCoordinator delivers a queued message by starting the coordinator
@@ -48,6 +48,9 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
 	} else if messageUUID != "" {
 		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
+	if item.SourceSessionID != "" {
+		operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	}
 	outcome, handled, err := coord.Restart(operationCtx, session, composed)
 	if !handled {

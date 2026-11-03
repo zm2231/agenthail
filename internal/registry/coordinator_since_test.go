@@ -34,7 +34,7 @@ func TestCoordinatorSinceFollowsEachAssignmentAndHandover(t *testing.T) {
 		t.Fatal("a session that is not the coordinator has a coordinator grant")
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := r.HandOverCoordinator(spec, "first", "second"); err != nil {
+	if _, err := r.HandOverCoordinator(spec, "first", "second", CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	handed, ok, err := r.CoordinatorSince("proj", "second")

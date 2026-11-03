@@ -124,12 +124,13 @@ type dashboardProject struct {
 // dashboardProjectCoordinator is one host's coordinator of a project.
 // SessionID is empty until its first message starts it.
 type dashboardProjectCoordinator struct {
-	Host      dashboardHost `json:"host"`
-	Name      string        `json:"name"`
-	Surface   string        `json:"surface"`
-	SessionID string        `json:"sessionId,omitempty"`
-	ChangedBy string        `json:"changedBy,omitempty"`
-	ChangedAt time.Time     `json:"changedAt"`
+	Host      dashboardHost             `json:"host"`
+	Name      string                    `json:"name"`
+	Surface   string                    `json:"surface"`
+	SessionID string                    `json:"sessionId,omitempty"`
+	ChangedBy string                    `json:"changedBy,omitempty"`
+	ChangedAt time.Time                 `json:"changedAt"`
+	Replaced  *dashboardLeadReplacement `json:"replaced,omitempty"`
 }
 
 type dashboardProjectCheckout struct {

@@ -270,5 +270,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
 	}
+	if err := d.addLeadReplacements(&state); err != nil {
+		return dashboardState{}, err
+	}
 	return state, nil
 }

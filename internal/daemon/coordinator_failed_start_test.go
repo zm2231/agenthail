@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,8 +157,14 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 				t.Fatalf("problems=%+v err=%v", problems, err)
 			}
-			if pending := r.QueueCount("to"); pending != 0 {
-				t.Fatalf("the sender still has %d notices about a message the new conversation took", pending)
+			rows, err := r.ListQueue(false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range rows {
+				if row.SessionID == "to" && !strings.HasPrefix(row.Message, "[agenthail] Your message to @captain started a new conversation") {
+					t.Fatalf("the sender still has a notice about a message the new conversation took: %+v", row)
+				}
 			}
 			if tc.turn != "" {
 				if reconciled, err := r.ReconcileDeliveryIntent("started", tc.turn); err != nil || !reconciled {

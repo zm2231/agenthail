@@ -52,6 +52,10 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
+	replacedLeads, err := d.Registry.ReplacedLeadTenures()
+	if err != nil {
+		return SessionViewSnapshot{}, err
+	}
 	read, err := d.readCatalogPresentation(ctx)
 	if err != nil {
 		return SessionViewSnapshot{}, err
@@ -85,6 +89,9 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			if adapterErr == nil {
 				row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
 			}
+			if tenures, replaced := replacedLeads[record.ID]; replaced && !leads[record.ID] {
+				row.ReplacedLead = tenures
+			}
 		}
 		if limit, ok := read.Limits[record.ID]; ok {
 			row.LimitResume = &dashboardLimitResume{State: limit.State, RefusedAt: limit.RefusedAt, ResetsAt: limit.ResetsAt, MoveTo: d.limitMoveOffer(record.ID, now)}
@@ -93,20 +100,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		}
 		display := sessionDisplay(row, now)
 		row.Display = &display
-		if !row.Archived && display.Kind != "unavailable" {
-			if n := read.Outgoing[record.ID]; n > 0 {
-				row.Attention = &SessionAttention{Kind: "outgoing", Reason: CountText(n, "message") + " not delivered"}
-			}
-			if display.Kind == "limited" && row.Attention == nil {
-				row.Attention = &SessionAttention{Kind: "usageLimit", Reason: display.Detail}
-			}
-			if record.Attention != "" {
-				row.Attention = &SessionAttention{Kind: "incoming", Reason: record.Attention}
-			}
-			if row.WaitingOn != nil {
-				row.Attention = &SessionAttention{Kind: "request", Reason: display.Detail}
-			}
-		}
+		row.Attention = rowAttention(row, read.Outgoing[record.ID], record.Attention)
 		rows = append(rows, row)
 		revision = append(revision, newRevisionRow(record, row))
 	}

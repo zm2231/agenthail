@@ -755,6 +755,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
   },
+  "api/action lead-replacement-ack missing": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"no open lead replacement has that id\"}}\n"
+  },
   "api/action lifecycle stop on a daemon session": {
     "status": 200,
     "header": {
@@ -1390,6 +1402,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
+  },
+  "api/action request-withdraw from a current session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_replaced\",\"message\":\"only a request from a lead that was replaced can be withdrawn; answer it instead\"}}\n"
   },
   "api/action respond": {
     "status": 200,
@@ -3119,6 +3143,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
   },
+  "api/v1/actions lead-replacement-ack missing": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"no open lead replacement has that id\"}}\n"
+  },
   "api/v1/actions lifecycle stop on a daemon session": {
     "status": 200,
     "header": {
@@ -3754,6 +3790,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
+  },
+  "api/v1/actions request-withdraw from a current session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_replaced\",\"message\":\"only a request from a lead that was replaced can be withdrawn; answer it instead\"}}\n"
   },
   "api/v1/actions respond": {
     "status": 200,
