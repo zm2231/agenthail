@@ -138,6 +138,12 @@ SOURCES=(
   macOS/WindowButtonBand.swift
 )
 
+# Helper tests run on a person's Mac: a window ordered on screen appears on their display.
+if grep -nE 'orderFront|makeKeyAndOrderFront|orderBack|orderWindow|setIsVisible' "$ROOT"/native/tests/*_test.swift; then
+  echo "helper tests lay out windows without ordering them on screen"
+  exit 1
+fi
+
 rm -rf "$OUT"
 mkdir -p "$OUT/logs"
 swiftc -parse-as-library -emit-library -static -enable-testing \
