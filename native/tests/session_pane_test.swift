@@ -45,6 +45,16 @@ struct SessionPaneTest {
         let idle = SessionState(id: "I", surface: "codex", name: "i", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         check(!SessionPane.stopAvailable(idle, removed: false, draftEmpty: true) && !SessionPane.stopAvailable(nil, removed: false, draftEmpty: true), "nothing to stop when idle or unselected")
 
+        first.composer = "kept"
+        first.showProject("P")
+        check(first.shownProjectID == "P" && first.selectedSessionID == nil && first.selectedSession == nil && first.displayedSession == nil, "a shown project leaves no session for commands to act on")
+        check(model.draft(for: "A").text == "kept", "showing a project keeps the session's draft")
+        first.select("A")
+        check(first.shownProjectID == nil && first.selectedSessionID == "A" && first.composer == "kept", "selecting a session leaves the project and restores its draft")
+        first.showProject("P")
+        first.openNewSession()
+        check(first.shownProjectID == nil && first.newSession != nil, "New Session leaves the project")
+
         UserDefaults.standard.removeObject(forKey: "sessionTabs")
         let tabbedModel = AgenthailModel(connecting: false)
         let tabbed = tabbedModel.mainPane!

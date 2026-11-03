@@ -31,7 +31,7 @@ extension View {
 private extension View {
     @ViewBuilder
     func prominent(_ primary: Bool) -> some View {
-        if primary { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
+        if primary { buttonStyle(.borderedProminent).tint(DesktopPalette.accent) } else { buttonStyle(.bordered) }
     }
 }
 
@@ -86,7 +86,7 @@ struct ProjectPane: View {
                 .fixedSize()
             Button(contents.lead == nil ? "New lead…" : "Change lead…") { pane.projectSheet = .lead(project) }
             Button("New session") { newSession() }
-                .buttonStyle(.borderedProminent)
+                .prominent(true)
                 .disabled(project.checkouts.allSatisfy { $0.archived == true })
         }
     }
@@ -128,7 +128,7 @@ struct ProjectPane: View {
                 Text("No lead yet").font(.system(size: DesktopType.title, weight: .semibold)).foregroundStyle(DesktopPalette.text)
                 Text("A lead keeps this project's work in one conversation you can return to. Messages to it always land.")
                     .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
-                Button("Start a lead") { pane.projectSheet = .lead(project) }.buttonStyle(.borderedProminent)
+                Button("Start a lead") { pane.projectSheet = .lead(project) }.prominent(true)
             }
         }
     }

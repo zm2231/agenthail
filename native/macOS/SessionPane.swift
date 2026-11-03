@@ -183,6 +183,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func showProject(_ id: String) {
         guard !closed else { return }
+        clearSelection()
         shownProjectID = id
     }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }

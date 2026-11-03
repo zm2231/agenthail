@@ -624,9 +624,11 @@ struct SessionRowView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
-            Text(relativeAge(session.lastActive))
-                .font(.system(size: DesktopType.caption))
-                .foregroundStyle(DesktopPalette.text2)
+            TimelineView(.everyMinute) { _ in
+                Text(session.isWorking ? session.activity?.busySince.map { relativeAge($0) } ?? "now" : relativeAge(session.lastActive))
+                    .font(.system(size: DesktopType.caption))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
         }
         .font(.system(size: DesktopType.body))
         .padding(.leading, 6)
