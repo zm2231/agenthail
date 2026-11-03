@@ -28,6 +28,10 @@ func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "host_not_found", "No paired host "+req.Host+"; see agenthail hosts.")
 		return
 	}
+	if err := d.hostTransit(r.Context(), host); err != nil {
+		writeActionResult(w, actionResult{}, err)
+		return
+	}
 	host.ledgerMu.Lock()
 	defer host.ledgerMu.Unlock()
 	key, store := req.ProjectKey, d.ledgerStore()

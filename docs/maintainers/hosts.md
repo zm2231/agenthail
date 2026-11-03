@@ -128,7 +128,24 @@ a `host` query field, or a raw id owned by a paired host is forwarded to that
 host with its raw id, request body included; the answer comes back with every
 session reference re-qualified. An upload for a remote session is therefore
 stored on that host, and the upload id the client sends with the message is
-resolved there. An action names sessions on at most one other host. Queue and
+resolved there. An action names sessions on at most one other host.
+
+A request crosses at most one host boundary. A request a paired host sent may
+go back to that host, never on to a third one, so a host never acts on a host
+it is not paired with through a peer that is. Each path that could pass a
+paired host's request on is refused with `host_transit` before anything changes:
+
+- actions routed to another host (`hostRoutedAction`);
+- session reads, streams, metadata, attachments and uploads (`hostRouted`);
+- a coordinator set or replace that would clear a third host's coordinator;
+- a send to a project's lead, and a channel post's delivery to a lead, on a
+  third host;
+- a session move to a third host;
+- a ledger owner assignment to a third host.
+
+`resolve` with `scope=remote` is refused for a paired host, and `usage` answers
+a paired host with this host's own sets only. Mirrors are never re-exported, so
+a host never shows its peers another host's sessions to address. Queue and
 delivery records and voice are refused for remote sessions with a reason, and
 opening a session's terminal is refused because the terminal is on the other
 machine. The mirror stores remote rows with `runtime.focusable` cleared, and

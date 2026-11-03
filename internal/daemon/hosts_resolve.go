@@ -42,6 +42,10 @@ func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	if r.URL.Query().Get("scope") == "remote" {
+		if _, fromHost := requestingHost(r.Context()); fromHost {
+			writeAPIError(w, http.StatusConflict, "host_transit", "a paired host's request is not passed on to other hosts")
+			return
+		}
 		candidates := d.pairedHosts()
 		if hostRef := strings.TrimSpace(r.URL.Query().Get("host")); hostRef != "" {
 			host, ok := d.pairedHost(hostRef)
