@@ -71,6 +71,53 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual(listed(.all), [], "a removed session stayed listed from a loaded page")
     }
 
+    private func waitForReread(_ host: String, after count: Int) async throws {
+        for _ in 0..<100 where !ScopeServer.state.requests(host).dropFirst(count).contains(where: { $0.contains("limit=200") && !$0.contains("scope=current") }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
+    func testASessionThatLeavesCurrentStaysInAll() async throws {
+        ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        let model = try await connect(["one"])
+        await model.listMore(.all)
+        XCTAssertEqual(listed(.all), ["one::live", "one::other", "one::a"])
+        ScopeServer.state.set("one", current: [ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("other")], [ScopeServer.row("a")]]])
+        let host = try XCTUnwrap(model.connection("one"))
+
+        let count = ScopeServer.state.requests("one").count
+        await host.receiveCatalog([try catalog("session.removed", seq: 600, #"{"sessionId":"live","reason":"unlisted"}"#)])
+        try await waitForReread("one", after: count)
+        XCTAssertTrue(listed(.all).contains("one::live"), "a session that left current dropped out of All")
+        XCTAssertEqual(listed(.recent), ["one::other"])
+    }
+
+    func testASessionARefreshDropsFromCurrentStaysInAll() async throws {
+        ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        let model = try await connect(["one"])
+        await model.listMore(.all)
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        let count = ScopeServer.state.requests("one").count
+        _ = await model.connection("one")?.refresh(fresh: true)
+        try await waitForReread("one", after: count)
+        XCTAssertTrue(listed(.all).contains("one::live"), "a session a refresh dropped from current dropped out of All")
+        XCTAssertEqual(listed(.recent), [])
+    }
+
+    func testAComputerWhoseCatalogWasResetRereadsItsPages() async throws {
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        let model = try await connect(["one"])
+        await model.listMore(.all)
+        XCTAssertTrue(model.canListMore(.all))
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("c")]]], epoch: "reset")
+        let count = ScopeServer.state.requests("one").count
+        _ = await model.connection("one")?.refresh(fresh: true)
+        try await waitForReread("one", after: count)
+        XCTAssertEqual(listed(.all), ["one::c"])
+        XCTAssertFalse(model.canListMore(.all))
+    }
+
     func testAnOlderSearchAnswerDoesNotReplaceANewerOne() async throws {
         ScopeServer.state.set("one", current: [], scopes: [:], searches: ["ze": ([ScopeServer.row("slow", name: "zeal")], .milliseconds(800)), "zet": ([ScopeServer.row("fast", name: "zeta")], .zero)])
         let model = try await connect(["one"])
@@ -123,6 +170,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             var current: [[String: Any]]
             var scopes: [String: [[[String: Any]]]]
             var searches: [String: (rows: [[String: Any]], delay: Duration)]
+            var epoch: String
             var requests: [String] = []
         }
 
@@ -130,10 +178,10 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
         private var hosts: [String: Host] = [:]
 
         func reset() { lock.withLock { hosts = [:] } }
-        func set(_ host: String, current: [[String: Any]], scopes: [String: [[[String: Any]]]], searches: [String: (rows: [[String: Any]], delay: Duration)] = [:]) {
+        func set(_ host: String, current: [[String: Any]], scopes: [String: [[[String: Any]]]], searches: [String: (rows: [[String: Any]], delay: Duration)] = [:], epoch: String = "epoch") {
             lock.withLock {
                 let requests = hosts[host]?.requests ?? []
-                hosts[host] = Host(current: current, scopes: scopes, searches: searches, requests: requests)
+                hosts[host] = Host(current: current, scopes: scopes, searches: searches, epoch: epoch, requests: requests)
             }
         }
         func requests(_ host: String) -> [String] { lock.withLock { hosts[host]?.requests ?? [] } }
@@ -170,11 +218,11 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
         case "/api/v1/snapshot" where query["sessions"] == "none":
             var base = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
             base.removeValue(forKey: "sessions")
-            base["hostEpoch"] = "epoch"
+            base["hostEpoch"] = host.epoch
             base["catalogSeq"] = 1
             respond(200, Self.json(base))
         case "/api/v1/snapshot" where query["scope"] == "current":
-            respond(200, Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": "epoch", "catalogSeq": 1]))
+            respond(200, Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1]))
         case "/api/v1/snapshot" where query["q"] != nil:
             let search = host.searches[query["q"]!] ?? ([], .zero)
             let body = Self.json(["sessions": search.rows])

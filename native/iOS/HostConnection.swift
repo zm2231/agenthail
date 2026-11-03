@@ -169,8 +169,10 @@ final class HostConnection {
             guard generation > appliedGeneration else { return true }
             appliedGeneration = generation
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
+            let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             pages.adopt(snapshot?.sessions ?? [])
+            if !pages.listings.isEmpty, !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty { rereadPages() }
             snapshotSeq = seq
             recovered(by: "snapshot")
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
@@ -393,7 +395,7 @@ final class HostConnection {
             pages.adopt(batch.snapshot.sessions)
             var reread = false
             for removal in batch.removals {
-                if pages.remove(removal.id) { reread = true }
+                if pages.remove(removal.id) || removal.unlisted && !pages.listings.isEmpty { reread = true }
                 delegate?.host(self, removedSession: removal.id, unlisted: removal.unlisted)
                 if let next = removal.rekeyedTo { delegate?.host(self, rekeyed: [removal.id: next]) }
             }
