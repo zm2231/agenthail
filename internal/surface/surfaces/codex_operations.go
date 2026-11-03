@@ -57,7 +57,9 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 			params[k] = v
 		}
 	}
-	response, err := c.requestSession(ctx, session, true, "thread/fork", params, 15*time.Second)
+	response, err := c.requestSessionWith(ctx, session, true, func(client codexClient) (map[string]any, error) {
+		return c.codexThreadRequest(ctx, client, codexThreadFork, session, params, 15*time.Second)
+	})
 	if err != nil {
 		return nil, codexOperationOutcome(err)
 	}

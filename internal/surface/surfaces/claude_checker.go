@@ -13,7 +13,7 @@ func (c *Claude) StartChecker(ctx context.Context, start surface.CheckerStart) (
 	if start.Run == "" || start.Token == "" || start.Message == "" {
 		return nil, fmt.Errorf("a checker needs its run, token and first message")
 	}
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{SessionID: start.Run, Cwd: start.Cwd,
+	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{SessionID: start.Run, Cwd: start.Cwd,
 		Checker: &claudehost.CheckerOpen{Run: start.Run, Token: start.Token, Prompt: start.Message}})
 	if err != nil {
 		return nil, claudeHostDeliveryError(fmt.Errorf("open the narrowing checker: %w", err))

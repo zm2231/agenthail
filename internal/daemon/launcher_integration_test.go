@@ -24,13 +24,15 @@ type launcherFixture struct {
 	launches         int
 	locateContextErr error
 	launchErr        error
+	requests         []surface.LaunchRequest
 }
 
 func (l *launcherFixture) ID() string                               { return l.id }
 func (l *launcherFixture) Agents() []surface.SurfaceKind            { return l.agents }
 func (l *launcherFixture) Available(context.Context) (bool, string) { return true, "fixture" }
-func (l *launcherFixture) Launch(context.Context, surface.LaunchRequest) (surface.LaunchResult, error) {
+func (l *launcherFixture) Launch(_ context.Context, request surface.LaunchRequest) (surface.LaunchResult, error) {
 	l.launches++
+	l.requests = append(l.requests, request)
 	return l.result, l.launchErr
 }
 

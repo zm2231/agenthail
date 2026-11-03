@@ -259,7 +259,7 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 	if options.Name == "" {
 		options.Name = c.conversationTitle(ctx, conversation, root)
 	}
-	opened, err := c.host.client.Open(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
+	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root), Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}

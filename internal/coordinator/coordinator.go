@@ -20,10 +20,11 @@ import (
 // delivered or queued for the running conversation, or it starts a new one
 // from the saved spec when the old conversation is gone.
 type Service struct {
-	Registry   *registry.Registry
-	Adapters   surface.Adapters
-	Dispatcher delivery.Dispatcher
-	ClaudeRoot func(context.Context) string
+	Registry     *registry.Registry
+	Adapters     surface.Adapters
+	Dispatcher   delivery.Dispatcher
+	ClaudeRoot   func(context.Context) string
+	LeadsChanged func()
 }
 
 type Outcome struct {
@@ -276,13 +277,16 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		}
 	}
 	messageUUID := uuid.NewString()
-	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
+	session, sent, startErr := starter.StartSession(surface.WithLeadStart(surface.WithMessageUUID(ctx, messageUUID)), options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
 		}
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: failureKind(startErr), SessionID: previous, Message: message, Error: fmt.Sprintf("start coordinator: %s", startErr)})
 		return nil, startErr
+	}
+	if s.LeadsChanged != nil {
+		defer s.LeadsChanged()
 	}
 	if err := s.Registry.RegisterSession(*session); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be registered: %w", session.ID, err))

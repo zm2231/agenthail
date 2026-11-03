@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
@@ -22,6 +23,13 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 }
 
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
+	if err := registerSessionRowTx(tx, s); err != nil {
+		return err
+	}
+	return bindClaimedCredentialTx(tx, s.ID, time.Now())
+}
+
+func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {
 	if s.RuntimeKind == "" {
 		return fmt.Errorf("register session %s: no runtime kind", s.ID)
 	}

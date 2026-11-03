@@ -1,0 +1,161 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
+)
+
+const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
+
+// Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
+type daemonMCPCredentials struct {
+	d          *Daemon
+	url        string
+	mu         sync.Mutex
+	tokens     map[string]string
+	deliveries keyedLocks
+}
+
+const deliveryAttempts = 3
+
+// Deliver confirms sent if it is still the live token; otherwise it pushes the live token read now (minting one only when this process does not hold it) until a pushed token is still live once the push returns.
+func (c *daemonMCPCredentials) Deliver(sessionID, sent string, push func(token string) error) error {
+	_, err := c.deliver(sessionID, sent, push, true)
+	return err
+}
+
+func (c *daemonMCPCredentials) deliver(sessionID, sent string, push func(token string) error, wait bool) (bool, error) {
+	release, ok := c.deliveries.acquire(sessionID, wait)
+	if !ok {
+		return false, nil
+	}
+	defer release()
+	return true, c.deliverLocked(sessionID, sent, push)
+}
+
+func (c *daemonMCPCredentials) deliverLocked(sessionID, sent string, push func(token string) error) error {
+	token := sent
+	for range deliveryAttempts {
+		if token != "" {
+			live, err := c.d.Registry.MarkCredentialDelivered(sessionID, registry.HashSessionToken(token))
+			if err != nil || live {
+				return err
+			}
+		}
+		held, ok := c.Live(sessionID)
+		if !ok {
+			rotated, err := c.Rotate(sessionID)
+			if err != nil {
+				return err
+			}
+			held = rotated
+		}
+		if err := push(held); err != nil {
+			return err
+		}
+		token = held
+	}
+	return fmt.Errorf("%s's credential kept changing while it was delivered", sessionID)
+}
+
+func newDaemonMCPCredentials(d *Daemon, listen string) *daemonMCPCredentials {
+	return &daemonMCPCredentials{d: d, url: "http://" + listen + "/mcp", tokens: map[string]string{}}
+}
+
+func (c *daemonMCPCredentials) remember(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.tokens[registry.HashSessionToken(token)] = token
+}
+
+func (c *daemonMCPCredentials) URL() string { return c.url }
+
+func (c *daemonMCPCredentials) Pending(ctx context.Context) (string, string, error) {
+	return c.issuePending(sessionCapabilities(surface.IsLeadStart(ctx)), pendingCredentialLifetime)
+}
+
+func (c *daemonMCPCredentials) issuePending(capabilities []string, lifetime time.Duration) (string, string, error) {
+	pending, err := c.d.Registry.IssuePendingCredential(capabilities, json.RawMessage(`{}`), time.Now(), lifetime)
+	if err != nil {
+		return "", "", err
+	}
+	c.remember(pending.Token)
+	return pending.Token, pending.Ref, nil
+}
+
+func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.SurfaceKind) (*surface.LaunchMCPCredential, error) {
+	if agent != surface.KindCodex || (launcher != surface.LauncherTMUX && launcher != surface.LauncherCMUX) {
+		return nil, nil
+	}
+	c.d.pruneLaunchCredentials()
+	token, ref, err := c.issuePending(defaultSessionCapabilities, pendingLaunchLifetime)
+	if err != nil {
+		return nil, err
+	}
+	return &surface.LaunchMCPCredential{URL: c.url, Token: token, Ref: ref}, nil
+}
+
+func (c *daemonMCPCredentials) Claim(ref, threadID string) error {
+	claimed, err := c.d.Registry.ClaimPendingCredential(ref, threadID, time.Now())
+	if err == nil && !claimed {
+		err = fmt.Errorf("pending credential %s expired or was already claimed", ref)
+	}
+	return err
+}
+
+func (c *daemonMCPCredentials) Live(sessionID string) (string, bool) {
+	hash, ok, err := c.d.Registry.LiveCredentialHash(sessionID)
+	if err != nil || !ok {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	token, held := c.tokens[hash]
+	return token, held
+}
+
+func (c *daemonMCPCredentials) Rotate(sessionID string) (string, error) {
+	capabilities, err := c.d.capabilitiesOf(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("permissions of %s: %w", sessionID, err)
+	}
+	issued, err := c.d.Registry.RotateSessionCredential(sessionID, capabilities, json.RawMessage(`{}`), time.Now())
+	if err != nil {
+		return "", err
+	}
+	c.remember(issued.Token)
+	return issued.Token, nil
+}
+
+func (c *daemonMCPCredentials) Unattached(sessionID string, err error) {
+	c.d.log.Printf("mcp: %s has no agenthail MCP server: %s", c.d.resolveDisplay(sessionID), err)
+}
+
+func (d *Daemon) attachMCPCredentials(listen string) {
+	credentials := newDaemonMCPCredentials(d, listen)
+	d.mcpCredentials.Store(credentials)
+	for _, adapter := range d.Surfaces {
+		if attachable, ok := adapter.(interface {
+			SetMCPCredentials(surfaces.MCPCredentials)
+		}); ok {
+			attachable.SetMCPCredentials(credentials)
+		}
+	}
+	if err := d.Registry.PrunePendingCredentials(time.Now()); err != nil {
+		d.log.Printf("mcp: prune pending credentials: %s", err)
+	}
+	d.pruneLaunchCredentials()
+}
+
+func (d *Daemon) pruneLaunchCredentials() {
+	if err := surface.PruneManagedCodexLaunchCredentials(time.Now().Add(-pendingLaunchLifetime)); err != nil {
+		d.log.Printf("mcp: remove expired launch credential files: %s", err)
+	}
+}

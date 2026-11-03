@@ -402,12 +402,14 @@ lines.on('line', (line) => {
       permissionMode = message.request.mode;
       write({ type: 'system', subtype: 'status', status: null, permissionMode, uuid: crypto.randomUUID(), session_id: sessionId });
     }
-    if (subtype === 'set_model' || subtype === 'set_permission_mode') {
+    if (subtype === 'set_model' || subtype === 'set_permission_mode' || subtype === 'mcp_set_servers') {
       fs.appendFileSync(path.join(dir, 'controls.jsonl'), JSON.stringify({ sessionId, pid: process.pid, ...message.request }) + '\n');
     }
     const responses = {
       initialize: { commands, models: [], account: {}, output_style: 'default', available_output_styles: [] },
       get_context_usage: { ...contextReport(), totalTokens: 1000, categories: [] },
+      // FAKE_CLAUDE_MCP_SET_ERROR makes the agenthail server fail to connect on a live swap.
+      mcp_set_servers: process.env.FAKE_CLAUDE_MCP_SET_ERROR ? { added: [], removed: [], errors: { agenthail: process.env.FAKE_CLAUDE_MCP_SET_ERROR } } : {},
     };
     const response = responses[subtype] ?? {};
     const answer = () => write({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response } });

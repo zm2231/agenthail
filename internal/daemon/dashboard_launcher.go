@@ -137,7 +137,15 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 	}
 	options := startOptions(cwd)
 	pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options)
-	launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: options})
+	launchRequest := surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: options}
+	if credentials := d.mcpCredentials.Load(); credentials != nil {
+		mcp, err := credentials.terminalLaunch(request.Launcher, launchRequest.Surface)
+		if err != nil {
+			return actionResult{}, d.unstartedSession(request.Message, fmt.Errorf("issue the session's MCP credential: %w", err))
+		}
+		launchRequest.MCP = mcp
+	}
+	launchResult, launchErr := launcher.Launch(ctx, launchRequest)
 	startErr := launchErr
 	if launchErr != nil && launchResult.Session == nil {
 		var acceptedErr surface.LaunchAcceptedError

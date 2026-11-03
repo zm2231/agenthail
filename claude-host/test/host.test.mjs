@@ -287,6 +287,49 @@ test('every session opens with consent to bypassPermissions and asks the host ab
   c.close();
 });
 
+test('a session opened with its agenthail credential has the agenthail MCP server, and a new credential replaces it live', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const url = 'http://127.0.0.1:7412/mcp';
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url: 'file:///x', token: 't' } }), /agenthail server url/);
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  const [spawned] = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const flag = (name) => {
+    const inline = spawned.argv.find((a) => a.startsWith(`${name}=`));
+    if (inline !== undefined) return inline.slice(name.length + 1);
+    const at = spawned.argv.indexOf(name);
+    return at >= 0 ? spawned.argv[at + 1] : undefined;
+  };
+  const config = JSON.parse(flag('--mcp-config'));
+  const server = config.mcpServers.agenthail;
+  assert.ok(server?.type === 'http' && server.url === url && server.timeout === 3_700_000, 'the agenthail server is an http server at the daemon url');
+  assert.ok(server.headers?.Authorization === 'Bearer ahs_first', 'the agenthail server carries the session credential');
+  assert.equal(flag('--allowedTools'), 'mcp__agenthail', spawned.argv.join(' '));
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
+  const controls = fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.subtype === 'mcp_set_servers');
+  assert.equal(controls.length, 1);
+  assert.ok(controls[0].servers.agenthail.headers.Authorization === 'Bearer ahs_second', 'the live swap carries the new credential');
+  c.close();
+});
+
+test('a new credential that the agenthail server refuses is reported, not taken as replaced', async () => {
+  const f = fixture();
+  await startHost(f, { env: { FAKE_CLAUDE_MCP_SET_ERROR: 'connection refused' } });
+  const c = new Client(f.socket);
+  const id = randomUUID();
+  const url = 'http://127.0.0.1:7412/mcp';
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
+  const reopened = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
+  assert.match(reopened.mcpError, /connection refused/);
+  await assert.rejects(c.call('replaceMcp', { sessionId: id, mcp: { url, token: 'ahs_third' } }), /connection refused/);
+  const again = await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
+  assert.match(again.mcpError, /connection refused/, 'a failed swap is retried, not remembered as done');
+  c.close();
+});
+
 test('a session opened in a Claude config root runs its Claude there', async () => {
   const f = fixture();
   await startHost(f);

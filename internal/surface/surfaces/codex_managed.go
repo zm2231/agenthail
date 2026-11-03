@@ -329,14 +329,14 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess
 // thread it already has loaded.
 func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess *surface.Session, model string) error {
 	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
-	if err == nil && codexDirectInputAccepted(readResponse) {
+	if err == nil && codexDirectInputAccepted(readResponse) && !c.staleMCP(sess.ID) {
 		return nil
 	}
 	params := codexResumeParams(sess)
 	if model != "" {
 		params["model"] = model
 	}
-	if _, err := client.Request(ctx, "thread/resume", params, 10*time.Second); err != nil {
+	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, params, 10*time.Second); err != nil {
 		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
@@ -399,6 +399,12 @@ func releaseCodexWriteLock(file *os.File) {
 }
 
 func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	return c.requestSessionWith(ctx, sess, writable, func(client codexClient) (map[string]any, error) {
+		return client.Request(ctx, method, params, wait)
+	})
+}
+
+func (c *Codex) requestSessionWith(ctx context.Context, sess *surface.Session, writable bool, run func(codexClient) (map[string]any, error)) (map[string]any, error) {
 	var lock *os.File
 	var err error
 	if writable {
@@ -414,14 +420,14 @@ func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writa
 			return nil, err
 		}
 		defer client.Close()
-		return client.Request(ctx, method, params, wait)
+		return run(client)
 	}
 	client, err := c.openWriter(ctx, sess)
 	if err != nil {
 		return nil, err
 	}
 	defer client.Close()
-	response, err := client.Request(ctx, method, params, wait)
+	response, err := run(client)
 	return response, classifyCodexWrite(err)
 }
 

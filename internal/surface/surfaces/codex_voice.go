@@ -37,11 +37,11 @@ func (v *CodexVoice) Create(ctx context.Context, cwd, instructions string) (*sur
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	defer client.Close()
-	return createVoiceOperator(ctx, client, cwd, instructions)
+	return v.Codex.createVoiceOperator(ctx, client, cwd, instructions)
 }
 
-func createVoiceOperator(ctx context.Context, client codexClient, cwd, instructions string) (*surface.Session, error) {
-	response, err := client.Request(ctx, "thread/start", map[string]any{
+func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd, instructions string) (*surface.Session, error) {
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{
 		"cwd": cwd, "developerInstructions": instructions, "ephemeral": false,
 		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
 	}, 15*time.Second)
@@ -67,7 +67,7 @@ func (v *CodexVoice) createManaged(ctx context.Context, cwd, instructions string
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	defer client.Close()
-	session, err := createVoiceOperator(ctx, client, cwd, instructions)
+	session, err := v.Codex.createVoiceOperator(ctx, client, cwd, instructions)
 	if err != nil {
 		return nil, err
 	}

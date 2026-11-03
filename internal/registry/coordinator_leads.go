@@ -27,6 +27,12 @@ func (r *Registry) LocalLeadSessions() (map[string]bool, error) {
 	return leads, rows.Err()
 }
 
+func (r *Registry) IsLocalLead(sessionID string) (bool, error) {
+	var lead bool
+	err := r.read.QueryRow(`SELECT EXISTS(`+localLeadSessions+` AND a.session_id=?)`, sessionID).Scan(&lead)
+	return lead, err
+}
+
 // LeadsFingerprint changes whenever any process changes a coordinator or the alias that names its session.
 func (r *Registry) LeadsFingerprint() (string, error) {
 	rows, err := r.read.Query(`SELECT c.project_id, c.host_id, c.project_root, c.name, c.surface, c.cwd, c.model, c.permission_mode, c.instructions, c.session_id, c.changed_by, c.changed_at_ms, COALESCE(a.session_id, '')

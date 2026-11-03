@@ -78,6 +78,12 @@ type OpenRequest struct {
 	Worktree       string       `json:"worktree,omitempty"`
 	ConfigDir      string       `json:"configDir,omitempty"`
 	Checker        *CheckerOpen `json:"checker,omitempty"`
+	MCP            *MCPServer   `json:"mcp,omitempty"`
+}
+
+type MCPServer struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
 }
 
 type CheckerOpen struct {
@@ -95,6 +101,7 @@ type Session struct {
 	PermissionMode string       `json:"permissionMode"`
 	Model          string       `json:"model"`
 	Checker        string       `json:"checker,omitempty"`
+	MCPError       string       `json:"mcpError,omitempty"`
 	ContextWindow  int64        `json:"contextWindow"`
 	ContextModel   string       `json:"contextModel"`
 	AutoCompact    *AutoCompact `json:"autoCompact"`
@@ -316,7 +323,7 @@ func (c Client) Hello(ctx context.Context) (Hello, error) {
 
 // Open opens a session in a host of this build's protocol. A conversation a
 // retiring host still runs is held by the current one; Open returns it as that
-// host lists it.
+// host lists it, after handing that host the request's MCP credential.
 func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) {
 	var out Session
 	hello, err := c.Hello(ctx)
@@ -335,6 +342,11 @@ func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) 
 	}
 	for _, session := range listing.Sessions {
 		if session.SessionID == request.Resume {
+			if request.MCP != nil {
+				if _, replaceErr := c.ReplaceMCP(ctx, session.SessionID, *request.MCP); replaceErr != nil {
+					session.MCPError = replaceErr.Error()
+				}
+			}
 			return session, nil
 		}
 	}
@@ -363,6 +375,11 @@ func (c Client) Respond(ctx context.Context, sessionID, requestID string, decisi
 func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session, error) {
 	var out Session
 	return out, c.sessionCall(ctx, "setModel", map[string]string{"sessionId": sessionID, "model": model}, &out)
+}
+
+func (c Client) ReplaceMCP(ctx context.Context, sessionID string, server MCPServer) (Session, error) {
+	var out Session
+	return out, c.sessionCall(ctx, "replaceMcp", map[string]any{"sessionId": sessionID, "mcp": server}, &out)
 }
 
 func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {

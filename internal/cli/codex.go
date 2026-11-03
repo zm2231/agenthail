@@ -18,6 +18,10 @@ func (a *App) cmdCodex(args []string) error {
 	if len(args) == 1 && args[0] == "--repair-managed-runtime" {
 		return repairManagedCodexRuntime(context.Background())
 	}
+	codex, err := a.managedCodexForLaunch(strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")))
+	if err != nil {
+		return err
+	}
 	for _, arg := range args {
 		if arg == "--remote" || strings.HasPrefix(arg, "--remote=") || arg == "--remote-auth-token-env" || strings.HasPrefix(arg, "--remote-auth-token-env=") {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
@@ -51,7 +55,7 @@ func (a *App) cmdCodex(args []string) error {
 		}
 		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, surfaces.NewCodex("").PrepareManagedTerminalSession, func(path string, argv, env []string) error {
+		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, codex.PrepareManagedTerminalSession, func(path string, argv, env []string) error {
 			return syscall.Exec(path, argv, env)
 		}, path)
 	}
