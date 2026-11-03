@@ -99,6 +99,16 @@ export function renderOverview() {
     )
     .join("");
   renderDeliveryProblems();
+  renderLeadReplacements();
+}
+
+export function renderLeadReplacements() {
+  const replacements = app.state.leadReplacements || [];
+  $("#lead-replacements-panel").hidden = replacements.length === 0;
+  $("#lead-replacements-list").innerHTML = replacements.map(item => {
+    const by = item.changedBy ? ` by ${item.changedBy}` : "";
+    return `<article class="attention-item"><div><div class="attention-target">@${escape(item.name)}</div><strong>Now runs in a new conversation</strong><p>${escape(item.reason)}</p><p>Replaced${escape(by)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-session="${escape(item.sessionId)}" type="button">Open</button><button class="soft-button" data-lead-replacement-ack="${escape(item.id)}" type="button">Acknowledge</button></div></article>`;
+  }).join("");
 }
 
 export function renderDeliveryProblems() {

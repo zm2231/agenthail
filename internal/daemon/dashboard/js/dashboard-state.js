@@ -65,6 +65,7 @@ export async function load(fresh = false, selectDefault = true) {
       history: state.history || [],
       attention: state.attention || [],
       deliveryProblems: state.deliveryProblems || [],
+      leadReplacements: state.leadReplacements || [],
     };
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"

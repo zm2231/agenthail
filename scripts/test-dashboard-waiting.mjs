@@ -58,4 +58,15 @@ await context.syncRequests();
 assert.equal(fetched.length, 1, "a question held after the session opened is read with the live session's capabilities");
 assert.match(panel.innerHTML, /Which color\?/, "the held question shows its card");
 assert.doesNotMatch(panel.innerHTML, /can&#39;t answer|can't answer/);
+assert.doesNotMatch(panel.innerHTML, /data-request-withdraw/, "a current lead's request cannot be withdrawn");
+
+context.app.state = { sessions: [{ id: "new-lead", name: "release-lead" }] };
+context.app.requestsKey = "";
+const replaced = { ...held, id: "c:question:old:x-2", replacedBy: "new-lead" };
+context.fetch = async () => ({ ok: true, json: async () => ({ permissionMode: "", requests: [replaced] }) });
+context.app.selected = { ...context.app.selected, waitingOn: { kind: "question", id: replaced.id, answerable: true } };
+await context.syncRequests();
+assert.match(panel.innerHTML, /From a replaced lead\. release-lead leads this project now/, "a replaced lead's request says who leads now");
+assert.match(panel.innerHTML, new RegExp(`data-request-withdraw="${replaced.id}"[^>]*>Withdraw<`), "and offers Withdraw");
+assert.match(panel.innerHTML, /Which color\?/, "while it can still be answered");
 console.log("dashboard waiting places ok");

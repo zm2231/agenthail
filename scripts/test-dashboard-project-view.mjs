@@ -59,9 +59,14 @@ assert.match(html, /<button class="primary-button" type="button" data-project-re
 assert.match(html, /data-project-start="repo:github.com\/demo\/fieldnotes" data-checkout="0">New session/);
 assert.match(html, /data-project-earlier=/);
 assert.doesNotMatch(html, /data-session="old"/, "Earlier stays closed until asked");
+assert.doesNotMatch(html, /data-project-lead-replaced/, "a lead never replaced says nothing about it");
 context.app.projectEarlier = project.id;
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-session="old"/);
+projects[0].coordinators[0].replaced = { id: 3, name: "release-lead", sessionId: "lead", previousSessionId: "gone", changedBy: "the daemon", reason: "conversation gone no longer exists", at: at(5) };
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /data-project-lead-replaced>Replaced [^<]+ by the daemon: conversation gone no longer exists</, "the lead card says when, by whom and why it was replaced");
+delete projects[0].coordinators[0].replaced;
 
 assert.equal(run("rowTime")({ ...sessions[1], activity: { busySince: at(25) } }, now), "25m", "a running row shows how long its turn has run");
 assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a start shows now, never its last activity");
