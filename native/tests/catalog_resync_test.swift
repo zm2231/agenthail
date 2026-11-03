@@ -55,8 +55,9 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
         }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": status == 200 && !snapshot ? "text/event-stream" : "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if body == "hold" { held = true; return }
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        let delivered = body.hasSuffix("hold") ? String(body.dropLast(4)) : body
+        if !delivered.isEmpty { client?.urlProtocol(self, didLoad: Data(delivered.utf8)) }
+        if body.hasSuffix("hold") { held = true; return }
         client?.urlProtocolDidFinishLoading(self)
     }
 }
@@ -79,9 +80,14 @@ struct CatalogResyncTest {
     }
 
     @MainActor
-    static func waitForLog(_ host: String, _ expected: [String], within seconds: TimeInterval) -> Bool {
+    static func waitForLog(_ host: String, _ expected: [String], within seconds: TimeInterval, ignoring: String? = nil) -> Bool {
+        waitUntil(within: seconds) { Array(ResyncProtocol.log(host).filter { $0 != ignoring }.prefix(expected.count)) == expected }
+    }
+
+    @MainActor
+    static func waitUntil(within seconds: TimeInterval, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
-        while Array(ResyncProtocol.log(host).prefix(expected.count)) != expected {
+        while !condition() {
             if Date() > deadline { return false }
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
@@ -98,13 +104,14 @@ struct CatalogResyncTest {
         check(waitForLog("gap.test", gapOrder, within: 15), "after a stream gap the stream waits for a fresh snapshot, through failures: \(ResyncProtocol.log("gap.test"))")
 
         let session = #"{"id":"a","surface":"claude","name":"a","status":"busy","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":true,"steer":true}}"#
-        let events = (11...60).map { #"data: {"stream":"catalog","seq":\#($0),"type":"session.upserted","data":{"session":\#(session)}}"# + "\n\n" }.joined()
-        ResyncProtocol.serve("overflow.test", failures: 1, seq: 60, streams: [(200, events)])
+        let event = #"data: {"stream":"catalog","seq":11,"type":"session.upserted","data":{"session":\#(session)}}"# + "\n\n"
+        ResyncProtocol.serve("overflow.test", failures: 1, seq: 60, streams: [(200, event + "hold")])
         _ = afterGap
-        let overflowed = model("overflow.test", bound: 3)
+        let overflowed = model("overflow.test", bound: 0)
         overflowed.catalogFeed.start()
         let overflowOrder = ["stream after 10", "snapshot failed", "snapshot 60", "stream after 60"]
-        check(waitForLog("overflow.test", overflowOrder, within: 15), "an overflowed inbox resumes only after a fresh snapshot: \(ResyncProtocol.log("overflow.test"))")
+        check(waitForLog("overflow.test", overflowOrder, within: 15, ignoring: "stream closed"), "an overflowed inbox resumes only after a fresh snapshot: \(ResyncProtocol.log("overflow.test"))")
+        check(waitUntil(within: 5) { ResyncProtocol.log("overflow.test").contains("stream closed") }, "an overflow closes the stream it came from: \(ResyncProtocol.log("overflow.test"))")
 
         ResyncProtocol.serve("release.test", failures: 0, seq: 10, streams: [(200, "hold")])
         var released: AgenthailModel? = model("release.test")
