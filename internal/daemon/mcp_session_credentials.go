@@ -127,6 +127,11 @@ func (d *Daemon) attachMCPCredentials(listen string) {
 		d.log.Printf("mcp: prune pending credentials: %s", err)
 	}
 	d.pruneLaunchCredentials()
+	if live, err := d.Registry.LiveCredentialSessions(); err != nil {
+		d.log.Printf("mcp: list live credentials: %s", err)
+	} else {
+		d.leads.unsettle(live...)
+	}
 }
 
 func (d *Daemon) pruneLaunchCredentials() {

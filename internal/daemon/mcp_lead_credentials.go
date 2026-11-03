@@ -19,43 +19,57 @@ func (d *Daemon) coordinatorStarted(sessionID string) {
 	d.syncLeads()
 }
 
-func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) error {
+func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) ([]func(), error) {
+	var deliveries []func()
 	var failed []error
+	reconcile := func(id string) {
+		deliver, err := d.reconcileSessionCredential(id)
+		failed = append(failed, err)
+		deliveries = appendDelivery(deliveries, deliver)
+	}
 	for id := range previous {
 		if !current[id] {
-			failed = append(failed, d.reconcileSessionCredential(id))
+			reconcile(id)
 		}
 	}
 	for id := range current {
 		if !previous[id] {
-			failed = append(failed, d.reconcileSessionCredential(id))
+			reconcile(id)
 		}
 	}
-	return errors.Join(failed...)
+	return deliveries, errors.Join(failed...)
 }
 
-func (d *Daemon) reconcileSessionCredential(sessionID string) error {
+func appendDelivery(deliveries []func(), deliver func()) []func() {
+	if deliver == nil {
+		return deliveries
+	}
+	return append(deliveries, deliver)
+}
+
+// The delivery can block on a runtime, so callers run it after releasing the lead lock.
+func (d *Daemon) reconcileSessionCredential(sessionID string) (func(), error) {
 	credentials := d.mcpCredentials.Load()
 	if credentials == nil {
-		return nil
+		return nil, nil
 	}
 	held, live, err := d.Registry.LiveCredentialCapabilities(sessionID)
 	if err != nil || !live {
-		return err
+		return nil, err
 	}
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
-		return fmt.Errorf("load %s: %w", sessionID, err)
+		return nil, fmt.Errorf("load %s: %w", sessionID, err)
 	}
 	if slices.Equal(slices.Compact(slices.Sorted(slices.Values(held))), slices.Compact(slices.Sorted(slices.Values(d.sessionCapabilities(*session))))) {
-		return nil
+		return nil, nil
 	}
 	token, err := credentials.Rotate(sessionID)
 	if err != nil {
-		return fmt.Errorf("rotate %s after its permissions changed: %w", d.resolveDisplay(sessionID), err)
+		return nil, fmt.Errorf("rotate %s after its permissions changed: %w", d.resolveDisplay(sessionID), err)
 	}
-	d.deliverRotatedCredential(*session, credentials.URL(), token)
-	return nil
+	url, rotated := credentials.URL(), *session
+	return func() { d.deliverRotatedCredential(rotated, url, token) }, nil
 }
 
 func (d *Daemon) deliverRotatedCredential(session surface.Session, url, token string) {

@@ -15,6 +15,23 @@ func (r *Registry) LiveCredentialHash(sessionID string) (string, bool, error) {
 	return hash, err == nil, err
 }
 
+func (r *Registry) LiveCredentialSessions() ([]string, error) {
+	rows, err := r.read.Query(`SELECT session_id FROM session_credentials WHERE revoked_at_ms=0 AND session_id IS NOT NULL ORDER BY session_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Registry) LiveCredentialCapabilities(sessionID string) ([]string, bool, error) {
 	var encoded string
 	err := r.read.QueryRow(`SELECT capabilities FROM session_credentials WHERE session_id=? AND revoked_at_ms=0`, sessionID).Scan(&encoded)

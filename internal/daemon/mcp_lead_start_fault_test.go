@@ -48,7 +48,8 @@ func TestAClaudeCoordinatorThatFailsToBecomeTheLeadLosesItsLeadCredential(t *tes
 	}
 }
 
-func TestACodexCoordinatorThatFailsToBecomeTheLeadLosesItsLeadCredential(t *testing.T) {
+func newCodexCaptain(t *testing.T) *mcpCodexFixture {
+	t.Helper()
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
 	root, err := canonicalCatalogPath(cwd)
@@ -61,17 +62,62 @@ func TestACodexCoordinatorThatFailsToBecomeTheLeadLosesItsLeadCredential(t *test
 	if code, body := fixture.action(t, map[string]any{"action": "coordinator-new", "surface": "codex", "cwd": cwd, "name": "captain"}); code != http.StatusOK {
 		t.Fatalf("coordinator-new status=%d body=%v", code, body)
 	}
+	return fixture
+}
+
+func (f *mcpCodexFixture) firstBearer(t *testing.T) string {
+	t.Helper()
+	starts := f.lifecycle.Daemon().Calls("thread/start")
+	if len(starts) != 1 {
+		t.Fatalf("thread/start calls=%d", len(starts))
+	}
+	return codexBearer(starts[0])
+}
+
+func TestAFailedCoordinatorCorrectionIsStillMadeAfterAgenthailRestarts(t *testing.T) {
+	fixture := newCodexCaptain(t)
+	for _, trigger := range []string{failOriginTrigger, `CREATE TRIGGER fail_rotation BEFORE UPDATE OF revoked_at_ms ON session_credentials BEGIN SELECT RAISE(ABORT, 'injected'); END`} {
+		if _, err := fixture.registry.WriteDB().Exec(trigger); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.action(t, map[string]any{"action": "coordinator-send", "name": "captain", "message": "hello"})
+	first := fixture.firstBearer(t)
+	fixture.restartAgenthail(t)
+	if _, err := fixture.registry.WriteDB().Exec(`DROP TRIGGER fail_rotation`); err != nil {
+		t.Fatal(err)
+	}
+	fixture.daemon.syncLeads()
+	if !refusedAsRevoked(t, fixture.server, first) {
+		t.Fatal("the correction a restart interrupted was never made")
+	}
+}
+
+func TestALeadThatStepsDownWhileAgenthailIsStoppedLosesProjectControlOnRestart(t *testing.T) {
+	fixture := newCodexCaptain(t)
+	if code, body := fixture.action(t, map[string]any{"action": "coordinator-send", "name": "captain", "message": "hello"}); code != http.StatusOK {
+		t.Fatalf("coordinator-send status=%d body=%s", code, redacted(body))
+	}
+	first := fixture.firstBearer(t)
+	if _, err := fixture.registry.ClearCoordinator("p-codex", "test", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.restartAgenthail(t)
+	fixture.daemon.syncLeads()
+	if !refusedAsRevoked(t, fixture.server, first) {
+		t.Fatal("a lead credential outlived its lead across a restart")
+	}
+}
+
+func TestACodexCoordinatorThatFailsToBecomeTheLeadLosesItsLeadCredential(t *testing.T) {
+	fixture := newCodexCaptain(t)
 	if _, err := fixture.registry.WriteDB().Exec(failOriginTrigger); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := fixture.action(t, map[string]any{"action": "coordinator-send", "name": "captain", "message": "hello"}); code == http.StatusOK {
 		t.Fatal("coordinator-send succeeded with origin writes failing")
 	}
-	starts := fixture.lifecycle.Daemon().Calls("thread/start")
-	if len(starts) != 1 {
-		t.Fatalf("thread/start calls=%d", len(starts))
-	}
-	if !refusedAsRevoked(t, fixture.server, codexBearer(starts[0])) {
+	if !refusedAsRevoked(t, fixture.server, fixture.firstBearer(t)) {
 		t.Fatal("the first credential still works although the thread never became the lead")
 	}
 }
