@@ -69,6 +69,7 @@ func claudeCommandEnv(home string) []string {
 	}
 	return append(env, "HOME="+home)
 }
+
 type rootedBackground struct {
 	claudeBackground
 	root string

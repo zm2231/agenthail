@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -42,6 +43,7 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 	c.app, c.r = cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	lazyRegistry(c.app)
 	c.app.DefaultTimeout = claudeFixtureTimeout
+	c.app.coordinatorNow = func() time.Time { return time.Now().Add(coordinator.GoneGrace + time.Minute) }
 	c.app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, c.claude.Home, posts.request)
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
