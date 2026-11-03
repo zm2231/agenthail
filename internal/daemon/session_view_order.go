@@ -92,4 +92,10 @@ func (p *sessionViewPlan) orderProjects() {
 			p.view.Projects[index].CollapsedFamilyIDs = append(p.view.Projects[index].CollapsedFamilyIDs, family.ID)
 		}
 	}
+	for i := range p.view.Families {
+		p.view.Families[i].key = sessionViewKey{Activity: p.view.Families[i].activity, ID: p.view.Families[i].ID}
+	}
+	sort.Slice(p.view.Families, func(i, j int) bool {
+		return p.view.Families[i].key.before(p.view.Families[j].key)
+	})
 }

@@ -87,10 +87,14 @@ func TestPresentationHTTPPagingHydrationAndReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, status = get("scope=all&limit=1&cursor=" + url.QueryEscape(first.NextCursor))
-	if status != 409 {
-		t.Fatalf("archive failed to invalidate cursor: %d", status)
+	if status != 200 {
+		t.Fatalf("a catalog change ended the walk: %d", status)
 	}
-	for _, query := range []string{"scope=bad", "scope=all&parentId=root", "scope=all&limit=0", "scope=all&cursor=bad", "scope=all&sessionId=child"} {
+	_, status = get("scope=all&revision=" + first.View.Revision + "&sessionId=child")
+	if status != 409 {
+		t.Fatalf("member hydration against a stale revision: %d", status)
+	}
+	for _, query := range []string{"scope=bad", "scope=all&parentId=root", "scope=all&limit=0", "scope=all&cursor=bad", "scope=all&sessionId=child", "scope=recent&cursor=" + url.QueryEscape(first.NextCursor), "scope=all&revision=" + first.View.Revision + "&cursor=" + url.QueryEscape(first.NextCursor)} {
 		_, status = get(query)
 		if status != 400 {
 			t.Fatalf("%s: %d", query, status)

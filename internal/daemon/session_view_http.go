@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,21 +16,9 @@ type sessionViewRequest struct {
 	Scope    string
 	Filters  SessionViewFilters
 	Limit    int
-	Offset   int
+	After    *sessionViewKey
 	Revision string
 	IDs      []string
-}
-
-type sessionViewCursor struct {
-	Scope    string
-	Filters  SessionViewFilters
-	Revision string
-	Offset   int
-}
-
-func encodeSessionViewCursor(request sessionViewRequest, revision string, offset int) string {
-	encoded, _ := json.Marshal(sessionViewCursor{request.Scope, request.Filters, revision, offset})
-	return base64.RawURLEncoding.EncodeToString(encoded)
 }
 
 func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
@@ -67,17 +53,13 @@ func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
 		request.Limit = limit
 	}
 	if q.Has("cursor") {
-		var cursor sessionViewCursor
-		encoded, err := base64.RawURLEncoding.DecodeString(q.Get("cursor"))
-		if err != nil || json.Unmarshal(encoded, &cursor) != nil || cursor.Scope != request.Scope || cursor.Filters != request.Filters || cursor.Offset < 0 || cursor.Revision == "" {
+		cursor, ok := decodeSessionViewCursor(q.Get("cursor"))
+		if !ok || cursor.Scope != request.Scope || cursor.Filters != request.Filters || request.Revision != "" {
 			return request, errPresentationCursor
 		}
-		if request.Revision != "" && request.Revision != cursor.Revision {
-			return request, errPresentationCursor
-		}
-		request.Revision, request.Offset = cursor.Revision, cursor.Offset
+		request.After = &cursor.After
 	}
-	if len(request.IDs) > 0 && (request.Revision == "" || q.Has("cursor")) {
+	if len(request.IDs) > 0 && (request.Revision == "" || request.After != nil) {
 		return request, fmt.Errorf("member hydration requires a revision and no cursor")
 	}
 	return request, nil
@@ -114,7 +96,7 @@ func (d *Daemon) sessionViewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	tag := fmt.Sprintf(`"%s-%d"`, state.View.Revision, request.Limit)
-	if request.Offset == 0 && len(request.IDs) == 0 {
+	if request.After == nil && len(request.IDs) == 0 {
 		w.Header().Set("ETag", tag)
 		if r.Header.Get("If-None-Match") == tag {
 			w.WriteHeader(http.StatusNotModified)

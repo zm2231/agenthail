@@ -66,6 +66,7 @@ type Daemon struct {
 	announcingRefusal    map[int64]int64
 	catalogNudge         chan struct{}
 	presence             catalogPresence
+	leads                leadWatch
 	observerNudge        chan struct{}
 	// catalogSelected, when set, runs after a catalog publication has chosen
 	// what a session waits on and before its row commits.
@@ -384,6 +385,7 @@ func (d *Daemon) runCatalogStatus(ctx context.Context) {
 			return
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)
+			d.syncLeads()
 		case <-problemTicker.C:
 			d.settleDeliveryProblems()
 		}

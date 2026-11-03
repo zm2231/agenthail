@@ -22,6 +22,10 @@ var typedActions = map[string]actionOperation{
 	"channel-remove":   (*Daemon).doChannelMembership,
 	"relay-add":        (*Daemon).doRelayAdd,
 	"relay-remove":     (*Daemon).doRelayRemove,
+	"session-create":   (*Daemon).doSessionCreate,
+	"notion-create":    (*Daemon).doNotionCreate,
+	"codex-launch":     (*Daemon).doCodexLaunch,
+	"runtime-ensure":   (*Daemon).doRuntimeEnsure,
 }
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -38,42 +42,18 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	d.doAction(withActionKey(r.Context(), r.Header.Get(actionIdempotencyHeader)), principalFromRequest(r), request).write(w)
 }
 
-func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashboardActionRequest) (actionResult, error) {
 	if len(request.Attachments) > 0 && request.Action != "send" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "attachments are only accepted with send")
-		return
+		return actionResult{}, invalidRequest("attachments are only accepted with send")
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		result, err := d.doProjectAction(r.Context(), principalFromRequest(r), projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
-		writeActionResult(w, result, err)
-		return
+		return d.doProjectAction(ctx, p, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
 	}
 	if strings.HasPrefix(request.Action, "coordinator-") {
-		result, err := d.doCoordinatorAction(r.Context(), principalFromRequest(r), coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Project: request.Project, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
-		writeActionResult(w, result, err)
-		return
+		return d.doCoordinatorAction(ctx, p, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Project: request.Project, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
 	}
 	if operation, typed := typedActions[request.Action]; typed {
-		result, err := operation(d, r.Context(), principalFromRequest(r), request)
-		writeActionResult(w, result, err)
-		return
+		return operation(d, ctx, p, request)
 	}
-	if request.Action == "session-create" {
-		d.dashboardSessionCreate(w, r, request)
-		return
-	}
-	if request.Action == "notion-create" {
-		d.dashboardNotionCreate(w, r, request)
-		return
-	}
-	if request.Action == "codex-launch" {
-		d.dashboardCodexLaunch(w, r, request)
-		return
-	}
-	if request.Action == "runtime-ensure" {
-		d.dashboardRuntimeEnsure(w, r, request)
-		return
-	}
-	result, err := d.doSessionAction(r.Context(), principalFromRequest(r), request)
-	writeActionResult(w, result, err)
+	return d.doSessionAction(ctx, p, request)
 }

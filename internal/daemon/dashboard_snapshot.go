@@ -27,6 +27,10 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
+	if r.URL.Query().Get("sessions") == "none" && !catalogMirror(r.Context()) {
+		d.snapshotBaseHandler(dashboard, w, r)
+		return
+	}
 	page, pageErr := catalogPageRequestFromHTTP(r)
 	if pageErr != nil {
 		code := "invalid_catalog_page"
@@ -36,14 +40,13 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		writeAPIError(w, http.StatusBadRequest, code, pageErr.Error())
 		return
 	}
-	cacheable := page == nil && !catalogMirror(r.Context())
-	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
-	dashboard.stateMu.Lock()
-	version := dashboard.stateVersion.Load()
-	if cacheable && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
-		state, tag := dashboard.state, dashboardSnapshotTag(dashboard.state, dashboard.cachedVersion, dashboard.stateAt)
-		dashboard.stateMu.Unlock()
-		if r.URL.RawQuery == "" {
+	if page == nil && !catalogMirror(r.Context()) {
+		state, tag, err := d.cachedDashboardState(r.Context(), dashboard, r.URL.Query().Get("fresh") == "1")
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if r.URL.RawQuery == "" && tag != "" {
 			w.Header().Set("ETag", tag)
 			if r.Header.Get("If-None-Match") == tag {
 				w.Header().Set("Cache-Control", "no-store")
@@ -54,8 +57,6 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		d.writeDashboardSnapshot(w, r, state)
 		return
 	}
-	previous, hadPrevious := dashboard.state, !dashboard.stateAt.IsZero()
-	dashboard.stateMu.Unlock()
 	refreshCtx, cancel := context.WithTimeout(r.Context(), dashboardRefreshBudget)
 	defer cancel()
 	var state dashboardState
@@ -66,29 +67,44 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		state, err = d.dashboardState(refreshCtx, *page)
 	}
 	if err != nil {
-		if cacheable && hadPrevious {
-			stale := previous
-			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
-			stale.Daemon["stale"] = true
-			stale.Daemon["refreshError"] = err.Error()
-			d.writeDashboardSnapshot(w, r, stale)
-			return
-		}
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if cacheable {
-		dashboard.stateMu.Lock()
-		dashboard.state = state
-		dashboard.stateAt = time.Now()
-		dashboard.cachedVersion = version
-		tag := dashboardSnapshotTag(state, version, dashboard.stateAt)
-		dashboard.stateMu.Unlock()
-		if r.URL.RawQuery == "" {
-			w.Header().Set("ETag", tag)
-		}
-	}
 	d.writeDashboardSnapshot(w, r, state)
+}
+
+// A failed rebuild serves the last state marked stale and untagged.
+func (d *Daemon) cachedDashboardState(ctx context.Context, dashboard *dashboardServer, fresh bool) (dashboardState, string, error) {
+	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
+	dashboard.stateMu.Lock()
+	version := dashboard.stateVersion.Load()
+	if catalogErr == nil && !fresh && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+		state, tag := dashboard.state, dashboardSnapshotTag(dashboard.state, dashboard.cachedVersion, dashboard.stateAt)
+		dashboard.stateMu.Unlock()
+		return state, tag, nil
+	}
+	previous, hadPrevious := dashboard.state, !dashboard.stateAt.IsZero()
+	dashboard.stateMu.Unlock()
+	refreshCtx, cancel := context.WithTimeout(ctx, dashboardRefreshBudget)
+	defer cancel()
+	state, err := d.dashboardState(refreshCtx)
+	if err != nil {
+		if !hadPrevious {
+			return dashboardState{}, "", err
+		}
+		stale := previous
+		stale.Daemon = cloneDashboardDaemon(stale.Daemon)
+		stale.Daemon["stale"] = true
+		stale.Daemon["refreshError"] = err.Error()
+		return stale, "", nil
+	}
+	dashboard.stateMu.Lock()
+	dashboard.state = state
+	dashboard.stateAt = time.Now()
+	dashboard.cachedVersion = version
+	tag := dashboardSnapshotTag(state, version, dashboard.stateAt)
+	dashboard.stateMu.Unlock()
+	return state, tag, nil
 }
 
 func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Time) string {

@@ -107,6 +107,7 @@ export function presenceLabel(session, now = Date.now()) {
       queued: "Queued",
       open: "Open",
       recent: "Recent",
+      lead: "Lead",
     }[session.currentReason] || statusLabel(session.status)
   );
 }
