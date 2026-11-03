@@ -49,7 +49,7 @@ func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 	if reply.Status == http.StatusAccepted {
 		var submitted struct{ Status string }
 		if json.Unmarshal(reply.Body, &submitted) == nil && submitted.Status == "submitted" {
-			return nil, &mcpRefusal{Code: "busy", Message: "A request with this clientRequestId is still running or its outcome was not recorded; retry with the same clientRequestId to read its result.", Retryable: true, Detail: map[string]any{"outcome": "unknown"}}
+			return nil, mcpUnknownOutcome()
 		}
 	}
 	if reply.Status < http.StatusMultipleChoices {
@@ -66,6 +66,10 @@ func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 	_ = json.Unmarshal(reply.Body, &extra)
 	delete(extra, "error")
 	return nil, mcpRefusalFor(&actionError{Status: reply.Status, Code: failure.Error.Code, Message: failure.Error.Message, Extra: extra})
+}
+
+func mcpUnknownOutcome() *mcpRefusal {
+	return &mcpRefusal{Code: "busy", Message: "A request with this clientRequestId is still running or its outcome was not recorded; retry with the same clientRequestId to read its result.", Retryable: true, Detail: map[string]any{"outcome": "unknown"}}
 }
 
 func (d *Daemon) recordMCPWrite(caller *mcpCaller, tool, target, clientRequestID string, refusal *mcpRefusal) {

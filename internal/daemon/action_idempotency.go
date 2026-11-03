@@ -49,7 +49,7 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
 			return
 		}
-		d.idempotentReply(principalFromRequest(r).ID, key, raw, func(body []byte) actionReply {
+		d.idempotentReply(principalFromRequest(r).ID, key, raw, mcpRequestHash(r.Context()), func(body []byte) actionReply {
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			recorder := newActionRecorder()
 			next(recorder, r)
@@ -58,7 +58,7 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 	}
 }
 
-func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, run func([]byte) actionReply) actionReply {
+func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, requestHash string, run func([]byte) actionReply) actionReply {
 	key := strings.TrimSpace(rawKey)
 	if key == "" {
 		return run(body)
@@ -74,8 +74,10 @@ func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, run fu
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
 		})
 	}
-	hash := sha256.Sum256(canonical)
-	requestHash := hex.EncodeToString(hash[:])
+	if requestHash == "" {
+		hash := sha256.Sum256(canonical)
+		requestHash = hex.EncodeToString(hash[:])
+	}
 	reservation, err := d.Registry.ReserveActionReceipt(principalID, key, requestHash, time.Now().UTC())
 	if err != nil {
 		return replyWith(func(w http.ResponseWriter) {

@@ -141,7 +141,7 @@ A ceiling bounds what a session started over MCP may do: `permission` (ranked `p
 
 ### Idempotency
 
-Every write takes a `clientRequestId`. The action receipt is keyed `<tool>:<clientRequestId>` per calling session: a repeat with the same arguments replays the first result, and a repeat with different arguments is `idempotency_conflict`. A first request still running, or one whose outcome was not recorded, answers `busy` with `detail.outcome: "unknown"`; retrying with the same id reads its result.
+Every write takes a `clientRequestId`. The action receipt is keyed `<tool>:<clientRequestId>` per calling session and records a hash of the tool's arguments: a repeat with the same arguments replays the first result, and a repeat with different arguments is `idempotency_conflict`. The receipt is read before any capability, scope or ceiling check, so a retry replays even after the caller lost the role that let the first call through (a replaced voice operator, a lead that stepped down). A first request still running, or one whose outcome was not recorded, answers `busy` with `detail.outcome: "unknown"`; retrying with the same id reads its result.
 
 ### Audit
 

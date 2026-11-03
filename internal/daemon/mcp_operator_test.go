@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -74,6 +75,33 @@ func TestOnlyTheCurrentVoiceOperatorHoldsControlOfEverySession(t *testing.T) {
 		if rows := credentialRows(t, r, session.ID); rows != 1 {
 			t.Fatalf("%s credentials=%d, an operator change minted a token", session.ID, rows)
 		}
+	}
+}
+
+func TestAReplacedOperatorsRetryReplaysItsFirstResult(t *testing.T) {
+	d, r, _, first, second := daemonFixture(t)
+	server := mcpServer(t, d)
+	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
+	token := issueMCPToken(t, d, first)
+	makeVoiceOperator(t, d, first)
+	args := map[string]any{"action": "create", "channel": "ops", "clientRequestId": "c1"}
+	created, refused := callMCP(t, mcpSession(t, server, token), "agenthail_channel", args)
+	if refused {
+		t.Fatalf("create: %v", created)
+	}
+	makeVoiceOperator(t, d, second)
+	if replayed, refused := callMCP(t, mcpSession(t, server, token), "agenthail_channel", args); refused || !reflect.DeepEqual(replayed, created) {
+		t.Fatalf("retry after replacement=%v refused=%v, want the first result %v", replayed, refused, created)
+	}
+	if out, _ := callMCP(t, mcpSession(t, server, token), "agenthail_channel", map[string]any{"action": "create", "channel": "other", "clientRequestId": "c1"}); out["code"] != "idempotency_conflict" {
+		t.Fatalf("changed arguments under the same id: %v", out)
+	}
+	if out, _ := callMCP(t, mcpSession(t, server, token), "agenthail_channel", map[string]any{"action": "create", "channel": "other", "clientRequestId": "c2"}); out["code"] != "capability_missing" {
+		t.Fatalf("a new request from the replaced operator: %v", out)
+	}
+	channels, err := r.ListChannels()
+	if err != nil || len(channels) != 1 {
+		t.Fatalf("channels=%v err=%v, the retry acted twice", channels, err)
 	}
 }
 

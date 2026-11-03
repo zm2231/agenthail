@@ -73,6 +73,18 @@ func (r *Registry) ReserveActionReceipt(principal, key, requestHash string, now 
 	return ActionReceiptReservation{Receipt: receipt}, nil
 }
 
+func (r *Registry) ActionReceipt(principal, key string) (ActionReceipt, bool, error) {
+	receipt, err := actionReceiptByStorageKey(r.db, actionReceiptStorageKey(principal, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ActionReceipt{}, false, nil
+	}
+	if err != nil {
+		return ActionReceipt{}, false, err
+	}
+	receipt.Principal, receipt.Key = principal, key
+	return receipt, true, nil
+}
+
 func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, receipt []byte, now time.Time) error {
 	if err := validateActionReceiptInput(principal, key, requestHash); err != nil {
 		return err
