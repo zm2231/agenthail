@@ -35,6 +35,7 @@ type Runtime struct {
 type LaunchRequest struct {
 	Surface SurfaceKind
 	Options SessionStartOptions
+	MCP     *LaunchMCPCredential
 }
 
 var ErrLaunchOptionUnsupported = errors.New("launcher does not support this session option")

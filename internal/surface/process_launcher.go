@@ -79,8 +79,13 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 				return LaunchResult{}, err
 			}
 		}
+		credentialPath, err := writeManagedCodexLaunchCredential(launchID, launchMCP(request))
+		if err != nil {
+			return LaunchResult{}, err
+		}
 		command, intentPath, err := writeLauncherIntent(request.Options.Cwd, argv)
 		if err != nil {
+			removeLaunchFile(credentialPath)
 			return LaunchResult{}, err
 		}
 		if receiptPath != "" {
@@ -96,6 +101,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 				return LaunchResult{}, LaunchAcceptedError{Launcher: l.id, Err: fmt.Errorf("%s launch outcome is unresolved: %w: %s", l.id, runErr, strings.TrimSpace(string(out)))}
 			}
 			_ = os.Remove(intentPath)
+			removeLaunchFile(credentialPath)
 			return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, runErr, strings.TrimSpace(string(out)))
 		}
 		result, parseErr := parseLaunchResult(l.id, out)
@@ -116,6 +122,10 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		}
 		argv = managedCodexLaunchArgv(argv, sessionName, receiptPath, LauncherTMUX)
 	}
+	credentialPath, err := writeManagedCodexLaunchCredential(sessionName, launchMCP(request))
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", request.Options.Cwd, "-P", "-F", "#{session_name} #{pane_id}"}
 	if request.Options.Name != "" {
 		args = append(args, "-n", request.Options.Name)
@@ -128,6 +138,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		if launchCommandStarted(err) {
 			return LaunchResult{Location: &Location{Session: sessionName}}, LaunchAcceptedError{Launcher: l.id, Err: fmt.Errorf("%s launch outcome is unresolved: %w: %s", l.id, err, strings.TrimSpace(string(out)))}
 		}
+		removeLaunchFile(credentialPath)
 		return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, err, strings.TrimSpace(string(out)))
 	}
 	result, parseErr := parseLaunchResult(l.id, out)
@@ -156,6 +167,19 @@ func launchCommandStarted(err error) bool {
 	}
 	var startErr *exec.Error
 	return !errors.As(err, &startErr)
+}
+
+func launchMCP(request LaunchRequest) *LaunchMCPCredential {
+	if request.Surface != KindCodex {
+		return nil
+	}
+	return request.MCP
+}
+
+func removeLaunchFile(path string) {
+	if path != "" {
+		_ = os.Remove(path)
+	}
 }
 
 func managedCodexLaunchArgv(argv []string, launchID, receiptPath, runtime string) []string {

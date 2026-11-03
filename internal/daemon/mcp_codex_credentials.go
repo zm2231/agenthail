@@ -34,12 +34,27 @@ func (c *daemonMCPCredentials) remember(token string) {
 func (c *daemonMCPCredentials) URL() string { return c.url }
 
 func (c *daemonMCPCredentials) Pending() (string, string, error) {
-	pending, err := c.d.Registry.IssuePendingCredential(defaultSessionCapabilities, json.RawMessage(`{}`), time.Now(), pendingCredentialLifetime)
+	return c.issuePending(pendingCredentialLifetime)
+}
+
+func (c *daemonMCPCredentials) issuePending(lifetime time.Duration) (string, string, error) {
+	pending, err := c.d.Registry.IssuePendingCredential(defaultSessionCapabilities, json.RawMessage(`{}`), time.Now(), lifetime)
 	if err != nil {
 		return "", "", err
 	}
 	c.remember(pending.Token)
 	return pending.Token, pending.Ref, nil
+}
+
+func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.SurfaceKind) (*surface.LaunchMCPCredential, error) {
+	if agent != surface.KindCodex || (launcher != surface.LauncherTMUX && launcher != surface.LauncherCMUX) {
+		return nil, nil
+	}
+	token, ref, err := c.issuePending(pendingLaunchLifetime)
+	if err != nil {
+		return nil, err
+	}
+	return &surface.LaunchMCPCredential{URL: c.url, Token: token, Ref: ref}, nil
 }
 
 func (c *daemonMCPCredentials) Claim(ref, threadID string) error {
@@ -90,6 +105,7 @@ func (d *Daemon) sessionCapabilities(session surface.Session) []string {
 
 func (d *Daemon) attachMCPCredentials(listen string) {
 	credentials := newDaemonMCPCredentials(d, listen)
+	d.mcpCodex.Store(credentials)
 	for _, adapter := range d.Surfaces {
 		if codex, ok := adapter.(*surfaces.Codex); ok {
 			codex.SetMCPCredentials(credentials)

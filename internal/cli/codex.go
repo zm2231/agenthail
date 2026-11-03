@@ -49,9 +49,13 @@ func (a *App) cmdCodex(args []string) error {
 		if err != nil {
 			return err
 		}
+		codex, err := a.managedCodexForLaunch(launchID)
+		if err != nil {
+			return err
+		}
 		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, surfaces.NewCodex("").PrepareManagedTerminalSession, func(path string, argv, env []string) error {
+		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, codex.PrepareManagedTerminalSession, func(path string, argv, env []string) error {
 			return syscall.Exec(path, argv, env)
 		}, path)
 	}

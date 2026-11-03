@@ -90,6 +90,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerMoveAPI(mux, dashboard)
 	d.registerUIAPI(mux, dashboard)
 	d.registerLedgerRoutes(mux, dashboard)
+	mux.HandleFunc(MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
 	mux.HandleFunc("/api/v1/snapshot", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) })))
 	mux.HandleFunc("/api/v1/projects/activity", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.projectActivityHandler(dashboard, w, r) })))
