@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -26,6 +27,15 @@ type parityCase struct {
 	action string
 	body   string
 	setup  func(t *testing.T, d *Daemon, r *registry.Registry)
+	caller *principal
+	key    string
+}
+
+func (c parityCase) principal() principal {
+	if c.caller != nil {
+		return *c.caller
+	}
+	return principal{ID: localDashboardPrincipal, Kind: principalPerson}
 }
 
 func withCodexLaunched(t *testing.T, d *Daemon, _ *registry.Registry) {
@@ -106,11 +116,35 @@ func parityCases() []parityCase {
 		session("session-unarchive", "session-unarchive", ``),
 		session("session-adopt", "session-adopt", ``),
 		session("session-fork", "session-fork", `,"alias":"forked"`),
-		session("native-queue", "native-queue", `,"nativeQueue":{"action":"list"}`),
+		session("native-queue", "native-queue", `,"nativeQueue":{"queueAction":"list"}`),
 		session("session-lifecycle-stop", "session-lifecycle-stop", ``),
 		session("session-lifecycle-status", "session-lifecycle-status", ``),
 		session("session-lifecycle-logs", "session-lifecycle-logs", ``),
 		session("session-lifecycle-resume", "session-lifecycle-resume", ``),
+		session("respond stale", "respond", `,"requestId":"gone","decision":{"behavior":"allow"}`),
+		session("respond choice", "respond", `,"requestId":"r1","decision":{"choice":"o9"}`),
+		session("respond choice stale", "respond", `,"requestId":"gone","decision":{"choice":"o0"}`),
+		session("session-fork conflicting points", "session-fork", `,"fork":{"lastTurnId":"a","beforeTurnId":"b"}`),
+		session("session-fork unknown creator", "session-fork", `,"sourceSessionId":"ghost"`),
+		session("session-fork unknown turn", "session-fork", `,"fork":{"beforeTurnId":"never"}`),
+		session("send unreadable attachment", "send", `,"message":"see file","attachments":["missing-upload"]`),
+		session("send pinned to a process", "send", `,"message":"hello","pid":4242`),
+		session("send busy policy", "send", `,"message":"hello","busyDelivery":"queue"`),
+		session("steer as person", "steer", `,"message":"nudge","author":"person","personName":"Ada"`),
+		session("steer from session", "steer", `,"message":"nudge","sourceSessionId":"from"`),
+		session("steer unknown source", "steer", `,"message":"nudge","sourceSessionId":"ghost"`),
+		session("steer empty", "steer", ``),
+		{name: "send to a daemon session", action: "send", body: `{"action":"send","sessionId":"to","message":"hello"}`, setup: withDaemonSession},
+		{name: "lifecycle stop on a daemon session", action: "session-lifecycle-stop", body: `{"action":"session-lifecycle-stop","sessionId":"to"}`, setup: withDaemonSession},
+		{name: "limit-resume stopped", action: "limit-resume", body: `{"action":"limit-resume","sessionId":"to"}`, setup: withLimitStop},
+		{name: "limit-resume-cancel stopped", action: "limit-resume-cancel", body: `{"action":"limit-resume-cancel","sessionId":"to"}`, setup: withLimitStop},
+		{name: "relay leg from a host", action: "send", body: `{"action":"send","sessionId":"to","message":"relayed","relayHops":1}`, caller: &parityHost, key: "relay-leg"},
+		{name: "relay leg from a host naming an unqualified sender", action: "send", body: `{"action":"send","sessionId":"to","message":"relayed","relayHops":1,"sourceSessionId":"from"}`, caller: &parityHost, key: "relay-unqualified"},
+		{name: "relay leg from a host without a key", action: "send", body: `{"action":"send","sessionId":"to","message":"relayed","relayHops":1}`, caller: &parityHost},
+		{name: "relay leg past the hop limit", action: "send", body: `{"action":"send","sessionId":"to","message":"relayed","relayHops":99}`, caller: &parityHost, key: "relay-far"},
+		{name: "relay leg not from a host", action: "send", body: `{"action":"send","sessionId":"to","message":"relayed","relayHops":1}`, key: "relay-person"},
+		{name: "model by a paired device", action: "model", body: `{"action":"model","sessionId":"to","model":"gpt"}`, caller: &principal{ID: "phone", Kind: principalDevice, HostName: "phone"}},
+		{name: "send with a key", action: "send", body: `{"action":"send","sessionId":"to","message":"hello"}`, key: "send-once"},
 		{name: "session-create", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","approvalPolicy":"sometimes"}`},
 		{name: "session-create unknown creator", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","sourceSessionId":"ghost"}`},
 		{name: "notion-create", action: "notion-create", body: `{"action":"notion-create","message":"go","alias":"bad name"}`},
@@ -143,18 +177,71 @@ func parityCases() []parityCase {
 	return cases
 }
 
-type parityLifecycleSurface struct{ *daemonSurface }
+type paritySurface struct{ *daemonSurface }
 
-func (s parityLifecycleSurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+func (s paritySurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
 	return map[string]any{"action": action, "sessionId": session.ID}, nil
 }
+
+func (s paritySurface) UpdateGoal(context.Context, *surface.Session, surface.GoalUpdate) error {
+	return nil
+}
+
+func (s paritySurface) ForkSession(_ context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
+	fork := *session
+	fork.ID, fork.Name = "forked", "forked from "+session.ID
+	return &fork, nil
+}
+
+func (s paritySurface) NativeQueue(_ context.Context, session *surface.Session, request surface.NativeQueueRequest) (map[string]any, error) {
+	return map[string]any{"queueAction": request.Action, "sessionId": session.ID}, nil
+}
+
+func (s paritySurface) AdoptSession(_ context.Context, session *surface.Session, _ surface.AdoptRequest) (*surface.AdoptResult, error) {
+	return &surface.AdoptResult{Stopped: "terminal"}, nil
+}
+
+func (s paritySurface) Requests(context.Context, *surface.Session) (surface.RequestState, error) {
+	return surface.RequestState{PermissionMode: "default", Requests: []surface.Request{{ID: "r1", Kind: surface.WaitingApproval, Tool: "Bash"}}}, nil
+}
+
+func (s paritySurface) Respond(_ context.Context, _ *surface.Session, requestID string, decision surface.Decision) (string, error) {
+	if requestID != "r1" {
+		return "", surface.ErrRequestStale
+	}
+	return decision.Behavior, nil
+}
+
+func (s paritySurface) Control(_ context.Context, session *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
+	return &surface.ControlResult{SessionID: session.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "parity", Output: control.Value}, nil
+}
+
+func withDaemonSession(t *testing.T, _ *Daemon, r *registry.Registry) {
+	t.Helper()
+	if err := r.RecordSessionOrigin(registry.SessionOrigin{SessionID: "to", Via: registry.OriginDaemon}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withLimitStop(t *testing.T, _ *Daemon, r *registry.Registry) {
+	t.Helper()
+	session, err := r.Session("to")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordLimitStop(*session, "account", surface.LimitStop{TurnID: "refused", RefusedAt: time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var parityHost = principal{ID: "paired-host-device", Kind: principalHost, HostID: "hparity", HostName: "parity-host"}
 
 func parityDaemon(t *testing.T, setup func(*testing.T, *Daemon, *registry.Registry)) *Daemon {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.caps = surface.Capabilities{Send: true, Steer: true, Interrupt: true, Compact: true, Goal: true, Model: true, PermissionMode: true, Commands: true, Attach: true}
-	d.Surfaces = []surface.Surface{parityLifecycleSurface{fake}}
+	d.Surfaces = []surface.Surface{paritySurface{fake}}
 	d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error { return nil }
 	if setup != nil {
 		setup(t, d, r)
@@ -209,9 +296,18 @@ func parityOf(d *Daemon, reply actionReply) parityReply {
 	return parityReply{Status: reply.Status, Header: reply.Header, Body: normalizeParity(d, reply.Body)}
 }
 
-func replyOverHTTP(d *Daemon, format actionFormat, path, body string) actionReply {
+func replyOverHTTP(d *Daemon, format actionFormat, path string, c parityCase) actionReply {
 	recorder := httptest.NewRecorder()
-	d.actionsHTTPHandler(format)(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+	p := c.principal()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(c.body))
+	request = request.WithContext(p.context(request.Context()))
+	if p.Claimed != "" {
+		request.Header.Set(ActionActorHeader, p.Claimed)
+	}
+	if c.key != "" {
+		request.Header.Set(actionIdempotencyHeader, c.key)
+	}
+	d.actionsHTTPHandler(format)(recorder, request)
 	return actionReply{Status: recorder.Code, Header: recorder.Header(), Body: recorder.Body.Bytes()}
 }
 
@@ -233,8 +329,8 @@ func TestEveryActionRepliesTheSameThroughEveryFrontEnd(t *testing.T) {
 			key := front.name + " " + c.name
 			t.Run(key, func(t *testing.T) {
 				viaHTTP, viaService := parityDaemon(t, c.setup), parityDaemon(t, c.setup)
-				httpJSON, _ := json.Marshal(parityOf(viaHTTP, replyOverHTTP(viaHTTP, front.format, front.path, c.body)))
-				directJSON, _ := json.Marshal(parityOf(viaService, viaService.performAction(context.Background(), principal{ID: "parity", Kind: principalPerson}, front.format, []byte(c.body), "")))
+				httpJSON, _ := json.Marshal(parityOf(viaHTTP, replyOverHTTP(viaHTTP, front.format, front.path, c)))
+				directJSON, _ := json.Marshal(parityOf(viaService, viaService.performAction(context.Background(), c.principal(), front.format, []byte(c.body), c.key)))
 				if !bytes.Equal(httpJSON, directJSON) {
 					t.Fatalf("HTTP replied %s, the service replied %s", httpJSON, directJSON)
 				}

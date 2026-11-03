@@ -156,7 +156,7 @@
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
   },
   "api/action context": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -165,7 +165,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"context\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/action coordinator-clear": {
     "status": 400,
@@ -228,7 +228,7 @@
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery problem not found\"}}\n"
   },
   "api/action effort": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -237,10 +237,10 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"effort\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"high\"}}\n"
   },
   "api/action goal-budget": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -249,7 +249,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/action goal-budget invalid": {
     "status": 400,
@@ -261,7 +261,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"token budget must be a non-negative integer\"}}\n"
   },
   "api/action goal-clear": {
     "status": 400,
@@ -288,7 +288,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
   },
   "api/action goal-pause": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -297,10 +297,10 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/action goal-resume": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -309,7 +309,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/action goal-set": {
     "status": 400,
@@ -333,7 +333,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/action invalid json": {
     "status": 400,
@@ -346,6 +346,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+  },
+  "api/action lifecycle stop on a daemon session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
   },
   "api/action limit-move": {
     "status": 409,
@@ -371,6 +383,18 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
+  "api/action limit-resume stopped": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/action limit-resume-cancel": {
     "status": 409,
     "header": {
@@ -383,6 +407,18 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
+  "api/action limit-resume-cancel stopped": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/action model": {
     "status": 200,
     "header": {
@@ -393,7 +429,19 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
+  },
+  "api/action model by a paired device": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
   },
   "api/action model empty": {
     "status": 400,
@@ -408,7 +456,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"model is required\"}}\n"
   },
   "api/action native-queue": {
-    "status": 502,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -417,7 +465,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"queueAction\":\"list\",\"sessionId\":\"to\"}}\n"
   },
   "api/action no session": {
     "status": 400,
@@ -453,7 +501,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
   "api/action project-add": {
     "status": 400,
@@ -551,6 +599,66 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sql: no rows in result set\"}}\n"
   },
+  "api/action relay leg from a host": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"queued\",\"status\":\"queued\",\"sessionId\":\"to\",\"queueId\":1,\"detail\":\"relay queued\"}}\n"
+  },
+  "api/action relay leg from a host naming an unqualified sender": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"host_mismatch: a host names its sender qualified with its own host id\"}}\n"
+  },
+  "api/action relay leg from a host without a key": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a forwarded relay needs its idempotency key\"}}\n"
+  },
+  "api/action relay leg not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"relayHops is set only by a paired host forwarding a relay\"}}\n"
+  },
+  "api/action relay leg past the hop limit": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a relay may take at most 8 hops\"}}\n"
+  },
   "api/action relay-add": {
     "status": 200,
     "header": {
@@ -576,7 +684,7 @@
     "body": "{\"ok\":true}\n"
   },
   "api/action rename": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -585,9 +693,21 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
   },
   "api/action respond": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"r1\"}}\n"
+  },
+  "api/action respond choice": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -597,7 +717,31 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session's requests are not answered through Agenthail\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"request r1 offers no choice \\\"o9\\\"\"}}\n"
+  },
+  "api/action respond choice stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
+  },
+  "api/action respond stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
   },
   "api/action runtime-ensure": {
     "status": 409,
@@ -635,6 +779,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
+  "api/action send busy policy": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
   "api/action send empty": {
     "status": 400,
     "header": {
@@ -659,6 +815,30 @@
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
+  "api/action send pinned to a process": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"pid names a Claude process that holds the conversation\"}}\n"
+  },
+  "api/action send to a daemon session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"daemon_session\",\"message\":\"this session is Agenthail's narrowing checker; only Agenthail drives it\"}}\n"
+  },
   "api/action send unknown source": {
     "status": 400,
     "header": {
@@ -671,7 +851,7 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
-  "api/action session-adopt": {
+  "api/action send unreadable attachment": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -681,7 +861,31 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_adopt_unsupported\",\"message\":\"codex sessions cannot be opened in Agenthail\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"attachment \\\"missing-upload\\\" is not stored on this host; upload it again\"}}\n"
+  },
+  "api/action send with a key": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action session-adopt": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"session\":null,\"stopped\":\"terminal\"}}\n"
   },
   "api/action session-archive": {
     "status": 200,
@@ -732,7 +936,7 @@
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
   },
   "api/action session-fork": {
-    "status": 502,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -741,7 +945,43 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"session\":{\"id\":\"forked\",\"surface\":\"codex\",\"name\":\"forked from to\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}}\n"
+  },
+  "api/action session-fork conflicting points": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"fork_point_conflict\",\"message\":\"A fork takes lastTurnId or beforeTurnId, not both.\"}}\n"
+  },
+  "api/action session-fork unknown creator": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
+  },
+  "api/action session-fork unknown turn": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"fork_turn_unknown\",\"message\":\"Agenthail no longer holds that part of this conversation, so it can't fork from there.\"}}\n"
   },
   "api/action session-lifecycle-logs": {
     "status": 200,
@@ -804,7 +1044,7 @@
     "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
   },
   "api/action status": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -813,7 +1053,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"status\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/action steer": {
     "status": 200,
@@ -825,7 +1065,55 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"codex\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action steer as person": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action steer empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session cannot be steered\"}}\n"
+  },
+  "api/action steer from session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action steer unknown source": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
   "api/action unknown action": {
     "status": 400,
@@ -852,7 +1140,7 @@
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"session not found\"}}\n"
   },
   "api/action usage": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -861,7 +1149,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/v1/actions alias": {
     "status": 200,
@@ -1020,7 +1308,7 @@
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
   },
   "api/v1/actions context": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1029,7 +1317,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"context\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/v1/actions coordinator-clear": {
     "status": 400,
@@ -1092,7 +1380,7 @@
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery problem not found\"}}\n"
   },
   "api/v1/actions effort": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1101,10 +1389,10 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"effort\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"high\"}}\n"
   },
   "api/v1/actions goal-budget": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1113,7 +1401,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/v1/actions goal-budget invalid": {
     "status": 400,
@@ -1125,7 +1413,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"token budget must be a non-negative integer\"}}\n"
   },
   "api/v1/actions goal-clear": {
     "status": 400,
@@ -1152,7 +1440,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
   },
   "api/v1/actions goal-pause": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1161,10 +1449,10 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/v1/actions goal-resume": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1173,7 +1461,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+    "body": "{\"ok\":true,\"result\":null}\n"
   },
   "api/v1/actions goal-set": {
     "status": 400,
@@ -1197,7 +1485,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/v1/actions invalid json": {
     "status": 400,
@@ -1210,6 +1498,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+  },
+  "api/v1/actions lifecycle stop on a daemon session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
   },
   "api/v1/actions limit-move": {
     "status": 409,
@@ -1235,6 +1535,18 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
+  "api/v1/actions limit-resume stopped": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/v1/actions limit-resume-cancel": {
     "status": 409,
     "header": {
@@ -1247,6 +1559,18 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
+  "api/v1/actions limit-resume-cancel stopped": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/v1/actions model": {
     "status": 200,
     "header": {
@@ -1257,7 +1581,19 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
+  },
+  "api/v1/actions model by a paired device": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
   },
   "api/v1/actions model empty": {
     "status": 400,
@@ -1272,7 +1608,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"model is required\"}}\n"
   },
   "api/v1/actions native-queue": {
-    "status": 502,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1281,7 +1617,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"queueAction\":\"list\",\"sessionId\":\"to\"}}\n"
   },
   "api/v1/actions no session": {
     "status": 400,
@@ -1317,7 +1653,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
   "api/v1/actions project-add": {
     "status": 400,
@@ -1415,6 +1751,66 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sql: no rows in result set\"}}\n"
   },
+  "api/v1/actions relay leg from a host": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"queued\",\"status\":\"queued\",\"sessionId\":\"to\",\"queueId\":1,\"detail\":\"relay queued\"}}\n"
+  },
+  "api/v1/actions relay leg from a host naming an unqualified sender": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"host_mismatch: a host names its sender qualified with its own host id\"}}\n"
+  },
+  "api/v1/actions relay leg from a host without a key": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a forwarded relay needs its idempotency key\"}}\n"
+  },
+  "api/v1/actions relay leg not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"relayHops is set only by a paired host forwarding a relay\"}}\n"
+  },
+  "api/v1/actions relay leg past the hop limit": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a relay may take at most 8 hops\"}}\n"
+  },
   "api/v1/actions relay-add": {
     "status": 200,
     "header": {
@@ -1440,7 +1836,7 @@
     "body": "{\"ok\":true}\n"
   },
   "api/v1/actions rename": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1449,9 +1845,21 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
   },
   "api/v1/actions respond": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"outcome\":\"allow\",\"requestId\":\"r1\"}}\n"
+  },
+  "api/v1/actions respond choice": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -1461,7 +1869,31 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session's requests are not answered through Agenthail\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"request r1 offers no choice \\\"o9\\\"\"}}\n"
+  },
+  "api/v1/actions respond choice stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
+  },
+  "api/v1/actions respond stale": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
   },
   "api/v1/actions runtime-ensure": {
     "status": 409,
@@ -1499,6 +1931,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
+  "api/v1/actions send busy policy": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
   "api/v1/actions send empty": {
     "status": 400,
     "header": {
@@ -1523,6 +1967,30 @@
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
+  "api/v1/actions send pinned to a process": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"pid names a Claude process that holds the conversation\"}}\n"
+  },
+  "api/v1/actions send to a daemon session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"daemon_session\",\"message\":\"this session is Agenthail's narrowing checker; only Agenthail drives it\"}}\n"
+  },
   "api/v1/actions send unknown source": {
     "status": 400,
     "header": {
@@ -1535,7 +2003,7 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
-  "api/v1/actions session-adopt": {
+  "api/v1/actions send unreadable attachment": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -1545,7 +2013,31 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_adopt_unsupported\",\"message\":\"codex sessions cannot be opened in Agenthail\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"attachment \\\"missing-upload\\\" is not stored on this host; upload it again\"}}\n"
+  },
+  "api/v1/actions send with a key": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions session-adopt": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"session\":null,\"stopped\":\"terminal\"}}\n"
   },
   "api/v1/actions session-archive": {
     "status": 200,
@@ -1596,7 +2088,7 @@
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
   },
   "api/v1/actions session-fork": {
-    "status": 502,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1605,7 +2097,43 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"session\":{\"id\":\"forked\",\"surface\":\"codex\",\"name\":\"forked from to\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}}\n"
+  },
+  "api/v1/actions session-fork conflicting points": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"fork_point_conflict\",\"message\":\"A fork takes lastTurnId or beforeTurnId, not both.\"}}\n"
+  },
+  "api/v1/actions session-fork unknown creator": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
+  },
+  "api/v1/actions session-fork unknown turn": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"fork_turn_unknown\",\"message\":\"Agenthail no longer holds that part of this conversation, so it can't fork from there.\"}}\n"
   },
   "api/v1/actions session-lifecycle-logs": {
     "status": 200,
@@ -1668,7 +2196,7 @@
     "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
   },
   "api/v1/actions status": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1677,7 +2205,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"status\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
   "api/v1/actions steer": {
     "status": 200,
@@ -1689,7 +2217,55 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"codex\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions steer as person": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions steer empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session cannot be steered\"}}\n"
+  },
+  "api/v1/actions steer from session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions steer unknown source": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
   "api/v1/actions unknown action": {
     "status": 400,
@@ -1716,7 +2292,7 @@
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"session not found\"}}\n"
   },
   "api/v1/actions usage": {
-    "status": 400,
+    "status": 200,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1725,6 +2301,6 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   }
 }
