@@ -37,6 +37,18 @@ enum PairedCredential {
     /// The pairing a notification names by its host, as the notification
     /// service reads it.
     static func read(host hostID: String) -> PairedHostCredential? {
+        if case .found(let credential) = lookup(host: hostID) { return credential }
+        return nil
+    }
+
+    enum Lookup: Equatable {
+        case found(PairedHostCredential)
+        case absent
+        // A failed read says nothing about whether the host is still paired.
+        case unavailable
+    }
+
+    static func lookup(host hostID: String) -> Lookup {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -46,8 +58,14 @@ enum PairedCredential {
         ]
         if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data,
-              let credential = decode(String(decoding: data, as: UTF8.self)), credential.hostID == hostID else { return nil }
-        return credential
+        switch SecItemCopyMatching(query as CFDictionary, &item) {
+        case errSecSuccess:
+            guard let data = item as? Data, let credential = decode(String(decoding: data, as: UTF8.self)), credential.hostID == hostID else { return .unavailable }
+            return .found(credential)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            return .unavailable
+        }
     }
 }

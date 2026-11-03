@@ -54,13 +54,17 @@ enum PushReceipts {
         }
     }
 
-    static func flush(credential: (String) -> PairedHostCredential? = PairedCredential.read(host:), session: URLSession = RequestNotifications.fetchSession) async {
+    static func flush(credential: (String) -> PairedCredential.Lookup = PairedCredential.lookup(host:), session: URLSession = RequestNotifications.fetchSession) async {
         let waiting = pending()
         for host in Set(waiting.map(\.host)).sorted() {
             let receipts = waiting.filter { $0.host == host }
-            guard let paired = credential(host) else {
+            let paired: PairedHostCredential
+            switch credential(host) {
+            case .found(let found): paired = found
+            case .absent:
                 receipts.forEach(remove)
                 continue
+            case .unavailable: continue
             }
             if await post(receipts, endpoint: paired.endpoint, token: paired.token, session: session) {
                 receipts.forEach(remove)

@@ -41,9 +41,27 @@ final class PushReceiptsTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReceiptStub.self]
         ReceiptStub.reset(status: 503)
-        await PushReceipts.flush(credential: { _ in nil }, session: URLSession(configuration: configuration))
+        await PushReceipts.flush(credential: { _ in .absent }, session: URLSession(configuration: configuration))
         XCTAssertTrue(PushReceipts.pending().isEmpty, "a receipt for a computer this phone no longer knows has nowhere to go")
         XCTAssertTrue(ReceiptStub.requests.isEmpty)
+    }
+
+    func testAReceiptSurvivesAKeychainReadThatFailsAndIsSentOnTheNext() async {
+        PushReceipts.pending().forEach(PushReceipts.remove)
+        defer { PushReceipts.pending().forEach(PushReceipts.remove) }
+        PushReceipts.enqueue(PushReceipt(host: "h1", pushId: "waiting01", receivedAt: Date(), alerts: "on"))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReceiptStub.self]
+        let session = URLSession(configuration: configuration)
+        ReceiptStub.reset(status: 200)
+        await PushReceipts.flush(credential: { _ in .unavailable }, session: session)
+        XCTAssertEqual(PushReceipts.pending().map(\.pushId), ["waiting01"], "a failed read is not a forgotten computer")
+        XCTAssertTrue(ReceiptStub.requests.isEmpty)
+
+        let paired = PairedHostCredential(hostID: "h1", hostName: "Mac", endpoint: URL(string: "https://mac.example.ts.net:7412")!, token: "device-token", pairedAt: Date())
+        await PushReceipts.flush(credential: { _ in .found(paired) }, session: session)
+        XCTAssertTrue(PushReceipts.pending().isEmpty)
+        XCTAssertEqual(ReceiptStub.requests.count, 1)
     }
 
     func testAReceiptQueuedWhileOthersAreSentIsKept() async {
@@ -63,7 +81,7 @@ final class PushReceiptsTests: XCTestCase {
         ReceiptStub.during = { PushReceipts.enqueue(late) }
         defer { ReceiptStub.during = nil }
         let paired = PairedHostCredential(hostID: "h1", hostName: "Mac", endpoint: URL(string: "https://mac.example.ts.net:7412")!, token: "device-token", pairedAt: at)
-        await PushReceipts.flush(credential: { $0 == "h1" ? paired : nil }, session: URLSession(configuration: configuration))
+        await PushReceipts.flush(credential: { $0 == "h1" ? .found(paired) : .absent }, session: URLSession(configuration: configuration))
         XCTAssertEqual(PushReceipts.pending().map(\.pushId), ["late00001"], "a flush removes only what it sent")
     }
 
