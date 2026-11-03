@@ -9,6 +9,8 @@ export function sessionRunning(session) {
   return !session.archived && (session.status === "busy" || (session.subagents?.working || 0) > 0);
 }
 
+const sessionWorking = (session) => session.status === "busy";
+
 export function leadSessionID(lead) {
   if (!lead?.sessionId) return "";
   if (!lead.host || lead.host.state === "local" || lead.sessionId.includes("::")) return lead.sessionId;
@@ -31,7 +33,7 @@ export function projectContents(project, sessions) {
 }
 
 export function leadActions(session) {
-  if (sessionRunning(session)) return [{ kind: "open" }, { kind: "message" }];
+  if (sessionWorking(session)) return [{ kind: "open" }, { kind: "message" }];
   const reachable = !session.unavailableReason;
   return [{ kind: "resume", enabled: reachable, lifecycle: reachable && Boolean(session.capabilities?.lifecycle?.resume) }, { kind: "open" }];
 }
@@ -45,12 +47,28 @@ export function idleFor(session, now = Date.now()) {
   return `${days} ${days === 1 ? "day" : "days"} ago`;
 }
 
+function compactAge(ms) {
+  const minutes = Math.max(0, Math.floor(ms / 60000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / (60 * 24))}d`;
+}
+
+export function rowTime(session, now = Date.now(), running = sessionRunning(session)) {
+  if (!running) return compactAge(now - activity(session));
+  const since = Date.parse(session.activity?.busySince || "");
+  return since ? compactAge(now - since) : "now";
+}
+
 function card(title, body, trailing = "") {
   return `<section class="project-card"><header><h2>${escape(title)}</h2>${trailing}</header>${body}</section>`;
 }
 
 function rows(sessions, empty) {
-  return sessions.length ? sessions.map(sessionButton).join("") : `<p class="project-empty">${escape(empty)}</p>`;
+  return sessions.length
+    ? sessions.map((session) => `<div class="project-row">${sessionButton(session)}<span class="project-row-time">${escape(rowTime(session))}</span></div>`).join("")
+    : `<p class="project-empty">${escape(empty)}</p>`;
 }
 
 function leadCard(project, contents) {
@@ -62,14 +80,15 @@ function leadCard(project, contents) {
     return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note">${escape(labels[lead.surface] || lead.surface)} · starts with the first message sent to it</p>`);
   }
   const where = leadSession.host && leadSession.host.state !== "local" ? shortHostName(leadSession.host.name) : "";
-  const status = sessionRunning(leadSession) ? "Working" : `Idle · ${idleFor(leadSession)}`;
+  const working = sessionWorking(leadSession);
+  const status = working ? `Working ${rowTime(leadSession, Date.now(), true)}` : `Idle · ${idleFor(leadSession)}`;
   const id = escape(leadSession.id);
   const buttons = leadActions(leadSession).map((action, index) => {
     const style = index === 0 ? "primary-button" : "soft-button";
     if (action.kind === "resume") return `<button class="${style}" type="button" data-project-resume="${id}" data-lifecycle="${action.lifecycle}"${action.enabled ? "" : " disabled"}>Resume</button>`;
     return `<button class="${style}" type="button" data-session="${id}">${action.kind === "open" ? "Open" : "Message"}</button>`;
   }).join("");
-  const offline = !sessionRunning(leadSession) && leadSession.unavailableReason ? `<p class="project-note">Resume needs ${escape(where || "its computer")} to be reachable.</p>` : "";
+  const offline = !working && leadSession.unavailableReason ? `<p class="project-note">Resume needs ${escape(where || "its computer")} to be reachable.</p>` : "";
   return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note" data-project-lead-status>${escape([labels[leadSession.surface] || leadSession.surface, where, status].filter(Boolean).join(" · "))}</p><div class="project-actions">${buttons}</div>${offline}`);
 }
 

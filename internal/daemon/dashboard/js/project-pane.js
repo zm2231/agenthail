@@ -16,7 +16,10 @@ export function syncProjectPane() {
   pane.innerHTML = project ? renderProjectView(project) : "";
 }
 
+let ticking = 0;
+
 export function openProject(id) {
+  if (!ticking) ticking = setInterval(() => { if (app.selectedProject) syncProjectPane(); }, 60_000);
   showView("conversations");
   app.selectedProject = id;
   app.projectEarlier = null;

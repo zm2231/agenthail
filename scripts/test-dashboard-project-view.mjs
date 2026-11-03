@@ -63,6 +63,27 @@ context.app.projectEarlier = project.id;
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-session="old"/);
 
+assert.equal(run("rowTime")({ ...sessions[1], activity: { busySince: at(25) } }, now), "25m", "a running row shows how long its turn has run");
+assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a start shows now, never its last activity");
+assert.equal(run("rowTime")(sessions[3], now), "2h", "an idle row shows its last activity");
+assert.match(html, /<span class="project-row-time">2h<\/span>/);
+
+const workingLead = { ...sessions[0], status: "busy", activity: { busySince: at(12) } };
+context.app.state.sessions = [workingLead, ...sessions.slice(1)];
+const pinned = run("projectContents(app.state.projects[0], app.state.sessions)");
+assert.equal(pinned.leadSession.id, "lead");
+assert.equal(ids(pinned.running), "build", "a working lead stays pinned and is not repeated in Running");
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /data-project-lead-status>Codex · Working 12m</);
+const delegating = { ...sessions[0], subagents: { count: 1, working: 1 } };
+context.app.state.sessions = [delegating, ...sessions.slice(1)];
+const delegated = run("projectContents(app.state.projects[0], app.state.sessions)");
+assert.equal(ids(delegated.running), "build", "a lead whose subagent works stays pinned, not in Running");
+assert.equal(actions(delegating), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: true }, { kind: "open" }]), "an idle lead with a working subagent can still be resumed");
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "an idle lead with a working subagent reads as idle");
+context.app.state.sessions = sessions;
+
 context.app.state.projects = [{ ...projects[0], coordinators: [] }];
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /No lead yet/);

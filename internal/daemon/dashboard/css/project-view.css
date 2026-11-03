@@ -7,6 +7,19 @@ button.project-name {
   text-align: left;
   cursor: pointer;
 }
+.project-header button.project-name {
+  flex: 0 0.1 auto;
+  min-width: min(12ch, 50%);
+}
+.project-header .lead-chip {
+  flex-shrink: 10;
+  min-width: 5ch;
+}
+.project-header .project-count,
+.project-header .link-button,
+.project-header .project-menu {
+  flex-shrink: 0;
+}
 button.project-name:hover,
 .project-header.selected button.project-name {
   color: var(--accent);
@@ -64,6 +77,18 @@ button.project-name:hover,
   background: transparent;
   color: var(--accent);
   font-size: 12px;
+}
+.project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+.project-row-time {
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .project-lead-name {
   margin: 0 0 4px;
