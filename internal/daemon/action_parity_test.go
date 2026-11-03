@@ -174,38 +174,59 @@ func parityCases() []parityCase {
 		{name: "coordinator-clear", action: "coordinator-clear", body: `{"action":"coordinator-clear","path":"relative/path"}`},
 		{name: "coordinator-send", action: "coordinator-send", body: `{"action":"coordinator-send","name":"nobody","message":"hi"}`},
 	}
-	return cases
+	return append(cases, parityFailureCases()...)
 }
 
-type paritySurface struct{ *daemonSurface }
+type paritySurface struct {
+	*daemonSurface
+	fail map[string]error
+}
 
 func (s paritySurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+	if err := s.fail["lifecycle"]; err != nil {
+		return nil, err
+	}
 	return map[string]any{"action": action, "sessionId": session.ID}, nil
 }
 
 func (s paritySurface) UpdateGoal(context.Context, *surface.Session, surface.GoalUpdate) error {
-	return nil
+	return s.fail["goal"]
 }
 
 func (s paritySurface) ForkSession(_ context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
+	if err := s.fail["fork"]; err != nil {
+		return nil, err
+	}
 	fork := *session
 	fork.ID, fork.Name = "forked", "forked from "+session.ID
 	return &fork, nil
 }
 
 func (s paritySurface) NativeQueue(_ context.Context, session *surface.Session, request surface.NativeQueueRequest) (map[string]any, error) {
+	if err := s.fail["native-queue"]; err != nil {
+		return nil, err
+	}
 	return map[string]any{"queueAction": request.Action, "sessionId": session.ID}, nil
 }
 
 func (s paritySurface) AdoptSession(_ context.Context, session *surface.Session, _ surface.AdoptRequest) (*surface.AdoptResult, error) {
+	if err := s.fail["adopt"]; err != nil {
+		return nil, err
+	}
 	return &surface.AdoptResult{Stopped: "terminal"}, nil
 }
 
 func (s paritySurface) Requests(context.Context, *surface.Session) (surface.RequestState, error) {
+	if err := s.fail["requests"]; err != nil {
+		return surface.RequestState{}, err
+	}
 	return surface.RequestState{PermissionMode: "default", Requests: []surface.Request{{ID: "r1", Kind: surface.WaitingApproval, Tool: "Bash"}}}, nil
 }
 
 func (s paritySurface) Respond(_ context.Context, _ *surface.Session, requestID string, decision surface.Decision) (string, error) {
+	if err := s.fail["respond"]; err != nil {
+		return "", err
+	}
 	if requestID != "r1" {
 		return "", surface.ErrRequestStale
 	}
@@ -213,7 +234,14 @@ func (s paritySurface) Respond(_ context.Context, _ *surface.Session, requestID 
 }
 
 func (s paritySurface) Control(_ context.Context, session *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
-	return &surface.ControlResult{SessionID: session.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "parity", Output: control.Value}, nil
+	return &surface.ControlResult{SessionID: session.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "parity", Output: control.Value}, s.fail["control"]
+}
+
+func (s paritySurface) List(ctx context.Context) ([]surface.Session, error) {
+	if err := s.fail["list"]; err != nil {
+		return nil, err
+	}
+	return s.daemonSurface.List(ctx)
 }
 
 func withDaemonSession(t *testing.T, _ *Daemon, r *registry.Registry) {
@@ -241,7 +269,7 @@ func parityDaemon(t *testing.T, setup func(*testing.T, *Daemon, *registry.Regist
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.caps = surface.Capabilities{Send: true, Steer: true, Interrupt: true, Compact: true, Goal: true, Model: true, PermissionMode: true, Commands: true, Attach: true}
-	d.Surfaces = []surface.Surface{paritySurface{fake}}
+	d.Surfaces = []surface.Surface{paritySurface{daemonSurface: fake}}
 	d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error { return nil }
 	if setup != nil {
 		setup(t, d, r)
@@ -269,6 +297,7 @@ var parityVolatile = []struct {
 	value   string
 }{
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?( [+-]\d{4} UTC)?`), "<time>"},
+	{regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`), "<clock>"},
 	{regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`), "<uuid>"},
 }
 

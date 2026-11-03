@@ -11,6 +11,18 @@
     },
     "body": "{\"alias\":\"renamed\",\"ok\":true}\n"
   },
+  "api/action alias held for a starting session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/action alias invalid": {
     "status": 400,
     "header": {
@@ -22,6 +34,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+  },
+  "api/action alias of the lead": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name conversation: @lead is reserved for the coordinator of the sender's project\"}}\n"
+  },
+  "api/action alias taken": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"@taken is already used by another session\"}}\n"
   },
   "api/action attachments outside send": {
     "status": 400,
@@ -154,6 +190,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/action compact failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"compaction refused\"}}\n"
   },
   "api/action context": {
     "status": 200,
@@ -299,6 +347,30 @@
     },
     "body": "{\"ok\":true,\"result\":null}\n"
   },
+  "api/action goal-pause failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action goal-pause refused as invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: no goal is set\"}}\n"
+  },
   "api/action goal-resume": {
     "status": 200,
     "header": {
@@ -335,6 +407,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
+  "api/action interrupt control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
+  },
   "api/action invalid json": {
     "status": 400,
     "header": {
@@ -370,6 +454,78 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"this session is not waiting on a usage limit\"}}\n"
+  },
+  "api/action limit-move busy": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"busy\":\"a turn is running\",\"error\":{\"code\":\"move_busy\",\"message\":\"Claude session to is busy (a turn is running); open it in Agenthail when it is idle, or pass a wait\"}}\n"
+  },
+  "api/action limit-move failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action limit-move needs consent": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_needs_consent\",\"message\":\"Claude session to is open in a terminal (process 4242); confirm stopping it to open it in Agenthail\"}}\n"
+  },
+  "api/action limit-move of an unmovable surface": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"codex sessions cannot move between accounts\"}}\n"
+  },
+  "api/action limit-move refused": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"the session is archived\"}}\n"
+  },
+  "api/action limit-move while moving": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_busy\",\"message\":\"this session is already moving to another Claude account\"}}\n"
   },
   "api/action limit-resume": {
     "status": 409,
@@ -443,6 +599,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
   },
+  "api/action model control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
+  },
   "api/action model empty": {
     "status": 400,
     "header": {
@@ -466,6 +634,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"queueAction\":\"list\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/action native-queue failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
   },
   "api/action no session": {
     "status": 400,
@@ -502,6 +682,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
+  },
+  "api/action permission-mode control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
   "api/action project-add": {
     "status": 400,
@@ -731,6 +923,30 @@
     },
     "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
   },
+  "api/action respond choice when requests fail": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action respond failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/action respond stale": {
     "status": 409,
     "header": {
@@ -802,6 +1018,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
+  },
+  "api/action send failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
   },
   "api/action send from session": {
     "status": 200,
@@ -887,6 +1115,66 @@
     },
     "body": "{\"ok\":true,\"result\":{\"session\":null,\"stopped\":\"terminal\"}}\n"
   },
+  "api/action session-adopt busy": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"busy\":\"a turn is running\",\"error\":{\"code\":\"session_adopt_busy\",\"message\":\"Claude session to is busy (a turn is running); open it in Agenthail when it is idle, or pass a wait\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/action session-adopt failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_failed\",\"message\":\"the runtime broke\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/action session-adopt needs consent": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_needs_consent\",\"message\":\"Claude session to is open in a terminal (process 4242); confirm stopping it to open it in Agenthail\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/action session-adopt outcome unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_unknown\",\"message\":\"delivery outcome is unknown: the runtime stopped answering\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/action session-adopt refused": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_refused\",\"message\":\"delivery rejected: the session ended\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
   "api/action session-archive": {
     "status": 200,
     "header": {
@@ -935,6 +1223,90 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
   },
+  "api/action session-focus at a stale location": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session location is stale\"}}\n"
+  },
+  "api/action session-focus by a launcher that cannot focus": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"launcher cannot focus sessions\"}}\n"
+  },
+  "api/action session-focus failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action session-focus focused": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w1\",\"pane\":\"p1\"},\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/action session-focus when listing fails": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session location is unavailable\"}}\n"
+  },
+  "api/action session-focus without a launcher transport": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"launcher transport is unavailable\"}}\n"
+  },
+  "api/action session-focus without its surface": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session surface is unavailable\"}}\n"
+  },
   "api/action session-fork": {
     "status": 200,
     "header": {
@@ -958,6 +1330,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"fork_point_conflict\",\"message\":\"A fork takes lastTurnId or beforeTurnId, not both.\"}}\n"
+  },
+  "api/action session-fork failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action session-fork outcome unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_unknown\",\"message\":\"delivery outcome is unknown: the runtime stopped answering\"}}\n"
   },
   "api/action session-fork unknown creator": {
     "status": 400,
@@ -1031,6 +1427,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
   },
+  "api/action session-lifecycle-stop failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/action session-unarchive": {
     "status": 200,
     "header": {
@@ -1091,6 +1499,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session cannot be steered\"}}\n"
   },
+  "api/action steer failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/action steer from session": {
     "status": 200,
     "header": {
@@ -1102,6 +1522,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action steer refused as invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
   },
   "api/action steer unknown source": {
     "status": 400,
@@ -1163,6 +1595,18 @@
     },
     "body": "{\"alias\":\"renamed\",\"ok\":true}\n"
   },
+  "api/v1/actions alias held for a starting session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/v1/actions alias invalid": {
     "status": 400,
     "header": {
@@ -1174,6 +1618,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+  },
+  "api/v1/actions alias of the lead": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name conversation: @lead is reserved for the coordinator of the sender's project\"}}\n"
+  },
+  "api/v1/actions alias taken": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"@taken is already used by another session\"}}\n"
   },
   "api/v1/actions attachments outside send": {
     "status": 400,
@@ -1306,6 +1774,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions compact failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"compaction refused\"}}\n"
   },
   "api/v1/actions context": {
     "status": 200,
@@ -1451,6 +1931,30 @@
     },
     "body": "{\"ok\":true,\"result\":null}\n"
   },
+  "api/v1/actions goal-pause failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions goal-pause refused as invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: no goal is set\"}}\n"
+  },
   "api/v1/actions goal-resume": {
     "status": 200,
     "header": {
@@ -1487,6 +1991,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
+  "api/v1/actions interrupt control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
+  },
   "api/v1/actions invalid json": {
     "status": 400,
     "header": {
@@ -1522,6 +2038,78 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"this session is not waiting on a usage limit\"}}\n"
+  },
+  "api/v1/actions limit-move busy": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"busy\":\"a turn is running\",\"error\":{\"code\":\"move_busy\",\"message\":\"Claude session to is busy (a turn is running); open it in Agenthail when it is idle, or pass a wait\"}}\n"
+  },
+  "api/v1/actions limit-move failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions limit-move needs consent": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_needs_consent\",\"message\":\"Claude session to is open in a terminal (process 4242); confirm stopping it to open it in Agenthail\"}}\n"
+  },
+  "api/v1/actions limit-move of an unmovable surface": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"codex sessions cannot move between accounts\"}}\n"
+  },
+  "api/v1/actions limit-move refused": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"the session is archived\"}}\n"
+  },
+  "api/v1/actions limit-move while moving": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_busy\",\"message\":\"this session is already moving to another Claude account\"}}\n"
   },
   "api/v1/actions limit-resume": {
     "status": 409,
@@ -1595,6 +2183,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
   },
+  "api/v1/actions model control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"gpt\"}}\n"
+  },
   "api/v1/actions model empty": {
     "status": 400,
     "header": {
@@ -1618,6 +2218,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"queueAction\":\"list\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions native-queue failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
   },
   "api/v1/actions no session": {
     "status": 400,
@@ -1654,6 +2266,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
+  },
+  "api/v1/actions permission-mode control failed": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
   "api/v1/actions project-add": {
     "status": 400,
@@ -1883,6 +2507,30 @@
     },
     "body": "{\"error\":{\"code\":\"stale\",\"message\":\"this request was already answered or has expired\"}}\n"
   },
+  "api/v1/actions respond choice when requests fail": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions respond failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/v1/actions respond stale": {
     "status": 409,
     "header": {
@@ -1954,6 +2602,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
+  },
+  "api/v1/actions send failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
   },
   "api/v1/actions send from session": {
     "status": 200,
@@ -2039,6 +2699,66 @@
     },
     "body": "{\"ok\":true,\"result\":{\"session\":null,\"stopped\":\"terminal\"}}\n"
   },
+  "api/v1/actions session-adopt busy": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"busy\":\"a turn is running\",\"error\":{\"code\":\"session_adopt_busy\",\"message\":\"Claude session to is busy (a turn is running); open it in Agenthail when it is idle, or pass a wait\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/v1/actions session-adopt failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_failed\",\"message\":\"the runtime broke\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/v1/actions session-adopt needs consent": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_needs_consent\",\"message\":\"Claude session to is open in a terminal (process 4242); confirm stopping it to open it in Agenthail\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/v1/actions session-adopt outcome unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_unknown\",\"message\":\"delivery outcome is unknown: the runtime stopped answering\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
+  "api/v1/actions session-adopt refused": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_refused\",\"message\":\"delivery rejected: the session ended\"},\"session\":{\"id\":\"to\",\"surface\":\"codex\",\"name\":\"\",\"cwd\":\"\",\"pid\":0,\"status\":\"idle\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"vscode\",\"transport\":\"desktop\",\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\"}}\n"
+  },
   "api/v1/actions session-archive": {
     "status": 200,
     "header": {
@@ -2087,6 +2807,90 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
   },
+  "api/v1/actions session-focus at a stale location": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session location is stale\"}}\n"
+  },
+  "api/v1/actions session-focus by a launcher that cannot focus": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"launcher cannot focus sessions\"}}\n"
+  },
+  "api/v1/actions session-focus failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions session-focus focused": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w1\",\"pane\":\"p1\"},\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions session-focus when listing fails": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session location is unavailable\"}}\n"
+  },
+  "api/v1/actions session-focus without a launcher transport": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"launcher transport is unavailable\"}}\n"
+  },
+  "api/v1/actions session-focus without its surface": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session surface is unavailable\"}}\n"
+  },
   "api/v1/actions session-fork": {
     "status": 200,
     "header": {
@@ -2110,6 +2914,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"fork_point_conflict\",\"message\":\"A fork takes lastTurnId or beforeTurnId, not both.\"}}\n"
+  },
+  "api/v1/actions session-fork failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions session-fork outcome unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_unknown\",\"message\":\"delivery outcome is unknown: the runtime stopped answering\"}}\n"
   },
   "api/v1/actions session-fork unknown creator": {
     "status": 400,
@@ -2183,6 +3011,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
   },
+  "api/v1/actions session-lifecycle-stop failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/v1/actions session-unarchive": {
     "status": 200,
     "header": {
@@ -2243,6 +3083,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session cannot be steered\"}}\n"
   },
+  "api/v1/actions steer failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
   "api/v1/actions steer from session": {
     "status": 200,
     "header": {
@@ -2254,6 +3106,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions steer refused as invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
   },
   "api/v1/actions steer unknown source": {
     "status": 400,
