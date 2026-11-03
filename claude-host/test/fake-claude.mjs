@@ -181,7 +181,9 @@ async function turn(message) {
     const decision = await control({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions }, tool_use_id: 'toolu_question' });
     interrupt = null;
     state('running');
-    reply = `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;
+    reply = decision.behavior === 'deny'
+      ? `question:deny:${decision.message ?? ''}`
+      : `question:${decision.behavior}:${JSON.stringify(decision.updatedInput?.answers ?? null)}`;
   } else if (text.startsWith('ELICIT')) {
     // An MCP server asking for input: a form, or a link to open.
     const request = text.startsWith('ELICIT URL')

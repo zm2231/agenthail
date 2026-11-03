@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS coordinator_history (
 	reason TEXT NOT NULL DEFAULT '',
 	acknowledged_at_ms INTEGER NOT NULL DEFAULT 0,
 	announced_at_ms INTEGER NOT NULL DEFAULT 0,
-	notify_sender INTEGER NOT NULL DEFAULT 0
+	notify_sender INTEGER NOT NULL DEFAULT 0,
+	person_notified_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS coordinator_replaced (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,

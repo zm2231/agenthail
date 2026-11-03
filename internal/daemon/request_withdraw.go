@@ -21,6 +21,6 @@ func (d *Daemon) withdrawReplacedRequest(ctx context.Context, adapter surface.Su
 		return actionResult{}, actionFailed(http.StatusConflict, "not_replaced", "only a request from a lead that was replaced can be withdrawn; answer it instead")
 	}
 	spec, _ := coord.Of(session.ID)
-	note := fmt.Sprintf("Withdrawn: you are no longer coordinator @%s; %s took over. The person did not answer this request.", spec.Name, d.resolveDisplay(current))
+	note := fmt.Sprintf("Withdrawn: you are no longer coordinator @%s; conversation %s took over. The person did not answer this request.", spec.Name, current)
 	return d.respond(ctx, adapter, session, requestID, surface.Decision{Behavior: "deny", Message: note}, actor)
 }

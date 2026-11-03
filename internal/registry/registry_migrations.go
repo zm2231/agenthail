@@ -88,6 +88,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"acknowledged_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"announced_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"notify_sender", `INTEGER NOT NULL DEFAULT 0`},
+		{"person_notified_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "coordinator_history", column.name, column.decl); err != nil {
 			return err
@@ -350,7 +351,7 @@ func migrateTx(tx *sql.Tx) error {
 		}
 	}
 	if version < 48 {
-		if _, err := tx.Exec(`UPDATE coordinator_history SET announced_at_ms=at_ms, acknowledged_at_ms=at_ms WHERE action='replaced'`); err != nil {
+		if _, err := tx.Exec(`UPDATE coordinator_history SET announced_at_ms=at_ms, acknowledged_at_ms=at_ms, person_notified_at_ms=at_ms WHERE action='replaced'`); err != nil {
 			return err
 		}
 	}

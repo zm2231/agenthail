@@ -114,7 +114,7 @@ func TestWithdrawingAReplacedLeadsPermissionPromptDeniesItWithANote(t *testing.T
 	}
 	testkit.Eventually(t, "the denied turn with its note", 15*time.Second, func() bool {
 		turns := f.fixture.Turns(t, f.id)
-		return len(turns) == 1 && strings.HasPrefix(turns[0].Reply, "tool:deny:Withdrawn: you are no longer coordinator @withdraw-lead")
+		return len(turns) == 1 && strings.HasPrefix(turns[0].Reply, "tool:deny:Withdrawn: you are no longer coordinator @withdraw-lead") && strings.Contains(turns[0].Reply, f.next)
 	})
 }
 
@@ -124,9 +124,9 @@ func TestWithdrawingAReplacedLeadsQuestionDismissesIt(t *testing.T) {
 	if response := f.withdraw(t); response.code != http.StatusOK {
 		t.Fatalf("withdraw status=%d body=%s", response.code, response.body)
 	}
-	testkit.Eventually(t, "the dismissed question", 15*time.Second, func() bool {
+	testkit.Eventually(t, "the dismissed question with its note", 15*time.Second, func() bool {
 		turns := f.fixture.Turns(t, f.id)
-		return len(turns) == 1 && turns[0].Reply == "question:deny:null"
+		return len(turns) == 1 && strings.HasPrefix(turns[0].Reply, "question:deny:Withdrawn: you are no longer coordinator @withdraw-lead") && strings.Contains(turns[0].Reply, f.next)
 	})
 	if requests := f.requests(t); len(requests) != 0 {
 		t.Fatalf("requests after withdraw=%+v", requests)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -76,8 +77,8 @@ func TestAPersonsSendThatReplacesTheLeadIsRecordedAndTellsThePersonOnce(t *testi
 	if unannounced, err := f.r.UnannouncedCoordinatorReplacements(); err != nil || len(unannounced) != 0 {
 		t.Fatalf("unannounced=%+v err=%v", unannounced, err)
 	}
-	if open, err := f.r.OpenCoordinatorReplacements(); err != nil || len(open) != 1 || open[0].ID != entry.ID {
-		t.Fatalf("open=%+v err=%v, want the handover waiting for the person", open, err)
+	if open, err := f.r.OpenCoordinatorReplacements(); err != nil || len(open) != 1 || open[0].ID != entry.ID || !open[0].PersonNotified {
+		t.Fatalf("open=%+v err=%v, want the handover waiting for the person, recorded as told", open, err)
 	}
 	if f.resumedGone(t) {
 		t.Fatal("the gone lead was resumed to be told")
@@ -137,6 +138,60 @@ func TestAQueuedMessageWithNoSenderIsReplacedByTheDaemonAndTellsNoAgent(t *testi
 	}
 	if shown := notices.all(); len(shown) != 1 || !strings.Contains(shown[0], "by the daemon") {
 		t.Fatalf("desktop notices=%q", shown)
+	}
+}
+
+func TestADaemonRestartedAfterThePushDoesNotTellThePersonAgain(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	const next = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a"
+	if err := f.r.RegisterSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := f.r.Coordinator("project-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.HandOverCoordinator(spec, goneCoordinator, next, registry.CoordinatorHandover{ChangedBy: coordinator.RestartedByDaemon, Reason: "gone: x"}); err != nil {
+		t.Fatal(err)
+	}
+	entry := f.handover(t)
+	first := &desktopNotices{}
+	first.capture(f)
+	f.daemon.notifyReplacement(context.Background(), entry)
+	if err := f.r.MarkCoordinatorReplacementPersonNotified(entry.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &coordinatorFixture{daemon: newTestDaemon(t, f.r, f.daemon.Surfaces), r: f.r}
+	second := &desktopNotices{}
+	second.capture(restarted)
+	restarted.daemon.announceReplacements(context.Background())
+	if shown := first.all(); len(shown) != 1 {
+		t.Fatalf("first daemon notices=%q", shown)
+	}
+	if shown := second.all(); len(shown) != 0 {
+		t.Fatalf("the restarted daemon told the person again: %q", shown)
+	}
+	if unannounced, err := f.r.UnannouncedCoordinatorReplacements(); err != nil || len(unannounced) != 0 {
+		t.Fatalf("unannounced=%+v err=%v", unannounced, err)
+	}
+}
+
+func TestASenderThatNoLongerExistsDoesNotHoldTheAnnouncement(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	const next = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a"
+	if err := f.r.RegisterSession(surface.Session{ID: next, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: orphanPID - 2, Status: surface.StatusIdle, Cwd: f.host.Cwd}); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := f.r.Coordinator("project-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.HandOverCoordinator(spec, goneCoordinator, next, registry.CoordinatorHandover{ChangedBy: "deleted-sender", Reason: "gone: x", NotifySender: true}); err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.announceReplacements(context.Background())
+	if unannounced, err := f.r.UnannouncedCoordinatorReplacements(); err != nil || len(unannounced) != 0 {
+		t.Fatalf("unannounced=%+v err=%v", unannounced, err)
 	}
 }
 

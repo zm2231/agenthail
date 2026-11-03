@@ -448,6 +448,7 @@ type CoordinatorHistoryEntry struct {
 	At                time.Time  `json:"at"`
 	AcknowledgedAt    *time.Time `json:"acknowledgedAt,omitempty"`
 	NotifySender      bool       `json:"-"`
+	PersonNotified    bool       `json:"-"`
 }
 
 // CoordinatorHandover says who replaced a coordinator's conversation and why.
@@ -458,12 +459,12 @@ type CoordinatorHandover struct {
 	NotifySender bool
 }
 
-const coordinatorHistoryColumns = `id,project_id,action,name,session_id,previous_name,previous_session_id,changed_by,reason,at_ms,acknowledged_at_ms,notify_sender`
+const coordinatorHistoryColumns = `id,project_id,action,name,session_id,previous_name,previous_session_id,changed_by,reason,at_ms,acknowledged_at_ms,notify_sender,person_notified_at_ms!=0`
 
 func scanCoordinatorHistory(row rowScanner) (CoordinatorHistoryEntry, error) {
 	var entry CoordinatorHistoryEntry
 	var at, acknowledged int64
-	err := row.Scan(&entry.ID, &entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &entry.Reason, &at, &acknowledged, &entry.NotifySender)
+	err := row.Scan(&entry.ID, &entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &entry.Reason, &at, &acknowledged, &entry.NotifySender, &entry.PersonNotified)
 	entry.At = time.UnixMilli(at).UTC()
 	if acknowledged != 0 {
 		when := time.UnixMilli(acknowledged).UTC()

@@ -83,8 +83,8 @@ A person's `set --replace` writes a `replaced` row with no reason, and nothing b
 
 The daemon announces each handover once. A pass right after the handover, and every 30 seconds until it is done, does the following in order:
 
-1. It notifies the person on the desktop and on paired devices (event `coordinator.replaced`).
-2. It gives an agent whose queued message caused the restart a notice keyed `coordinator-replaced:<history id>:sender`. A sender that waited for its send learns from the receipt instead.
+1. It notifies the person on the desktop and on paired devices (event `coordinator.replaced`), and records that it did, so a retry or a restarted daemon does not notify them again. A crash between the two resends it under the same identifier, which replaces the first.
+2. It gives an agent whose queued message caused the restart a notice keyed `coordinator-replaced:<history id>:sender`. A sender that waited for its send learns from the receipt instead, and a sender that no longer exists is skipped.
 3. It marks the row announced.
 4. It makes one attempt to tell the old conversation that it is no longer the lead and should end its turn. This happens only if the conversation turns out to still exist, and the attempt is direct, because a queued notice would be moved to the new lead.
 

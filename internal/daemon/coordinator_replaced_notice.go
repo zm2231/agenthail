@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,11 +15,9 @@ import (
 
 const replacementAnnounceEvery = 30 * time.Second
 
-// replacementAnnouncer keeps one announcing pass at a time, and the person
-// told once per handover within this daemon even when a later notice retries.
+// replacementAnnouncer keeps one announcing pass at a time.
 type replacementAnnouncer struct {
-	mu     sync.Mutex
-	pushed map[int64]bool
+	mu sync.Mutex
 }
 
 func replacementNoticeKey(historyID int64, recipient string) string {
@@ -57,26 +57,25 @@ func (d *Daemon) announceReplacements(ctx context.Context) {
 	}
 }
 
-// The handover is marked announced only once the person and any agent sender
-// have been told; the old lead's notice is a best-effort attempt after that.
+// A crash between the push and its record resends it under the same identifier, which replaces rather than repeats it.
 func (d *Daemon) announceReplacement(ctx context.Context, entry registry.CoordinatorHistoryEntry) error {
-	if d.replacements.pushed == nil {
-		d.replacements.pushed = map[int64]bool{}
-	}
-	if !d.replacements.pushed[entry.ID] {
+	if !entry.PersonNotified {
 		d.notifyReplacement(ctx, entry)
-		d.replacements.pushed[entry.ID] = true
+		if err := d.Registry.MarkCoordinatorReplacementPersonNotified(entry.ID, time.Now()); err != nil {
+			return fmt.Errorf("record that the person was told: %w", err)
+		}
 	}
 	if entry.NotifySender && coordinator.ChangedByAgent(entry.ChangedBy) {
 		message := fmt.Sprintf("[agenthail] Your message to @%s started a new conversation, %s, because %s. The previous conversation %s is no longer the lead. Read its reply with 'agenthail last @%s'.", entry.Name, entry.SessionID, replacementWhy(entry), entry.PreviousSessionID, entry.Name)
-		if _, err := d.sendNotice(noticeRecipient{sessionID: entry.ChangedBy, role: "sender"}, surface.Session{ID: entry.SessionID}, message, replacementNoticeKey(entry.ID, "sender")); err != nil {
+		if _, err := d.sendNotice(noticeRecipient{sessionID: entry.ChangedBy, role: "sender"}, surface.Session{ID: entry.SessionID}, message, replacementNoticeKey(entry.ID, "sender")); errors.Is(err, sql.ErrNoRows) {
+			d.log.Printf("the sender %s that replaced @%s no longer exists; nobody to tell", entry.ChangedBy, entry.Name)
+		} else if err != nil {
 			return fmt.Errorf("tell the sender %s: %w", entry.ChangedBy, err)
 		}
 	}
 	if err := d.Registry.MarkCoordinatorReplacementAnnounced(entry.ID, time.Now()); err != nil {
 		return err
 	}
-	delete(d.replacements.pushed, entry.ID)
 	d.publishEvent("state.changed", "", map[string]any{"source": "lead-replacement"})
 	d.background.start(func(ctx context.Context) { d.tellReplacedLead(ctx, entry) })
 	return nil

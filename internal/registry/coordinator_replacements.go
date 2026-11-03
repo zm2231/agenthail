@@ -16,6 +16,11 @@ func (r *Registry) UnannouncedCoordinatorReplacements() ([]CoordinatorHistoryEnt
 	return appendRows([]CoordinatorHistoryEntry{}, rows, scanCoordinatorHistory)
 }
 
+func (r *Registry) MarkCoordinatorReplacementPersonNotified(id int64, at time.Time) error {
+	_, err := r.db.Exec(`UPDATE coordinator_history SET person_notified_at_ms=? WHERE id=? AND action='replaced' AND person_notified_at_ms=0`, at.UnixMilli(), id)
+	return err
+}
+
 func (r *Registry) MarkCoordinatorReplacementAnnounced(id int64, at time.Time) error {
 	_, err := r.db.Exec(`UPDATE coordinator_history SET announced_at_ms=? WHERE id=? AND action='replaced' AND announced_at_ms=0`, at.UnixMilli(), id)
 	return err
