@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,7 +62,10 @@ type fakeCredentials struct {
 	unattached []error
 	claims     []string
 	rotateErr  error
+	expired    bool
 }
+
+func (f *fakeCredentials) Current(string) bool { return !f.expired }
 
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
 func (f *fakeCredentials) Pending(context.Context) (string, string, error) {
@@ -148,6 +152,23 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	}
 	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.rotations, credentials.unattached)
+	}
+}
+
+func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *testing.T) {
+	credentials := &fakeCredentials{expired: true}
+	c := &Codex{}
+	c.SetMCPCredentials(credentials)
+	client := &scriptedThreadClient{connected: []bool{true}}
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{codexThreadResume, "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	if got := client.methods(); !slices.Equal(got, want) {
+		t.Fatalf("calls=%v", got)
+	}
+	if credentials.rotations != 1 || bearerOf(client.calls[2].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+		t.Fatalf("rotations=%d unattached=%v, the expired token stayed attached", credentials.rotations, credentials.unattached)
 	}
 }
 

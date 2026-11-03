@@ -26,15 +26,13 @@ func (c launchMCPCredentials) Pending(context.Context) (string, string, error) {
 
 func (c launchMCPCredentials) Claim(ref, threadID string) error { return c.claim(ref, threadID) }
 
+func (c launchMCPCredentials) Current(string) bool { return true }
+
 func (c launchMCPCredentials) Live(string) (string, bool) { return "", false }
 
 var errLaunchOnlyStarts = errors.New("a terminal launch only starts its thread")
 
 func (c launchMCPCredentials) Rotate(string) (string, error) { return "", errLaunchOnlyStarts }
-
-func (c launchMCPCredentials) Deliver(string, string, func(string) error) error {
-	return errLaunchOnlyStarts
-}
 
 func (c launchMCPCredentials) Unattached(threadID string, err error) {
 	fmt.Fprintf(os.Stderr, "agenthail: %s starts without the agenthail MCP server: %s\n", threadID, err)

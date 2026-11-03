@@ -201,6 +201,52 @@ func TestALeadThatStepsDownWhileAgenthailIsStoppedLosesProjectControlOnRestart(t
 	}
 }
 
+func expireCredential(t *testing.T, r *registry.Registry, sessionID string) {
+	t.Helper()
+	if _, err := r.WriteDB().Exec(`UPDATE session_credentials SET max_expires_at_ms=? WHERE session_id=? AND revoked_at_ms=0`, time.Now().Add(-time.Minute).UnixMilli(), sessionID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAHeldTokenPastItsLimitIsReplacedAtTheNextResume(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		f := newMCPClaudeFixture(t)
+		id, held := f.create(t)
+		expireCredential(t, f.registry, id)
+		credentials := f.daemon.mcpCredentials.Load()
+		if _, ok := credentials.Live(id); ok {
+			t.Fatal("a token past its limit was offered as live")
+		}
+		replaced, err := credentials.Rotate(id)
+		if err != nil || replaced == "" || replaced == held {
+			t.Fatalf("resume token=%s err=%v", redacted(replaced), err)
+		}
+		f.capabilities(t, replaced)
+	})
+	t.Run("codex", func(t *testing.T) {
+		fixture := newMCPCodexFixture(t)
+		_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First", "cwd": t.TempDir()})
+		id := created["session"].(map[string]any)["id"].(string)
+		started := fixture.firstBearer(t)
+		fixture.lifecycle.Daemon().CompleteTurn(id, "done")
+		expireCredential(t, fixture.registry, id)
+		if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Again"}); code != http.StatusOK {
+			t.Fatalf("send status=%d body=%v", code, body)
+		}
+		resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
+		if len(resumes) == 0 || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != 1 {
+			t.Fatalf("the loaded thread was not reloaded: resumes=%d", len(resumes))
+		}
+		replaced := codexBearer(resumes[len(resumes)-1])
+		if replaced == "" || replaced == started {
+			t.Fatalf("reload carried %s", redacted(replaced))
+		}
+		if whoami, refused := fixture.whoami(t, replaced); refused || whoami["sessionId"] != id {
+			t.Fatalf("whoami=%v", whoami)
+		}
+	})
+}
+
 func TestConcurrentResumesShareTheTokenThisProcessHolds(t *testing.T) {
 	f := newMCPClaudeFixture(t)
 	id, token := f.create(t)

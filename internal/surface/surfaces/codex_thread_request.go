@@ -58,7 +58,7 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 	return nil, fmt.Errorf("codexThreadRequest does not send %s", method)
 }
 
-// A loaded thread ignores a resume's config, so a held token rides every resume; without one, the thread's MCP status shows whether it loaded bare.
+// A loaded thread ignores a resume's config, so only a reload replaces a token it holds.
 func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
 		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
@@ -67,13 +67,15 @@ func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, cr
 	if err != nil {
 		return response, err
 	}
-	connected, err := codexMCPConnected(ctx, client, session.ID)
-	if err != nil {
-		credentials.Unattached(session.ID, fmt.Errorf("read the thread's MCP status: %w", err))
-		return response, nil
-	}
-	if connected {
-		return response, nil
+	if credentials.Current(session.ID) {
+		connected, err := codexMCPConnected(ctx, client, session.ID)
+		if err != nil {
+			credentials.Unattached(session.ID, fmt.Errorf("read the thread's MCP status: %w", err))
+			return response, nil
+		}
+		if connected {
+			return response, nil
+		}
 	}
 	if reattached, err := c.reattachMCP(ctx, client, credentials, session.ID, params, wait); err != nil {
 		credentials.Unattached(session.ID, err)
@@ -81,6 +83,11 @@ func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, cr
 		response = reattached
 	}
 	return response, nil
+}
+
+func (c *Codex) mcpCurrent(threadID string) bool {
+	credentials := c.mcpCredentials()
+	return credentials == nil || credentials.Current(threadID)
 }
 
 func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, wait time.Duration) (map[string]any, error) {

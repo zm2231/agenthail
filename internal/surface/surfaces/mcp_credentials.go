@@ -14,6 +14,7 @@ type MCPCredentials interface {
 	URL() string
 	Pending(ctx context.Context) (token, ref string, err error)
 	Claim(ref, sessionID string) error
+	Current(sessionID string) bool
 	Live(sessionID string) (token string, ok bool)
 	Rotate(sessionID string) (token string, err error)
 	Unattached(sessionID string, err error)

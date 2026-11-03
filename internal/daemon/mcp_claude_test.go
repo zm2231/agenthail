@@ -161,4 +161,3 @@ func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *tes
 		t.Fatalf("the coordinator's credential was swapped after its first turn began: %d swaps", len(replaced))
 	}
 }
-

@@ -67,8 +67,13 @@ func (c *daemonMCPCredentials) Claim(ref, threadID string) error {
 	return err
 }
 
+func (c *daemonMCPCredentials) Current(sessionID string) bool {
+	_, ok, err := c.d.Registry.LiveCredentialHash(sessionID, time.Now())
+	return err == nil && ok
+}
+
 func (c *daemonMCPCredentials) Live(sessionID string) (string, bool) {
-	hash, ok, err := c.d.Registry.LiveCredentialHash(sessionID)
+	hash, ok, err := c.d.Registry.LiveCredentialHash(sessionID, time.Now())
 	if err != nil || !ok {
 		return "", false
 	}

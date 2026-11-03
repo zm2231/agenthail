@@ -329,7 +329,7 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess
 // thread it already has loaded.
 func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess *surface.Session, model string) error {
 	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
-	if err == nil && codexDirectInputAccepted(readResponse) {
+	if err == nil && codexDirectInputAccepted(readResponse) && c.mcpCurrent(sess.ID) {
 		return nil
 	}
 	params := codexResumeParams(sess)
