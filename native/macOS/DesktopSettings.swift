@@ -105,6 +105,9 @@ struct GeneralSettings: View {
                 .onAppear { personName = PersonNameDraft.field(for: person) }
                 .onChange(of: person) { _, current in personName = PersonNameDraft.field(for: current) }
             }
+            Section("Composer") {
+                DesktopTurnNoticeSetting()
+            }
             Section("Sending while an agent works") {
                 Picker(shortcuts.label(.send) ?? "Send", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
                     Text("Queue the message (default)").tag(FollowUpAction.queue)
