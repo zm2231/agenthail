@@ -27,6 +27,8 @@ type Codex struct {
 	usageReads   map[string]*codexUsageRead
 	planMu       sync.Mutex
 	planState    map[string]*codexPlanState
+	turnMu       sync.Mutex
+	turnState    map[string]*codexLiveTurnState
 	backgroundMu    sync.Mutex
 	backgroundState map[string]*codexBackgroundState
 	loadedThreads   map[string]map[string]bool
