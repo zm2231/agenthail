@@ -172,14 +172,21 @@ func TestSystemdDoesNotCountADaemonItDidNotStart(t *testing.T) {
 	fake, service := newFakeSystemctl(t)
 	shortenDaemonBounds(t, 400*time.Millisecond, 30*time.Second)
 	fake.otherMainPID = 1
-	for name, operation := range map[string]func() error{"install": service.Install, "restart": service.Restart, "start": func() error {
-		if err := service.Stop(); err != nil {
-			return err
-		}
-		return service.Start()
-	}} {
-		if out, err := captureStdout(t, operation); err == nil || !strings.Contains(err.Error(), "did not become ready") {
-			t.Fatalf("%s with another daemon = %v\n%s", name, err, out)
+	for _, step := range []struct {
+		name      string
+		operation func() error
+	}{
+		{"install", service.Install},
+		{"restart", service.Restart},
+		{"start", func() error {
+			if err := service.Stop(); err != nil {
+				return err
+			}
+			return service.Start()
+		}},
+	} {
+		if out, err := captureStdout(t, step.operation); err == nil || !strings.Contains(err.Error(), "did not become ready") {
+			t.Fatalf("%s with another daemon = %v\n%s", step.name, err, out)
 		}
 	}
 }
