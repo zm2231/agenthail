@@ -26,28 +26,34 @@ func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
+	requests, mode, err := d.openRequests(r.Context(), session)
+	if err != nil {
+		writeActionResult(w, actionResult{}, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "permissionMode": mode, "requests": requests})
+}
+
+func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]openRequestView, string, error) {
 	adapter, err := d.adapters().For(session)
 	if err != nil {
-		writeAPIError(w, http.StatusConflict, "conflict", "surface is not configured")
-		return
+		return nil, "", actionFailed(http.StatusConflict, "conflict", "surface is not configured")
 	}
 	responder, ok := sessionResponder(adapter, session)
 	if !ok {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
-		return
+		return nil, "", actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	state, err := responder.Requests(ctx, session)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
+		return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
 	requests := make([]openRequestView, 0, len(state.Requests))
 	for _, request := range state.Requests {
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions()})
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": session.ID, "permissionMode": state.PermissionMode, "requests": requests})
+	return requests, state.PermissionMode, nil
 }
 
 // openRequestView is a request with the line and buttons a notification shows

@@ -154,7 +154,12 @@ func unarchiveProjectTx(tx *sql.Tx, id string) error {
 }
 
 func (r *Registry) ArchiveSession(sessionID string, at time.Time) error {
-	result, err := r.db.Exec(`INSERT INTO session_archive(session_id,archived_at_ms) SELECT id,? FROM sessions WHERE id=?
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`INSERT INTO session_archive(session_id,archived_at_ms) SELECT id,? FROM sessions WHERE id=?
 		ON CONFLICT(session_id) DO UPDATE SET archived_at_ms=excluded.archived_at_ms`, at.UnixMilli(), sessionID)
 	if err != nil {
 		return err
@@ -164,7 +169,10 @@ func (r *Registry) ArchiveSession(sessionID string, at time.Time) error {
 	} else if changed == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	if _, err := tx.Exec(`UPDATE session_credentials SET revoked_at_ms=?,revoked_reason=? WHERE session_id=? AND revoked_at_ms=0`, at.UnixMilli(), RevokedSessionArchive, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Registry) UnarchiveSession(sessionID string) error {

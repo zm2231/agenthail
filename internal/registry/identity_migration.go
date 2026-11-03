@@ -199,6 +199,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"delivery_intents", `UPDATE delivery_intents SET sender_session_id=?2 WHERE sender_session_id=?1`, false},
 		{"delivery_intents", `UPDATE OR IGNORE delivery_intents SET target_session_id=?2 WHERE target_session_id=?1`, false},
 		{"session_archive", `UPDATE OR IGNORE session_archive SET session_id=?2 WHERE session_id=?1`, false},
+		{"session_credentials", `UPDATE OR IGNORE session_credentials SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_runtime", `UPDATE session_runtime SET session_id=?2 WHERE session_id=?1`, hasRuntime},
 		{"session_origins", `INSERT OR IGNORE INTO session_origins(session_id,via,creator_session_id,created_at) SELECT ?2,via,creator_session_id,created_at FROM session_origins WHERE session_id=?1`, false},
 		{"session_origins", `UPDATE session_origins SET creator_session_id=?2 WHERE creator_session_id=?1`, false},
