@@ -87,6 +87,7 @@ let package = Package(
                 "QuestionPagerView.swift",
                 "RequestCard.swift",
                 "AgenthailModel.swift",
+                "AgenthailModelPaging.swift",
                 "VoiceAPI.swift",
                 "VoiceAudioBridge.swift",
                 "VoiceCallDiagnostics.swift",

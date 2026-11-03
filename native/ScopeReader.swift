@@ -23,6 +23,11 @@ final class ScopeReader {
 
     func cancel() { rereadTask?.cancel() }
 
+    func drop(_ request: ScopeRequest) {
+        pages.drop(request)
+        views.removeValue(forKey: request)
+    }
+
     func adoptCurrent() { pages.adopt(source.current()) }
 
     func joined(_ sessions: [SessionState]) -> [SessionState] { pages.joined(sessions) }

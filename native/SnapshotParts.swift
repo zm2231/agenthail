@@ -24,6 +24,7 @@ struct ScopeSessions {
     var sessions: [SessionState]
     var hostEpoch: String?
     var catalogSeq: UInt64?
+    var view: ScopePage.View? = nil
 }
 
 struct ScopePage: Decodable {
@@ -40,6 +41,7 @@ struct ScopePage: Decodable {
     struct View: Decodable, Equatable {
         let counts: [String: Count]
         let surfaces: [Surface]
+        var refreshAt: String? = nil
     }
 
     let sessions: [SessionState]
@@ -79,6 +81,7 @@ extension AgenthailAPI {
                 }
             }
             result.hostEpoch = result.hostEpoch ?? page.hostEpoch
+            result.view = result.view ?? page.view
             if let seq = page.catalogSeq { result.catalogSeq = min(result.catalogSeq ?? seq, seq) }
             cursor = page.nextCursor
         } while cursor != nil
@@ -118,11 +121,11 @@ extension AgenthailAPI {
 
 extension DashboardSnapshot {
     // The stream resumes from the older read so nothing between the two is missed.
-    init(base: SnapshotBase, current: ScopeSessions, activity: [ProjectActivity]) {
+    init(base: SnapshotBase, current: ScopeSessions, activity: [ProjectActivity], history: [HistoryState] = []) {
         let byID = Dictionary(activity.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let catalogSeq = [base.catalogSeq, current.catalogSeq].compactMap { $0 }.min()
         self.init(updatedAt: base.updatedAt, eventCursor: base.eventCursor, hostEpoch: base.hostEpoch, catalogSeq: catalogSeq, daemon: base.daemon, surfaces: base.surfaces,
-                  sessions: current.sessions, totalSessions: current.sessions.count, queue: base.queue, channels: base.channels, relays: base.relays, history: [],
+                  sessions: current.sessions, totalSessions: current.sessions.count, queue: base.queue, channels: base.channels, relays: base.relays, history: history,
                   attention: base.attention, deliveryProblems: base.deliveryProblems, codexRecentHours: base.codexRecentHours, busyDelivery: base.busyDelivery,
                   rekeyed: base.rekeyed, signin: base.signin, person: base.person,
                   projects: base.projects?.map { project in

@@ -16,6 +16,7 @@ SOURCES=(
   AgenthailAPI.swift
   TaggedResponses.swift
   AgenthailModel.swift
+  AgenthailModelPaging.swift
   AgenthailModels.swift
   ComposerAttachment.swift
   ComposerTextSync.swift
@@ -115,6 +116,7 @@ SOURCES=(
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
+  macOS/SpotlightCatalog.swift
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptAgentBlocks.swift

@@ -7,6 +7,22 @@ enum SessionFilter: String, CaseIterable, Identifiable {
     case archived = "Archived"
 
     var id: String { rawValue }
+
+    var viewScope: String {
+        switch self {
+        case .running: "running"
+        case .recent: "recent"
+        case .all: "all"
+        case .archived: "archived"
+        }
+    }
+
+    var pagedScope: String? {
+        switch self {
+        case .all, .archived: viewScope
+        case .recent, .running: nil
+        }
+    }
 }
 
 typealias SessionStatusFilter = SessionDisplayKind

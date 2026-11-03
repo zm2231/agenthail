@@ -128,7 +128,11 @@ struct CommandPalette: View {
         .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
         .task { fieldFocused = true }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in fieldFocused = true }
-        .onChange(of: query) { highlightedID = nil }
+        .onChange(of: query) {
+            highlightedID = nil
+            model.findSessions(query)
+        }
+        .onDisappear { model.findSessions(model.searchQuery) }
     }
 
     private func row(_ entry: Entry, highlighted: Bool) -> some View {

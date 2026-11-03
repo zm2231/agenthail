@@ -64,6 +64,10 @@ struct ScopePages {
         return true
     }
 
+    mutating func drop(_ request: ScopeRequest) {
+        listings.removeValue(forKey: request)
+    }
+
     mutating func setFound(_ rows: [SessionState]) {
         found = Self.merged([], rows)
     }

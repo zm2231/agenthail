@@ -439,8 +439,7 @@ private struct MenuBarLabel: View {
         }
         .onAppear(perform: handleRoute)
         .onChange(of: route.latest) { handleRoute() }
-        .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
-        .onChange(of: spotlightSessions) { syncSpotlight() }
+        .onChange(of: spotlightSessions, initial: true) { syncSpotlight() }
         .onChange(of: model.sessionAttention.count, initial: true) { _, count in
             NSApplication.shared.dockTile.badgeLabel = count > 0 ? String(count) : nil
         }
@@ -448,10 +447,11 @@ private struct MenuBarLabel: View {
 
     private func syncSpotlight() {
         guard spotlightSessions else {
+            model.stopIndexingSpotlight()
             SpotlightIndex.shared.clear()
             return
         }
-        if let sessions = model.snapshot?.sessions { SpotlightIndex.shared.update(sessions) }
+        model.indexSpotlight { SpotlightIndex.shared.update(entries: $0) }
     }
 
     private func handleRoute() {

@@ -171,7 +171,7 @@ struct SessionSidebar: View {
             }
             SessionSidebarHeader(
                 model: model,
-                counts: tree.counts,
+                counts: model.filterCounts ?? tree.counts,
                 help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
                 newSessionHelp: shortcuts.help("New session", .newSession),
                 findShortcut: shortcuts.keyboardShortcut(.findSession),
@@ -238,9 +238,22 @@ struct SessionSidebar: View {
                                 ProjectMenuButtons(model: model, pane: pane, project: project)
                             }
                     }
-                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty {
+                    if tree.projects.isEmpty && projectsWithoutSessions(tree).isEmpty && !model.listHasMore {
                         Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: DesktopType.body))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .padding(.horizontal, DesktopSpace.s)
+                    }
+                    if model.listHasMore {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, DesktopSpace.s)
+                            .task(id: model.pages.listings[model.listRequest!]?.rows.count ?? -1) { await model.listMore() }
+                    }
+                    if let error = model.reader.pageError, model.listRequest != nil {
+                        Text(error)
+                            .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, DesktopSpace.s)
                     }
@@ -1556,7 +1569,7 @@ struct ComposerView: View {
         } : []
         let runtime = store.commands[session.id]
         let mentioning = token.trigger == .mention
-        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.knownSessions, from: session) : [], files: mentioning && scopedCompletion.files?.query == token.query ? scopedCompletion.files?.files ?? [] : [])
+        let items = ComposerCompletion.items(for: token, appCommands: appCommands, runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(mentionCandidates(token.query), from: session) : [], files: mentioning && scopedCompletion.files?.query == token.query ? scopedCompletion.files?.files ?? [] : [])
         return (items, ComposerCompletion.notice(for: token, runtime: runtime))
     }
 
@@ -1590,13 +1603,24 @@ struct ComposerView: View {
         completionState = state
     }
 
+    private func mentionCandidates(_ query: String) -> [SessionState] {
+        let known = Set(model.knownSessions.map(\.id))
+        let fetched = scopedCompletion.sessions?.query == query ? scopedCompletion.sessions?.sessions ?? [] : []
+        return model.knownSessions + fetched.filter { !known.contains($0.id) }
+    }
+
     private func loadMentionFiles(_ request: MentionRequest?) async {
         guard let request, let api = model.api else { return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled else { return }
-        let found = try? await api.sessionFiles(id: request.session, query: request.query)
+        async let files = try? api.sessionFiles(id: request.session, query: request.query)
+        async let sessions = model.mentionSessions(request.query)
+        let (found, matched) = await (files, sessions)
         guard !Task.isCancelled else { return }
-        updateCompletion { $0.files = (request.query, found?.files ?? []) }
+        updateCompletion {
+            $0.files = (request.query, found?.files ?? [])
+            $0.sessions = (request.query, matched)
+        }
     }
 
     private func accept(_ item: CompletionItem) {

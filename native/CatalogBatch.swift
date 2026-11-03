@@ -10,6 +10,7 @@ struct CatalogBatch {
     var snapshot: DashboardSnapshot
     var cursor: UInt64
     var removals: [CatalogRemoval] = []
+    var upserted: [SessionState] = []
     var sessionsChanged = false
     var changed = false
     var needsSnapshot = false
@@ -38,6 +39,7 @@ private extension CatalogBatch {
             } else {
                 snapshot.sessions.append(changed)
             }
+            upserted.append(changed)
             sessionsChanged = true
         case "session.queue":
             guard let id = data.sessionId, let count = data.queueCount,
