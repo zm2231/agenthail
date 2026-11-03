@@ -16,7 +16,7 @@ import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
 import { scopedSessions } from "./session-scope.js";
 import { friendlyError, toast } from "./feedback.js";
-import { syncProjectPane } from "./project-pane.js";
+import { refreshShownProject } from "./project-pane.js";
 
 export function renderAll() {
   try {
@@ -29,7 +29,7 @@ export function renderAll() {
   renderSurfaceFilter();
   renderStartSurfaceOptions();
   renderSessions();
-  syncProjectPane();
+  refreshShownProject();
   renderOperations();
   if (app.settings && app.operationsTab === "settings") renderSettings();
   $("#sync").textContent =

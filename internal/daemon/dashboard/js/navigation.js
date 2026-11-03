@@ -3,6 +3,7 @@ import { scopedSessions } from "./session-scope.js";
 import { selectSession } from "./session-selection.js";
 import { startLiveStream, stopLiveStream } from "./session-stream.js";
 import { loadSettings } from "./settings.js";
+import { refreshShownProject } from "./project-pane.js";
 
 export function showView(name) {
   const allowed = ["overview", "conversations", "operations"];
@@ -24,6 +25,7 @@ export function showView(name) {
     if (first) selectSession(first.id);
   }
   syncConversationLayout();
+  refreshShownProject();
   if (view === "conversations") startLiveStream();
   else stopLiveStream();
   if (view === "operations" && app.operationsTab === "settings") loadSettings();

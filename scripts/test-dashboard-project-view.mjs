@@ -106,8 +106,13 @@ const paneContext = {
   $: () => pane,
   renderProjectView: () => `rendered ${++renders}`,
   showView() {}, syncConversationLayout() {}, mobileConversationView: () => false,
+  renderOverview() {}, renderSurfaceFilter() {}, renderStartSurfaceOptions() {}, renderSessions() {}, renderOperations() {},
 };
-await dashboardModules(["project-pane"], paneContext);
+await dashboardModules(["project-pane", "dashboard-state"], paneContext);
+panel.classList.hidden = true;
+vm.runInContext("renderAll", paneContext)();
+assert.equal(renders, 0, "the 30 s state refresh does not rebuild a project hidden behind another view");
+panel.classList.hidden = false;
 const refresh = vm.runInContext("refreshShownProject", paneContext);
 refresh();
 assert.equal(pane.innerHTML, "rendered 1", "the shown project refreshes while Conversations is open");
