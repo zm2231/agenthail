@@ -80,19 +80,19 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNot
 			select {
 			case concurrency <- struct{}{}:
 				defer func() { <-concurrency }()
+				if recordErr := d.Registry.RecordPushSent(target.DeviceID, sent.PushID, notification.EventType, time.Now()); recordErr != nil {
+					d.log.Printf("record push sent %s: %s", target.DeviceID, recordErr)
+				}
 				receipt, sendErr = sendDevicePushWithRetry(ctx, target, sent)
+				if settleErr := d.Registry.SettlePushSent(sent.PushID, receipt); settleErr != nil {
+					d.log.Printf("settle push sent %s: %s", target.DeviceID, settleErr)
+				}
 			case <-ctx.Done():
 				sendErr = fmt.Errorf("not sent: %w", ctx.Err())
 			}
 			attempt.record(target.DeviceID, sendErr)
-			now := time.Now()
-			if recordErr := d.Registry.RecordPushOutcome(target.DeviceID, notification.EventType, now, sendErr); recordErr != nil {
+			if recordErr := d.Registry.RecordPushOutcome(target.DeviceID, notification.EventType, time.Now(), sendErr); recordErr != nil {
 				d.log.Printf("record push outcome %s: %s", target.DeviceID, recordErr)
-			}
-			if receipt {
-				if recordErr := d.Registry.RecordPushSent(target.DeviceID, sent.PushID, notification.EventType, now); recordErr != nil {
-					d.log.Printf("record push sent %s: %s", target.DeviceID, recordErr)
-				}
 			}
 			if isTerminalPushRelayError(sendErr) {
 				if removeErr := d.Registry.RemoveDevicePushTarget(target.DeviceID); removeErr != nil {

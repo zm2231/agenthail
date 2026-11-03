@@ -25,6 +25,16 @@ func (r *Registry) RecordPushSent(deviceID, pushID, eventType string, at time.Ti
 	return tx.Commit()
 }
 
+// Recorded before the relay answers, since the phone's receipt can arrive first.
+func (r *Registry) SettlePushSent(pushID string, passedOn bool) error {
+	if passedOn {
+		_, err := r.db.Exec(`UPDATE push_sends SET confirmed=1 WHERE push_id=?`, pushID)
+		return err
+	}
+	_, err := r.db.Exec(`DELETE FROM push_sends WHERE push_id=? AND received_at=''`, pushID)
+	return err
+}
+
 // A receipt counts only for a push this device was sent, so one device cannot
 // mark another's notifications as arrived.
 func (r *Registry) RecordPushReceipt(deviceID, pushID string, receivedAt time.Time, alerts string) (bool, error) {

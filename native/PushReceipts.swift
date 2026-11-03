@@ -10,18 +10,18 @@ struct PushReceipt: Codable, Equatable, Sendable {
     let alerts: String
 }
 
-/// Receipts go to the paired computer as each push arrives. One the phone
-/// could not deliver, as when the computer is out of reach, waits in the
-/// keychain group the notification service shares with the app, and the app
-/// sends it later with the time it arrived.
+/// An undelivered receipt waits as its own keychain item, so the notification
+/// service and the app only add or delete items and never overwrite each other.
 enum PushReceipts {
-    static let account = "push-receipts"
+    static let accountPrefix = "push-receipt:"
     static let kept = 50
     static let path = "/api/v1/device/push-receipts"
 
     static func alerts(authorization: UNAuthorizationStatus, alert: UNNotificationSetting) -> String {
         [.authorized, .provisional, .ephemeral].contains(authorization) && alert == .enabled ? "on" : "off"
     }
+
+    static func account(_ receipt: PushReceipt) -> String { accountPrefix + receipt.host + ":" + receipt.pushId }
 
     static func body(_ receipts: [PushReceipt]) -> Data {
         let formatter = ISO8601DateFormatter()
@@ -30,10 +30,8 @@ enum PushReceipts {
         return (try? JSONSerialization.data(withJSONObject: ["receipts": rows])) ?? Data()
     }
 
-    static func merged(_ pending: [PushReceipt], adding: [PushReceipt]) -> [PushReceipt] {
-        var seen = Set<String>()
-        let unique = (pending + adding).filter { seen.insert($0.host + "\u{0}" + $0.pushId).inserted }
-        return Array(unique.suffix(kept))
+    static func overflow(_ receipts: [PushReceipt]) -> [PushReceipt] {
+        Array(receipts.sorted { $0.receivedAt < $1.receivedAt }.dropLast(kept))
     }
 
     static func post(_ receipts: [PushReceipt], endpoint: URL, token: String, session: URLSession = RequestNotifications.fetchSession) async -> Bool {
@@ -52,46 +50,54 @@ enum PushReceipts {
 
     static func send(_ receipt: PushReceipt, credential: PairedHostCredential) async {
         if await !post([receipt], endpoint: credential.endpoint, token: credential.token) {
-            store(merged(pending(), adding: [receipt]))
+            enqueue(receipt)
         }
     }
 
-    static func flush(credential: (String) -> PairedHostCredential? = PairedCredential.read(host:)) async {
+    static func flush(credential: (String) -> PairedHostCredential? = PairedCredential.read(host:), session: URLSession = RequestNotifications.fetchSession) async {
         let waiting = pending()
-        guard !waiting.isEmpty else { return }
-        var unsent: [PushReceipt] = []
         for host in Set(waiting.map(\.host)).sorted() {
             let receipts = waiting.filter { $0.host == host }
             guard let paired = credential(host) else { continue }
-            if await !post(receipts, endpoint: paired.endpoint, token: paired.token) { unsent += receipts }
+            if await post(receipts, endpoint: paired.endpoint, token: paired.token, session: session) {
+                receipts.forEach(remove)
+            }
         }
-        store(merged(unsent, adding: pending().filter { !waiting.contains($0) }))
     }
 
-    static func pending() -> [PushReceipt] {
-        var query = item()
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var found: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess, let data = found as? Data else { return [] }
-        return (try? JSONDecoder().decode([PushReceipt].self, from: data)) ?? []
-    }
-
-    private static func store(_ receipts: [PushReceipt]) {
-        SecItemDelete(item() as CFDictionary)
-        guard !receipts.isEmpty, let data = try? JSONEncoder().encode(receipts) else { return }
-        var attributes = item()
+    static func enqueue(_ receipt: PushReceipt) {
+        guard let data = try? JSONEncoder().encode(receipt) else { return }
+        var attributes = item(account(receipt))
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(attributes as CFDictionary, nil)
+        overflow(pending()).forEach(remove)
     }
 
-    private static func item() -> [String: Any] {
+    static func pending() -> [PushReceipt] {
+        var query = item(nil)
+        query[kSecReturnAttributes as String] = true
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess, let rows = found as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            guard let account = row[kSecAttrAccount as String] as? String, account.hasPrefix(accountPrefix),
+                  let data = row[kSecValueData as String] as? Data else { return nil }
+            return try? JSONDecoder().decode(PushReceipt.self, from: data)
+        }
+    }
+
+    static func remove(_ receipt: PushReceipt) {
+        SecItemDelete(item(account(receipt)) as CFDictionary)
+    }
+
+    private static func item(_ account: String?) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: PairedCredential.service,
-            kSecAttrAccount as String: account
+            kSecAttrService as String: PairedCredential.service
         ]
+        if let account { query[kSecAttrAccount as String] = account }
         if let group = PairedCredential.accessGroup { query[kSecAttrAccessGroup as String] = group }
         return query
     }

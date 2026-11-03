@@ -66,6 +66,9 @@ func TestDoctorFailsWhenAcceptedPushesNeverReachThePhone(t *testing.T) {
 		if err := reg.RecordPushSent(device, id, "session.waiting", sent.Add(time.Duration(i)*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
+		if err := reg.SettlePushSent(id, true); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if arrived, err := reg.RecordPushReceipt(device, "p1", sent.Add(5*time.Second), "on"); err != nil || !arrived {
 		t.Fatalf("receipt arrived=%v err=%v", arrived, err)
@@ -103,6 +106,9 @@ func TestDoctorExpectsNoReceiptsFromARelayWithoutThem(t *testing.T) {
 	reg := doctorPushRegistry(t)
 	device := pairPushDevice(t, reg, "iPhone")
 	sent := time.Date(2026, 11, 2, 23, 0, 0, 0, time.UTC)
+	if err := reg.RecordPushSent(device, "unconfirmed", "session.waiting", sent); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 5 {
 		if err := reg.RecordPushOutcome(device, "session.waiting", sent.Add(time.Duration(i)*time.Minute), nil); err != nil {
 			t.Fatal(err)

@@ -438,6 +438,7 @@ CREATE TABLE push_sends (
 	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
 	event_type TEXT NOT NULL DEFAULT '',
 	sent_at TEXT NOT NULL,
+	confirmed INTEGER NOT NULL DEFAULT 0,
 	received_at TEXT NOT NULL DEFAULT ''
 );
 

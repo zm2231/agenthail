@@ -186,13 +186,15 @@ test("send passes a push id on for the app's receipt and says so", async () => {
   const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
   const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
   const credential = "fixture-credential"
-  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({
+  const registration = {
     token: "ab".repeat(32),
     environment: "sandbox",
     attestedAt: Date.now(),
     appAttestKeyHash: "fixture-key-hash",
     credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
-  }))
+  }
+  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({ ...registration, tag: "host-1" }))
+  env.PUSH_DEVICES.values.set("device:untagged", JSON.stringify(registration))
   const delivered = []
   const answers = []
   let apnsStatus = 200
@@ -208,6 +210,11 @@ test("send passes a push id on for the app's receipt and says so", async () => {
       assert.equal(response.status, 200)
       answers.push(await response.json())
     }
+    const untagged = await send(request("POST", { ...notification, installationId: "untagged", pushId: "abcdefgh2345" }), env)
+    assert.deepEqual(await untagged.json(), { ok: true }, "a registration with no host tag gives the app nowhere to send a receipt")
+    const untaggedPayload = delivered.pop()
+    assert.equal("pushId" in untaggedPayload, false)
+    assert.equal("mutable-content" in untaggedPayload.aps, false)
     apnsStatus = 403
     const refused = await send(request("POST", { ...notification, pushId: "abcdefgh2345" }), env)
     assert.equal(refused.status, 502)

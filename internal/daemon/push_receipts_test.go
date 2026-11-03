@@ -81,6 +81,45 @@ func TestAPushTheRelayForwardsWithAnIDIsMarkedArrivedByThePhonesReceipt(t *testi
 	}
 }
 
+func TestAReceiptThatArrivesBeforeTheRelayAnswersStillCounts(t *testing.T) {
+	reg := registryTestRegistry(t)
+	d := newTestDaemon(t, reg, nil)
+	d.log = log.New(io.Discard, "", 0)
+	handler := dashboardRouter(d)
+	phone := deviceToken(t, reg, "Phone", "read")
+	devices, _ := reg.ListDevices(false)
+	for _, device := range devices {
+		if device.Name == "Phone" {
+			if err := reg.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var recorded struct {
+		Recorded int `json:"recorded"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			PushID string `json:"pushId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		response := apiCall(t, handler, http.MethodPost, "/api/v1/device/push-receipts", phone, map[string]any{"receipts": []map[string]any{{"pushId": body.PushID, "alerts": "on"}}})
+		_ = json.Unmarshal(response.Body.Bytes(), &recorded)
+		w.Write([]byte(`{"ok":true,"receipt":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
+
+	d.notifyPairedDevices(context.Background(), mobileNotification{Title: "Agenthail", Message: "Claude asks you a question", SessionID: "s1", EventType: "session.waiting"})
+	if recorded.Recorded != 1 {
+		t.Fatalf("a receipt that beat the relay's answer was not recorded: %d", recorded.Recorded)
+	}
+	statuses, err := reg.PushStatuses(time.Now().Add(time.Hour))
+	if err != nil || len(statuses) != 1 || statuses[0].ReceivedAt == "" || statuses[0].Unarrived != 0 {
+		t.Fatalf("a push that arrived before the relay answered counts as lost: %+v err=%v", statuses, err)
+	}
+}
+
 func TestAPushThroughARelayWithoutReceiptsExpectsNone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"ok":true}`))

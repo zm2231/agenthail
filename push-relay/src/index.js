@@ -209,8 +209,8 @@ export async function send(request, env) {
     payload.aps["mutable-content"] = 1
     payload.requestId = requestId
   }
-  // The app's notification service quotes pushId back to the computer as a receipt.
-  const pushId = receiptPushId(body)
+  // The app quotes pushId back to the computer the host tag names; without a tag it has nowhere to send it.
+  const pushId = device.stored.tag ? receiptPushId(body) : ""
   if (pushId) {
     payload.aps["mutable-content"] = 1
     payload.pushId = pushId

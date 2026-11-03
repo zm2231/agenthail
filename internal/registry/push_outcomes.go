@@ -52,7 +52,7 @@ func (r *Registry) PushStatuses(sentBefore time.Time) ([]PushStatus, error) {
 	rows, err := r.read.Query(`SELECT p.device_id,d.name,p.enabled,p.updated_at,
 			COALESCE(o.event_type,''),COALESCE(o.attempted_at,''),COALESCE(o.succeeded_at,''),COALESCE(o.error,''),COALESCE(o.failed_at,''),
 			COALESCE(o.received_at,''),COALESCE(o.alerts,''),
-			(SELECT COUNT(*) FROM push_sends s WHERE s.device_id=p.device_id AND s.received_at=''
+			(SELECT COUNT(*) FROM push_sends s WHERE s.device_id=p.device_id AND s.confirmed=1 AND s.received_at=''
 				AND julianday(s.sent_at)<julianday(?)
 				AND (COALESCE(o.received_at,'')='' OR julianday(s.sent_at)>julianday(o.received_at)))
 		FROM device_push_targets p JOIN paired_devices d ON d.id=p.device_id

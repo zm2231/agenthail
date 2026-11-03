@@ -17,16 +17,33 @@ final class PushReceiptsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(formatter.date(from: try XCTUnwrap(receipt["receivedAt"]))).timeIntervalSince1970, arrived.timeIntervalSince1970, accuracy: 0.001)
     }
 
-    func testWaitingReceiptsKeepOneOfEachAndOnlyTheNewest() {
+    func testOnlyTheOldestWaitingReceiptsBeyondTheKeptOnesAreDropped() {
         let at = Date()
-        let one = PushReceipt(host: "h1", pushId: "p1", receivedAt: at, alerts: "on")
-        XCTAssertEqual(PushReceipts.merged([one], adding: [one]), [one], "a receipt queued twice is sent once")
-        let other = PushReceipt(host: "h2", pushId: "p1", receivedAt: at, alerts: "on")
-        XCTAssertEqual(PushReceipts.merged([one], adding: [other]).count, 2, "the same id from another computer is another push")
-        let many = (0..<(PushReceipts.kept + 5)).map { PushReceipt(host: "h1", pushId: "p\($0)", receivedAt: at, alerts: "on") }
-        let kept = PushReceipts.merged([], adding: many)
-        XCTAssertEqual(kept.count, PushReceipts.kept)
-        XCTAssertEqual(kept.last?.pushId, "p\(PushReceipts.kept + 4)")
+        let many = (0..<(PushReceipts.kept + 5)).map { PushReceipt(host: "h1", pushId: "p\($0)", receivedAt: at.addingTimeInterval(Double($0)), alerts: "on") }
+        XCTAssertEqual(PushReceipts.overflow(many.shuffled()).map(\.pushId), (0..<5).map { "p\($0)" })
+        XCTAssertTrue(PushReceipts.overflow(Array(many.prefix(PushReceipts.kept))).isEmpty)
+        XCTAssertNotEqual(PushReceipts.account(many[0]), PushReceipts.account(PushReceipt(host: "h2", pushId: "p0", receivedAt: at, alerts: "on")), "the same id from another computer is another push")
+    }
+
+    func testAReceiptQueuedWhileOthersAreSentIsKept() async {
+        PushReceipts.pending().forEach(PushReceipts.remove)
+        defer { PushReceipts.pending().forEach(PushReceipts.remove) }
+        let at = Date()
+        let first = PushReceipt(host: "h1", pushId: "first0001", receivedAt: at, alerts: "on")
+        let second = PushReceipt(host: "h1", pushId: "second001", receivedAt: at, alerts: "on")
+        PushReceipts.enqueue(first)
+        PushReceipts.enqueue(second)
+        XCTAssertEqual(Set(PushReceipts.pending().map(\.pushId)), ["first0001", "second001"], "two writers each keep their own receipt")
+
+        let late = PushReceipt(host: "h1", pushId: "late00001", receivedAt: at, alerts: "on")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReceiptStub.self]
+        ReceiptStub.reset(status: 200)
+        ReceiptStub.during = { PushReceipts.enqueue(late) }
+        defer { ReceiptStub.during = nil }
+        let paired = PairedHostCredential(hostID: "h1", hostName: "Mac", endpoint: URL(string: "https://mac.example.ts.net:7412")!, token: "device-token", pairedAt: at)
+        await PushReceipts.flush(credential: { $0 == "h1" ? paired : nil }, session: URLSession(configuration: configuration))
+        XCTAssertEqual(PushReceipts.pending().map(\.pushId), ["late00001"], "a flush removes only what it sent")
     }
 
     func testAlertsAreOnOnlyWhenAgenthailMayShowThem() {
@@ -58,6 +75,7 @@ final class PushReceiptsTests: XCTestCase {
 private final class ReceiptStub: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [URLRequest] = []
     nonisolated(unsafe) static var status = 200
+    nonisolated(unsafe) static var during: (() -> Void)?
 
     static func reset(status: Int) {
         requests = []
@@ -68,6 +86,7 @@ private final class ReceiptStub: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.requests.append(request)
+        Self.during?()
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"recorded":1}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
