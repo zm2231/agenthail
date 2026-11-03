@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -59,7 +58,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	if peerLead != nil && !hasFlag(args, "--stream") && !hasFlag(args, "--reply") {
-		return a.sendToPeerCoordinator(ctx, *peerLead, message, args)
+		return a.sendToNamedCoordinator(ctx, *peerLead, message, args)
 	}
 	if target, err = a.expandLead(target); err != nil {
 		return err
@@ -67,7 +66,7 @@ func (a *App) cmdSend(args []string) error {
 	coord := a.coordinator()
 	_, byName := coord.Named(target)
 	if spec, named := coord.Named(target); named && !coord.Started(spec) {
-		return a.startCoordinator(ctx, coord, spec, message, args)
+		return a.sendToNamedCoordinator(ctx, spec, message, args)
 	}
 	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, target)
 	if err != nil {
@@ -103,9 +102,11 @@ func (a *App) cmdSend(args []string) error {
 		if err != nil {
 			return err
 		}
-		if daemonStream.Cancel != nil {
-			defer daemonStream.Cancel()
-		}
+		defer func() {
+			if daemonStream.Cancel != nil {
+				daemonStream.Cancel()
+			}
+		}()
 	} else if wantReply {
 		observation, observeErr := surf.Observe(ctx, sess)
 		if observeErr != nil {
@@ -125,6 +126,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	addressed := *sess
+	followsJournal := false
 	dispatcher := delivery.Dispatcher{Registry: a.registry()}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -140,25 +142,28 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 	if coordinated {
-		deliver := coord.Deliver
-		if hasFlag(args, "--no-queue") {
-			deliver = coord.DeliverWithoutQueue
-		}
-		var outcome *coordinator.Outcome
-		if outcome, err = deliver(ctx, spec, message, options); err == nil {
-			if outcome.Started {
-				if !byName {
-					return printCoordinatorStart(outcome, outcome.Session.ID, jsonOut)
-				}
-				return printCoordinatorStart(outcome, target, jsonOut)
+		var answer coordinatorSendAnswer
+		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
+			receipt = &answer.Result
+			ref := target
+			if !byName && answer.Started {
+				ref = answer.Result.SessionID
 			}
-			receipt = outcome.Receipt
-			if outcome.Session != nil && outcome.Session.ID != addressed.ID {
-				if wantStream || wantReply {
-					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", outcome.Session.ID, outcome.Session.ID)
+			sess = a.receiptSession(answer.Result, addressed)
+			if wantStream || wantReply {
+				following, note := a.followReceipt(ctx, answer.Result, addressed, &daemonStream)
+				if note != "" {
+					fmt.Fprintln(os.Stderr, note)
 					wantStream, wantReply = false, false
+				} else if following.ID != addressed.ID {
+					if !jsonOut {
+						fmt.Println(answer.Result.Detail)
+					}
+					addressed, useDaemonStream, followsJournal = *following, true, true
 				}
-				sess = outcome.Session
+			}
+			if answer.Started && !wantStream && !wantReply {
+				return printCoordinatorAnswer(answer, ref, jsonOut)
 			}
 		}
 	} else if hasFlag(args, "--no-queue") || syntheticNotion {
@@ -217,7 +222,7 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
+	if (wantStream || wantReply) && !followsJournal && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}

@@ -89,6 +89,8 @@ type coordinatorRequest struct {
 	Message         string
 	Author          surface.Author
 	PersonName      string
+	TurnOptions     surface.TurnOptions
+	NoQueue         bool
 }
 
 // coordinatorAction sets or clears a coordinator on the host that owns it.
@@ -194,13 +196,20 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	}
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName}
+	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions}
 	reply := coordinatorSendReply{OK: true, Ref: d.coordinator().Ref(spec)}
 	if spec.HostID != "" {
+		if request.NoQueue {
+			return actionResult{}, invalidRequest(fmt.Sprintf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", reply.Ref))
+		}
 		reply.Result, reply.Started, err = d.sendToPeerCoordinator(ctx, spec, request.Message, options)
 	} else {
+		deliver := d.coordinator().Deliver
+		if request.NoQueue {
+			deliver = d.coordinator().DeliverWithoutQueue
+		}
 		var outcome *coordinator.Outcome
-		if outcome, err = d.coordinator().Deliver(ctx, spec, request.Message, options); err == nil {
+		if outcome, err = deliver(ctx, spec, request.Message, options); err == nil {
 			reply.Result, reply.Started = outcome.Receipt, outcome.Started
 		}
 	}

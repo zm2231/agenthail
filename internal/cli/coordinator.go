@@ -27,10 +27,7 @@ const coordinatorUsage = `usage:
   agenthail coordinator clear [--cwd <path>]`
 
 func (a *App) coordinator() coordinator.Service {
-	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}, ClaudeRoot: func(ctx context.Context) string {
-		pick, _ := a.claudeRootPick(ctx)
-		return pick.Root
-	}, Now: a.coordinatorNow}
+	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}}
 }
 
 func (a *App) cmdCoordinator(args []string) error {
@@ -475,92 +472,35 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	return nil
 }
 
-type peerCoordinatorAnswer struct {
-	Result  delivery.Receipt `json:"result"`
-	Started bool             `json:"started"`
-}
-
-func (a *App) peerCoordinatorSend(ctx context.Context, spec registry.CoordinatorSpec, message, source, model string) (peerCoordinatorAnswer, error) {
-	var answer peerCoordinatorAnswer
-	client, err := a.daemonAPI()
-	if err != nil {
-		return answer, err
-	}
-	payload := map[string]any{"action": "coordinator-send", "host": spec.HostID, "name": spec.Name, "message": message}
-	if source != "" {
-		payload["sourceSessionId"] = source
-	}
-	if model != "" {
-		payload["model"] = model
-	}
-	data, status, err := client.action(ctx, payload)
-	if err != nil {
-		return answer, err
-	}
-	if status != http.StatusOK {
-		return answer, actionError(data)
-	}
-	return answer, json.Unmarshal(data, &answer)
-}
-
-// sendToPeerCoordinator delivers to a paired host's coordinator through
-// that host, which starts its conversation when it has none.
-func (a *App) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, args []string) error {
-	if hasFlag(args, "--no-queue") {
-		return fmt.Errorf("--no-queue is not available for %s: the daemon holds a send to another host until that host answers", a.coordinator().Ref(spec))
+// sendToNamedCoordinator delivers to a coordinator by its name when its
+// conversation cannot be followed from here: one on a paired host, or one
+// with no conversation yet, which the daemon starts from the saved spec.
+func (a *App) sendToNamedCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, args []string) error {
+	if spec.HostID == "" && (hasFlag(args, "--stream") || hasFlag(args, "--reply")) {
+		return fmt.Errorf("the coordinator has no conversation yet; send without --stream or --reply, then read it with 'agenthail last'")
 	}
 	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))
 	if err != nil {
 		return err
 	}
-	answer, err := a.peerCoordinatorSend(ctx, spec, message, source, flagVal(args, "--model"))
+	turnOptions, err := parseTurnOptions(args)
 	if err != nil {
 		return err
 	}
-	if hasFlag(args, "--json") {
+	answer, err := a.coordinatorSend(ctx, spec, message, surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions, SourceSessionID: source}, hasFlag(args, "--no-queue"))
+	if err != nil {
+		return err
+	}
+	return printCoordinatorAnswer(answer, a.coordinator().Ref(spec), hasFlag(args, "--json"))
+}
+
+func printCoordinatorAnswer(answer coordinatorSendAnswer, target string, jsonOut bool) error {
+	if jsonOut {
 		return emit(answer)
 	}
 	fmt.Println(answer.Result.Detail)
 	if answer.Started {
-		fmt.Printf("read its reply with 'agenthail last %s'\n", a.coordinator().Ref(spec))
+		fmt.Printf("read its reply with 'agenthail last %s'\n", target)
 	}
-	return nil
-}
-
-// startCoordinator delivers to a coordinator whose name does not point at a
-// session yet, which starts its conversation from the saved spec.
-func (a *App) startCoordinator(ctx context.Context, coord coordinator.Service, spec registry.CoordinatorSpec, message string, args []string) error {
-	if hasFlag(args, "--stream") || hasFlag(args, "--reply") {
-		return fmt.Errorf("the coordinator has no conversation yet; send without --stream or --reply, then read it with 'agenthail last'")
-	}
-	options := surface.SendOptions{Model: flagVal(args, "--model")}
-	deliver := coord.Deliver
-	if hasFlag(args, "--no-queue") {
-		deliver = coord.DeliverWithoutQueue
-	}
-	outcome, err := deliver(ctx, spec, message, options)
-	if err != nil {
-		return err
-	}
-	if !outcome.Started {
-		return printCoordinatorReceipt(outcome, hasFlag(args, "--json"))
-	}
-	return printCoordinatorStart(outcome, "@"+spec.Name, hasFlag(args, "--json"))
-}
-
-func printCoordinatorStart(outcome *coordinator.Outcome, target string, jsonOut bool) error {
-	if jsonOut {
-		return emit(outcome)
-	}
-	fmt.Println(outcome.Receipt.Detail)
-	fmt.Printf("read its reply with 'agenthail last %s'\n", target)
-	return nil
-}
-
-func printCoordinatorReceipt(outcome *coordinator.Outcome, jsonOut bool) error {
-	if jsonOut {
-		return emit(outcome.Receipt)
-	}
-	fmt.Println(outcome.Receipt.Detail)
 	return nil
 }
