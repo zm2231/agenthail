@@ -60,6 +60,16 @@ async function fetchJSON(url, { fetchImpl, token, requestTimeoutMs = 15_000 }) {
   throw error
 }
 
+export async function findUploadedBuild({ issuerId, keyId, privateKey, bundleId, buildNumber, marketingVersion, baseURL = apiBase, fetchImpl = fetch, now = Date.now }) {
+  const token = createAppStoreToken({ issuerId, keyId, privateKey, now: now() })
+  const apps = await fetchJSON(appLookupURL(bundleId, baseURL), { fetchImpl, token })
+  if (apps.data?.length !== 1) throw new Error(`Expected one App Store app for ${bundleId}, found ${apps.data?.length || 0}`)
+  const builds = await fetchJSON(buildLookupURL({ appId: apps.data[0].id, buildNumber, marketingVersion }, baseURL), { fetchImpl, token })
+  const build = builds.data?.[0]
+  const state = build?.attributes?.processingState
+  return build && state !== "FAILED" && state !== "INVALID" ? build : null
+}
+
 export async function waitForProcessedBuild({
   issuerId,
   keyId,
@@ -177,6 +187,12 @@ async function main() {
     if (!value) throw new Error(`missing ${name}`)
   }
   const privateKey = await readFile(keyPath, "utf8")
+  if (process.argv.includes("--uploaded")) {
+    const build = await findUploadedBuild({ issuerId, keyId, privateKey, bundleId, buildNumber, marketingVersion })
+    process.stdout.write(build ? `TestFlight build ${marketingVersion} (${buildNumber}) is already uploaded: ${build.attributes.processingState}\n` : `TestFlight build ${marketingVersion} (${buildNumber}) is not uploaded\n`)
+    process.exitCode = build ? 0 : 3
+    return
+  }
   await waitForInternalBuild({
     groupId: process.env.ASC_GROUP_ID,
     issuerId,
