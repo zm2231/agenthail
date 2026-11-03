@@ -139,7 +139,7 @@ func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (cl
 	if err != nil {
 		return state, err
 	}
-	jobs, err := c.backgroundSessions(ctx, root)
+	jobs, err := c.backgroundJobs(ctx, root)
 	if err != nil {
 		return state, err
 	}
@@ -147,7 +147,7 @@ func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (cl
 		if job.Kind != "background" || job.SessionID != id {
 			continue
 		}
-		job := job
+		job := job.claudeBackground
 		state.job = &job
 		if claudeProcessAlive(job.PID) || job.State == "starting" {
 			state.alive = true

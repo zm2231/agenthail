@@ -129,7 +129,7 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 	}
 	// A background job that is still starting holds the conversation before
 	// it writes its session record; only Claude's job catalog shows it.
-	jobs, err := c.backgroundSessions(ctx, root)
+	jobs, err := c.backgroundJobs(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -201,20 +201,20 @@ func (c *Claude) quiesce(ctx context.Context, conversation, root string, holder 
 	case holder.hosted:
 		stopped = "host"
 	case holder.background:
-		records, err := c.backgroundSessions(ctx, root)
+		records, err := c.backgroundJobs(ctx, root)
 		if err != nil {
 			return "", err
 		}
-		job := ""
+		job, jobRoot := "", root
 		for _, record := range records {
 			if record.Kind == "background" && record.SessionID == conversation {
-				job = record.ID
+				job, jobRoot = record.ID, record.root
 			}
 		}
 		if job == "" {
 			return "", fmt.Errorf("Claude conversation %s runs as a background job Claude does not list", conversation)
 		}
-		if output, err := c.backgroundCommand(ctx, root, "", "stop", job); err != nil {
+		if output, err := c.backgroundCommand(ctx, jobRoot, "", "stop", job); err != nil {
 			return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude stop %s: %w: %s", job, err, string(output)))
 		}
 		stopped = "background job " + job

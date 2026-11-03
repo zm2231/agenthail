@@ -31,6 +31,13 @@ func TestClaudeConversationStateIsGoneOnlyOnPositiveEvidence(t *testing.T) {
 			}
 			t.Setenv("CLAUDE_CONFIG_DIR", f.AddRoot("other-root"))
 		}, want: surface.ConversationResumable},
+		{name: "a job still starting in the daemon's root while the caller names another", setup: func(t *testing.T, f *claudetest.Fixture) {
+			f.Job("bg-starting", fixtureConversation, f.Home, "starting", 0)
+			if err := surface.RecordDaemonClaudeRoot(f.Home); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("CLAUDE_CONFIG_DIR", f.AddRoot("other-root"))
+		}, want: surface.ConversationLive},
 		{name: "a transcript in two roots", setup: func(t *testing.T, f *claudetest.Fixture) {
 			f.Transcript(fixtureConversation, f.Home)
 			f.AddRoot("second-root")
