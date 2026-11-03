@@ -321,7 +321,9 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
 CREATE TABLE IF NOT EXISTS session_credentials (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+	pending_ref TEXT UNIQUE,
+	pending_expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	token_hash TEXT NOT NULL UNIQUE,
 	capabilities TEXT NOT NULL DEFAULT '[]',
 	ceiling TEXT NOT NULL DEFAULT '{}',
@@ -330,7 +332,8 @@ CREATE TABLE IF NOT EXISTS session_credentials (
 	idle_expires_at_ms INTEGER NOT NULL,
 	max_expires_at_ms INTEGER NOT NULL,
 	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
-	revoked_reason TEXT NOT NULL DEFAULT ''
+	revoked_reason TEXT NOT NULL DEFAULT '',
+	CHECK ((session_id IS NULL) <> (pending_ref IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0;
 CREATE TABLE IF NOT EXISTS action_receipts (

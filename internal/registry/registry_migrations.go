@@ -53,10 +53,16 @@ func migrateTx(tx *sql.Tx) error {
 	if err := setAsideReleasedProjectsTable(tx); err != nil {
 		return err
 	}
+	if err := setAsideBoundOnlyCredentials(tx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(schema); err != nil {
 		return err
 	}
 	if err := upgradeReleasedProjectsTable(tx); err != nil {
+		return err
+	}
+	if err := upgradeBoundOnlyCredentials(tx); err != nil {
 		return err
 	}
 	if err := ensureHostIdentity(tx); err != nil {

@@ -155,6 +155,9 @@ func (r *Registry) AuthenticateSessionToken(token string, now time.Time) (Sessio
 	if err != nil {
 		return SessionCredential{}, err
 	}
+	if row.SessionID == "" {
+		return SessionCredential{}, ErrCredentialUnknown
+	}
 	if row.revokedAt != 0 {
 		return SessionCredential{}, CredentialRevokedError{Reason: row.revokedReason}
 	}
@@ -220,10 +223,12 @@ type credentialRow struct {
 func scanCredential(row *sql.Row) (credentialRow, error) {
 	var result credentialRow
 	var caps, ceiling string
+	var sessionID sql.NullString
 	var created, used, idle, max int64
-	if err := row.Scan(&result.ID, &result.SessionID, &caps, &ceiling, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason); err != nil {
+	if err := row.Scan(&result.ID, &sessionID, &caps, &ceiling, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason); err != nil {
 		return credentialRow{}, err
 	}
+	result.SessionID = sessionID.String
 	if err := json.Unmarshal([]byte(caps), &result.Capabilities); err != nil {
 		return credentialRow{}, fmt.Errorf("decode credential capabilities: %w", err)
 	}
