@@ -35,11 +35,14 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 		startErr error
 		status   registry.DeliveryIntentStatus
 		turn     string
-		held     bool
+		before   string
 	}{
 		{name: "accepted", status: registry.DeliveryIntentSent, turn: "started-turn"},
-		{name: "held before the restart", status: registry.DeliveryIntentSent, turn: "started-turn", held: true},
+		{name: "held before the restart", status: registry.DeliveryIntentSent, turn: "started-turn", before: "held"},
+		{name: "failed before the restart", status: registry.DeliveryIntentSent, turn: "started-turn", before: "failed"},
+		{name: "failure dismissed before the restart", status: registry.DeliveryIntentSent, turn: "started-turn", before: "dismissed"},
 		{name: "outcome unknown", startErr: surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out")), status: registry.DeliveryIntentSubmitted},
+		{name: "held, outcome unknown", startErr: surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out")), status: registry.DeliveryIntentSubmitted, before: "held"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, r, fake, repo := projectsFixture(t)
@@ -60,13 +63,24 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.held {
-				if changed, err := r.HoldPeerMessage(registry.PeerMessage{MsgID: queued.UUID, TargetSessionID: "from", SenderSessionID: "to"}, "parked by Claude"); err != nil || !changed {
+			peer := registry.PeerMessage{MsgID: queued.UUID, TargetSessionID: "from", SenderSessionID: "to"}
+			switch tc.before {
+			case "held":
+				if changed, err := r.HoldPeerMessage(peer, "parked by Claude"); err != nil || !changed {
 					t.Fatalf("hold changed=%v err=%v", changed, err)
 				}
-				if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 1 {
-					t.Fatalf("held problems=%+v err=%v", problems, err)
+			case "failed", "dismissed":
+				if changed, err := r.DropPeerMessage(peer, "dropped by Claude"); err != nil || !changed {
+					t.Fatalf("drop changed=%v err=%v", changed, err)
 				}
+				if tc.before == "dismissed" {
+					if changed, err := r.DismissDeliveryProblem(intentID); err != nil || !changed {
+						t.Fatalf("dismiss changed=%v err=%v", changed, err)
+					}
+				}
+			}
+			if tc.before != "" && r.QueueCount("to") == 0 {
+				t.Fatalf("%s left the sender no notice to retire", tc.before)
 			}
 			previous, err := r.Session("from")
 			if err != nil {
@@ -85,6 +99,9 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			}
 			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 				t.Fatalf("problems=%+v err=%v", problems, err)
+			}
+			if pending := r.QueueCount("to"); pending != 0 {
+				t.Fatalf("the sender still has %d notices about a message the new conversation took", pending)
 			}
 			if tc.turn != "" {
 				if reconciled, err := r.ReconcileDeliveryIntent("started", tc.turn); err != nil || !reconciled {
