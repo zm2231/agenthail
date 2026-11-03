@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -68,7 +67,7 @@ func (d *Daemon) announceReplacement(ctx context.Context, entry registry.Coordin
 		d.notifyReplacement(ctx, entry)
 		d.replacements.pushed[entry.ID] = true
 	}
-	if entry.NotifySender && d.agentSender(entry.ChangedBy) {
+	if entry.NotifySender && coordinator.ChangedByAgent(entry.ChangedBy) {
 		message := fmt.Sprintf("[agenthail] Your message to @%s started a new conversation, %s, because %s. The previous conversation %s is no longer the lead. Read its reply with 'agenthail last @%s'.", entry.Name, entry.SessionID, replacementWhy(entry), entry.PreviousSessionID, entry.Name)
 		if _, err := d.sendNotice(noticeRecipient{sessionID: entry.ChangedBy, role: "sender"}, surface.Session{ID: entry.SessionID}, message, replacementNoticeKey(entry.ID, "sender")); err != nil {
 			return fmt.Errorf("tell the sender %s: %w", entry.ChangedBy, err)
@@ -120,26 +119,9 @@ func (d *Daemon) tellReplacedLead(ctx context.Context, entry registry.Coordinato
 }
 
 func replacementWhy(entry registry.CoordinatorHistoryEntry) string {
-	why, _ := strings.CutPrefix(entry.Reason, "gone: ")
-	return why
+	return coordinator.ReplacementWhy(entry.Reason)
 }
 
 func (d *Daemon) changedByDisplay(changedBy string) string {
-	switch changedBy {
-	case surface.PersonSessionID:
-		return "the person"
-	case surface.CLISessionID, "":
-		return "the CLI"
-	case coordinator.RestartedByDaemon:
-		return "the daemon"
-	}
-	return d.resolveDisplay(changedBy)
-}
-
-func (d *Daemon) agentSender(changedBy string) bool {
-	switch changedBy {
-	case "", surface.PersonSessionID, surface.CLISessionID, coordinator.RestartedByDaemon:
-		return false
-	}
-	return true
+	return coordinator.ChangedByLabel(changedBy, d.resolveDisplay)
 }

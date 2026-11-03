@@ -166,6 +166,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		}
 	case "respond":
 		return d.respond(ctx, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, p.actor())
+	case "request-withdraw":
+		return d.withdrawReplacedRequest(ctx, adapter, session, strings.TrimSpace(request.RequestID), p.actor())
 	case "context", "usage", "status", "effort", "rename":
 		if _, ok := adapter.(surface.Controller); !ok || !effective.Commands {
 			return actionResult{}, invalidRequest("this session does not support Claude Remote Control commands")

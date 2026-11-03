@@ -72,6 +72,39 @@ A worker reports with `agenthail send @lead "..."`. Its host needs to have paire
 
 A Claude conversation is gone only on positive evidence: every Claude config root was read without error, none holds a transcript of it, no process or starting background job holds it, and the session was registered or last active more than two minutes ago. A conversation that has just started has not written its transcript or process record yet, which the two minutes cover. Anything short of that, such as a root that cannot be read, a transcript in two places, or a lead seen moments ago, is unknown: the message queues for the lead as it would for a busy one, and nothing starts. Starting again holds a lock file per project next to the registry, named by a hash of the project id, and the alias moves with a compare-and-swap, so concurrent senders start at most one conversation for a project: the second re-reads the lead under the lock and finds the replacement, which is inside its two minutes and so never gone. A queued message to a coordinator whose conversation is gone becomes the first turn of the new conversation instead of resuming an empty one.
 
+### Handover
+
+A restart's handover is a `coordinator_history` row with action `replaced`. It records:
+
+- who caused it (`changed_by`): the sending session, `agenthail-person`, `agenthail-cli`, or `daemon` for a queued message with no sender;
+- why (`reason`): `gone: ` with the evidence, including when the old conversation was last seen.
+
+A person's `set --replace` writes a `replaced` row with no reason, and nothing below applies to it.
+
+The daemon announces each handover once. A pass right after the handover, and every 30 seconds until it is done, does the following in order:
+
+1. It notifies the person on the desktop and on paired devices (event `coordinator.replaced`).
+2. It gives an agent whose queued message caused the restart a notice keyed `coordinator-replaced:<history id>:sender`. A sender that waited for its send learns from the receipt instead.
+3. It marks the row announced.
+4. It makes one attempt to tell the old conversation that it is no longer the lead and should end its turn. This happens only if the conversation turns out to still exist, and the attempt is direct, because a queued notice would be moved to the new lead.
+
+Handovers recorded before schema 48 count as announced and acknowledged.
+
+The person sees each handover until they acknowledge it:
+
+- The snapshot's `leadReplacements` lists the open handovers, each with its id, project, name, both conversations, who caused it, why and when.
+- The action `lead-replacement-ack {replacementId}` acknowledges one.
+- A local project lead in the snapshot carries its last handover as `replaced`. `coordinator` and `coordinator list` print it as "replaced <when> by <who>, because <why> (was <old conversation>)".
+
+A replaced conversation's session row carries `replacedLead`, the spans in which it held a coordinator's name, and `agenthail list` shows them in DETAIL.
+
+The old lead's open requests are not a second "needs you":
+
+- `requests` returns each with `replacedBy`, the current lead.
+- Its session row's attention kind is `replacedRequest`, which does not count toward `attentionFamilies`.
+- The action `request-withdraw {sessionId, requestId}` settles such a request through `respond` with a deny and a note naming the new lead. That denies a permission prompt and dismisses a question. It is refused with `not_replaced` for any other session's request.
+- An answer the person gives instead still goes to the old conversation.
+
 The registry remembers each conversation a restart replaced, and for which project. A send addressed to one of them, such as a reply to an old notification or a composer still showing the old conversation, and a queued message claimed for one, reach the project's current coordinator instead.
 
 `send --no-queue` refuses to wait for a busy or unavailable coordinator, but still starts one whose conversation is gone. It is not available for a paired host's coordinator.

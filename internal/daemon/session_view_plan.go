@@ -218,7 +218,7 @@ func (p *sessionViewPlan) summary(families []SessionViewFamily) SessionViewSumma
 			}
 			row := p.rows[member.ID]
 			result.QueuedMessages += row.QueueCount
-			attention = attention || row.Attention != nil
+			attention = attention || (row.Attention != nil && row.Attention.Kind != AttentionReplacedRequest)
 		}
 		if attention {
 			result.AttentionFamilies++

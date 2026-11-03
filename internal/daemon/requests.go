@@ -49,9 +49,10 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 	if err != nil {
 		return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
+	replacedBy, _ := d.coordinator().ReplacedBy(session.ID)
 	requests := make([]openRequestView, 0, len(state.Requests))
 	for _, request := range state.Requests {
-		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions()})
+		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
 	}
 	return requests, state.PermissionMode, nil
 }
@@ -63,6 +64,8 @@ type openRequestView struct {
 	surface.Request
 	Prompt  string                  `json:"prompt"`
 	Actions []surface.RequestAction `json:"actions,omitempty"`
+	// ReplacedBy is the project's current lead when this request is from a lead a restart replaced.
+	ReplacedBy string `json:"replacedBy,omitempty"`
 }
 
 // sessionResponder is the provider that answers a session's requests through

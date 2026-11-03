@@ -215,8 +215,12 @@ func (a *App) coordinatorShow(path string, jsonOut bool) error {
 	if len(specs) == 0 {
 		return fmt.Errorf("%s has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'", found.RootPath)
 	}
+	replaced, err := a.lastReplacement(found.ID)
+	if err != nil {
+		return err
+	}
 	if jsonOut {
-		return emit(map[string]any{"projectId": found.ID, "coordinators": specs})
+		return emit(map[string]any{"projectId": found.ID, "coordinators": specs, "replaced": replaced})
 	}
 	if len(specs) > 1 {
 		fmt.Printf("%s has %d coordinators; resolve it with 'agenthail coordinator set --replace' on one host\n", found.RootPath, len(specs))
@@ -244,8 +248,23 @@ func (a *App) coordinatorShow(path string, jsonOut bool) error {
 		if spec.ChangedBy != "" {
 			fmt.Printf("  set by:       %s, %s\n", spec.ChangedBy, spec.ChangedAt.Local().Format(time.DateTime))
 		}
+		if spec.HostID == "" && replaced != nil {
+			fmt.Printf("  replaced:     %s\n", a.replacementSummary(*replaced))
+		}
 	}
 	return nil
+}
+
+func (a *App) lastReplacement(projectID string) (*registry.CoordinatorHistoryEntry, error) {
+	entry, found, err := a.registry().LastCoordinatorReplacement(projectID)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (a *App) replacementSummary(entry registry.CoordinatorHistoryEntry) string {
+	return fmt.Sprintf("%s by %s, because %s (was %s)", entry.At.Local().Format(time.DateTime), coordinator.ChangedByLabel(entry.ChangedBy, a.resolveDisplay), coordinator.ReplacementWhy(entry.Reason), entry.PreviousSessionID)
 }
 
 func (a *App) coordinatorList(jsonOut bool) error {
@@ -255,8 +274,9 @@ func (a *App) coordinatorList(jsonOut bool) error {
 	}
 	type row struct {
 		registry.CoordinatorSpec
-		Host        string `json:"host"`
-		ProjectSeen bool   `json:"projectSeen"`
+		Host        string                            `json:"host"`
+		ProjectSeen bool                              `json:"projectSeen"`
+		Replaced    *registry.CoordinatorHistoryEntry `json:"replaced,omitempty"`
 	}
 	rows := make([]row, 0, len(specs))
 	for _, spec := range specs {
@@ -265,6 +285,9 @@ func (a *App) coordinatorList(jsonOut bool) error {
 			entry.Host = "local"
 			found, err := a.projectOf(spec.ProjectRoot)
 			entry.ProjectSeen = err == nil && found.ID == spec.ProjectID
+			if entry.Replaced, err = a.lastReplacement(spec.ProjectID); err != nil {
+				return err
+			}
 		}
 		rows = append(rows, entry)
 	}
@@ -286,6 +309,9 @@ func (a *App) coordinatorList(jsonOut bool) error {
 			project += " (no project here now; move it with 'coordinator set --replace')"
 		}
 		fmt.Printf("%-12s @%-23s %-7s %-38s %s\n", truncate(r.Host, 12), r.Name, r.Surface, session, project)
+		if r.Replaced != nil {
+			fmt.Printf("%-12s   replaced %s\n", "", a.replacementSummary(*r.Replaced))
+		}
 	}
 	return nil
 }

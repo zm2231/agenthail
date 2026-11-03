@@ -62,6 +62,9 @@ func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
 		if wide && row.ClaudeConfigRoot != nil {
 			detail += " · " + row.ClaudeConfigRoot.Name
 		}
+		if held := replacedLeadDetail(row.ReplacedLead); held != "" {
+			detail = strings.Trim(held+" · "+detail, " ·")
+		}
 		pins := make([]string, 0, len(row.Holders))
 		for _, holder := range row.Holders {
 			pin := strconv.Itoa(holder.PID)

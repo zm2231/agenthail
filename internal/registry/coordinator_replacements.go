@@ -53,6 +53,28 @@ func (r *Registry) LastCoordinatorReplacement(projectID string) (CoordinatorHist
 	return entries[0], true, nil
 }
 
+// ReplacedLeadTenures maps each conversation a restart replaced to when it held a coordinator's name.
+func (r *Registry) ReplacedLeadTenures() (map[string][]CoordinatorTenure, error) {
+	rows, err := r.read.Query(`SELECT session_id FROM coordinator_replaced`)
+	if err != nil {
+		return nil, err
+	}
+	ids, err := appendRows([]string{}, rows, func(row rowScanner) (string, error) {
+		var id string
+		return id, row.Scan(&id)
+	})
+	if err != nil {
+		return nil, err
+	}
+	tenures := make(map[string][]CoordinatorTenure, len(ids))
+	for _, id := range ids {
+		if tenures[id], err = r.CoordinatorTenures(id); err != nil {
+			return nil, err
+		}
+	}
+	return tenures, nil
+}
+
 // CoordinatorTenure is a span in which a session held a coordinator's name; Until is zero while it still does.
 type CoordinatorTenure struct {
 	Name  string    `json:"name"`
