@@ -52,16 +52,21 @@ func (d *Daemon) deliverCredentials(deliveries *sync.WaitGroup, sessionIDs []str
 		return
 	}
 	for _, id := range sessionIDs {
-		deliveries.Go(func() {
-			push := func(token string) error { return d.pushCredential(id, credentials.URL(), token) }
+		deliveries.Add(1)
+		started := d.background.start(func(ctx context.Context) {
+			defer deliveries.Done()
+			push := func(token string) error { return d.pushCredential(ctx, id, credentials.URL(), token) }
 			if _, err := credentials.deliver(id, "", push, false); err != nil && !errors.Is(err, surfaces.ErrMCPDeliveryDeferred) {
 				d.log.Printf("mcp: delivering %s's new credential is retried: %s", d.resolveDisplay(id), err)
 			}
 		})
+		if !started {
+			deliveries.Done()
+		}
 	}
 }
 
-func (d *Daemon) pushCredential(sessionID, url, token string) error {
+func (d *Daemon) pushCredential(ctx context.Context, sessionID, url, token string) error {
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
 		return nil
@@ -74,7 +79,7 @@ func (d *Daemon) pushCredential(sessionID, url, token string) error {
 	if !ok {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return replacer.ReplaceMCPCredential(ctx, sessionID, url, token)
 }
