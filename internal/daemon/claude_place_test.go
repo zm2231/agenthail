@@ -188,6 +188,35 @@ func TestAReplacementLeadStartsInTheReplacedLeadsRoot(t *testing.T) {
 	}
 }
 
+func TestEveryWayOfNamingThePrimaryLaunchesWithoutAConfigDir(t *testing.T) {
+	f := newPickFixture(t, true)
+	primary := filepath.Join(f.host.Home, ".claude")
+	for _, root := range []string{primary, primary + "/", "~/.claude", "default"} {
+		if _, dir := f.create(root); dir != nil {
+			t.Fatalf("an explicit primary %q launched with CLAUDE_CONFIG_DIR=%q", root, *dir)
+		}
+	}
+	if code := f.setDefault("default"); code != http.StatusOK {
+		t.Fatalf("settings status=%d", code)
+	}
+	if pick, dir := f.create(""); dir != nil || pick.Name != "default" {
+		t.Fatalf("a default root that is the primary launched with CLAUDE_CONFIG_DIR: pick=%+v dir=%v", pick, dir)
+	}
+	agent := f.claudeSessionIn("agent-in-primary", primary)
+	if pick, dir := f.createFrom("", agent); dir != nil || pick.Reason != "the root of the session that created it" {
+		t.Fatalf("an agent in the primary launched its session with CLAUDE_CONFIG_DIR: pick=%+v dir=%v", pick, dir)
+	}
+	if got, err := f.daemon.coordinator().ClaudeRoot(f.claudeSessionIn("old-lead-in-primary", primary)); err != nil || got != "" {
+		t.Fatalf("a replacement for a lead in the primary names a config dir: %q err=%v", got, err)
+	}
+	if _, dir := f.create(""); dir != nil {
+		t.Fatal("the primary leaked after placing a lead")
+	}
+	if _, dir := f.createFrom("", f.claudeSessionIn("agent-in-work", f.second)); dir == nil || *dir != f.second {
+		t.Fatalf("a secondary root still launches with its config dir: %v", dir)
+	}
+}
+
 func TestNoSessionStartsWhenTheDefaultRootCannotBeRead(t *testing.T) {
 	f := newPickFixture(t, true)
 	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999,"claude":{"defaultRoot":"work"}}`})
@@ -209,5 +238,18 @@ func TestNoSessionStartsWhenTheDefaultRootCannotBeRead(t *testing.T) {
 		if session.Surface == surface.KindClaude {
 			t.Fatalf("a Claude session started anyway: %s", session.ID)
 		}
+	}
+}
+
+func TestAnUnreadableDefaultDoesNotStopARootThatIsAlreadyKnown(t *testing.T) {
+	f := newPickFixture(t, true)
+	agent := f.claudeSessionIn("agent-in-work", f.second)
+	lead := f.claudeSessionIn("old-lead", f.second)
+	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999}`})
+	if pick, dir := f.createFrom("", agent); dir == nil || *dir != f.second || pick.Name != "work" {
+		t.Fatalf("an agent's root does not need the default: pick=%+v dir=%v", pick, dir)
+	}
+	if got, err := f.daemon.coordinator().ClaudeRoot(lead); err != nil || got != f.second {
+		t.Fatalf("a replaced lead's root does not need the default: %q err=%v", got, err)
 	}
 }

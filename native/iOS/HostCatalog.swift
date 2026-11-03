@@ -22,6 +22,9 @@ struct SessionRoute: Equatable {
 struct HostTarget: Equatable {
     let hostID: String
     let remote: String?
+
+    /// The settings API is not forwarded to a computer reached through another.
+    var takesSettings: Bool { remote == nil }
 }
 
 /// The sessions of every paired computer as one list. A session's id is

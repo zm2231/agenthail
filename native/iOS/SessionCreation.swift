@@ -101,7 +101,7 @@ struct NewSessionSheet: View {
                             } footer: {
                                 if claude.configRoot.isEmpty, let pick = hosts.claudePick {
                                     Text(ClaudeRootLabels.reason(pick, roots: roots, titles: titles))
-                                } else if let index = roots.firstIndex(where: { $0.root == claude.configRoot }), hosts.claudePick?.name != roots[index].name {
+                                } else if let index = roots.firstIndex(where: { $0.root == claude.configRoot }), hosts.claudePick?.name != roots[index].name, model.canSetCreationDefaultRoot(host: hosts.hostQuery) {
                                     Button("Use \(titles[index]) for every session you start") { setDefault(roots[index].name) }
                                         .font(.footnote)
                                         .accessibilityIdentifier("creation-default-root")

@@ -22,11 +22,13 @@ func (a *App) placeClaudeSession(creator string) (claudepick.Pick, error) {
 	if err != nil {
 		return claudepick.Pick{}, err
 	}
-	config, err := daemon.LoadDashboardConfig()
-	if err != nil {
-		return claudepick.Pick{}, err
-	}
-	return claudepick.Place(roots, config.ClaudeDefaultRoot(), claudepick.Origin{CreatorTranscript: a.claudeTranscript(creator)}), nil
+	return claudepick.Place(roots, claudepick.Origin{CreatorTranscript: a.claudeTranscript(creator)}, func() (string, error) {
+		config, err := daemon.LoadDashboardConfig()
+		if err != nil {
+			return "", err
+		}
+		return config.ClaudeDefaultRoot(), nil
+	})
 }
 
 func (a *App) claudeTranscript(id string) string {

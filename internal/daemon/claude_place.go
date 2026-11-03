@@ -10,12 +10,14 @@ import (
 )
 
 func (d *Daemon) placeClaudeSession(creator, previous string) (claudepick.Pick, error) {
-	config, err := LoadDashboardConfig()
-	if err != nil {
-		return claudepick.Pick{}, fmt.Errorf("read the default Claude root, so the session would not start where it should: %w", err)
-	}
 	origin := claudepick.Origin{CreatorTranscript: d.sessionTranscript(creator), PreviousTranscript: d.sessionTranscript(previous)}
-	return claudepick.Place(d.claudeConfigRoots(), config.ClaudeDefaultRoot(), origin), nil
+	return claudepick.Place(d.claudeConfigRoots(), origin, func() (string, error) {
+		config, err := LoadDashboardConfig()
+		if err != nil {
+			return "", fmt.Errorf("read the default Claude root, so the session would not start where it should: %w", err)
+		}
+		return config.ClaudeDefaultRoot(), nil
+	})
 }
 
 func (d *Daemon) sessionTranscript(id string) string {

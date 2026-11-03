@@ -319,8 +319,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		if s.ClaudeRoot != nil {
 			root, err := s.ClaudeRoot(previous)
 			if err != nil {
-				_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: failureKind(err), SessionID: previous, Message: message, Error: fmt.Sprintf("start coordinator: %s", err)})
-				return nil, err
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("start coordinator: %w", err))
 			}
 			options.ConfigRoot = root
 		}

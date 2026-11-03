@@ -18,17 +18,21 @@ type Origin struct {
 }
 
 // Place never reads usage; an explicit root is the caller's to apply first.
-func Place(roots []surface.ClaudeConfigRoot, defaultRoot string, origin Origin) Pick {
+func Place(roots []surface.ClaudeConfigRoot, origin Origin, readDefault func() (string, error)) (Pick, error) {
 	if root, ok := transcriptRoot(roots, origin.CreatorTranscript); ok {
-		return pick(root, "the root of the session that created it")
+		return pick(root, "the root of the session that created it"), nil
 	}
 	if root, ok := transcriptRoot(roots, origin.PreviousTranscript); ok {
-		return pick(root, "the root of the lead it replaces")
+		return pick(root, "the root of the lead it replaces"), nil
+	}
+	defaultRoot, err := readDefault()
+	if err != nil {
+		return Pick{}, err
 	}
 	primary, found := surface.ClaudeConfigRoot{}, false
 	for _, root := range roots {
 		if defaultRoot != "" && root.Name == defaultRoot {
-			return pick(root, "your default root for new sessions")
+			return pick(root, "your default root for new sessions"), nil
 		}
 		if root.Primary && !found {
 			primary, found = root, true
@@ -38,9 +42,9 @@ func Place(roots []surface.ClaudeConfigRoot, defaultRoot string, origin Origin) 
 		primary = roots[0]
 	}
 	if defaultRoot != "" {
-		return pick(primary, "the primary root; the default root "+defaultRoot+" is not configured")
+		return pick(primary, "the primary root; the default root "+defaultRoot+" is not configured"), nil
 	}
-	return pick(primary, "the primary root")
+	return pick(primary, "the primary root"), nil
 }
 
 func transcriptRoot(roots []surface.ClaudeConfigRoot, transcript string) (surface.ClaudeConfigRoot, bool) {
