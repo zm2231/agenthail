@@ -142,10 +142,14 @@ func (a *App) cmdSend(args []string) error {
 		var answer coordinatorSendAnswer
 		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
 			if answer.Started {
+				ref := target
 				if !byName {
-					return printCoordinatorAnswer(answer, answer.Result.SessionID, jsonOut)
+					ref = answer.Result.SessionID
 				}
-				return printCoordinatorAnswer(answer, target, jsonOut)
+				if wantStream || wantReply {
+					fmt.Fprintf(os.Stderr, "the coordinator started a new conversation %s for this message, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", answer.Result.SessionID, ref)
+				}
+				return printCoordinatorAnswer(answer, ref, jsonOut)
 			}
 			receipt = &answer.Result
 			if answer.Result.SessionID != "" && answer.Result.SessionID != addressed.ID {

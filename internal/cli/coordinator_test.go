@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -50,6 +51,8 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 	c.app.daemonAPIOverride = func() (*daemonAPIClient, error) {
 		return &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}, nil
 	}
+	c.app.daemonSessionPageReader = func() (sessionPageReader, error) { return testSessionPageReader{}, nil }
+	c.app.daemonSessionStreamReader = func() (sessionStreamReader, error) { return testSessionStreamReader{blocked: true}, nil }
 	c.project(t, "project-fixture", c.cwd, "fixture")
 	return c
 }
@@ -217,6 +220,63 @@ func TestQueuedSendToAReplacedCoordinatorConversationNamesTheCurrentOne(t *testi
 	output, err := c.run(t, "send", goneConversation, "second")
 	if err != nil || !strings.Contains(output, "queued #4") || !strings.Contains(output, "agenthail steer "+replacedConversation) {
 		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if sends := c.sends(t); len(sends) != 1 || sends[0]["name"] != "fixture-lead" {
+		t.Fatalf("sends=%v", sends)
+	}
+}
+
+func captureStderr(t *testing.T, run func() error) (string, error) {
+	t.Helper()
+	old := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	runErr := run()
+	writer.Close()
+	os.Stderr = old
+	data, readErr := io.ReadAll(reader)
+	reader.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	return string(data), runErr
+}
+
+func TestASendThatStartsANewLeadSaysItCannotFollowIt(t *testing.T) {
+	for _, follow := range []string{"--reply", "--stream"} {
+		t.Run(follow, func(t *testing.T) {
+			c := newCoordinatorCLI(t).withGoneCoordinator(t)
+			c.answers(startedAnswer)
+			var output string
+			stderr, err := captureStderr(t, func() error {
+				var runErr error
+				output, runErr = c.run(t, "send", goneConversation, "task", follow, "--timeout", "3s")
+				return runErr
+			})
+			if err != nil || !strings.Contains(output, "agenthail last "+startedConversation) {
+				t.Fatalf("output=%q stderr=%q err=%v", output, stderr, err)
+			}
+			if !strings.Contains(stderr, "cannot follow its turns") || !strings.Contains(stderr, startedConversation) {
+				t.Fatalf("stderr=%q, want the sender told the new conversation is not followed", stderr)
+			}
+		})
+	}
+}
+
+func TestAReplyToAReplacedLeadConversationGoesToTheCurrentOne(t *testing.T) {
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	c.register(t, surface.Session{ID: replacedConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: c.claude.PID, Status: surface.StatusBusy, Cwd: c.cwd, Transcript: c.claude.Transcript(replacedConversation, c.cwd)})
+	c.claude.RecordStatus(replacedConversation, c.cwd, "", "busy", "", time.Now())
+	if err := c.r.HandOverCoordinator(c.spec(t), goneConversation, replacedConversation); err != nil {
+		t.Fatal(err)
+	}
+	c.answers(`{"ok":true,"result":{"evidence":"queued","status":"queued","sessionId":"` + replacedConversation + `","queueId":5}}`)
+	output, err := c.run(t, "send", goneConversation, "follow up", "--reply", "--timeout", "3s")
+	if err != nil || !strings.Contains(output, "queued #5") || !strings.Contains(output, "agenthail steer "+replacedConversation) || strings.Contains(output, goneConversation) {
+		t.Fatalf("output=%q err=%v, want the reply addressed to the current conversation", output, err)
 	}
 	if sends := c.sends(t); len(sends) != 1 || sends[0]["name"] != "fixture-lead" {
 		t.Fatalf("sends=%v", sends)
