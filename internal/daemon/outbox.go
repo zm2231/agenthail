@@ -220,7 +220,11 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 // session a paired host owns. The provider took it, so it is never retried,
 // and it is recorded only under the session it was addressed to.
 func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed *surface.Session, message string, ownedErr error) {
-	if err := d.Registry.DeadLetterUnknown(item.ID, ownedErr); err != nil {
+	err := d.Registry.DeadLetterUnknown(item.ID, ownedErr)
+	if d.settledElsewhere(item.ID, err) {
+		return
+	}
+	if err != nil {
 		d.log.Printf("dead-letter queue item %d: %s", item.ID, err)
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
