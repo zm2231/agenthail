@@ -39,6 +39,7 @@ SOURCES=(
   ProjectContents.swift
   ScopePages.swift
   ScopeReader.swift
+  SessionDisplayKind.swift
   SnapshotParts.swift
   SessionRowTime.swift
   HostNames.swift

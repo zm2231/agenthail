@@ -59,7 +59,7 @@ enum DesktopPalette {
 
     static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> DesktopStyle {
         if needsYou { return attention }
-        if session.isWorking { return working }
+        if SessionDisplayKind.of(session) == .working { return working }
         if finishedUnseen { return done }
         return muted
     }

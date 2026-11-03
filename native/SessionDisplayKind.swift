@@ -1,0 +1,40 @@
+import Foundation
+
+// Mirrors the daemon's sessionDisplayState; scripts/fixtures/session-display-vectors.json holds both to it.
+enum SessionDisplayKind: String, CaseIterable, Identifiable {
+    case unavailable, waiting, working, limited, finishing, queued, offline, idle
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .unavailable: "Unavailable"
+        case .waiting: "Waiting on you"
+        case .working: "Working"
+        case .limited: "Usage limit"
+        case .finishing: "Finishing"
+        case .queued: "Queued"
+        case .offline: "Offline"
+        case .idle: "Idle"
+        }
+    }
+
+    static func of(_ session: SessionState, now: Date = Date()) -> SessionDisplayKind {
+        if ["unreachable", "unauthorized", "incompatible"].contains(session.host?.state ?? "") || ["unknown", "notLoaded"].contains(session.status) {
+            return .unavailable
+        }
+        if session.waitingOn != nil { return .waiting }
+        if session.status == "busy" { return .working }
+        if let resume = session.limitResume, resume.state != "released" { return .limited }
+        if let limit = session.usageLimit, !lifted(limit, now: now) { return .limited }
+        if session.backgroundTasks?.running == true { return .finishing }
+        if session.queueCount > 0 { return .queued }
+        if session.status == "offline" { return .offline }
+        return .idle
+    }
+
+    private static func lifted(_ limit: UsageLimitState, now: Date) -> Bool {
+        guard let resetsAt = limit.resetsAt, let date = TimestampParser.date(resetsAt) else { return false }
+        return now >= date
+    }
+}

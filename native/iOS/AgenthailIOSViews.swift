@@ -1486,7 +1486,7 @@ struct SessionInspector: View {
                                 HStack {
                                     Text(SessionFamilies.label(child)).lineLimit(1)
                                     Spacer(minLength: 0)
-                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
+                                    if SessionDisplayKind.of(child) == .working { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
                                 }
                             }
                             .accessibilityIdentifier("subagent-" + child.id)
@@ -1631,14 +1631,15 @@ struct IOSSessionRow: View {
 
     @ViewBuilder
     private func meta(spaced: Bool) -> some View {
+        let kind = SessionDisplayKind.of(session)
         Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.muted)
             .lineLimit(1).fixedSize()
-        if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
-            IOSHostBadge(name: host, unavailable: session.isUnavailable)
+        if let host = session.shortRemoteHostName, showsHost || kind == .unavailable {
+            IOSHostBadge(name: host, unavailable: kind == .unavailable)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("On \(host)")
         }
-        if session.isWaitingOnYou {
+        if kind == .waiting {
             HStack(spacing: 4) {
                 Image(systemName: "questionmark.bubble")
                 Text(session.waitingPlace?.label ?? "Waiting on you")
@@ -1647,13 +1648,13 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.attention)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isUnavailable {
+        } else if kind == .unavailable {
             Text("Unavailable")
                 .font(.caption)
                 .foregroundStyle(PhonePalette.failed)
                 .lineLimit(1)
                 .fixedSize()
-        } else if let limit = session.limitLabel, !session.isWorking {
+        } else if kind == .limited, let limit = session.limitLabel {
             HStack(spacing: 4) {
                 Image(systemName: "gauge.with.dots.needle.100percent")
                 Text(limit)
@@ -1662,7 +1663,7 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.muted)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isWorking {
+        } else if kind == .working {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")
                 Text("Working")
@@ -1671,7 +1672,7 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.working)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isWaitingOnBackground {
+        } else if kind == .finishing {
             HStack(spacing: 4) {
                 Image(systemName: "hourglass")
                 Text("Background work")
@@ -1698,13 +1699,14 @@ struct IOSSessionRow: View {
     }
 
     var body: some View {
+        let kind = SessionDisplayKind.of(session)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !showsTime {
                     EmptyView()
-                } else if session.isWorking {
+                } else if kind == .working {
                     TimelineView(.everyMinute) { context in
                         Text(SessionRowTime.working(session, now: context.date)).font(.caption).foregroundStyle(PhonePalette.muted)
                             .lineLimit(1).fixedSize()
@@ -1723,9 +1725,9 @@ struct IOSSessionRow: View {
                     VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
                 }
             }
-            if session.isUnavailable, let reason = session.unavailableReason {
+            if kind == .unavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(PhonePalette.muted)
-            } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+            } else if kind == .working, let activity = session.activity {
                 TimelineView(.everyMinute) { context in
                     if let note = activity.quietNote(now: context.date) {
                         Text(note).font(.caption).foregroundStyle(PhonePalette.muted)

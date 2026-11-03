@@ -558,19 +558,20 @@ struct SessionRowView: View {
     var finishedUnseen = false
 
     var body: some View {
+        let kind = SessionDisplayKind.of(session)
         HStack(alignment: reason == nil ? .center : .firstTextBaseline, spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title ?? session.title)
                     .lineLimit(1)
-                    .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
+                    .foregroundStyle(kind != .unavailable && (session.open || kind == .working) ? DesktopPalette.text : DesktopPalette.text2)
                 if let reason {
                     Text(reason)
                         .font(.system(size: DesktopType.meta))
                         .foregroundStyle(DesktopPalette.text2)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+                } else if kind == .working, let activity = session.activity {
                     TimelineView(.everyMinute) { context in
                         if let note = activity.quietNote(now: context.date) {
                             Text(note)
@@ -583,7 +584,7 @@ struct SessionRowView: View {
                 }
             }
             if let host = session.shortRemoteHostName {
-                HostBadge(name: host, unavailable: session.isUnavailable)
+                HostBadge(name: host, unavailable: kind == .unavailable)
                     .help(session.unavailableReason ?? "On \(session.remoteHostName ?? host)")
             }
             Spacer(minLength: 4)
@@ -644,10 +645,11 @@ struct StatusIndicator: View {
     var finishedUnseen = false
 
     var body: some View {
+        let kind = SessionDisplayKind.of(session)
         Group {
-            if session.isWorking && !needsYou {
+            if kind == .working && !needsYou {
                 WorkingSpinner()
-            } else if session.isWaitingOnBackground && !needsYou {
+            } else if kind == .finishing && !needsYou {
                 Circle()
                     .strokeBorder(DesktopPalette.working, lineWidth: 1.5)
                     .frame(width: 7, height: 7)

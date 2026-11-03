@@ -6,11 +6,14 @@ enum SessionRing: Equatable {
     case needsYou, unavailable, working, background, idle
 
     static func kind(_ session: SessionState, needsYou: Bool) -> SessionRing {
-        if needsYou || session.isWaitingOnYou { return .needsYou }
-        if session.isUnavailable { return .unavailable }
-        if session.isWorking { return .working }
-        if session.isWaitingOnBackground { return .background }
-        return .idle
+        if needsYou { return .needsYou }
+        switch SessionDisplayKind.of(session) {
+        case .unavailable: return .unavailable
+        case .waiting: return .needsYou
+        case .working: return .working
+        case .finishing: return .background
+        default: return .idle
+        }
     }
 
     var spoken: String? {

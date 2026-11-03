@@ -49,6 +49,7 @@ targets:
       - path: ProjectContents.swift
       - path: ScopePages.swift
       - path: ScopeReader.swift
+      - path: SessionDisplayKind.swift
       - path: SnapshotParts.swift
       - path: SessionRowTime.swift
       - path: HostNames.swift
