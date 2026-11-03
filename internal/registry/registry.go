@@ -169,7 +169,7 @@ func connect(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)")
+	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-65536)")
 	if err != nil {
 		db.Close()
 		return nil, err
