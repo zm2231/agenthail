@@ -294,20 +294,24 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if err := s.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: session.ID, Via: registry.OriginCoordinator}); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded as the coordinator's: %w", session.ID, err))
 	}
-	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
-	}
-	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
+	var intent *registry.DeliveryIntent
 	if startErr != nil {
-		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, sender, messageUUID, message)
+		recorded, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, sender, messageUUID, message)
 		if intentErr != nil {
 			return nil, errors.Join(startErr, intentErr)
 		}
+		intent = recorded
 		if !surface.IsDeliveryOutcomeUnknown(startErr) {
 			_, _ = s.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
 			_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
 			return nil, startErr
 		}
+	}
+	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
+	}
+	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
+	if startErr != nil {
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
 		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: startedDetail(spec, previous, reason)}
 		return outcome, nil
