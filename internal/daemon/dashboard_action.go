@@ -12,19 +12,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	mutation := &mutationResponseWriter{ResponseWriter: w}
-	w = mutation
-	defer func() {
-		if mutation.succeeded() {
-			d.publishEvent("state.changed", "", map[string]string{"source": "action"})
-		}
-	}()
 	defer r.Body.Close()
 	var request dashboardActionRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
 		return
 	}
+	d.doAction(withActionKey(r.Context(), r.Header.Get(actionIdempotencyHeader)), principalFromRequest(r), request).write(w)
+}
+
+func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
 	if len(request.Attachments) > 0 && request.Action != "send" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "attachments are only accepted with send")
 		return

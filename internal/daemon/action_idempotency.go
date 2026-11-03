@@ -156,10 +156,7 @@ func canonicalActionBody(body io.ReadCloser) ([]byte, []byte, error) {
 }
 
 func actionPrincipal(r *http.Request) string {
-	if principal, ok := r.Context().Value(actionPrincipalContextKey{}).(string); ok && principal != "" {
-		return principal
-	}
-	return "local-dashboard"
+	return principalFromRequest(r).ID
 }
 
 func replayActionReceipt(w http.ResponseWriter, encoded []byte) error {

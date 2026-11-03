@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -172,25 +171,8 @@ const CLIActor = "the CLI"
 
 const maxActorLength = 160
 
-// actionActor names who sent a request: a paired device by name, the person a
-// paired host acted for, the CLI, or the dashboard. A claimed actor is taken
-// only from a paired host, which names its own caller, or from the local
-// dashboard token, which only the CLI presents with this header.
 func actionActor(r *http.Request) string {
-	claimed := claimedActor(r.Header.Get(ActionActorHeader))
-	if principal, ok := r.Context().Value(apiHostPrincipalContextKey{}).(apiHostPrincipal); ok && strings.TrimSpace(principal.hostName) != "" {
-		if !principal.host {
-			return fmt.Sprintf("device %s", principal.hostName)
-		}
-		if claimed != "" {
-			return fmt.Sprintf("%s via host %s", claimed, principal.hostName)
-		}
-		return fmt.Sprintf("host %s", principal.hostName)
-	}
-	if claimed == CLIActor && dashboardBearer(r.Context()) {
-		return CLIActor
-	}
-	return "the dashboard"
+	return principalFromRequest(r).actor()
 }
 
 // claimedActor keeps a forwarded actor to one bounded printable line.
