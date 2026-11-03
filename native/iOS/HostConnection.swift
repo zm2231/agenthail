@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 @MainActor
 protocol HostConnectionDelegate: AnyObject {
@@ -21,6 +22,7 @@ final class HostConnection {
     let isPreview: Bool
     private(set) var snapshot: DashboardSnapshot?
     private(set) var reachable = false
+    private(set) var holding = false
     private(set) var reconnecting = false
     private(set) var connectionError: String?
     private(set) var pushRelayURL: URL?
@@ -34,6 +36,9 @@ final class HostConnection {
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
+    var grace = ConnectionGrace()
+    private var streamOpen = false
+    private static let log = Logger(subsystem: "com.agenthail.app", category: "connection")
     lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
 
@@ -61,7 +66,7 @@ final class HostConnection {
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
 
-    var view: PairedHostView { PairedHostView(id: id, name: name, reachable: reachable, snapshot: snapshot) }
+    var view: PairedHostView { PairedHostView(id: id, name: name, reachable: reachable, holding: holding, snapshot: snapshot) }
 
     static func relayAccount(_ hostID: String) -> String { "pushRelayURL:\(hostID)" }
 
@@ -72,6 +77,8 @@ final class HostConnection {
         eventRefreshTask?.cancel()
         lastEventID = 0
         reconnecting = true
+        streamOpen = false
+        if reachable || holding { grace.contact() }
         delegate?.hostDidChange(self)
         connectionTask = Task {
             let backoff = EventRetryBackoff()
@@ -79,6 +86,7 @@ final class HostConnection {
                 do {
                     let version = try await api.version()
                     guard !Task.isCancelled, !stopped else { return }
+                    grace.contact()
                     build = version.build
                     if let value = version.pushRelayUrl, let url = URL(string: value) {
                         pushRelayURL = url
@@ -93,8 +101,7 @@ final class HostConnection {
                     }
                 } catch {
                     guard !stopped else { return }
-                    connectionError = error.localizedDescription
-                    reachable = false
+                    recordFailure(error, during: "connect")
                     if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
                         reconnecting = false
                         delegate?.hostDidChange(self)
@@ -116,12 +123,15 @@ final class HostConnection {
         eventRefreshTask?.cancel()
         catalogFeed.stop()
         reachable = false
+        holding = false
         reconnecting = false
+        grace.forget()
     }
 
     func setSnapshot(_ value: DashboardSnapshot?) {
         snapshot = value
         reachable = value != nil
+        holding = false
         delegate?.hostDidChange(self)
     }
 
@@ -141,7 +151,10 @@ final class HostConnection {
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             snapshotSeq = seq
+            if !reachable { Self.log.notice("\(self.id, privacy: .public) reachable after snapshot") }
             reachable = true
+            holding = false
+            grace.contact()
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -178,6 +191,9 @@ final class HostConnection {
                     )
                 } catch {
                     if Task.isCancelled || stopped { return }
+                    if streamOpen { grace.contact() }
+                    streamOpen = false
+                    Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
                     reconnecting = true
                     do {
                         let version = try await api.version()
@@ -198,6 +214,8 @@ final class HostConnection {
     func eventStreamConnected() async {
         guard !stopped else { return }
         reconnecting = false
+        streamOpen = true
+        grace.contact()
         if !snapshotCoversEventStream { _ = await refresh(fresh: true) } else {
             snapshotCoversEventStream = false
             delegate?.hostDidChange(self)
@@ -209,9 +227,29 @@ final class HostConnection {
     }
 
     func recordStreamInterruption(probeError: Error?) {
-        reconnecting = probeError == nil
-        reachable = probeError == nil
-        connectionError = probeError?.localizedDescription
+        guard let probeError else {
+            grace.contact()
+            reconnecting = true
+            reachable = true
+            holding = false
+            connectionError = nil
+            delegate?.hostDidChange(self)
+            return
+        }
+        recordFailure(probeError, during: "stream probe")
+    }
+
+    private func recordFailure(_ error: Error, during step: String) {
+        let held = (reachable || holding) && grace.holds(error)
+        if held {
+            Self.log.notice("\(self.id, privacy: .public) \(step, privacy: .public) failed, still shown connected: \(error.localizedDescription, privacy: .public)")
+        } else if reachable || holding {
+            Self.log.notice("\(self.id, privacy: .public) shown unreachable after \(step, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+        reachable = false
+        holding = held
+        reconnecting = held
+        connectionError = held ? nil : error.localizedDescription
         delegate?.hostDidChange(self)
     }
 

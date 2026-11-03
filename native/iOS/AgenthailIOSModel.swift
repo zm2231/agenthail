@@ -144,6 +144,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
     private var subagentServers: [String: HostConnection?] = [:]
+    private var subagentFailedUnreachable: Set<String> = []
 
     private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
@@ -278,8 +279,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func refetchMovedSubagents() {
-        for (parent, recorded) in subagentServers where server(for: parent) !== recorded {
+        for (parent, recorded) in subagentServers {
+            let current = server(for: parent)
+            let recovered = subagentFailedUnreachable.contains(parent) && current?.reachable == true
+            guard current !== recorded || recovered else { continue }
             subagentServers[parent] = nil
+            subagentFailedUnreachable.remove(parent)
             if fetchedSubagents.holds(parent) { fetchedSubagents.refetch(parent) }
         }
     }
@@ -431,6 +436,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard (session.hiddenSubagents?.count ?? 0) > 0 else {
             fetchedSubagents.drop(session.id)
             subagentServers[session.id] = nil
+            subagentFailedUnreachable.remove(session.id)
             return
         }
         let requestServer = server(for: session.id)
@@ -440,10 +446,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             guard !Task.isCancelled, server(for: session.id) === connection else { return }
             fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
             subagentServers.updateValue(connection, forKey: session.id)
+            subagentFailedUnreachable.remove(session.id)
         } catch {
             guard !Task.isCancelled, server(for: session.id) === requestServer else { return }
             fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id)
             subagentServers.updateValue(requestServer, forKey: session.id)
+            if requestServer?.reachable != true { subagentFailedUnreachable.insert(session.id) }
         }
     }
 

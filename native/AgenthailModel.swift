@@ -51,6 +51,8 @@ final class AgenthailModel: ObservableObject {
     var daemonBuildNotice: String? { AgenthailBuild.daemonNotice(app: .app(Bundle.main.infoDictionary), daemon: daemonBuild) }
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
+    var grace = ConnectionGrace()
+    private var streamOpen = false
     @Published var operationError: String?
     @Published var pendingForks: Set<String> = []
     @Published var loading = false
@@ -163,6 +165,7 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         connectionTask?.cancel()
         statusRefreshTask?.cancel()
+        if isConnected { grace.contact() }
         connectionTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled {
@@ -1138,6 +1141,8 @@ final class AgenthailModel: ObservableObject {
                     )
                 } catch {
                     if Task.isCancelled { return }
+                    if streamOpen { grace.contact() }
+                    streamOpen = false
                     reconnecting = true
                     do {
                         let reloadedAPI = try AgenthailAPI()
@@ -1214,6 +1219,7 @@ final class AgenthailModel: ObservableObject {
     private func eventStreamConnected() {
         if let api { interface.load(from: api) }
         reconnecting = false
+        streamOpen = true
         clearConnectionError()
     }
 
@@ -1237,11 +1243,16 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func clearConnectionError() {
+        grace.contact()
         if connectionError != nil { connectionError = nil }
         if daemonSlow { daemonSlow = false }
     }
 
     private func connectionFailed(_ error: Error) {
+        if isConnected, grace.holds(error) {
+            if !reconnecting { reconnecting = true }
+            return
+        }
         connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
     }
