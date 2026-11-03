@@ -31,10 +31,16 @@ final class ResyncProtocol: URLProtocol, @unchecked Sendable {
         let url = request.url!
         let name = url.host ?? ""
         let after = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "after" }?.value ?? ""
-        let snapshot = url.path == "/api/v1/snapshot"
+        let query = url.query ?? ""
+        let snapshot = url.path == "/api/v1/snapshot" || url.path == "/api/v1/projects/activity" || url.path == "/api/v1/history"
         let (status, body): (Int, String) = Self.lock.withLock {
             var host = Self.hosts[name] ?? Host(failures: 0, seq: 0, streams: [])
             defer { Self.hosts[name] = host }
+            if url.path == "/api/v1/projects/activity" { return (200, #"{"projects":[]}"#) }
+            if url.path == "/api/v1/history" { return (200, #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#) }
+            if snapshot, !query.contains("sessions=none") {
+                return (200, #"{"sessions":[],"hostEpoch":"h","catalogSeq":\#(host.seq)}"#)
+            }
             if snapshot {
                 if host.failures > 0 {
                     host.failures -= 1

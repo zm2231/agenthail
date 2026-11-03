@@ -55,8 +55,14 @@ struct ProjectPane: View {
                         }
                         if showingEarlier {
                             card("Earlier") {
-                                if contents.earlier.isEmpty { empty("No earlier sessions") }
+                                if contents.earlier.isEmpty && !model.hasEarlier(project.id) { empty("No earlier sessions") }
                                 rows(contents.earlier)
+                                if model.hasEarlier(project.id) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(maxWidth: .infinity)
+                                        .task(id: model.pages.listings[model.earlierRequest(project.id)]?.rows.count ?? -1) { await model.listEarlier(project.id) }
+                                }
                             }
                         }
                     }

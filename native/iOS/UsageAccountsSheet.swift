@@ -122,7 +122,7 @@ private struct PhoneUsageSessions: View {
         ForEach(sessions.prefix(5)) { session in
             Button { open(session.id) } label: {
                 HStack(spacing: 8) {
-                    Circle().fill(session.isWorking ? PhonePalette.working : PhonePalette.muted).frame(width: 7, height: 7)
+                    Circle().fill(SessionDisplayKind.of(session) == .working ? PhonePalette.working : PhonePalette.muted).frame(width: 7, height: 7)
                     Text(session.displayName).lineLimit(1)
                 }
                 .font(.subheadline)

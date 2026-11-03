@@ -1,15 +1,5 @@
 import Foundation
 
-extension SessionFilter {
-    var pagedScope: String? {
-        switch self {
-        case .all: return "all"
-        case .archived: return "archived"
-        case .recent, .running: return nil
-        }
-    }
-}
-
 struct ScopeTarget {
     let host: HostConnection
     let request: ScopeRequest

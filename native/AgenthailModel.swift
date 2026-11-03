@@ -61,11 +61,23 @@ final class AgenthailModel: ObservableObject {
     @Published var loading = false
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent {
-        didSet { rederive() }
+        didSet {
+            listChanged()
+            rederive()
+        }
     }
     @Published var sessionRefinement = SessionRefinement() {
-        didSet { rederive() }
+        didSet {
+            listChanged()
+            rederive()
+        }
     }
+    private(set) lazy var reader = makeReader()
+    var pages: ScopePages { reader.pages }
+    private(set) var currentView: ScopePage.View?
+    var listRereadTask: Task<Void, Never>?
+    var findTask: Task<Void, Never>?
+    var spotlightCatalog: SpotlightCatalog?
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
@@ -107,13 +119,19 @@ final class AgenthailModel: ObservableObject {
 
     /// Rebuilds the sidebar's sessions, attention and tree when one of their
     /// inputs changes, so views read them instead of rebuilding them.
-    private func rederive() {
-        let listed = snapshot?.sessions ?? []
+    func rederive() {
+        let listed = reader.joined(snapshot?.sessions ?? [])
         let listedIDs = Set(listed.map(\.id))
         knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
         sessionFamilies = SessionFamilies.build(knownSessions)
         sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
-        sessionTree = SessionTree.build(knownSessions, families: sessionFamilies, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
+        if sessionRefinement.isActive, let request = listRequest {
+            let paged = Set((pages.listings[request]?.rows ?? []).map(\.id))
+            let families = sessionFamilies.filter { family in family.sessions.contains { paged.contains($0.id) } }
+            sessionTree = SessionTree.build(knownSessions, families: families, filter: sessionFilter == .archived ? .archived : .all, attention: sessionAttention)
+        } else {
+            sessionTree = SessionTree.build(knownSessions, families: sessionFamilies, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
+        }
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {
@@ -220,7 +238,13 @@ final class AgenthailModel: ObservableObject {
         guard let api else { return false }
         setLoading(snapshot == nil)
         do {
-            let loaded = try await api.snapshot(fresh: fresh)
+            async let base = api.snapshotBase(fresh: fresh)
+            async let current = api.scopeSessions("current")
+            async let activity = api.projectActivity(fresh: fresh)
+            async let history = api.history(limit: 50)
+            let (readBase, readCurrent, readActivity, readHistory) = try await (base, current, activity, history)
+            let loaded = DashboardSnapshot(base: readBase, current: readCurrent, activity: readActivity, history: readHistory.items)
+            currentView = readCurrent.view
             adoptRefreshed(loaded)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
@@ -235,10 +259,17 @@ final class AgenthailModel: ObservableObject {
     }
 
     func adoptRefreshed(_ loaded: DashboardSnapshot) {
+        let before = Set(snapshot?.sessions.map(\.id) ?? [])
+        let hadEpoch = catalogPosition.epoch != nil
         adopt(loaded.keepingCatalog(of: snapshot, appliedThrough: catalogPosition.cursor))
-        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogFeed.isRunning {
-            catalogFeed.start()
+        reader.refreshed(removedFromCurrent: !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty)
+        if !pages.isEmpty { rederive() }
+        spotlightCatalog?.epoch(loaded.hostEpoch)
+        if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq) {
+            if hadEpoch { reader.rereadAll() }
+            if catalogFeed.isRunning { catalogFeed.start() }
         }
+        if let request = listRequest, pages.listings[request] == nil { Task { await reader.readMore(request) } }
     }
 
     // Rekeys are recorded before the snapshot is published, because publishing
@@ -382,9 +413,7 @@ final class AgenthailModel: ObservableObject {
     func openCreatedSession(_ id: String, in pane: SessionPane? = nil, started: Bool = false) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
-            var created = SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
-            created.host = snapshot?.daemon.pairedHost(owning: detail.session.id)
-            pin(created)
+            pin(detail.sessionState(open: true, host: snapshot?.daemon.pairedHost(owning: detail.session.id)))
         }
         guard let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) else { return }
         if started {
@@ -417,6 +446,7 @@ final class AgenthailModel: ObservableObject {
 
     func search(_ query: String) {
         searchQuery = query
+        findSessions(query)
         searchTask?.cancel()
         searchResults = []
         searchError = nil
@@ -463,7 +493,7 @@ final class AgenthailModel: ObservableObject {
         pane.select(session.id)
     }
 
-    private func pin(_ session: SessionState) {
+    func pin(_ session: SessionState) {
         if !(snapshot?.sessions.contains { $0.id == session.id } ?? false), !pinnedSessions.contains(where: { $0.id == session.id }) {
             pinnedSessions.append(session)
         }
@@ -1115,14 +1145,22 @@ final class AgenthailModel: ObservableObject {
         guard let current = snapshot else { return }
         let batch = current.applyingCatalog(events, after: catalogPosition.cursor)
         catalogPosition.cursor = batch.cursor
+        var reread = batch.sessionsChanged && sessionRefinement.isActive
         for removal in batch.removals {
             fetchedSubagents.sessionRemoved(removal.id, unlisted: removal.unlisted)
             if let next = removal.rekeyedTo { rekeys.record([removal.id: next]) }
+            if reader.removed(removal.id, unlisted: removal.unlisted) { reread = true }
         }
         if batch.changed {
             snapshot = batch.snapshot
+            if !pages.isEmpty {
+                reader.adoptCurrent()
+                rederive()
+            }
             reconcilePanes()
         }
+        if reread { reader.rereadAll() }
+        spotlightCatalog?.apply(upserted: batch.upserted, removed: batch.removals.map(\.id))
         if batch.needsSnapshot { Task { await refresh(fresh: true) } }
     }
 

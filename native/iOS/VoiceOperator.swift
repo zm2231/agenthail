@@ -100,7 +100,7 @@ struct AgenthailVoiceOperatorSheet: View {
                         .environment(\.transcriptRows, TranscriptRows(memory: rowMemory, session: detail.session.id))
                         .environment(\.toolCallStates, ToolCallStates(items: detail.timeline?.items ?? [], active: detail.session.status == "busy" || detail.session.waitingOn != nil))
                     } label: {
-                        Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
+                        Label(detail.orchestratorState.map { "Orchestrator · \($0)" } ?? "Agent activity", systemImage: "terminal")
                             .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                             .accessibilityIdentifier("voice-activity")
                     }

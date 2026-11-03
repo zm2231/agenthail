@@ -384,8 +384,6 @@ struct DeliverySettings: View {
     @State private var channelTarget = ""
     @State private var channelMessage = ""
 
-    private var sessions: [SessionState] { (model.snapshot?.sessions ?? []).filter { $0.remoteHostID == nil } }
-    private var writableSessions: [SessionState] { sessions.filter { !$0.isReadOnly } }
 
     var body: some View {
         Form {
@@ -419,19 +417,13 @@ struct DeliverySettings: View {
                         Button("Remove") { model.performOperation(action: "relay-remove", relayID: relay.id) }
                     }
                 }
-                Picker("When", selection: $relayFrom) {
-                    Text("Choose a session").tag("")
-                    ForEach(sessions) { Text($0.displayName).tag($0.id) }
-                }
+                SessionPickerField(title: "When", selection: $relayFrom, model: model)
                 Picker("hand off when", selection: $relayHandoff) {
                     Text("Turn finished").tag("turn_finished")
                     Text("Goal completed").tag("goal_completed")
                 }
                 TextField("finishes with text matching", text: $relayPattern)
-                Picker("hand off to", selection: $relayTo) {
-                    Text("Choose a session").tag("")
-                    ForEach(writableSessions) { Text($0.displayName).tag($0.id) }
-                }
+                SessionPickerField(title: "Hand off to", selection: $relayTo, model: model, writableOnly: true)
                 Toggle("Run this handoff once", isOn: $relayOnce)
                 Button("Add Handoff") {
                     model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce, handoff: relayHandoff)
@@ -473,10 +465,7 @@ struct DeliverySettings: View {
                         Text(channel.members.joined(separator: ", ")).foregroundStyle(DesktopPalette.text2)
                     }
                     HStack {
-                        Picker("Add", selection: $channelTarget) {
-                            Text("Choose a session").tag("")
-                            ForEach(writableSessions) { Text($0.displayName).tag($0.id) }
-                        }
+                        SessionPickerField(title: "Add", selection: $channelTarget, model: model, writableOnly: true)
                         Button("Add") { model.performOperation(action: "channel-add", channel: selectedChannel, targetID: channelTarget) }
                             .disabled(channelTarget.isEmpty)
                     }

@@ -7,31 +7,28 @@ enum SessionFilter: String, CaseIterable, Identifiable {
     case archived = "Archived"
 
     var id: String { rawValue }
+
+    var viewScope: String {
+        switch self {
+        case .running: "running"
+        case .recent: "current"
+        case .all: "all"
+        case .archived: "archived"
+        }
+    }
+
+    var pagedScope: String? {
+        switch self {
+        case .all, .archived: viewScope
+        case .recent, .running: nil
+        }
+    }
 }
 
-enum SessionStatusFilter: String, CaseIterable, Identifiable {
-    case busy
-    case idle
-    case offline
-    case unavailable
+typealias SessionStatusFilter = SessionDisplayKind
 
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .busy: return "Working"
-        case .idle: return "Idle"
-        case .offline: return "Offline"
-        case .unavailable: return "Unavailable"
-        }
-    }
-
-    func matches(_ session: SessionState) -> Bool {
-        switch self {
-        case .unavailable: return ["unknown", "notLoaded"].contains(session.status)
-        default: return session.status == rawValue
-        }
-    }
+extension SessionDisplayKind {
+    func matches(_ session: SessionState, now: Date = Date()) -> Bool { Self.of(session, now: now) == self }
 }
 
 struct SessionRefinement: Equatable {

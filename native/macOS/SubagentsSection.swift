@@ -41,7 +41,7 @@ struct SubagentsSection: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityValue(child.isWorking ? "Working" : "Idle")
+                    .accessibilityValue(SessionDisplayKind.label(child))
                 }
                 if loading || error != nil {
                     Text(error ?? "Loading subagents")

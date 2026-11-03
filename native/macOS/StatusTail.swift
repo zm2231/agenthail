@@ -26,7 +26,7 @@ struct StatusTail: View {
     private func item(_ name: String) -> some View {
         switch name {
         case "working":
-            let working = model.knownSessions.filter { $0.archived != true && $0.isWorking }.count
+            let working = model.knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
             StatusLabel(title: short ? "\(working)" : "\(working) working", spoken: "\(working) working") {
                 Circle().fill(DesktopPalette.working).frame(width: 7, height: 7)
             }

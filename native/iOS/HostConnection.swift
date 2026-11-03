@@ -43,11 +43,9 @@ final class HostConnection {
     var grace = ConnectionGrace()
     private var streamOpen = false
     private static let log = Logger(subsystem: "com.agenthail.app", category: "connection")
-    private(set) var pages = ScopePages()
-    private(set) var pageError: String?
-    private var readingScopes: Set<ScopeRequest> = []
-    private var searchGeneration: UInt64 = 0
-    private var rereadTask: Task<Void, Never>?
+    private(set) lazy var reader = makeReader()
+    var pages: ScopePages { reader.pages }
+    var pageError: String? { reader.pageError }
     lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
     var drops: ConnectionDrops?
@@ -76,7 +74,6 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        rereadTask?.cancel()
     }
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
@@ -139,7 +136,7 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
-        rereadTask?.cancel()
+        reader.cancel()
         catalogFeed.stop()
         reachable = false
         holding = false
@@ -179,14 +176,13 @@ final class HostConnection {
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
-            pages.adopt(snapshot?.sessions ?? [])
-            if !pages.listings.isEmpty, !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty { rereadPages() }
+            reader.refreshed(removedFromCurrent: !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty)
             snapshotSeq = seq
             _ = drops?.peersConnected(via: id, Set((loaded.daemon.hosts ?? []).filter { $0.state == "connected" }.map(\.id)))
             recovered(by: "snapshot")
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
-                if catalogHostEpoch != nil { rereadPages() }
+                if catalogHostEpoch != nil { reader.rereadAll() }
                 catalogHostEpoch = loaded.hostEpoch
                 catalogStreamCursor = loaded.catalogSeq ?? 0
                 if catalogFeed.isRunning { catalogFeed.start() }
@@ -208,67 +204,24 @@ final class HostConnection {
         }
     }
 
-    func readMore(_ request: ScopeRequest) async {
-        guard !stopped, reachable, !readingScopes.contains(request), let read = pages.next(request) else { return }
-        readingScopes.insert(request)
-        defer { readingScopes.remove(request) }
-        do {
-            let page = try await api.scopePage(request.scope, projectID: request.projectID, cursor: read.cursor, timeout: refreshTimeout)
-            guard !stopped else { return }
-            pageError = nil
-            if pages.append(page, to: request, after: read) { pages.adopt(snapshot?.sessions ?? []) }
-        } catch {
-            guard !stopped, !Task.isCancelled else { return }
-            pageError = error.localizedDescription
-        }
-        delegate?.hostDidChange(self)
-    }
+    func readMore(_ request: ScopeRequest) async { await reader.readMore(request) }
 
-    func search(_ query: String, scope: String) async {
-        searchGeneration += 1
-        let generation = searchGeneration
-        guard !query.isEmpty, reachable else {
-            if !pages.found.isEmpty {
-                pages.setFound([])
+    func search(_ query: String, scope: String) async { await reader.search(query, in: ScopeRequest(scope: scope)) }
+
+    func mentions(_ query: String) async throws -> [SessionState] { try await reader.mentions(query) }
+
+    private func makeReader() -> ScopeReader {
+        ScopeReader(ScopeReader.Source(
+            api: { [weak self] in self?.api },
+            current: { [weak self] in self?.snapshot?.sessions ?? [] },
+            active: { [weak self] in self.map { !$0.stopped } ?? false },
+            reachable: { [weak self] in self?.reachable ?? false },
+            changed: { [weak self] in
+                guard let self else { return }
                 delegate?.hostDidChange(self)
-            }
-            return
-        }
-        let page = try? await api.scopePage(scope, query: query, timeout: refreshTimeout)
-        guard !stopped, !Task.isCancelled, generation == searchGeneration else { return }
-        pages.setFound(page?.sessions ?? [])
-        delegate?.hostDidChange(self)
-    }
-
-    func mentions(_ query: String) async throws -> [SessionState] {
-        try await api.scopePage("all", query: query, limit: 20, timeout: refreshTimeout).sessions
-    }
-
-    private func rereadPages() {
-        rereadTask?.cancel()
-        rereadTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self, !Task.isCancelled else { return }
-            for request in pages.listings.keys.sorted() { await reread(request) }
-        }
-    }
-
-    private func reread(_ request: ScopeRequest) async {
-        guard !stopped, let start = pages.restart(request) else { return }
-        var rows: [SessionState] = []
-        var cursor: String?
-        do {
-            repeat {
-                let page = try await api.scopePage(request.scope, projectID: request.projectID, cursor: cursor, limit: 200, timeout: refreshTimeout)
-                rows += page.sessions
-                cursor = page.nextCursor
-            } while cursor != nil && rows.count < start.rows
-        } catch {
-            return
-        }
-        guard !stopped, !Task.isCancelled, pages.replace(request, rows: rows, cursor: cursor, generation: start.generation) else { return }
-        pages.adopt(snapshot?.sessions ?? [])
-        delegate?.hostDidChange(self)
+            },
+            timeout: { [weak self] in self?.refreshTimeout ?? 25 }
+        ))
     }
 
     private func startEvents() {
@@ -420,14 +373,14 @@ final class HostConnection {
         if batch.changed {
             if batch.sessionsChanged { snapshotSeq = delegate?.nextStateRequest() ?? snapshotSeq }
             snapshot = batch.snapshot
-            pages.adopt(batch.snapshot.sessions)
+            reader.adoptCurrent()
             var reread = false
             for removal in batch.removals {
-                if pages.remove(removal.id) || removal.unlisted && !pages.listings.isEmpty { reread = true }
+                if reader.removed(removal.id, unlisted: removal.unlisted) { reread = true }
                 delegate?.host(self, removedSession: removal.id, unlisted: removal.unlisted)
                 if let next = removal.rekeyedTo { delegate?.host(self, rekeyed: [removal.id: next]) }
             }
-            if reread { rereadPages() }
+            if reread { reader.rereadAll() }
             delegate?.hostDidChange(self)
         }
         return batch.needsSnapshot

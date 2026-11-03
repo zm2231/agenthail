@@ -16,6 +16,7 @@ SOURCES=(
   AgenthailAPI.swift
   TaggedResponses.swift
   AgenthailModel.swift
+  AgenthailModelPaging.swift
   AgenthailModels.swift
   ComposerAttachment.swift
   ComposerTextSync.swift
@@ -37,6 +38,11 @@ SOURCES=(
   SessionSelection.swift
   ProjectActions.swift
   ProjectContents.swift
+  ScopePages.swift
+  ScopeReader.swift
+  SessionDisplayKind.swift
+  SessionDetailState.swift
+  SnapshotParts.swift
   SessionRowTime.swift
   HostNames.swift
   ClaudeRootLabels.swift
@@ -111,6 +117,7 @@ SOURCES=(
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
+  macOS/SpotlightCatalog.swift
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptAgentBlocks.swift

@@ -30,9 +30,7 @@ struct SessionRefinementMenu: View {
         .accessibilityLabel("Filter sessions")
     }
 
-    private var surfaces: [String] {
-        SessionRefinement.surfaces(model.knownSessions, configured: model.snapshot?.surfaces ?? [])
-    }
+    private var surfaces: [String] { model.refinementSurfaces }
 }
 
 struct SessionRefinementBar: View {

@@ -192,12 +192,7 @@ struct SessionRouteView: View {
         if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
         if let value = model.fetchedSubagents.session(sessionID) { return value }
         guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
-        var unlisted = SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-                                    status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
-                                    current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-                                    readOnlyReason: detail.readOnlyReason)
-        unlisted.host = model.snapshot?.daemon.pairedHost(owning: sessionID)
-        return unlisted
+        return detail.sessionState(open: false, host: model.snapshot?.daemon.pairedHost(owning: sessionID))
     }
     var body: some View {
         Group {
@@ -675,7 +670,7 @@ struct SessionScreen: View {
             if !atLatest && detail != nil { jumpToLatest.padding(.bottom, 8) }
         }
         .edgeBar(.top, spacing: 0) {
-            if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+            if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
@@ -1324,6 +1319,7 @@ struct AttachmentRow: View {
 
 struct SessionSummary: View {
     let detail: SessionDetail
+    let session: SessionState
     let openDetails: () -> Void
 
     var body: some View {
@@ -1352,17 +1348,16 @@ struct SessionSummary: View {
         .buttonStyle(.plain)
         .accessibilityHint("Open session details, context, model and controls")
     }
-    private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
         TimelineView(.everyMinute) { context in
             statusLabel(now: context.date)
         }
     }
     private func statusLabel(now: Date) -> some View {
-        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
-              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
-        .font(.subheadline)
-        .foregroundStyle(detail.session.status == "busy" ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
+        let kind = SessionDisplayKind.of(session, now: now)
+        return Label(SessionDisplayKind.label(session, now: now, waitingPlace: detail.waitingPlace, limit: detail.limitLabel), systemImage: kind.symbol)
+            .font(.subheadline)
+            .foregroundStyle(kind == .working ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
@@ -1399,7 +1394,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.waitingPlace?.label ?? detail.limitLabel ?? (liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized))
+                    LabeledContent("Status", value: SessionDisplayKind.label(liveSession, waitingPlace: detail.waitingPlace, limit: detail.limitLabel))
                     if let value = detail.modelLabel { LabeledContent("Model", value: value) }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
@@ -1486,7 +1481,7 @@ struct SessionInspector: View {
                                 HStack {
                                     Text(SessionFamilies.label(child)).lineLimit(1)
                                     Spacer(minLength: 0)
-                                    if child.isWorking { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
+                                    if SessionDisplayKind.of(child) == .working { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
                                 }
                             }
                             .accessibilityIdentifier("subagent-" + child.id)
@@ -1631,14 +1626,15 @@ struct IOSSessionRow: View {
 
     @ViewBuilder
     private func meta(spaced: Bool) -> some View {
+        let kind = SessionDisplayKind.of(session)
         Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(PhonePalette.muted)
             .lineLimit(1).fixedSize()
-        if let host = session.shortRemoteHostName, showsHost || session.isUnavailable {
-            IOSHostBadge(name: host, unavailable: session.isUnavailable)
+        if let host = session.shortRemoteHostName, showsHost || kind == .unavailable {
+            IOSHostBadge(name: host, unavailable: kind == .unavailable)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("On \(host)")
         }
-        if session.isWaitingOnYou {
+        if kind == .waiting {
             HStack(spacing: 4) {
                 Image(systemName: "questionmark.bubble")
                 Text(session.waitingPlace?.label ?? "Waiting on you")
@@ -1647,13 +1643,13 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.attention)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isUnavailable {
+        } else if kind == .unavailable {
             Text("Unavailable")
                 .font(.caption)
                 .foregroundStyle(PhonePalette.failed)
                 .lineLimit(1)
                 .fixedSize()
-        } else if let limit = session.limitLabel, !session.isWorking {
+        } else if kind == .limited, let limit = session.limitLabel {
             HStack(spacing: 4) {
                 Image(systemName: "gauge.with.dots.needle.100percent")
                 Text(limit)
@@ -1662,7 +1658,7 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.muted)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isWorking {
+        } else if kind == .working {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")
                 Text("Working")
@@ -1671,7 +1667,7 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.working)
             .lineLimit(1)
             .fixedSize()
-        } else if session.isWaitingOnBackground {
+        } else if kind == .finishing {
             HStack(spacing: 4) {
                 Image(systemName: "hourglass")
                 Text("Background work")
@@ -1698,13 +1694,14 @@ struct IOSSessionRow: View {
     }
 
     var body: some View {
+        let kind = SessionDisplayKind.of(session)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !showsTime {
                     EmptyView()
-                } else if session.isWorking {
+                } else if kind == .working {
                     TimelineView(.everyMinute) { context in
                         Text(SessionRowTime.working(session, now: context.date)).font(.caption).foregroundStyle(PhonePalette.muted)
                             .lineLimit(1).fixedSize()
@@ -1723,9 +1720,9 @@ struct IOSSessionRow: View {
                     VStack(alignment: .leading, spacing: 4) { meta(spaced: false) }
                 }
             }
-            if session.isUnavailable, let reason = session.unavailableReason {
+            if kind == .unavailable, let reason = session.unavailableReason {
                 Text(reason).font(.caption).foregroundStyle(PhonePalette.muted)
-            } else if session.isWorking, !session.isWaitingOnYou, let activity = session.activity {
+            } else if kind == .working, let activity = session.activity {
                 TimelineView(.everyMinute) { context in
                     if let note = activity.quietNote(now: context.date) {
                         Text(note).font(.caption).foregroundStyle(PhonePalette.muted)

@@ -3,9 +3,13 @@ import Foundation
 struct ScopeRequest: Hashable, Comparable {
     let scope: String
     var projectID: String? = nil
+    var surface: String? = nil
+    var status: String? = nil
+    var query: String? = nil
 
     static func < (lhs: ScopeRequest, rhs: ScopeRequest) -> Bool {
-        (lhs.scope, lhs.projectID ?? "") < (rhs.scope, rhs.projectID ?? "")
+        [lhs.scope, lhs.projectID ?? "", lhs.surface ?? "", lhs.status ?? "", lhs.query ?? ""]
+            .lexicographicallyPrecedes([rhs.scope, rhs.projectID ?? "", rhs.surface ?? "", rhs.status ?? "", rhs.query ?? ""])
     }
 }
 
@@ -58,6 +62,10 @@ struct ScopePages {
         listing.finished = cursor == nil
         listings[request] = listing
         return true
+    }
+
+    mutating func drop(_ request: ScopeRequest) {
+        listings.removeValue(forKey: request)
     }
 
     mutating func setFound(_ rows: [SessionState]) {

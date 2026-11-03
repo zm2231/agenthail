@@ -25,6 +25,17 @@ final class SessionListChromeTests: XCTestCase {
         XCTAssertEqual(SessionRing.kind(background, needsYou: false), .background)
 
         XCTAssertEqual(SessionRing.kind(session(), needsYou: false), .idle)
+
+        var unreachableQuestion = waiting
+        unreachableQuestion.host = SessionHost(id: "h", name: "build-server", state: "unreachable")
+        XCTAssertEqual(SessionRing.kind(unreachableQuestion, needsYou: false), .unavailable, "a question on a computer out of reach cannot be answered, as the daemon says")
+        var busyFinishing = session(status: "busy")
+        busyFinishing.backgroundTasks = BackgroundTasks(running: true, source: "transcript")
+        XCTAssertEqual(SessionRing.kind(busyFinishing, needsYou: false), .working)
+        var staleReason = session()
+        staleReason.host = SessionHost(id: "h", name: "build-server", state: "connected")
+        staleReason.unavailableReason = "build-server is offline"
+        XCTAssertEqual(SessionRing.kind(staleReason, needsYou: false), .idle, "a connected computer's leftover reason does not make the row unavailable")
     }
 
     func testEveryRingHasWordsAndIdleHasNone() {

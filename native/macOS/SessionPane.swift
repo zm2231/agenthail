@@ -358,6 +358,7 @@ final class SessionPane: ObservableObject, Identifiable {
         guard id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
+        if let selectedSnapshot { model.pin(selectedSnapshot) }
         frozenOlderCursor = nil
         composerDraft = model.draft(for: id)
         selectedSessionID = id

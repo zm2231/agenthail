@@ -22,10 +22,13 @@ struct SpotlightEntry: Equatable {
     }
 
     static func changes(from indexed: [String: SpotlightEntry], to sessions: [SessionState]) -> (upserts: [SpotlightEntry], removals: [String]) {
+        changes(from: indexed, to: sessions.map(SpotlightEntry.init))
+    }
+
+    static func changes(from indexed: [String: SpotlightEntry], to entries: [SpotlightEntry]) -> (upserts: [SpotlightEntry], removals: [String]) {
         var seen = Set<String>()
         var upserts: [SpotlightEntry] = []
-        for session in sessions where seen.insert(session.id).inserted {
-            let entry = SpotlightEntry(session)
+        for entry in entries where seen.insert(entry.id).inserted {
             if indexed[entry.id] != entry { upserts.append(entry) }
         }
         let removals = indexed.keys.filter { !seen.contains($0) }.sorted()
@@ -44,7 +47,7 @@ protocol SpotlightStore {
 final class SpotlightSync {
     private enum Target {
         case off
-        case sessions([SessionState])
+        case entries([SpotlightEntry])
     }
 
     private let store: SpotlightStore
@@ -69,7 +72,11 @@ final class SpotlightSync {
     }
 
     func update(_ sessions: [SessionState]) {
-        set(.sessions(sessions))
+        update(entries: sessions.map(SpotlightEntry.init))
+    }
+
+    func update(entries: [SpotlightEntry]) {
+        set(.entries(entries))
     }
 
     func clear() {
@@ -126,13 +133,13 @@ final class SpotlightSync {
             try await store.deleteAll()
             indexed.removeAll()
             cleared = true
-        case .sessions(let sessions):
+        case .entries(let entries):
             if !cleared {
                 try await store.deleteAll()
                 indexed.removeAll()
                 cleared = true
             }
-            let changes = SpotlightEntry.changes(from: indexed, to: sessions)
+            let changes = SpotlightEntry.changes(from: indexed, to: entries)
             if !changes.removals.isEmpty {
                 try await store.delete(changes.removals)
                 changes.removals.forEach { indexed.removeValue(forKey: $0) }
