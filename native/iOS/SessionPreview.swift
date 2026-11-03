@@ -266,7 +266,7 @@ struct SessionPreview: View {
             func ago(_ minutes: Double) -> String { stamp.string(from: Date().addingTimeInterval(-minutes * 60)) }
             var timed = snapshot["sessions"] as! [[String: Any]]
             timed[0]["lastActive"] = ago(1)
-            timed[0]["activity"] = ["busySince": ago(12), "lastProgressAt": ago(1)]
+            timed[0]["activity"] = ["busySince": ago(25), "lastProgressAt": ago(12)]
             timed[1]["lastActive"] = ago(3 * 24 * 60)
             timed[1]["current"] = true
             var recent = timed[1]

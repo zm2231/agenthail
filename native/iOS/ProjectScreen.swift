@@ -106,7 +106,7 @@ struct ProjectScreen: View {
                     Button { openSession(session.id) } label: {
                         HStack(alignment: .top, spacing: 12) {
                             SessionAvatar(surface: session.surface, ring: SessionRing.kind(session, needsYou: model.sessionAttention[session.id] != nil))
-                            IOSSessionRow(session: session, title: "@" + lead.name, showsHost: true)
+                            IOSSessionRow(session: session, title: "@" + lead.name, showsHost: true, showsTime: false)
                         }
                     }
                     .buttonStyle(.plain)

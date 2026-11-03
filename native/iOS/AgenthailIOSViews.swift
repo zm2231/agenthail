@@ -1623,6 +1623,7 @@ struct IOSSessionRow: View {
     var title: String? = nil
     var family: SessionFamily? = nil
     var showsHost = true
+    var showsTime = true
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var displayTitle: String {
         title ?? SessionStyle.title(session)
@@ -1701,7 +1702,9 @@ struct IOSSessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if session.isWorking {
+                if !showsTime {
+                    EmptyView()
+                } else if session.isWorking {
                     Text(SessionRowTime.working(session, now: Date())).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()
                 } else if let value = session.lastActive, let date = TimestampParser.date(value) {
