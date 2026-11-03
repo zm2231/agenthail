@@ -259,6 +259,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func activateTab(_ id: String) {
         tabs.activate(id)
+        shownProjectID = nil
         showActiveTab()
     }
 
@@ -269,7 +270,7 @@ final class SessionPane: ObservableObject, Identifiable {
     func closeTab(_ id: String) {
         let wasActive = tabs.active == id
         tabs.close(id)
-        if wasActive { showActiveTab() }
+        if wasActive && shownProjectID == nil { showActiveTab() }
     }
 
     /// Unarchives a session whose tab closed when it was archived, and opens
@@ -289,12 +290,13 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func closeOtherTabs(_ id: String) {
         tabs.closeOthers(id)
-        showActiveTab()
+        if shownProjectID == nil { showActiveTab() }
     }
 
     func stepTab(_ offset: Int) {
         guard let next = tabs.neighbour(offset) else { return }
         tabs.activate(next)
+        shownProjectID = nil
         showActiveTab()
     }
 
@@ -349,6 +351,7 @@ final class SessionPane: ObservableObject, Identifiable {
             archivedTab = archived
         }
         let shown = tabs.active == SessionTabs.newSession ? nil : tabs.active
+        guard shownProjectID == nil else { return }
         if shown != selectedSessionID || shown == nil && newSession == nil { showActiveTab() }
     }
 
@@ -519,6 +522,7 @@ final class SessionPane: ObservableObject, Identifiable {
         if tabsEnabled {
             reconcileTabs(sessions)
         }
+        guard shownProjectID == nil else { return }
         if let selected = selectedSessionID, model.resolveSessionID(selected) != selected {
             show(model.resolveSessionID(selected))
             return

@@ -20,17 +20,18 @@ struct ProjectContents: Equatable {
         return [.resume(enabled: resumable(session), lifecycle: resumable(session) && session.capabilities.lifecycle.resume), .open]
     }
 
-    static func running(_ session: SessionState) -> Bool {
-        session.isWorking || session.waitingOn != nil || session.queueCount > 0
-    }
+    static func running(_ session: SessionState) -> Bool { SessionTree.includes(session, in: .running) }
 
     static func build(lead: ProjectState.Lead?, leadID: String?, projectID: String, sessions: [SessionState]) -> ProjectContents {
         var contents = ProjectContents(lead: lead)
         contents.leadSession = leadID.flatMap { id in sessions.first { $0.id == id } }
         let members = sessions.filter { $0.project?.id == projectID && $0.subagent == nil && $0.archived != true && $0.id != leadID }
+            .map { (session: $0, active: $0.lastActive.flatMap(SessionTree.parseTimestamp) ?? .distantPast) }
+            .sorted { $0.active > $1.active }
+            .map(\.session)
         contents.running = members.filter(running)
         contents.recent = members.filter { $0.current && !running($0) }
-        contents.earlier = members.filter { !$0.current && !running($0) }.sorted { ($0.lastActive ?? "") > ($1.lastActive ?? "") }
+        contents.earlier = members.filter { !$0.current && !running($0) }
         return contents
     }
 }

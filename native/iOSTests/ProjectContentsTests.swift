@@ -50,6 +50,27 @@ final class ProjectContentsTests: XCTestCase {
         XCTAssertEqual(contents.earlier.map(\.id), ["one::old", "one::older"])
     }
 
+    func testRunningAgreesWithTheSessionListAndRecentIsNewestFirstAcrossComputers() throws {
+        let state = try JSONDecoder().decode(ProjectState.self, from: JSONSerialization.data(withJSONObject: Self.project(lead: nil)))
+        let listed = ListedProject(state: state, hostID: "one")
+        var queued = Self.row("one::queued", current: true, lastActive: "2026-11-01T03:00:00Z")
+        queued["queueCount"] = 1
+        var far = Self.row("forge::far", current: true, lastActive: "2026-11-01T11:20:00.5Z")
+        far["host"] = ["id": "forge", "name": "forge", "state": "connected"]
+        let rows = try Self.sessions([
+            Self.row("one::busy", current: true, status: "busy"),
+            queued,
+            Self.row("one::photos", current: true, lastActive: "2026-11-01T10:00:00Z"),
+            far,
+        ])
+
+        let contents = ProjectContents.build(listed, sessions: rows)
+
+        XCTAssertEqual(contents.running.map(\.id), rows.filter { SessionTree.includes($0, in: .running) }.map(\.id), "Running disagrees with the session list's Running")
+        XCTAssertEqual(contents.running.map(\.id), ["one::busy"], "a queued idle session counted as running")
+        XCTAssertEqual(contents.recent.map(\.id), ["forge::far", "one::photos", "one::queued"], "Recent is not newest first across computers")
+    }
+
     func testAProjectWithoutALeadOffersOne() throws {
         let state = try JSONDecoder().decode(ProjectState.self, from: JSONSerialization.data(withJSONObject: Self.project(lead: nil)))
         let contents = ProjectContents.build(ListedProject(state: state, hostID: "one"), sessions: [])
