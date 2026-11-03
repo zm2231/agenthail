@@ -41,6 +41,11 @@ func (d *Daemon) registerMCPTools(server *mcp.Server) {
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_requests", Description: "The sessions you can read that are waiting on a prompt or question, or one session's open requests, in one call (prompts clipped to fit; pass requestId for one request's longer prompt). If truncated is true, total says how many there are."}, d.mcpRequests)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_ledger_read", Description: "Your project's intent ledger: the board, or one list (goals, asks, decisions, questions, work, ready), paged."}, d.mcpLedgerRead)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_read", Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."}, d.mcpRead)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_projects", Description: "The projects on this host and its paired hosts, with their coordinators. A project marked conflict has coordinators on two hosts and cannot be reached until one is chosen."}, d.mcpProjects)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_send", Description: "Send a message to a session (target) or to a project's coordinator (project). Queued by default; sessions you spawned or lead can also take mode now. A queued message may go up to your spawner or your project's coordinator, attributed to you."}, d.mcpSend)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."}, d.mcpSteer)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."}, d.mcpInterrupt)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_goal", Description: "Set, edit, clear, pause or resume the goal of a Codex session you spawned or, as coordinator, lead, or change its token budget."}, d.mcpGoal)
 }
 
 func addMCPTool[In any](server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {
