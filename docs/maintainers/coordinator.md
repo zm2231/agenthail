@@ -52,6 +52,7 @@ The dashboard shows the coordinator in the project header as `@name`, or `host::
 - `@<name>` reaches this host's coordinator by name. An `@<name>` that no session or coordinator here holds reaches the paired host's coordinator of that name; a name several hosts' coordinators share is refused with each `host::@name`.
 - `@lead` reaches the coordinator of the sender's project: the project of the calling session's folder when the registry knows that session, otherwise the current folder.
 - A paired host's coordinator is reached through its owner with the routed action `coordinator-send`, which delivers or starts it there. `--stream` and `--reply` need its conversation, so they follow its current session once it has one.
+- `coordinator-send` takes either `name`, a coordinator on the host that runs the action, or `project`, a project id or name resolved by the same rules as `@<project>-lead`. A project's lead on a paired host is reached through that host, with the sender, model and author carried the way a routed action carries them. Its reply names the coordinator as `ref`. A request a paired host sent is not passed on to a lead on a third host; it is refused with `host_transit`. Voice's `voice_send_to_lead` is this action.
 - `lead` is reserved and cannot name a session.
 - A coordinator cannot take a name held by a conversation still starting, and a conversation cannot start under a coordinator's name. See [launchers](launchers.md#names).
 

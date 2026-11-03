@@ -44,11 +44,13 @@ func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request das
 		return
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		d.projectAction(r, w, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		result, err := d.doProjectAction(r.Context(), principalFromRequest(r), projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		writeActionResult(w, result, err)
 		return
 	}
 	if strings.HasPrefix(request.Action, "coordinator-") {
-		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
+		result, err := d.doCoordinatorAction(r.Context(), principalFromRequest(r), coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Project: request.Project, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
+		writeActionResult(w, result, err)
 		return
 	}
 	if operation, typed := typedActions[request.Action]; typed {
@@ -72,5 +74,6 @@ func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request das
 		d.dashboardRuntimeEnsure(w, r, request)
 		return
 	}
-	d.dashboardSessionAction(w, r, request)
+	result, err := d.doSessionAction(r.Context(), principalFromRequest(r), request)
+	writeActionResult(w, result, err)
 }

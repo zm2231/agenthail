@@ -372,17 +372,15 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 	return rows, nil
 }
 
-// limitResumeAction resumes a stopped session now, whatever its reset, or
+// doLimitResume resumes a stopped session now, whatever its reset, or
 // keeps it from being resumed for its current stop.
-func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resume bool) {
+func (d *Daemon) doLimitResume(sessionID string, resume bool) (actionResult, error) {
 	stop, found, err := d.Registry.LimitResumeFor(sessionID)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	if !found || stop.State == registry.LimitResumeReleased {
-		writeAPIError(w, http.StatusConflict, "conflict", "this session is not stopped by a usage limit")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "conflict", "this session is not stopped by a usage limit")
 	}
 	var moved bool
 	if !d.unlessLimitMoving(sessionID, func() {
@@ -392,16 +390,13 @@ func (d *Daemon) limitResumeAction(w http.ResponseWriter, sessionID string, resu
 			moved, err = d.setLimitResume(stop, limitWaiting, registry.LimitResumeCanceled, time.Now())
 		}
 	}) {
-		writeAPIError(w, http.StatusConflict, "conflict", "this session is moving to another Claude account")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "conflict", "this session is moving to another Claude account")
 	}
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	if !moved {
-		writeAPIError(w, http.StatusConflict, "conflict", "the session's usage-limit stop changed; check it again")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "conflict", "the session's usage-limit stop changed; check it again")
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return actionOK(map[string]any{"ok": true}), nil
 }

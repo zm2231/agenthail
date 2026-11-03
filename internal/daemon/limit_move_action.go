@@ -21,15 +21,13 @@ func (d *Daemon) releaseMovedLimitStop(sessionID string) {
 	d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, time.Now()))
 }
 
-func (d *Daemon) limitMoveAction(w http.ResponseWriter, r *http.Request, sessionID, root string, stopTerminal bool) {
+func (d *Daemon) doLimitMove(ctx context.Context, sessionID, root string, stopTerminal bool) (actionResult, error) {
 	claimed, moving := d.claimLimitMove(sessionID, "")
 	if moving {
-		writeAPIError(w, http.StatusConflict, "move_busy", "this session is already moving to another Claude account")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "move_busy", "this session is already moving to another Claude account")
 	}
 	if !claimed {
-		writeAPIError(w, http.StatusConflict, "move_refused", "this session is not waiting on a usage limit")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", "this session is not waiting on a usage limit")
 	}
 	defer d.unclaimLimitMove(sessionID)
 	if root == "" {
@@ -38,24 +36,23 @@ func (d *Daemon) limitMoveAction(w http.ResponseWriter, r *http.Request, session
 		}
 	}
 	if root == "" {
-		writeAPIError(w, http.StatusConflict, "move_refused", "no other Claude account has room for this session now")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", "no other Claude account has room for this session now")
 	}
-	result, err := d.moveSessionToRoot(context.WithoutCancel(r.Context()), sessionMoveRequest{SessionID: sessionID, Root: root, StopTerminal: stopTerminal})
+	result, err := d.moveSessionToRoot(context.WithoutCancel(ctx), sessionMoveRequest{SessionID: sessionID, Root: root, StopTerminal: stopTerminal})
 	var refused MoveRefusedError
 	var busy *surface.AdoptBusyError
 	var consent *surface.AdoptConsentError
 	switch {
 	case err == nil:
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+		return actionOK(map[string]any{"ok": true, "result": result}), nil
 	case errors.As(err, &busy):
-		writeAPIErrorWith(w, http.StatusConflict, "move_busy", err.Error(), map[string]any{"busy": busy.Reason})
+		return actionResult{}, &actionError{Status: http.StatusConflict, Code: "move_busy", Message: err.Error(), Extra: map[string]any{"busy": busy.Reason}}
 	case errors.As(err, &consent):
-		writeAPIError(w, http.StatusConflict, "move_needs_consent", err.Error())
+		return actionResult{}, actionFailed(http.StatusConflict, "move_needs_consent", err.Error())
 	case errors.As(err, &refused):
-		writeAPIError(w, http.StatusConflict, "move_refused", err.Error())
+		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", err.Error())
 	default:
-		writeAPIError(w, http.StatusBadGateway, "move_failed", err.Error())
+		return actionResult{}, actionFailed(http.StatusBadGateway, "move_failed", err.Error())
 	}
 }
 

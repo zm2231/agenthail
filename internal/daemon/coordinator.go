@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -66,6 +67,7 @@ type coordinatorRequest struct {
 	SessionID       string
 	SourceSessionID string
 	ProjectID       string
+	Project         string
 	Name            string
 	Surface         string
 	Cwd             string
@@ -84,54 +86,46 @@ type coordinatorRequest struct {
 // coordinatorAction sets or clears a coordinator on the host that owns it.
 // A set runs where its conversation lives, which the action router picks
 // from the session or the host the request names.
-func (d *Daemon) coordinatorAction(r *http.Request, w http.ResponseWriter, request coordinatorRequest) {
-	ctx := r.Context()
+func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request coordinatorRequest) (actionResult, error) {
 	switch request.Action {
 	case "coordinator-set":
 		session, err := d.Registry.Session(request.SessionID)
 		if err != nil {
-			writeAPIError(w, http.StatusNotFound, "session_not_found", fmt.Sprintf("no session %s on this host", request.SessionID))
-			return
+			return actionResult{}, actionFailed(http.StatusNotFound, "session_not_found", fmt.Sprintf("no session %s on this host", request.SessionID))
 		}
 		if owner, err := d.Registry.SessionHost(session.ID); err != nil || owner != "" || session.Cwd == "" {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s has no working directory on this host to start again in", session.ID))
-			return
+			return actionResult{}, invalidRequest(fmt.Sprintf("%s has no working directory on this host to start again in", session.ID))
 		}
-		project, ok := d.coordinatorProject(ctx, w, session.Cwd)
-		if !ok {
-			return
+		project, err := d.coordinatorProject(ctx, session.Cwd)
+		if err != nil {
+			return actionResult{}, err
 		}
 		spec, err := d.coordinatorSpec(request, project, string(session.Surface), session.Cwd, session.ConfiguredModel)
 		if err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return actionResult{}, invalidRequest(err.Error())
 		}
-		d.assignCoordinator(r, w, request, spec, session.ID)
+		return d.assignCoordinator(ctx, p, request, spec, session.ID)
 	case "coordinator-new":
 		kind := surface.SurfaceKind(request.Surface)
 		if kind != surface.KindClaude && kind != surface.KindCodex {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("a coordinator is a claude or codex conversation, not %q", request.Surface))
-			return
+			return actionResult{}, invalidRequest(fmt.Sprintf("a coordinator is a claude or codex conversation, not %q", request.Surface))
 		}
 		if _, ok := d.adapters().ForSurface(kind).(surface.SessionStarter); !ok {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s is not configured to start conversations on %s", kind, d.hostIdentity().Name))
-			return
+			return actionResult{}, invalidRequest(fmt.Sprintf("%s is not configured to start conversations on %s", kind, d.hostIdentity().Name))
 		}
 		folder := request.Cwd
 		if folder == "" {
 			folder = request.Path
 		}
 		if !filepath.IsAbs(folder) {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a coordinator needs an absolute folder on its host")
-			return
+			return actionResult{}, invalidRequest("a coordinator needs an absolute folder on its host")
 		}
 		if info, err := os.Stat(folder); err != nil || !info.IsDir() {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s is not a folder on %s", folder, d.hostIdentity().Name))
-			return
+			return actionResult{}, invalidRequest(fmt.Sprintf("%s is not a folder on %s", folder, d.hostIdentity().Name))
 		}
-		project, ok := d.coordinatorProject(ctx, w, folder)
-		if !ok {
-			return
+		project, err := d.coordinatorProject(ctx, folder)
+		if err != nil {
+			return actionResult{}, err
 		}
 		cwd := request.Cwd
 		if cwd == "" {
@@ -139,64 +133,85 @@ func (d *Daemon) coordinatorAction(r *http.Request, w http.ResponseWriter, reque
 		}
 		spec, err := d.coordinatorSpec(request, project, string(kind), cwd, request.Model)
 		if err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return actionResult{}, invalidRequest(err.Error())
 		}
-		d.assignCoordinator(r, w, request, spec, "")
+		return d.assignCoordinator(ctx, p, request, spec, "")
 	case "coordinator-clear":
-		d.clearCoordinator(r, w, request)
+		return d.clearCoordinator(ctx, p, request)
 	case "coordinator-send":
-		d.sendToCoordinator(r, w, request)
+		return d.sendToCoordinator(ctx, request)
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "unknown coordinator action")
+		return actionResult{}, invalidRequest("unknown coordinator action")
 	}
 }
 
-// sendToCoordinator delivers to this host's coordinator by name, starting
-// its conversation when it has none, for a sender that cannot name a session
-// because the coordinator may not have one yet.
-func (d *Daemon) sendToCoordinator(r *http.Request, w http.ResponseWriter, request coordinatorRequest) {
+type coordinatorSendReply struct {
+	OK      bool              `json:"ok"`
+	Ref     string            `json:"ref"`
+	Result  *delivery.Receipt `json:"result"`
+	Started bool              `json:"started"`
+}
+
+// sendToCoordinator delivers to a coordinator named directly on this host, or
+// to a project's lead on this host or a paired one, starting its
+// conversation when it has none.
+func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorRequest) (actionResult, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(request.Name), "@")
-	if name == "" || strings.TrimSpace(request.Message) == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "a coordinator name and a message are required")
-		return
+	project := strings.TrimSpace(request.Project)
+	if name != "" && project != "" {
+		return actionResult{}, invalidRequest("name a coordinator or a project, not both")
 	}
-	spec, err := d.Registry.CoordinatorNamed(name)
-	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
-		return
+	if name == "" && project == "" || strings.TrimSpace(request.Message) == "" {
+		return actionResult{}, invalidRequest("a coordinator name or a project, and a message, are required")
+	}
+	var spec registry.CoordinatorSpec
+	var err error
+	if name != "" {
+		if spec, err = d.Registry.CoordinatorNamed(name); err != nil {
+			return actionResult{}, actionFailed(http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
+		}
+	} else if spec, err = d.projectLead(project); err != nil {
+		return actionResult{}, actionFailed(http.StatusConflict, "no_lead", err.Error())
 	}
 	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
-		return
+		return actionResult{}, invalidRequest("author must be \"person\" and name no source session when set")
 	}
 	if request.SourceSessionID != "" {
 		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "source session not found")
-			return
+			return actionResult{}, invalidRequest("source session not found")
 		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	outcome, err := d.coordinator().Deliver(ctx, spec, request.Message, surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName})
-	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, "delivery_failed", err.Error())
-		return
+	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName}
+	reply := coordinatorSendReply{OK: true, Ref: d.coordinator().Ref(spec)}
+	if spec.HostID != "" {
+		reply.Result, reply.Started, err = d.sendToPeerCoordinator(ctx, spec, request.Message, options)
+	} else {
+		var outcome *coordinator.Outcome
+		if outcome, err = d.coordinator().Deliver(ctx, spec, request.Message, options); err == nil {
+			reply.Result, reply.Started = outcome.Receipt, outcome.Started
+		}
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": outcome.Receipt, "started": outcome.Started})
+	var refused *actionError
+	if errors.As(err, &refused) {
+		return actionResult{}, err
+	}
+	if err != nil {
+		return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())
+	}
+	return actionOK(reply), nil
 }
 
-func (d *Daemon) coordinatorProject(ctx context.Context, w http.ResponseWriter, folder string) (*CatalogProject, bool) {
+func (d *Daemon) coordinatorProject(ctx context.Context, folder string) (*CatalogProject, error) {
 	project, err := ResolvePathProject(ctx, d.Registry, folder)
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("find the project of %s: %s", folder, err))
-		return nil, false
+		return nil, invalidRequest(fmt.Sprintf("find the project of %s: %s", folder, err))
 	}
 	if project == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s is not in a project on %s; use a Git repository or run 'agenthail project add <folder>'", folder, d.hostIdentity().Name))
-		return nil, false
+		return nil, invalidRequest(fmt.Sprintf("%s is not in a project on %s; use a Git repository or run 'agenthail project add <folder>'", folder, d.hostIdentity().Name))
 	}
-	return project, true
+	return project, nil
 }
 
 func (d *Daemon) coordinatorSpec(request coordinatorRequest, project *CatalogProject, agent, cwd, model string) (registry.CoordinatorSpec, error) {
@@ -237,8 +252,8 @@ func DefaultCoordinatorName(displayName string) string {
 // coordinatorCaller names who changes a coordinator: the session that ran
 // the command, qualified with its host, else the person or device acting.
 // A paired host names its own caller.
-func (d *Daemon) coordinatorCaller(r *http.Request, request coordinatorRequest) string {
-	if _, fromHost := requestingHost(r.Context()); fromHost && strings.TrimSpace(request.ChangedBy) != "" {
+func (d *Daemon) coordinatorCaller(ctx context.Context, p principal, request coordinatorRequest) string {
+	if _, fromHost := requestingHost(ctx); fromHost && strings.TrimSpace(request.ChangedBy) != "" {
 		return strings.TrimSpace(request.ChangedBy)
 	}
 	if request.SourceSessionID != "" {
@@ -247,19 +262,19 @@ func (d *Daemon) coordinatorCaller(r *http.Request, request coordinatorRequest) 
 		}
 		return hosts.Qualify(d.hostIdentity().ID, request.SourceSessionID)
 	}
-	return actionActor(r)
+	return p.actor()
 }
 
 // coordinatorRef is how the caller names a coordinator: @name on its own
 // host, host::@name on any other.
-func (d *Daemon) coordinatorRef(r *http.Request, spec registry.CoordinatorSpec) string {
+func (d *Daemon) coordinatorRef(ctx context.Context, spec registry.CoordinatorSpec) string {
 	if spec.HostID == "" {
-		if _, fromHost := requestingHost(r.Context()); fromHost {
+		if _, fromHost := requestingHost(ctx); fromHost {
 			return d.hostIdentity().Name + "::@" + spec.Name
 		}
 		return "@" + spec.Name
 	}
-	if requester, fromHost := requestingHost(r.Context()); fromHost && requester == spec.HostID {
+	if requester, fromHost := requestingHost(ctx); fromHost && requester == spec.HostID {
 		return "@" + spec.Name
 	}
 	name := spec.HostID
@@ -269,10 +284,10 @@ func (d *Daemon) coordinatorRef(r *http.Request, spec registry.CoordinatorSpec) 
 	return name + "::@" + spec.Name
 }
 
-func (d *Daemon) coordinatorRefs(r *http.Request, specs []registry.CoordinatorSpec) string {
+func (d *Daemon) coordinatorRefs(ctx context.Context, specs []registry.CoordinatorSpec) string {
 	refs := make([]string, 0, len(specs))
 	for _, spec := range specs {
-		refs = append(refs, d.coordinatorRef(r, spec))
+		refs = append(refs, d.coordinatorRef(ctx, spec))
 	}
 	return strings.Join(refs, " and ")
 }
@@ -281,28 +296,24 @@ func (d *Daemon) coordinatorRefs(r *http.Request, specs []registry.CoordinatorSp
 // project with a coordinator on any host is refused unless the request
 // replaces it; a paired host's coordinator is cleared by that host first,
 // and nothing changes here when it cannot confirm.
-func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, request coordinatorRequest, spec registry.CoordinatorSpec, sessionID string) {
+func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coordinatorRequest, spec registry.CoordinatorSpec, sessionID string) (actionResult, error) {
 	d.coordinatorMu.Lock()
 	defer d.coordinatorMu.Unlock()
-	changedBy := d.coordinatorCaller(r, request)
+	changedBy := d.coordinatorCaller(ctx, p, request)
 	existing, err := d.Registry.ProjectCoordinators(spec.ProjectID)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if len(existing) == 1 && sameCoordinator(existing[0], spec, sessionID) {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "coordinator": existing[0], "replaced": []registry.CoordinatorSpec{}})
-		return
+		return actionOK(map[string]any{"ok": true, "coordinator": existing[0], "replaced": []registry.CoordinatorSpec{}}), nil
 	}
 	if len(existing) > 0 && !request.Replace {
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; replace it to take over", spec.ProjectRoot, d.coordinatorRefs(r, existing)))
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; replace it to take over", spec.ProjectRoot, d.coordinatorRefs(ctx, existing)))
 	}
 	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, OverPeers: true, ChangedBy: changedBy}
 	stored, undo, err := d.Registry.ReplaceCoordinator(spec, change)
 	if err != nil {
-		writeCoordinatorError(w, r, d, err)
-		return
+		return actionResult{}, d.coordinatorError(ctx, err)
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
 	cleared := 0
@@ -310,74 +321,69 @@ func (d *Daemon) assignCoordinator(r *http.Request, w http.ResponseWriter, reque
 		if current.HostID == "" {
 			continue
 		}
-		if err := d.clearPeerCoordinator(r.Context(), current, changedBy); err != nil {
-			message := fmt.Sprintf("cannot replace %s: %s", d.coordinatorRef(r, current), err)
+		if err := d.clearPeerCoordinator(ctx, current, changedBy); err != nil {
+			message := fmt.Sprintf("cannot replace %s: %s", d.coordinatorRef(ctx, current), err)
 			if cleared > 0 {
-				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and replacing again resolves it", stored.Name))
-				return
+				return actionResult{}, actionFailed(http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and replacing again resolves it", stored.Name))
 			}
 			undoErr := d.Registry.WithdrawCoordinator(undo, changedBy)
 			d.flushCatalog("coordinator " + spec.ProjectID)
 			if undoErr != nil {
-				writeAPIError(w, http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s stays here alongside it because it could not be withdrawn (%s), and replacing again resolves it", stored.Name, undoErr))
-				return
+				return actionResult{}, actionFailed(http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s stays here alongside it because it could not be withdrawn (%s), and replacing again resolves it", stored.Name, undoErr))
 			}
-			writeAPIError(w, http.StatusConflict, "coordinator_not_replaced", message+"; nothing changed")
-			return
+			return actionResult{}, actionFailed(http.StatusConflict, "coordinator_not_replaced", message+"; nothing changed")
 		}
 		cleared++
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "coordinator": stored, "replaced": existing})
+	return actionOK(map[string]any{"ok": true, "coordinator": stored, "replaced": existing}), nil
 }
 
-func writeCoordinatorError(w http.ResponseWriter, r *http.Request, d *Daemon, err error) {
+func (d *Daemon) coordinatorError(ctx context.Context, err error) error {
 	var exists registry.CoordinatorExistsError
 	var nameTaken registry.CoordinatorNameTakenError
 	var aliasTaken registry.AliasTakenError
 	var aliasReserved registry.AliasReservedError
 	switch {
 	case errors.As(err, &exists):
-		writeAPIError(w, http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; replace it to take over", d.coordinatorRefs(r, exists.Existing)))
+		return actionFailed(http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; replace it to take over", d.coordinatorRefs(ctx, exists.Existing)))
 	case errors.As(err, &nameTaken):
-		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another name", d.coordinatorRef(r, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
+		return actionFailed(http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another name", d.coordinatorRef(ctx, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
 	case errors.As(err, &aliasTaken):
-		writeAPIError(w, http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another name", aliasTaken.Name, aliasTaken.Owner))
+		return actionFailed(http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another name", aliasTaken.Name, aliasTaken.Owner))
 	case errors.As(err, &aliasReserved):
-		writeAPIError(w, http.StatusConflict, "name_taken", err.Error())
+		return actionFailed(http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, registry.ErrReservedAlias):
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return invalidRequest(err.Error())
 	case errors.Is(err, registry.ErrNoCoordinator):
-		writeAPIError(w, http.StatusNotFound, "no_coordinator", err.Error())
+		return actionFailed(http.StatusNotFound, "no_coordinator", err.Error())
 	case errors.Is(err, registry.ErrCoordinatorChanged):
-		writeAPIError(w, http.StatusConflict, "coordinator_changed", err.Error())
+		return actionFailed(http.StatusConflict, "coordinator_changed", err.Error())
 	default:
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return invalidRequest(err.Error())
 	}
 }
 
 // clearCoordinator clears this host's coordinator of a project, or asks the
 // paired host that owns it to. A host answering a paired host clears only
 // its own.
-func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, request coordinatorRequest) {
+func (d *Daemon) clearCoordinator(ctx context.Context, p principal, request coordinatorRequest) (actionResult, error) {
 	if request.ProjectID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "projectId is required")
-		return
+		return actionResult{}, invalidRequest("projectId is required")
 	}
-	if _, fromHost := requestingHost(r.Context()); fromHost {
+	_, fromHost := requestingHost(ctx)
+	if fromHost {
 		if !d.coordinatorMu.TryLock() {
-			writeAPIError(w, http.StatusConflict, "coordinator_busy", fmt.Sprintf("%s is changing a coordinator; try again", d.hostIdentity().Name))
-			return
+			return actionResult{}, actionFailed(http.StatusConflict, "coordinator_busy", fmt.Sprintf("%s is changing a coordinator; try again", d.hostIdentity().Name))
 		}
 	} else {
 		d.coordinatorMu.Lock()
 	}
 	defer d.coordinatorMu.Unlock()
-	changedBy := d.coordinatorCaller(r, request)
+	changedBy := d.coordinatorCaller(ctx, p, request)
 	existing, err := d.Registry.ProjectCoordinators(request.ProjectID)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	var remote []registry.CoordinatorSpec
 	for _, current := range existing {
@@ -387,30 +393,24 @@ func (d *Daemon) clearCoordinator(r *http.Request, w http.ResponseWriter, reques
 		}
 		cleared, err := d.Registry.ClearCoordinator(request.ProjectID, changedBy, request.ChangedAt)
 		if err != nil {
-			writeCoordinatorError(w, r, d, err)
-			return
+			return actionResult{}, d.coordinatorError(ctx, err)
 		}
 		d.flushCatalog("coordinator " + request.ProjectID)
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": cleared})
-		return
+		return actionOK(map[string]any{"ok": true, "cleared": cleared}), nil
 	}
-	if _, fromHost := requestingHost(r.Context()); fromHost {
-		writeCoordinatorError(w, r, d, registry.ErrNoCoordinator)
-		return
+	if fromHost {
+		return actionResult{}, d.coordinatorError(ctx, registry.ErrNoCoordinator)
 	}
 	if len(remote) == 0 {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": nil})
-		return
+		return actionOK(map[string]any{"ok": true, "cleared": nil}), nil
 	}
 	if len(remote) > 1 {
-		writeAPIError(w, http.StatusConflict, "coordinator_conflict", fmt.Sprintf("the project has coordinators %s; clear it on one of those hosts", d.coordinatorRefs(r, remote)))
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_conflict", fmt.Sprintf("the project has coordinators %s; clear it on one of those hosts", d.coordinatorRefs(ctx, remote)))
 	}
-	if err := d.clearPeerCoordinator(r.Context(), remote[0], changedBy); err != nil {
-		writeAPIError(w, http.StatusConflict, "coordinator_not_cleared", fmt.Sprintf("cannot clear %s: %s", d.coordinatorRef(r, remote[0]), err))
-		return
+	if err := d.clearPeerCoordinator(ctx, remote[0], changedBy); err != nil {
+		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_not_cleared", fmt.Sprintf("cannot clear %s: %s", d.coordinatorRef(ctx, remote[0]), err))
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": remote[0]})
+	return actionOK(map[string]any{"ok": true, "cleared": remote[0]}), nil
 }
 
 // sameCoordinator reports whether current, this host's coordinator, is what
