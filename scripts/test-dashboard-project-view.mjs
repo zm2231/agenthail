@@ -5,13 +5,13 @@ import vm from "node:vm";
 const now = Date.UTC(2026, 10, 3, 12);
 const at = (minutes) => new Date(now - minutes * 60e3).toISOString();
 const project = { id: "repo:github.com/demo/fieldnotes", displayName: "fieldnotes", rootPath: "/work/fieldnotes", kind: "git" };
-const forge = { id: "forge", name: "forge-agents.example.ts.net", state: "connected" };
+const buildbox = { id: "buildbox", name: "buildbox.example.net", state: "connected" };
 const sessions = [
   { id: "lead", name: "release-lead", surface: "codex", status: "idle", lastActive: at(3 * 24 * 60), project, current: true, capabilities: { lifecycle: { resume: true } } },
   { id: "build", name: "build", surface: "claude", status: "busy", lastActive: at(1), project, current: true },
   { id: "queued", name: "queued", surface: "claude", status: "idle", lastActive: at(9 * 60), project, current: true, queueCount: 1 },
   { id: "photos", name: "photos", surface: "claude", status: "idle", lastActive: at(2 * 60), project, current: true },
-  { id: "forge::ingest", name: "ingest", surface: "claude", status: "idle", lastActive: at(40), project, current: true, host: forge },
+  { id: "buildbox::ingest", name: "ingest", surface: "claude", status: "idle", lastActive: at(40), project, current: true, host: buildbox },
   { id: "old", name: "old", surface: "claude", status: "idle", lastActive: at(6 * 24 * 60), project },
   { id: "older", name: "older", surface: "claude", status: "idle", lastActive: at(9 * 24 * 60), project },
   { id: "child", name: "child", surface: "claude", status: "busy", lastActive: at(1), project, current: true, subagent: { parentId: "build" } },
@@ -22,7 +22,7 @@ const projects = [{
   ...project,
   checkouts: [
     { host: { id: "studio", name: "studio-mac", state: "local" }, projectId: "implicit:/work/fieldnotes", rootPath: "/work/fieldnotes", added: true },
-    { host: forge, projectId: "forge::implicit:/srv/fieldnotes", rootPath: "/srv/fieldnotes" },
+    { host: buildbox, projectId: "buildbox::implicit:/srv/fieldnotes", rootPath: "/srv/fieldnotes" },
   ],
   coordinators: [{ name: "release-lead", surface: "codex", sessionId: "lead" }],
 }];
@@ -39,7 +39,7 @@ const contents = run("projectContents(app.state.projects[0], app.state.sessions)
 assert.equal(contents.leadSession.id, "lead");
 assert.equal(ids(contents.running), "build", "only working sessions are running; a queued idle one is not");
 assert.equal(ids(contents.running), ids(sessions.filter((session) => session.project.id === project.id && !session.subagent && run("sessionRunning")(session))), "Running agrees with the list's running rule");
-assert.equal(ids(contents.recent), "forge::ingest,photos,queued", "Recent is newest first across computers and leaves out the lead");
+assert.equal(ids(contents.recent), "buildbox::ingest,photos,queued", "Recent is newest first across computers and leaves out the lead");
 assert.equal(ids(contents.earlier), "old,older");
 for (const hidden of ["child", "shelved", "elsewhere"]) assert(!JSON.stringify(contents).includes(`"${hidden}"`), `${hidden} does not belong in the project`);
 
@@ -47,8 +47,8 @@ const actions = (session) => JSON.stringify(run("leadActions")(session));
 assert.equal(actions(sessions[1]), JSON.stringify([{ kind: "open" }, { kind: "message" }]), "a working lead offers Open and Message");
 assert.equal(actions(sessions[0]), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: true }, { kind: "open" }]));
 assert.equal(actions({ ...sessions[0], capabilities: {} }), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: false }, { kind: "open" }]), "Resume without the lifecycle capability opens the lead to message it");
-assert.equal(actions({ ...sessions[0], unavailableReason: "forge can't be reached" }), JSON.stringify([{ kind: "resume", enabled: false, lifecycle: false }, { kind: "open" }]), "an offline lead's Resume is disabled");
-assert.equal(run('leadSessionID({ name: "far", sessionId: "s1", host: { id: "forge", state: "connected" } })'), "forge::s1", "a remote lead's session is named by its computer");
+assert.equal(actions({ ...sessions[0], unavailableReason: "buildbox can't be reached" }), JSON.stringify([{ kind: "resume", enabled: false, lifecycle: false }, { kind: "open" }]), "an offline lead's Resume is disabled");
+assert.equal(run('leadSessionID({ name: "far", sessionId: "s1", host: { id: "buildbox", state: "connected" } })'), "buildbox::s1", "a remote lead's session is named by its computer");
 assert.equal(run('leadSessionID({ name: "near", sessionId: "s1", host: { id: "studio", state: "local" } })'), "s1");
 
 let html = run("renderProjectView(app.state.projects[0])");
