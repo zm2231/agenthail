@@ -1,39 +1,34 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 )
 
-func (d *Daemon) dashboardRelayAdd(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doRelayAdd(ctx context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if request.FromID == "" || request.ToID == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "fromId and toId are required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "fromId and toId are required")
 	}
 	fromID, fromErr := d.Registry.ResolveTarget(request.FromID)
 	if fromErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve source agent: %s", fromErr))
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve source agent: %s", fromErr))
 	}
 	toID, toErr := d.resolveLinkTarget(request.ToID)
 	if toErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve destination agent: %s", toErr))
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve destination agent: %s", toErr))
 	}
 	toSession, toSessionErr := d.Registry.Session(toID)
 	if toSessionErr != nil {
-		writeAPIError(w, http.StatusNotFound, "not_found", "destination session not found")
-		return
+		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "destination session not found")
 	}
 	if !d.hostOwned(toSession.ID) {
 		adapter, adapterErr := d.adapters().For(toSession)
 		if adapterErr != nil {
-			writeAPIError(w, http.StatusConflict, "conflict", "destination surface is not configured")
-			return
+			return actionResult{}, actionFailed(http.StatusConflict, "conflict", "destination surface is not configured")
 		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
-			writeAPIError(w, http.StatusConflict, "conflict", err.Error())
-			return
+		if err := d.ensureDashboardWritable(ctx, adapter, toSession); err != nil {
+			return actionResult{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 		}
 	}
 	pattern := request.Pattern
@@ -42,31 +37,24 @@ func (d *Daemon) dashboardRelayAdd(w http.ResponseWriter, r *http.Request, reque
 	}
 	fromSession, err := d.Registry.Session(fromID)
 	if err != nil {
-		writeAPIError(w, http.StatusNotFound, "not_found", "source session not found")
-		return
+		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "source session not found")
 	}
 	fromAdapter, fromAdapterErr := d.adapters().For(fromSession)
 	if fromAdapterErr != nil {
-		writeAPIError(w, http.StatusConflict, "conflict", "source surface is not configured")
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "conflict", "source surface is not configured")
 	}
-	if err := d.Registry.PrepareRelaySource(r.Context(), fromAdapter, fromSession, request.Handoff); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+	if err := d.Registry.PrepareRelaySource(ctx, fromAdapter, fromSession, request.Handoff); err != nil {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	if _, err := d.Registry.AddRelayRoute(fromID, toID, pattern, request.Once, request.Handoff); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
 
-func (d *Daemon) dashboardRelayRemove(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doRelayRemove(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if err := d.Registry.RemoveRoute(request.RelayID); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }

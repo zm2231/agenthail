@@ -42,6 +42,10 @@ func dispatchedActionNames(t *testing.T) []string {
 			t.Fatal(err)
 		}
 		for _, decl := range file.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok {
+				addTableKeys(t, names, gen)
+				continue
+			}
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil || !dispatchesActions(fn) {
 				continue
@@ -94,6 +98,33 @@ func dispatchedActionNames(t *testing.T) []string {
 	}
 	sort.Strings(list)
 	return list
+}
+
+func addTableKeys(t *testing.T, names map[string]bool, gen *ast.GenDecl) {
+	t.Helper()
+	for _, spec := range gen.Specs {
+		value, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for index, name := range value.Names {
+			if name.Name != "typedActions" || index >= len(value.Values) {
+				continue
+			}
+			if table, ok := value.Values[index].(*ast.CompositeLit); ok {
+				for _, element := range table.Elts {
+					pair, ok := element.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					if literal, ok := pair.Key.(*ast.BasicLit); !ok || literal.Kind != token.STRING {
+						t.Fatalf("typedActions keys must be string literals so the guard can read them; found %T", pair.Key)
+					}
+					addLiteral(names, pair.Key)
+				}
+			}
+		}
+	}
 }
 
 func dispatchesActions(fn *ast.FuncDecl) bool {
