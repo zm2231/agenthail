@@ -43,6 +43,9 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 	if !ok {
 		return nil, false, fmt.Errorf("host %s is not paired", spec.HostID)
 	}
+	if _, fromHost := requestingHost(ctx); fromHost {
+		return nil, false, actionFailed(http.StatusConflict, "host_transit", fmt.Sprintf("%s runs on host %s; a paired host's request is not passed on to another host", d.coordinator().Ref(spec), host.record.Name))
+	}
 	request := map[string]any{"action": "coordinator-send", "name": spec.Name, "message": message}
 	if options.Model != "" {
 		request["model"] = options.Model

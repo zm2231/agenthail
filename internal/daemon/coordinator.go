@@ -193,6 +193,10 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 			reply.Result, reply.Started = outcome.Receipt, outcome.Started
 		}
 	}
+	var refused *actionError
+	if errors.As(err, &refused) {
+		return actionResult{}, err
+	}
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())
 	}
