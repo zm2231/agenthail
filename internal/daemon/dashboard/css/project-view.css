@@ -9,14 +9,19 @@ button.project-name {
 }
 .project-header button.project-name {
   flex: 0 0.1 auto;
-  min-width: min(12ch, 50%);
+  min-width: min(12ch, 40%);
 }
 .project-header .lead-chip {
   flex-shrink: 10;
-  min-width: 5ch;
+  min-width: min(5ch, 15%);
+}
+.project-header .link-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .project-header .project-count,
-.project-header .link-button,
 .project-header .project-menu {
   flex-shrink: 0;
 }

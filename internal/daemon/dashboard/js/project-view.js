@@ -3,7 +3,11 @@ import { escape, labels } from "./format.js";
 import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 
-const activity = (session) => Date.parse(session.lastActive || 0) || 0;
+const knownSince = Date.UTC(2000, 0, 1);
+const activity = (session) => {
+  const at = Date.parse(session.lastActive || "");
+  return at >= knownSince ? at : 0;
+};
 
 export function sessionRunning(session) {
   return !session.archived && (session.status === "busy" || (session.subagents?.working || 0) > 0);
@@ -39,6 +43,7 @@ export function leadActions(session) {
 }
 
 export function idleFor(session, now = Date.now()) {
+  if (!activity(session)) return "";
   const minutes = Math.max(0, Math.floor((now - activity(session)) / 60000));
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes} min ago`;
@@ -56,9 +61,9 @@ function compactAge(ms) {
 }
 
 export function rowTime(session, now = Date.now(), running = sessionRunning(session)) {
-  if (!running) return compactAge(now - activity(session));
+  if (!running) return activity(session) ? compactAge(now - activity(session)) : "";
   const since = Date.parse(session.activity?.busySince || "");
-  return since ? compactAge(now - since) : "now";
+  return since >= knownSince ? compactAge(now - since) : "now";
 }
 
 function card(title, body, trailing = "") {
@@ -81,7 +86,7 @@ function leadCard(project, contents) {
   }
   const where = leadSession.host && leadSession.host.state !== "local" ? shortHostName(leadSession.host.name) : "";
   const working = sessionWorking(leadSession);
-  const status = working ? `Working ${rowTime(leadSession, Date.now(), true)}` : `Idle · ${idleFor(leadSession)}`;
+  const status = working ? `Working ${rowTime(leadSession, Date.now(), true)}` : ["Idle", idleFor(leadSession)].filter(Boolean).join(" · ");
   const id = escape(leadSession.id);
   const buttons = leadActions(leadSession).map((action, index) => {
     const style = index === 0 ? "primary-button" : "soft-button";

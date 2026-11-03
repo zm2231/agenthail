@@ -18,8 +18,13 @@ export function syncProjectPane() {
 
 let ticking = 0;
 
+export function refreshShownProject() {
+  const conversations = document.querySelector('[data-view-panel="conversations"]');
+  if (app.selectedProject && conversations && !conversations.classList.contains("hidden")) syncProjectPane();
+}
+
 export function openProject(id) {
-  if (!ticking) ticking = setInterval(() => { if (app.selectedProject) syncProjectPane(); }, 60_000);
+  if (!ticking) ticking = setInterval(refreshShownProject, 60_000);
   showView("conversations");
   app.selectedProject = id;
   app.projectEarlier = null;

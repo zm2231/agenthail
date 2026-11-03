@@ -82,10 +82,39 @@ assert.equal(ids(delegated.running), "build", "a lead whose subagent works stays
 assert.equal(actions(delegating), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: true }, { kind: "open" }]), "an idle lead with a working subagent can still be resumed");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "an idle lead with a working subagent reads as idle");
+for (const lastActive of ["0001-01-01T00:00:00Z", "", undefined]) {
+  const unknown = { ...sessions[3], lastActive };
+  assert.equal(run("rowTime")(unknown, now), "", "a row with no known activity shows no age");
+  assert.equal(run("idleFor")(unknown, now), "", "a lead with no known activity shows no age");
+}
+context.app.state.sessions = [{ ...sessions[0], lastActive: "0001-01-01T00:00:00Z" }, ...sessions.slice(1)];
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /data-project-lead-status>Codex · Idle</, "a lead with no known activity reads as idle alone");
 context.app.state.sessions = sessions;
 
 context.app.state.projects = [{ ...projects[0], coordinators: [] }];
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /No lead yet/);
 assert.match(html, /data-project-lead="repo:github.com\/demo\/fieldnotes">Start a lead</);
+
+const panel = { classList: { hidden: false, contains: () => panel.classList.hidden } };
+const pane = { hidden: true, innerHTML: "" };
+let renders = 0;
+const paneContext = {
+  app: { state: { projects }, selectedProject: project.id },
+  document: { querySelector: (selector) => selector === '[data-view-panel="conversations"]' ? panel : { hidden: false } },
+  $: () => pane,
+  renderProjectView: () => `rendered ${++renders}`,
+  showView() {}, syncConversationLayout() {}, mobileConversationView: () => false,
+};
+await dashboardModules(["project-pane"], paneContext);
+const refresh = vm.runInContext("refreshShownProject", paneContext);
+refresh();
+assert.equal(pane.innerHTML, "rendered 1", "the shown project refreshes while Conversations is open");
+panel.classList.hidden = true;
+refresh();
+assert.equal(renders, 1, "a project left behind another view is not rebuilt each minute");
+panel.classList.hidden = false;
+refresh();
+assert.equal(pane.innerHTML, "rendered 2", "returning to Conversations resumes the refresh");
 console.log("dashboard project view tests passed");
