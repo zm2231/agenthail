@@ -10,7 +10,7 @@ struct SessionPreview: View {
     init() {
         let decoder = JSONDecoder()
         let capture = SessionCapture.current
-        let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data((capture?.snapshotJSON ?? Self.snapshotJSON).utf8))
+        let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data(Self.withTurnNotice(capture?.snapshotJSON ?? Self.snapshotJSON).utf8))
         let capturedDetail = capture.flatMap { $0.detailJSON[$0.initialSessionID] }
         var detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
         if ProcessInfo.processInfo.arguments.contains("--preview-app"),
@@ -83,6 +83,22 @@ struct SessionPreview: View {
             NavigationStack { SessionScreen(model: model, session: session) }
         }
     }
+    /// With --preview-turn-notice the first session is a terminal session that reads messages as notes.
+    static func withTurnNotice(_ json: String) -> String {
+        guard ProcessInfo.processInfo.arguments.contains("--preview-turn-notice") else { return json }
+        if !ProcessInfo.processInfo.arguments.contains("--preview-keep-defaults") {
+            UserDefaults.standard.removeObject(forKey: TurnNoticePreference.hiddenKey)
+            UserDefaults.standard.removeObject(forKey: TurnNoticePreference.dismissedKey)
+        }
+        var snapshot = try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+        var sessions = snapshot["sessions"] as! [[String: Any]]
+        var capabilities = sessions[0]["capabilities"] as? [String: Any] ?? [:]
+        capabilities["turnNotice"] = "What you write reaches this terminal session as a note from Agenthail, not as your own turn."
+        sessions[0]["capabilities"] = capabilities
+        snapshot["sessions"] = sessions
+        return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
+    }
+
     /// The question a waiting preview session asks in its terminal.
     nonisolated static let previewWaiting: [String: String] = ["kind": "question", "id": "preview-question"]
 

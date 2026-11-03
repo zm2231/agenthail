@@ -70,6 +70,7 @@ let package = Package(
                 "TurnClock.swift",
                 "TimelineMetadata.swift",
                 "TimelineEventLabel.swift",
+                "TurnNoticePreference.swift",
                 "OperationsRefreshPolicy.swift",
                 "RequestNotifications.swift",
                 "RequestAnswer.swift",

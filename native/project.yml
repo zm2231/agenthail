@@ -71,6 +71,7 @@ targets:
       - path: TurnClock.swift
       - path: TimelineMetadata.swift
       - path: TimelineEventLabel.swift
+      - path: TurnNoticePreference.swift
       - path: VoiceAPI.swift
       - path: VoiceAudioBridge.swift
       - path: VoiceCallDiagnostics.swift

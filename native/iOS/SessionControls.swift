@@ -68,15 +68,19 @@ struct QueueListView: View {
     var onOpenSession: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var error: String?
-    @State private var queue: [QueueState] = []
+    @State private var page = InboxPage()
     @State private var loading = true
+    @State private var loadingOlder = false
     @State private var showHistory = false
     @State private var retryCandidate: QueueState?
     @State private var reloadID = UUID()
 
-    private var items: [QueueState] { queue.filter { sessionID == nil || $0.sessionId == sessionID } }
-    private var current: [QueueState] { items.filter { !$0.isHistorical } }
+    private var items: [QueueState] { page.items }
+    private var current: [QueueState] { items.filter { !$0.isHistorical }.reversed() }
     private var history: [QueueState] { items.filter { $0.isHistorical } }
+    private var activeInSnapshot: [String] {
+        (model.snapshot?.queue ?? []).filter { sessionID == nil || $0.sessionId == sessionID }.map { "\($0.id):\($0.status)" }
+    }
 
     var body: some View {
         List {
@@ -87,6 +91,11 @@ struct QueueListView: View {
                 }.pickerStyle(.segmented).listRowSeparator(.hidden)
                 if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(PhonePalette.failed).font(.footnote) }
                 if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(PhonePalette.muted).font(.footnote) }
+                if !page.unreachable.isEmpty {
+                    Label("Couldn’t reach \(page.unreachable.formatted(.list(type: .and))). Its deliveries aren’t shown.", systemImage: "wifi.exclamationmark")
+                        .foregroundStyle(PhonePalette.muted).font(.footnote)
+                        .accessibilityIdentifier("inbox-unreachable")
+                }
                 let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
                 if !problems.isEmpty {
                     Section("Delivery problems") {
@@ -113,11 +122,22 @@ struct QueueListView: View {
                             .listRowSeparator(.hidden)
                     }
                 } else {
-                    if history.isEmpty && !loading {
+                    if history.isEmpty && !loading && !page.hasOlder {
                         ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
                             .listRowSeparator(.hidden)
                     }
-                    ForEach(history.reversed(), id: \.listID) { item in queueRow(item) }
+                    ForEach(history, id: \.listID) { item in queueRow(item) }
+                    if page.hasOlder {
+                        Button { Task { await loadOlder() } } label: {
+                            HStack {
+                                Text(history.isEmpty ? "Nothing in the last 30 days. Load older" : "Load older")
+                                Spacer()
+                                if loadingOlder { ProgressView() }
+                            }.frame(minHeight: 44)
+                        }
+                        .disabled(loadingOlder)
+                        .accessibilityIdentifier("inbox-load-older")
+                    }
                 }
             }
             .listRowBackground(GlassRowBackground(selected: false))
@@ -127,8 +147,7 @@ struct QueueListView: View {
         .navigationTitle(sessionID == nil ? "Inbox" : "Session inbox")
         .task { await reload() }
         .refreshable { _ = await model.refresh(fresh: true); await reload() }
-        .onChange(of: model.snapshot?.queue) { _, _ in Task { await reload() } }
-        .onChange(of: model.snapshot?.history) { _, _ in Task { await reload() } }
+        .onChange(of: activeInSnapshot) { _, _ in Task { await reload() } }
         .confirmationDialog("Send this instruction again?", isPresented: Binding(get: { retryCandidate != nil }, set: { if !$0 { retryCandidate = nil } }), titleVisibility: .visible) {
             if let item = retryCandidate {
                 Button("Send again") { update(item, retry: true); retryCandidate = nil }
@@ -240,13 +259,27 @@ struct QueueListView: View {
     private func reload() async {
         let requestID = UUID(); reloadID = requestID
         do {
-            let items = try await model.queuedInstructions()
+            let first = try await model.inboxPage(sessionID: sessionID) { partial in
+                guard reloadID == requestID else { return }
+                page = page.refreshed(with: partial); loading = false
+            }
             guard reloadID == requestID, !Task.isCancelled else { return }
-            queue = items; error = nil
+            page = page.refreshed(with: first); error = nil
         } catch {
             guard reloadID == requestID, !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
         loading = false
+    }
+    private func loadOlder() async {
+        guard page.hasOlder, !loadingOlder else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        do {
+            let older = try await model.inboxPage(sessionID: sessionID, before: page.cursors)
+            page = page.appending(older); error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

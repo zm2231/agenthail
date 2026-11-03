@@ -660,14 +660,7 @@ struct SessionScreen: View {
                             .floatingGlass(in: Capsule())
                             .padding()
                     } else {
-                        if !liveSession.composerTurnNotice.isEmpty {
-                            Label(liveSession.composerTurnNotice, systemImage: "terminal")
-                                .font(.footnote).foregroundStyle(PhonePalette.muted)
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .floatingGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .padding(.horizontal).padding(.top, 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
                         IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                     }
                 }
@@ -1799,6 +1792,7 @@ struct SettingsView: View {
                         Text("Talk to orchestrator calls this computer.")
                     }
                 }
+                TurnNoticeSettingsSection()
                 Section("Notifications") {
                     LabeledContent("Status", value: model.notificationStatus)
                     if model.notificationStatus == "Enabled" {

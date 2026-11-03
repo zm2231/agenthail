@@ -451,26 +451,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
-    private func hostQueue(_ connection: HostConnection) async throws -> [QueueState] {
-        try await connection.api.queuedInstructions().map { item in
-            var item = item
-            item.hostID = connection.id
-            item.sessionId = HostCatalog.qualify(connection.id, item.sessionId)
-            item.sourceSessionId = item.sourceSessionId.map { HostCatalog.qualify(connection.id, $0) }
-            return item
-        }
-    }
-
-    func queuedInstructions() async throws -> [QueueState] {
-        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.reachable)
-        guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        var items: [QueueState] = []
-        var failure: Error?
-        for connection in reachable {
-            do { items += try await hostQueue(connection) } catch { failure = error }
-        }
-        if items.isEmpty, let failure { throw failure }
-        return items
+    func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
+        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.reachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        return try await InboxPage.load(from: hosts, sessionID: sessionID, before: cursors, partial: partial)
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {
@@ -1167,13 +1151,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         refreshingDeliveries = true
         defer { refreshingDeliveries = false }
         let expected = deliveryQueueIDs
-        var queues: [String: [QueueState]] = [:]
         for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
             guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { continue }
-            if queues[route.hostID] == nil { queues[route.hostID] = (try? await hostQueue(connection)) ?? [] }
-            guard let item = queues[route.hostID]?.first(where: { $0.id == queueID && $0.sessionId == HostCatalog.qualify(route.hostID, route.sessionID) }) else {
-                continue
-            }
+            let found: QueueState?
+            do { found = try await connection.api.queueItem(id: queueID, timeout: InboxPage.hostTimeout).map { InboxPage.qualified($0, host: route.hostID) } }
+            catch { continue }
+            guard let item = found, item.sessionId == HostCatalog.qualify(route.hostID, route.sessionID) else { continue }
             switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
             case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
             case "queued": deliveryStatus[sessionID] = item.queuedReceipt

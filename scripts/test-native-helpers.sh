@@ -52,6 +52,7 @@ SOURCES=(
   TurnClock.swift
   TimelineMetadata.swift
   TimelineEventLabel.swift
+  TurnNoticePreference.swift
   TurnSettings.swift
   UIConfig.swift
   SurfaceMode.swift
