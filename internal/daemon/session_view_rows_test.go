@@ -196,6 +196,46 @@ func TestAProjectionAMigrationRewroteIsSeenByTheFirstRead(t *testing.T) {
 	}
 }
 
+func TestARowRemovedAndAddedAgainIsReadFresh(t *testing.T) {
+	_, store := openPresentationRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := store.AddHost(registry.PairedHost{ID: hostID, Name: "peer", Endpoint: "https://peer.example", Address: "100.64.0.2", Token: "synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	mirror := func(send bool) {
+		raw, _ := json.Marshal(dashboardSession{ID: "s", Name: "s", Surface: surface.KindCodex, Status: surface.StatusBusy, Capabilities: surface.Capabilities{Send: send}})
+		session := surface.Session{ID: "s", Name: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
+		if _, _, err := store.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: session, EntityID: hostID + "::s", Projection: raw, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirror(false)
+	d := newTestDaemon(t, store, nil)
+	before := viewSession(t, d, hostID+"::s")
+	if before.Capabilities.Send {
+		t.Fatal("setup")
+	}
+	internal := d.presentation.fingerprints
+	var stored string
+	for id := range internal.rows {
+		stored = id
+	}
+	if _, removed, err := store.RemoveHostCatalogRow(hostID, stored, hostID+"::s", "gone"); err != nil || !removed {
+		t.Fatalf("removed=%v err=%v", removed, err)
+	}
+	if read, err := store.ReadCatalogPresentation(context.Background(), func(string, uint64) bool { return false }); err != nil || len(read.Rows) != 0 {
+		t.Fatalf("the row was not removed: %+v err=%v", read.Rows, err)
+	}
+	mirror(true)
+	after := viewSession(t, d, hostID+"::s")
+	if after.Freshness.Generation <= before.Freshness.Generation {
+		t.Fatalf("the row came back at generation %d after %d", after.Freshness.Generation, before.Freshness.Generation)
+	}
+	if !after.Capabilities.Send {
+		t.Fatal("a row removed and added again kept its cached projection")
+	}
+}
+
 func TestTheProjectionCacheIsDroppedWhenGenerationsGoBack(t *testing.T) {
 	path, store := openPresentationRegistry(t)
 	for _, id := range []string{"a", "b"} {

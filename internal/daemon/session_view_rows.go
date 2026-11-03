@@ -12,7 +12,7 @@ import (
 type presentationFingerprint struct {
 	generation uint64
 	row        dashboardSession
-	merged     presentationMergedFields
+	raw        json.RawMessage
 }
 
 type presentationMergedFields struct {
@@ -61,9 +61,7 @@ func (c *presentationFingerprints) adopt(read registry.CatalogPresentation) erro
 		if err := json.Unmarshal(raw, &decoded.row); err != nil {
 			return fmt.Errorf("read presentation %s: %w", row.ID, err)
 		}
-		if err := json.Unmarshal(raw, &decoded.merged); err != nil {
-			return fmt.Errorf("read presentation %s: %w", row.ID, err)
-		}
+		decoded.raw = raw
 		decoded.generation = row.Freshness.Generation
 		c.rows[row.ID] = decoded
 	}
@@ -91,15 +89,22 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		subagent.ParentID, subagent.RootID, subagent.Depth, subagent.Nickname, subagent.Role = record.Subagent.ParentID, record.Subagent.RootID, record.Subagent.Depth, record.Subagent.Nickname, record.Subagent.Role
 		row.Subagent = &subagent
 	}
-	var err error
-	if row.WaitingOn, err = mergedPresentationField[surface.Waiting](source.merged.WaitingOn, record.WaitingOn); err != nil {
-		return row, err
-	}
-	if row.BackgroundTasks, err = mergedPresentationField[surface.BackgroundTasks](source.merged.BackgroundTasks, record.BackgroundTasks); err != nil {
-		return row, err
-	}
-	if row.UsageLimit, err = mergedPresentationField[surface.UsageLimit](source.merged.UsageLimit, record.UsageLimit); err != nil {
-		return row, err
+	row.WaitingOn, row.BackgroundTasks, row.UsageLimit = nil, nil, nil
+	if len(record.WaitingOn)+len(record.BackgroundTasks)+len(record.UsageLimit) > 0 {
+		var projected presentationMergedFields
+		if err := json.Unmarshal(source.raw, &projected); err != nil {
+			return row, err
+		}
+		var err error
+		if row.WaitingOn, err = mergedPresentationField[surface.Waiting](projected.WaitingOn, record.WaitingOn); err != nil {
+			return row, err
+		}
+		if row.BackgroundTasks, err = mergedPresentationField[surface.BackgroundTasks](projected.BackgroundTasks, record.BackgroundTasks); err != nil {
+			return row, err
+		}
+		if row.UsageLimit, err = mergedPresentationField[surface.UsageLimit](projected.UsageLimit, record.UsageLimit); err != nil {
+			return row, err
+		}
 	}
 	switch {
 	case record.Alias.Valid:
