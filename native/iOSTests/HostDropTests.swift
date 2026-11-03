@@ -161,7 +161,7 @@ final class HostDropTests: XCTestCase {
         XCTAssertEqual(model.fetchedSubagents.revision(parent.id), settled, "a list failing on a reachable computer is not refetched in a loop")
     }
 
-    func testASendDuringTheGraceReportsItsOwnError() async throws {
+    func testASendDuringTheGraceWaitsForAnAnswer() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
         let listed = try XCTUnwrap(model.snapshot?.sessions.first)
@@ -175,8 +175,9 @@ final class HostDropTests: XCTestCase {
         XCTAssertNil(model.connectionState(for: session.id).error, "the held computer raises no banner")
         model.composer = "Keep the regression test"
         model.send(to: session)
-        for _ in 0..<200 where model.sendingSessionIDs.contains(session.id) { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(model.deliveryStatus[session.id], "Couldn’t complete request. Draft kept.")
+        for _ in 0..<200 where model.pendingSends[session.id]?.first?.unconfirmed != true { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(model.deliveryStatus[session.id], "Not confirmed yet · retrying")
+        XCTAssertEqual(model.composer, "", "it may have arrived, so it waits instead of coming back")
     }
 
     func testTheInboxAsksAComputerHeldThroughTheGraceAndReportsItsOwnError() async throws {
