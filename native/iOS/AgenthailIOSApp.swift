@@ -41,7 +41,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
             await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: { @Sendable in try Self.pairedAPI(host: host) })
             return
         }
-        let opened = HostCatalog.qualify(host, sessionID)
+        guard let opened = Self.openedSession(userInfo) else { return }
         await MainActor.run {
             NotificationCenter.default.post(name: .agenthailNotificationOpened, object: opened)
         }
@@ -49,6 +49,12 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
 }
 
 extension IOSAppDelegate {
+    nonisolated static func openedSession(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty,
+              let host = userInfo["host"] as? String, !host.isEmpty else { return nil }
+        return HostCatalog.qualify(host, sessionID)
+    }
+
     nonisolated static func pairedAPI(host: String) throws -> AgenthailAPI {
         guard let credential = KeychainStore.get(PairedCredential.account(for: host)).flatMap(PairedCredential.decode) else {
             throw AgenthailAPIError.unavailable("This iPhone is no longer paired with the computer that sent this notification.")

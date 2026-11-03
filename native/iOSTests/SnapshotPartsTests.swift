@@ -79,7 +79,9 @@ final class SnapshotPartsTests: XCTestCase {
         defer { model.forgetHost("parts") }
         _ = await model.refresh(fresh: true)
         XCTAssertEqual(model.snapshot?.sessions.map(\.id), ["parts::root"])
-        await model.loadSession("parts::elsewhere")
+        let opened = try XCTUnwrap(IOSAppDelegate.openedSession(["sessionId": "elsewhere", "host": "parts"]))
+        model.openSession(opened)
+        await model.loadSession(try XCTUnwrap(model.requestedSessionID))
         XCTAssertTrue(PartsServer.state.requests(for: "parts").contains { $0.hasPrefix("/api/v1/session?") && $0.contains("id=elsewhere") }, "a notification's session was not asked of its owner: \(PartsServer.state.requests(for: "parts"))")
     }
 
