@@ -86,8 +86,9 @@ struct ConnectionGraceTest {
 
         DaemonDropProtocol.set(failing: 1)
         DaemonDropProtocol.dropStreams()
+        check(wait(within: 2) { model.heldByGrace }, "the failed probe is held, not shown")
         check(holds(for: 3) { model.isConnected }, "one failed probe after a stream drop keeps the Mac app connected: \(model.connectionError ?? "")")
-        check(wait(within: 5) { DaemonDropProtocol.streaming }, "the stream comes back")
+        check(wait(within: 5) { DaemonDropProtocol.streaming && !model.heldByGrace }, "the stream comes back and the hold ends with a recovery")
 
         model.grace.window = 1
         DaemonDropProtocol.set(down: true)

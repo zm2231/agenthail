@@ -54,6 +54,7 @@ final class AgenthailModel: ObservableObject {
     @Published var reconnecting = false
     var grace = ConnectionGrace()
     private var streamOpen = false
+    private(set) var heldByGrace = false
     private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
     @Published var operationError: String?
     @Published var pendingForks: Set<String> = []
@@ -1245,9 +1246,10 @@ final class AgenthailModel: ObservableObject {
 
     private func clearConnectionError() {
         grace.contact()
-        if connectionError != nil {
+        if connectionError != nil || heldByGrace {
             Self.connectionLog.notice("daemon reachable again")
             connectionError = nil
+            heldByGrace = false
         }
         if daemonSlow { daemonSlow = false }
     }
@@ -1255,9 +1257,11 @@ final class AgenthailModel: ObservableObject {
     private func connectionFailed(_ error: Error) {
         if isConnected, grace.holds(error) {
             Self.connectionLog.notice("daemon request failed, still shown connected: \(error.localizedDescription, privacy: .public)")
+            heldByGrace = true
             if !reconnecting { reconnecting = true }
             return
         }
+        heldByGrace = false
         if isConnected { Self.connectionLog.notice("daemon shown unreachable: \(error.localizedDescription, privacy: .public)") }
         connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
