@@ -242,15 +242,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 queue: ordered.flatMap { connection in
                     (connection.snapshot?.queue ?? []).map { item in var item = item; item.hostID = connection.id; return item }
                 },
-                channels: [], relays: [], history: loaded.flatMap(\.history), attention: catalog.attention,
+                channels: [], relays: [], history: [], attention: catalog.attention,
                 deliveryProblems: catalog.deliveryProblems,
                 codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
-        let listedSessions = Set(catalog.sessions.map(\.id))
-        let loadedHosts = ordered.filter { $0.snapshot != nil }.map { $0.id + HostCatalog.separator }
         store.carry(rekeys)
-        store.prune { id in !listedSessions.contains(id) && loadedHosts.contains { id.hasPrefix($0) } }
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
                              reachable: connection.reachable, reconnecting: connection.reconnecting, error: connection.connectionError,
@@ -918,6 +915,25 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func refresh(host hostID: String) async {
         _ = await connections[hostID]?.refresh(fresh: true)
+    }
+
+    private var listedHosts: [HostConnection] { hostOrder.compactMap { connections[$0] } }
+
+    func listMore(_ filter: SessionFilter) async {
+        await SessionScopes.readMore(filter, on: listedHosts)
+    }
+
+    func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(filter, on: listedHosts) }
+
+    var listingError: String? { SessionScopes.error(on: listedHosts) }
+
+    func searchScope(_ query: String, filter: SessionFilter) async {
+        await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), filter: filter, on: listedHosts)
+    }
+
+    func mentionSessions(for sessionID: String, query: String) async -> [SessionState]? {
+        guard let host = server(for: sessionID), let rows = try? await host.mentions(query) else { return nil }
+        return rows.map { HostCatalog.merge($0, servedBy: host.id, ownerName: { id in self.catalog.hosts.first { $0.id == id }?.name }, reachable: true).row }
     }
 
     /// The session list for a scope and search, built once per catalog change
@@ -1900,7 +1916,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     func host(_ host: HostConnection, removedSession id: String, unlisted: Bool) {
         guard connections[host.id] === host else { return }
-        fetchedSubagents.sessionRemoved(HostCatalog.qualify(host.id, id), unlisted: unlisted)
+        let removed = HostCatalog.qualify(host.id, id)
+        fetchedSubagents.sessionRemoved(removed, unlisted: unlisted)
+        if !unlisted { store.prune { $0 == removed } }
     }
 
     private static func pushAccount(_ hostID: String) -> String { "push:\(hostID)" }

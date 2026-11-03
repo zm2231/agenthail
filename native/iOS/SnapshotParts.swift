@@ -26,7 +26,7 @@ struct ScopeSessions {
     var catalogSeq: UInt64?
 }
 
-private struct ScopePage: Decodable {
+struct ScopePage: Decodable {
     let sessions: [SessionState]
     var nextCursor: String? = nil
     var hostEpoch: String? = nil
@@ -55,16 +55,7 @@ extension AgenthailAPI {
         var seen: [String: Int] = [:]
         var cursor: String?
         repeat {
-            var components = URLComponents()
-            components.path = "/api/v1/snapshot"
-            components.queryItems = [URLQueryItem(name: "scope", value: scope), URLQueryItem(name: "members", value: "1"), URLQueryItem(name: "limit", value: "200")]
-            if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
-            guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
-            var request = authorizedRequest(path: path)
-            request.timeoutInterval = timeout
-            let (data, response) = try await session.data(for: request)
-            try validate(response: response, data: data)
-            let page = try JSONDecoder().decode(ScopePage.self, from: data)
+            let page = try await scopePage(scope, cursor: cursor, limit: 200, timeout: timeout)
             for session in page.sessions {
                 if let index = seen[session.id] { result.sessions[index] = session } else {
                     seen[session.id] = result.sessions.count
@@ -76,6 +67,20 @@ extension AgenthailAPI {
             cursor = page.nextCursor
         } while cursor != nil
         return result
+    }
+
+    func scopePage(_ scope: String, query: String? = nil, cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 25) async throws -> ScopePage {
+        var components = URLComponents()
+        components.path = "/api/v1/snapshot"
+        components.queryItems = [URLQueryItem(name: "scope", value: scope), URLQueryItem(name: "members", value: "1"), URLQueryItem(name: "limit", value: String(limit))]
+        if let query, !query.isEmpty { components.queryItems?.append(URLQueryItem(name: "q", value: query)) }
+        if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.timeoutInterval = timeout
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ScopePage.self, from: data)
     }
 
     private func taggedGet<T: Decodable>(_ path: String, key: String, fresh: Bool, timeout: TimeInterval) async throws -> T {

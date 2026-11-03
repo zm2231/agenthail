@@ -46,6 +46,7 @@ struct CompletionState {
     var dismissed: String?
     var highlighted = 0
     var files: (query: String, files: [SessionFile])?
+    var sessions: (query: String, sessions: [SessionState])?
 
     /// Another session's draft starts over, with the caret at its end where a
     /// new text view puts it.
