@@ -36,6 +36,7 @@ struct HostCatalog {
     private(set) var sessions: [SessionState] = []
     private(set) var attention: [AttentionState] = []
     private(set) var deliveryProblems: [DeliveryProblem] = []
+    private(set) var leadReplacements: [LeadReplacement] = []
     private(set) var hosts: [HostHealth] = []
     private var routesByID: [String: [SessionRoute]] = [:]
     private var servers: [String: String] = [:]
@@ -90,6 +91,9 @@ struct HostCatalog {
             }
             deliveryProblems += (snapshot.deliveryProblems ?? []).map { problem in
                 DeliveryProblem(deliveryId: problem.deliveryId, sessionId: Self.qualify(host.id, problem.sessionId), sourceSessionId: problem.sourceSessionId.map { Self.qualify(host.id, $0) }, attentionSessionId: problem.attentionSessionId.map { Self.qualify(host.id, $0) }, message: problem.message, reason: problem.reason, status: problem.status, at: problem.at, hostID: host.id)
+            }
+            leadReplacements += (snapshot.leadReplacements ?? []).map { item in
+                LeadReplacement(id: item.id, projectId: item.projectId, name: item.name, sessionId: Self.qualify(host.id, item.sessionId), previousSessionId: Self.qualify(host.id, item.previousSessionId), changedBy: item.changedBy, reason: item.reason, at: item.at, hostID: host.id)
             }
         }
         for id in order {

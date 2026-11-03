@@ -146,6 +146,13 @@ struct ProjectScreen: View {
                     Text("@" + lead.name).font(.headline)
                     Text("\(SessionStyle.agentName(lead.surface)) · starts with the first message sent to it").font(.subheadline).foregroundStyle(PhonePalette.muted)
                 }
+                if let replaced = lead.replaced {
+                    TimelineView(.everyMinute) { context in
+                        Text(replaced.detail(now: context.date))
+                            .font(.caption).foregroundStyle(PhonePalette.muted)
+                            .accessibilityIdentifier("project-lead-replaced")
+                    }
+                }
             }
             .padding(.vertical, 4)
         } else {

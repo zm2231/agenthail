@@ -136,6 +136,22 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(Set(catalog.deliveryProblems.map(\.id)).count, 2, "the same delivery id on two computers is two problems")
     }
 
+    func testLeadReplacementsNameTheirComputer() {
+        let replacement = LeadReplacement(id: 7, projectId: "repo:github.com/x/y", name: "release-lead", sessionId: "new", previousSessionId: "old", changedBy: "the daemon", reason: "gone", at: "2026-11-03T12:00:00Z")
+        var first = Self.snapshot([local("new")])
+        first.leadReplacements = [replacement]
+        var second = Self.snapshot([local("new")])
+        second.leadReplacements = [replacement]
+        let catalog = HostCatalog(hosts: [
+            PairedHostView(id: "ha", name: "a", reachable: true, snapshot: first),
+            PairedHostView(id: "hb", name: "b", reachable: true, snapshot: second),
+        ])
+        XCTAssertEqual(catalog.leadReplacements.map(\.sessionId), ["ha::new", "hb::new"])
+        XCTAssertEqual(catalog.leadReplacements.map(\.previousSessionId), ["ha::old", "hb::old"])
+        XCTAssertEqual(catalog.leadReplacements.map(\.hostID), ["ha", "hb"], "an acknowledgement goes to the computer that recorded it")
+        XCTAssertEqual(Set(catalog.leadReplacements.map(\.listID)).count, 2, "the same id on two computers is two rows")
+    }
+
     func testAComputerIsReachedDirectlyOrThroughAPairedComputerThatMirrorsIt() {
         var laptop = Self.snapshot([])
         laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected"), HostHealth(id: "hbuild", name: "build", state: "unreachable")])

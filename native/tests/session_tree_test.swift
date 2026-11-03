@@ -239,6 +239,12 @@ struct SessionTreeTest {
         expect(places["limited"] == SessionAttention(kind: .usageLimit, reason: "Usage limit, resets \(resets)"), "a usage limit names when it resets: \(String(describing: places["limited"]))")
         expect(places["unknown-reset"]?.reason == "Usage limit reached", "a limit with no reset time says it was reached")
         expect(SessionTree.needsYou([limited, terminal], attention: places).map(\.id) == ["terminal", "limited"], "a usage limit comes after waits on the person")
+
+        var oldLead = waiting("old-lead", kind: "question")
+        oldLead.replacedLead = [CoordinatorTenure(name: "release-lead", from: "2026-10-04T09:00:00Z", until: "2026-10-04T11:00:00Z")]
+        let replacedReasons = SessionAttention.build(sessions: [oldLead, asker], attention: [], deliveryProblems: [])
+        expect(replacedReasons["old-lead"] == SessionAttention(kind: .replacedRequest, reason: "From a replaced lead. Asks you a question"), "a replaced lead's request says so: \(String(describing: replacedReasons["old-lead"]))")
+        expect(SessionTree.needsYou([oldLead, asker], attention: replacedReasons).map(\.id) == ["asker"], "a replaced lead's request stays out of Needs you")
         print("session tree tests passed")
     }
 

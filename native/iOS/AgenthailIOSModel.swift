@@ -185,6 +185,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     var isPaired: Bool { !hostOrder.isEmpty && (previewPaired || connections.values.contains { !$0.isPreview }) }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
+
+    /// Names the lead that replaced a request's session; the computer serving the request gives the id unqualified.
+    func leadName(_ id: String, requestFrom sessionID: String) -> String {
+        let qualified = HostCatalog.qualify(catalog.route(for: sessionID)?.hostID ?? HostCatalog.owner(of: sessionID) ?? "", id)
+        return snapshot?.sessions.first { $0.id == qualified }?.displayName ?? id
+    }
     var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
     var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
@@ -247,7 +254,8 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 },
                 channels: [], relays: [], history: [], attention: catalog.attention,
                 deliveryProblems: catalog.deliveryProblems,
-                codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil)
+                codexRecentHours: loaded.first?.codexRecentHours ?? 24, busyDelivery: nil,
+                leadReplacements: catalog.leadReplacements)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
         store.carry(rekeys)
@@ -405,6 +413,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         defer { pendingControls.remove(key) }
         try await connection.api.action("delivery-dismiss", deliveryID: problem.deliveryId)
         connection.updateSnapshot { $0.deliveryProblems = $0.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId } }
+    }
+
+    func acknowledgeLeadReplacement(_ replacement: LeadReplacement) async throws {
+        guard let hostID = replacement.hostID, let connection = connections[hostID], connection.shownReachable else {
+            throw AgenthailAPIError.unavailable("Connect to your computer first.")
+        }
+        let key = "lead-replacement:\(replacement.listID)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        try await connection.api.acknowledgeLeadReplacement(replacement.id)
+        connection.updateSnapshot { $0.leadReplacements = $0.leadReplacements?.filter { $0.id != replacement.id } }
     }
 
     private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
@@ -1173,6 +1193,24 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         do {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
+            operationError = nil
+        } catch AgenthailAPIError.requestStale {
+            sessionRequests = sessionRequests?.removing(request.id)
+            operationError = "That request was already answered or has expired."
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await fetchRequests(sessionID, key: sessionRequestsKey)
+        await refreshSession(sessionID)
+    }
+
+    func withdraw(_ request: SessionRequest, sessionID: String) async {
+        guard answeringRequest == nil else { return }
+        answeringRequest = request.id
+        defer { answeringRequest = nil }
+        do {
+            let (api, route) = try resolve(sessionID)
+            try await api.withdrawRequest(sessionID: route.sessionID, requestID: request.id)
             operationError = nil
         } catch AgenthailAPIError.requestStale {
             sessionRequests = sessionRequests?.removing(request.id)

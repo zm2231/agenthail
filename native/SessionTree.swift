@@ -152,7 +152,7 @@ struct SessionTree: Equatable {
     /// then delivery decisions, then usage limits, newest first within each.
     static func needsYou(_ sessions: [SessionState], attention: [String: SessionAttention]) -> [SessionState] {
         let flagged = sessions.compactMap { session in attention[session.id].map { (session: session, kind: $0.kind) } }
-        return SessionAttention.Kind.allCases.flatMap { kind in
+        return SessionAttention.Kind.allCases.filter { $0 != .replacedRequest }.flatMap { kind in
             newestFirst(flagged.filter { $0.kind == kind }.map(\.session))
         }
     }
@@ -220,6 +220,8 @@ struct SessionAttention: Equatable {
         case outgoing
         /// A usage limit refused the session's last turn.
         case usageLimit
+        /// A lead a restart replaced still waits on a request; it is shown, but does not need the person.
+        case replacedRequest
     }
 
     let kind: Kind
@@ -249,7 +251,9 @@ struct SessionAttention: Equatable {
             result[id] = SessionAttention(kind: .incoming, reason: reason)
         }
         for session in live.values {
-            if let waiting = session.waitingOn {
+            if let waiting = session.waitingOn, session.replacedLead?.isEmpty == false {
+                result[session.id] = SessionAttention(kind: .replacedRequest, reason: "From a replaced lead. " + requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
+            } else if let waiting = session.waitingOn {
                 result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
             } else if let limit = session.limitLabel, result[session.id] == nil {
                 result[session.id] = SessionAttention(kind: .usageLimit, reason: limit)
