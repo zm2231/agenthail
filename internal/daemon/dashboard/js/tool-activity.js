@@ -131,7 +131,7 @@ export function readableInput(text, name = "") {
   if (!input || !Object.keys(input).length) return text || "";
   const asked = name === "AskUserQuestion" ? questions(input) : [];
   if (asked.length) {
-    return asked.map((question) => [question.question + (question.multiSelect ? " (choose any)" : ""), ...question.options.map((option) => `• ${option.label}${option.description ? ` — ${option.description}` : ""}`)].join("\n")).join("\n\n");
+    return asked.map((question) => [question.question + (question.multiSelect ? " (choose any)" : ""), ...question.options.map((option) => `• ${option.label}${option.description ? `: ${option.description}` : ""}`)].join("\n")).join("\n\n");
   }
   const commandKey = ["command", "cmd"].find((key) => typeof input[key] === "string");
   const lines = commandKey ? [`$ ${input[commandKey]}`] : [];

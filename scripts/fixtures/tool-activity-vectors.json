@@ -724,7 +724,7 @@
       "diffs" : [
 
       ],
-      "input" : "Which color?\n• Red — Warm\n• Blue\n\nWhere should it run? (choose any)\n• Mac\n• iPhone — The shared simulator",
+      "input" : "Which color?\n• Red: Warm\n• Blue\n\nWhere should it run? (choose any)\n• Mac\n• iPhone: The shared simulator",
       "name" : "AskUserQuestion",
       "object" : "Which color?",
       "summary" : "Which color?",

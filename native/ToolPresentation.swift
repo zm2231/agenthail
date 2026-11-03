@@ -211,7 +211,7 @@ extension ToolPresentation {
         if name == "AskUserQuestion", case let asked = Self.questions(input), !asked.isEmpty {
             return asked.map { question in
                 ([question.question + (question.multiSelect ? " (choose any)" : "")]
-                 + question.options.map { "• " + $0.label + ($0.description.isEmpty ? "" : " — " + $0.description) }).joined(separator: "\n")
+                 + question.options.map { "• " + $0.label + ($0.description.isEmpty ? "" : ": " + $0.description) }).joined(separator: "\n")
             }.joined(separator: "\n\n")
         }
         let commandKey = ["command", "cmd"].first { input[$0] is String }
