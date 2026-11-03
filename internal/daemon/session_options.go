@@ -207,29 +207,3 @@ func (d *Daemon) launchFolders() ([]string, error) {
 	}
 	return folders, nil
 }
-
-func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for queued instructions.")
-		return
-	}
-	rows, err := d.Registry.ListQueue(true, d.adapters())
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "Queued instructions are unavailable.")
-		return
-	}
-	items := []dashboardQueue{}
-	historyCount := 0
-	for index := len(rows) - 1; index >= 0; index-- {
-		item := rows[index]
-		if item.Historical {
-			if historyCount >= 100 {
-				continue
-			}
-			historyCount++
-		}
-		items = append(items, d.dashboardQueueItem(item))
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"items": items})
-}

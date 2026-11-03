@@ -377,9 +377,18 @@ final class AgenthailAPI: @unchecked Sendable {
         throw AgenthailAPIError.invalidResponse
     }
 
-    func queuedInstructions() async throws -> [QueueState] {
-        let response: QueueResponse = try await get("/api/v1/queue")
-        return response.items
+    func queuePage(sessionID: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> QueuePage {
+        var components = URLComponents()
+        components.path = "/api/v1/queue"
+        let items = [sessionID.map { URLQueryItem(name: "sessionId", value: $0) }, before.map { URLQueryItem(name: "before", value: String($0)) }].compactMap { $0 }
+        components.queryItems = items.isEmpty ? nil : items
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await request(path, method: "GET", body: nil, timeout: timeout)
+    }
+
+    func queueItem(id: Int64, timeout: TimeInterval = 25) async throws -> QueueState? {
+        let page: QueuePage = try await request("/api/v1/queue?id=\(id)", method: "GET", body: nil, timeout: timeout)
+        return page.items.first
     }
 
     func nameSession(id: String, alias: String) async throws {
