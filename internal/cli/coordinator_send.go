@@ -59,19 +59,34 @@ func (a *App) coordinatorSend(ctx context.Context, spec registry.CoordinatorSpec
 	return answer, json.Unmarshal(data, &answer)
 }
 
-// followStartedCoordinator opens the stream of the conversation the daemon
-// started for a send, so a send that asked for its reply follows the new lead.
-func (a *App) followStartedCoordinator(ctx context.Context, receipt delivery.Receipt, spec registry.CoordinatorSpec) (*surface.Session, sessionstream.Subscription, error) {
-	if receipt.SessionID == "" || receipt.TurnID == "" {
-		return nil, sessionstream.Subscription{}, errors.New("its first turn was submitted but not confirmed")
+// followReceipt moves a send that follows its turn onto the conversation its
+// receipt names. A conversation started for the message is followed from the
+// start of its journal; any other move cancels following and returns the note
+// to tell the sender. The superseded stream is cancelled either way.
+func (a *App) followReceipt(ctx context.Context, receipt delivery.Receipt, addressed surface.Session, stream *sessionstream.Subscription) (*surface.Session, string) {
+	if receipt.SessionID == "" || receipt.SessionID == addressed.ID {
+		return &addressed, ""
 	}
-	session := surface.Session{ID: receipt.SessionID, Surface: surface.SurfaceKind(spec.Surface)}
-	if stored, err := a.registry().Session(receipt.SessionID); err == nil {
-		session = *stored
+	if stream.Cancel != nil {
+		stream.Cancel()
 	}
-	stream, err := a.openDaemonSessionStream(ctx, &session, 0)
-	if err != nil {
-		return nil, sessionstream.Subscription{}, err
+	*stream = sessionstream.Subscription{}
+	session := surface.Session{ID: receipt.SessionID, Surface: addressed.Surface}
+	if a.registry() != nil {
+		if stored, err := a.registry().Session(receipt.SessionID); err == nil {
+			session = *stored
+		}
 	}
-	return &session, stream, nil
+	if !receipt.Started {
+		return &session, fmt.Sprintf("the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'", session.ID, session.ID)
+	}
+	var err error = errors.New("its first turn was submitted but not confirmed")
+	if receipt.TurnID != "" {
+		var next sessionstream.Subscription
+		if next, err = a.openDaemonSessionStream(ctx, &session, 0); err == nil {
+			*stream = next
+			return &session, ""
+		}
+	}
+	return &session, fmt.Sprintf("the coordinator started a new conversation %s for this message, but this send cannot follow it (%s); read the reply with 'agenthail last %s'", session.ID, err, session.ID)
 }

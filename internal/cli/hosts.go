@@ -296,9 +296,11 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 		if err != nil {
 			return err
 		}
-		if stream.Cancel != nil {
-			defer stream.Cancel()
-		}
+		defer func() {
+			if stream.Cancel != nil {
+				stream.Cancel()
+			}
+		}()
 	}
 	data, _, err := client.action(ctx, payload)
 	if err != nil {
@@ -307,6 +309,14 @@ func (a *App) sendRemote(ctx context.Context, remote *remoteTarget, message stri
 	receipt, err := remoteReceipt(data)
 	if err != nil {
 		return err
+	}
+	if wantStream || wantReply {
+		if _, note := a.followReceipt(ctx, receipt, *remote.session(), &stream); note != "" {
+			fmt.Fprintln(os.Stderr, note)
+			wantStream, wantReply = false, false
+		} else if receipt.Started && !jsonOut {
+			fmt.Println(receipt.Detail)
+		}
 	}
 	if receipt.Evidence == surface.EvidenceQueued || receipt.Status == string(registry.DeliveryIntentSubmitted) {
 		if jsonOut {

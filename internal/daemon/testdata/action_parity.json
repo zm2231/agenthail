@@ -453,7 +453,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/action coordinator-send from an unknown session": {
     "status": 400,
@@ -489,7 +489,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/action coordinator-send to a project without a lead": {
     "status": 409,
@@ -513,7 +513,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/action coordinator-send to a project's lead by id": {
     "status": 200,
@@ -525,7 +525,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/action coordinator-send to an unknown project": {
     "status": 409,
@@ -2817,7 +2817,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/v1/actions coordinator-send from an unknown session": {
     "status": 400,
@@ -2853,7 +2853,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/v1/actions coordinator-send to a project without a lead": {
     "status": 409,
@@ -2877,7 +2877,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/v1/actions coordinator-send to a project's lead by id": {
     "status": 200,
@@ -2889,7 +2889,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\",\"started\":true},\"started\":true}\n"
   },
   "api/v1/actions coordinator-send to an unknown project": {
     "status": 409,

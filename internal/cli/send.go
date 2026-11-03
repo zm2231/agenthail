@@ -102,9 +102,11 @@ func (a *App) cmdSend(args []string) error {
 		if err != nil {
 			return err
 		}
-		if daemonStream.Cancel != nil {
-			defer daemonStream.Cancel()
-		}
+		defer func() {
+			if daemonStream.Cancel != nil {
+				daemonStream.Cancel()
+			}
+		}()
 	} else if wantReply {
 		observation, observeErr := surf.Observe(ctx, sess)
 		if observeErr != nil {
@@ -124,6 +126,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	addressed := *sess
+	followsJournal := false
 	dispatcher := delivery.Dispatcher{Registry: a.registry()}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -141,37 +144,26 @@ func (a *App) cmdSend(args []string) error {
 	if coordinated {
 		var answer coordinatorSendAnswer
 		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
-			if answer.Started {
-				ref := target
-				if !byName {
-					ref = answer.Result.SessionID
-				}
-				if !wantStream && !wantReply {
-					return printCoordinatorAnswer(answer, ref, jsonOut)
-				}
-				replacement, stream, followErr := a.followStartedCoordinator(ctx, answer.Result, spec)
-				if followErr != nil {
-					fmt.Fprintf(os.Stderr, "the coordinator started a new conversation %s for this message, but this send cannot follow it (%s); read the reply with 'agenthail last %s'\n", answer.Result.SessionID, followErr, ref)
-					return printCoordinatorAnswer(answer, ref, jsonOut)
-				}
-				defer stream.Cancel()
+			receipt = &answer.Result
+			ref := target
+			if !byName && answer.Started {
+				ref = answer.Result.SessionID
+			}
+			following, note := a.followReceipt(ctx, answer.Result, addressed, &daemonStream)
+			if note != "" && (wantStream || wantReply) {
+				fmt.Fprintln(os.Stderr, note)
+				wantStream, wantReply = false, false
+			}
+			if answer.Started && !wantStream && !wantReply {
+				return printCoordinatorAnswer(answer, ref, jsonOut)
+			}
+			if following.ID != addressed.ID && note == "" {
 				if !jsonOut {
 					fmt.Println(answer.Result.Detail)
 				}
-				sess, addressed, daemonStream, useDaemonStream = replacement, *replacement, stream, true
+				addressed, useDaemonStream, followsJournal = *following, true, true
 			}
-			receipt = &answer.Result
-			if answer.Result.SessionID != "" && answer.Result.SessionID != addressed.ID {
-				if wantStream || wantReply {
-					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", answer.Result.SessionID, answer.Result.SessionID)
-					wantStream, wantReply = false, false
-				}
-				moved := surface.Session{ID: answer.Result.SessionID}
-				if stored, err := a.registry().Session(answer.Result.SessionID); err == nil {
-					moved = *stored
-				}
-				sess = &moved
-			}
+			sess = following
 		}
 	} else if hasFlag(args, "--no-queue") || syntheticNotion {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
@@ -229,7 +221,7 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
+	if (wantStream || wantReply) && !followsJournal && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || surface.RouteFor(surf, sess, options.Author).TransportOnly()) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}
