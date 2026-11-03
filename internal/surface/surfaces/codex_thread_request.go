@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -68,7 +69,6 @@ func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, cr
 		if reattached, err := c.reattachWith(ctx, client, credentials, session.ID, params, token, wait); err != nil {
 			credentials.Unattached(session.ID, err)
 		} else {
-			c.clearStaleMCP(session.ID)
 			response = reattached
 		}
 		return response, nil
@@ -98,7 +98,6 @@ func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials
 	if err != nil {
 		return nil, fmt.Errorf("rotate the credential: %w", err)
 	}
-	c.clearStaleMCP(threadID)
 	return c.reattachWith(ctx, client, credentials, threadID, params, token, wait)
 }
 
@@ -116,6 +115,14 @@ func (c *Codex) reattachWith(ctx context.Context, client codexClient, credential
 	}
 	if !connected {
 		return response, fmt.Errorf("another client keeps the thread loaded without the agenthail MCP server; it attaches at the thread's next load")
+	}
+	c.clearStaleMCP(threadID)
+	err = credentials.Deliver(threadID, token, func(string) error {
+		c.markStaleMCP(threadID)
+		return ErrMCPDeliveryDeferred
+	})
+	if err != nil && !errors.Is(err, ErrMCPDeliveryDeferred) {
+		return response, fmt.Errorf("record the thread's credential: %w", err)
 	}
 	return response, nil
 }

@@ -64,7 +64,14 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 - The status loop runs a pass every second, and the first pass after the daemon starts fixes whatever it finds. The daemon also runs a pass at once after its own coordinator changes (set, clear, replace, and any outcome of starting a coordinator's conversation).
 - A rotation that fails is logged and tried again on the next pass.
 - A coordinator's new conversation is minted with `control.project` before it is registered, so its first turn already has project control; if the start fails before the handover, the next pass takes that capability away.
-- Rotated tokens reach their runtimes after the pass releases its lock.
+- A pass is one indexed query (`session_credentials_live`, with the lead set as a subquery) and makes no runtime call when every credential matches and is delivered; about 0.4 ms at 200 live credentials.
+
+**Delivery.** A rotated credential is stored with `delivered=0`, and it becomes `1` only once a runtime confirms it holds that exact token while it is still live. That covers a Claude host's `replaceMcp` or `open` on resume, a conversation no host has open (its next open carries the live token), and a Codex thread reattached with it. Every pass delivers each `delivered=0` credential after releasing the lead lock, through `Deliver`:
+
+- One delivery runs at a time per session, under a per-session lock.
+- It pushes the live token read at push time, never a token captured earlier, and re-reads the live token after the push. If a rotation landed meanwhile, it pushes again, so the last token a runtime receives is the live one.
+- It mints a new token only when this process does not hold the raw token of the live credential, which happens only after the daemon restarts, since the registry stores hashes. A runtime that keeps refusing is sent the same token on every pass and never causes another rotation.
+- A loaded Codex thread takes its token at the next input or resume, which reattaches it and confirms delivery.
 - A hosted Claude conversation gets the new token at once through the host's `replaceMcp` call.
 - A Codex thread is marked for re-attach. Its next input or resume unsubscribes and resumes it with the new token, even when Codex still has it loaded, and checks the server connected. Until then its old token is refused.
 

@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -10,12 +11,16 @@ const (
 	mcpToolTimeoutSec = 3700
 )
 
+// ErrMCPDeliveryDeferred is a push that hands the token over later, as a loaded Codex thread takes it at its next reattach.
+var ErrMCPDeliveryDeferred = errors.New("the runtime takes its new credential later")
+
 type MCPCredentials interface {
 	URL() string
 	Pending(ctx context.Context) (token, ref string, err error)
 	Claim(ref, sessionID string) error
 	Live(sessionID string) (token string, ok bool)
 	Rotate(sessionID string) (token string, err error)
+	Deliver(sessionID, sent string, push func(token string) error) error
 	Unattached(sessionID string, err error)
 }
 

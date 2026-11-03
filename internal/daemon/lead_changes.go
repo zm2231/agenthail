@@ -14,16 +14,14 @@ func (d *Daemon) syncLeads() {
 		return
 	}
 	d.leads.mu.Lock()
-	deliveries, err := d.reconcileCredentials()
+	undelivered, err := d.reconcileCredentials()
 	if err != nil {
 		d.log.Printf("mcp: credentials are retried: %s", err)
 	}
 	changed := fingerprint != d.leads.last
 	d.leads.last = fingerprint
 	d.leads.mu.Unlock()
-	for _, deliver := range deliveries {
-		deliver()
-	}
+	d.deliverCredentials(undelivered)
 	if !changed {
 		return
 	}

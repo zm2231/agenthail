@@ -128,8 +128,8 @@ func TestACredentialWhoseCapabilitiesAreWrongWhenAgenthailStartsIsFixedWithinOne
 		t.Fatal("a credential granting project control to a non-lead survived a tick")
 	}
 	held, err := fixture.registry.LiveCredentials()
-	if err != nil || !sameCapabilities(held[id], sessionCapabilities(false)) {
-		t.Fatalf("live capabilities=%v err=%v", held[id], err)
+	if err != nil || !sameCapabilities(held[id].Capabilities, sessionCapabilities(false)) {
+		t.Fatalf("live capabilities=%v err=%v", held[id].Capabilities, err)
 	}
 }
 

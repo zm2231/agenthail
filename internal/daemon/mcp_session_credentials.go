@@ -16,10 +16,42 @@ const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
 
 // Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
 type daemonMCPCredentials struct {
-	d      *Daemon
-	url    string
-	mu     sync.Mutex
-	tokens map[string]string
+	d          *Daemon
+	url        string
+	mu         sync.Mutex
+	tokens     map[string]string
+	deliveries sync.Map
+}
+
+const deliveryAttempts = 3
+
+// Deliver confirms sent if it is still the live token; otherwise it pushes the live token read now (minting one only when this process does not hold it) until a pushed token is still live once the push returns.
+func (c *daemonMCPCredentials) Deliver(sessionID, sent string, push func(token string) error) error {
+	lock, _ := c.deliveries.LoadOrStore(sessionID, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	token := sent
+	for range deliveryAttempts {
+		if token != "" {
+			live, err := c.d.Registry.MarkCredentialDelivered(sessionID, registry.HashSessionToken(token))
+			if err != nil || live {
+				return err
+			}
+		}
+		held, ok := c.Live(sessionID)
+		if !ok {
+			rotated, err := c.Rotate(sessionID)
+			if err != nil {
+				return err
+			}
+			held = rotated
+		}
+		if err := push(held); err != nil {
+			return err
+		}
+		token = held
+	}
+	return fmt.Errorf("%s's credential kept changing while it was delivered", sessionID)
 }
 
 func newDaemonMCPCredentials(d *Daemon, listen string) *daemonMCPCredentials {

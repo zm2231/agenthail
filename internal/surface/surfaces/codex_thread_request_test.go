@@ -62,6 +62,7 @@ type fakeCredentials struct {
 	claims     []string
 	rotateErr  error
 	leadStarts []bool
+	confirmed  []string
 }
 
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
@@ -82,6 +83,10 @@ func (f *fakeCredentials) Rotate(id string) (string, error) {
 	return "ahs_rotated", f.rotateErr
 }
 func (f *fakeCredentials) Unattached(_ string, err error) { f.unattached = append(f.unattached, err) }
+func (f *fakeCredentials) Deliver(id, sent string, _ func(string) error) error {
+	f.confirmed = append(f.confirmed, id)
+	return nil
+}
 
 func TestStartAndForkCarryAPendingCredential(t *testing.T) {
 	for _, method := range []string{codexThreadStart, codexThreadFork} {

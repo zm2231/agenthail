@@ -334,6 +334,7 @@ CREATE TABLE IF NOT EXISTS session_credentials (
 	max_expires_at_ms INTEGER NOT NULL,
 	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
 	revoked_reason TEXT NOT NULL DEFAULT '',
+	delivered INTEGER NOT NULL DEFAULT 1,
 	CHECK ((session_id IS NULL) <> (pending_ref IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0;

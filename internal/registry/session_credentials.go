@@ -127,8 +127,8 @@ func (r *Registry) issueSessionCredential(sessionID string, capabilities []strin
 		return IssuedCredential{}, err
 	}
 	idle, max := now.Add(CredentialIdleLifetime), now.Add(CredentialMaxLifetime)
-	result, err := tx.Exec(`INSERT INTO session_credentials(session_id,token_hash,capabilities,ceiling,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?,?,?)`,
-		sessionID, HashSessionToken(token), string(encodedCaps), string(encodedCeiling), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli())
+	result, err := tx.Exec(`INSERT INTO session_credentials(session_id,token_hash,capabilities,ceiling,created_at_ms,idle_expires_at_ms,max_expires_at_ms,delivered) VALUES(?,?,?,?,?,?,?,?)`,
+		sessionID, HashSessionToken(token), string(encodedCaps), string(encodedCeiling), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli(), !rotate)
 	if err != nil {
 		return IssuedCredential{}, err
 	}
