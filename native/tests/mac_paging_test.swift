@@ -111,6 +111,21 @@ struct MacPagingTest {
         check(await settle { model.pages.found.isEmpty }, "clearing the search drops what it found")
         check(model.knownSessions.contains { $0.id == "zeta" }, "a session opened from search stays open after the search clears")
 
+        model.sessionFilter = .archived
+        PagingDaemon.firstAll = ["left"]
+        PagingDaemon.slowPages = ["first"]
+        let asked = PagingDaemon.lock.withLock { PagingDaemon.requests.count }
+        model.sessionFilter = .all
+        try? await Task.sleep(for: .milliseconds(50))
+        PagingDaemon.firstAll = ["returned"]
+        model.sessionFilter = .archived
+        model.sessionFilter = .all
+        check(await settle { ids().contains("returned") }, "a list left while its first page was in flight reads its own first page when it comes back: \(ids())")
+        try? await Task.sleep(for: .milliseconds(400))
+        let firstPages = PagingDaemon.lock.withLock { PagingDaemon.requests.dropFirst(asked).filter { $0.contains("scope=all") && !$0.contains("cursor") && !$0.contains("q=") } }
+        check(!ids().contains("left") && firstPages.count == 2, "coming back does not wait on the read it left: \(ids()) \(firstPages)")
+        PagingDaemon.slowPages = []
+
         PagingDaemon.firstAll = ["stale"]
         model.sessionFilter = .archived
         let served = PagingDaemon.lock.withLock { PagingDaemon.servedFirstAll }
