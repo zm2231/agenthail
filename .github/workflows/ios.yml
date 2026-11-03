@@ -71,7 +71,8 @@ jobs:
         run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
       - name: iOS simulator tests
         run: |
-          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
+          rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
+          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
@@ -80,6 +81,14 @@ jobs:
           app="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app"
           test -s "$app/Frameworks/WebRTC.framework/WebRTC"
           cmp native/iOS/WebRTC-LICENSE.txt "$app/WebRTC-LICENSE.txt"
+      - name: Upload simulator test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-tests-xcresult-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-tests.xcresult
+          retention-days: 3
+          if-no-files-found: ignore
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
