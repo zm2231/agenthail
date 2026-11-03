@@ -50,6 +50,10 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
+		if err := d.hostTransit(r.Context(), host); err != nil {
+			writeActionResult(w, actionResult{}, err)
+			return
+		}
 		if !writeIncompatibleHost(w, host) {
 			return
 		}

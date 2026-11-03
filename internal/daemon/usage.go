@@ -42,7 +42,7 @@ func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
 	var sets, remote []usageSet
 	var wait sync.WaitGroup
 	wait.Go(func() { sets = d.localUsageSets(r.Context(), time.Now()) })
-	if r.URL.Query().Get("scope") != "local" {
+	if _, fromHost := requestingHost(r.Context()); !fromHost && r.URL.Query().Get("scope") != "local" {
 		wait.Go(func() { remote = d.remoteUsageSets(r.Context()) })
 	}
 	wait.Wait()

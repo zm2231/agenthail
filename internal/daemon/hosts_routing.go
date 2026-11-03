@@ -48,6 +48,10 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 			next(w, r)
 			return
 		}
+		if err := d.hostTransit(r.Context(), host); err != nil {
+			writeActionResult(w, actionResult{}, err)
+			return
+		}
 		if !writeIncompatibleHost(w, host) {
 			return
 		}
