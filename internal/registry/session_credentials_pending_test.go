@@ -11,7 +11,7 @@ import (
 func TestPendingCredentialAuthenticatesOnlyOnceItsSessionRegisters(t *testing.T) {
 	r := openTestRegistry(t)
 	now := time.Now()
-	pending, err := r.IssuePendingCredential(readCaps, nil, now, time.Minute)
+	pending, err := r.IssuePendingCredential(now, time.Minute)
 	if err != nil || pending.Token == "" || pending.Ref == "" {
 		t.Fatalf("pending=%+v err=%v", pending, err)
 	}
@@ -53,7 +53,7 @@ func TestPendingCredentialAuthenticatesOnlyOnceItsSessionRegisters(t *testing.T)
 func TestAClaimForAnAlreadyRegisteredSessionBindsAtOnce(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	pending, err := r.IssuePendingCredential(readCaps, nil, now, time.Minute)
+	pending, err := r.IssuePendingCredential(now, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +68,11 @@ func TestAClaimForAnAlreadyRegisteredSessionBindsAtOnce(t *testing.T) {
 func TestBindingAPendingCredentialReplacesTheSessionsLiveOne(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	old, err := r.IssueSessionCredential(session, readCaps, nil, now)
+	old, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := r.IssuePendingCredential(readCaps, nil, now, time.Minute)
+	pending, err := r.IssuePendingCredential(now, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func TestBindingAPendingCredentialReplacesTheSessionsLiveOne(t *testing.T) {
 func TestExpiredPendingCredentialIsDeletedAndNeverBinds(t *testing.T) {
 	r := openTestRegistry(t)
 	later := time.Now()
-	stale, err := r.IssuePendingCredential(readCaps, nil, later.Add(-2*time.Minute), time.Minute)
+	stale, err := r.IssuePendingCredential(later.Add(-2*time.Minute), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedLate, err := r.IssuePendingCredential(readCaps, nil, later.Add(-2*time.Minute), time.Minute)
+	claimedLate, err := r.IssuePendingCredential(later.Add(-2*time.Minute), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestExpiredPendingCredentialIsDeletedAndNeverBinds(t *testing.T) {
 func TestBoundOnlyCredentialTableUpgradesKeepingCredentials(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	issued, err := r.IssueSessionCredential(session, readCaps, nil, now)
+	issued, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestBoundOnlyCredentialTableUpgradesKeepingCredentials(t *testing.T) {
 		`DROP INDEX session_credentials_live`,
 		`CREATE TABLE session_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, capabilities TEXT NOT NULL DEFAULT '[]', ceiling TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL, last_used_at_ms INTEGER NOT NULL DEFAULT 0, idle_expires_at_ms INTEGER NOT NULL, max_expires_at_ms INTEGER NOT NULL, revoked_at_ms INTEGER NOT NULL DEFAULT 0, revoked_reason TEXT NOT NULL DEFAULT '')`,
 		`CREATE UNIQUE INDEX session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0`,
-		`INSERT INTO session_credentials(id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason) SELECT id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM current_credentials`,
+		`INSERT INTO session_credentials(id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason) SELECT id,session_id,token_hash,'[]','{}',created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM current_credentials`,
 		`DROP TABLE current_credentials`,
 		`PRAGMA user_version=42`,
 	} {
@@ -156,14 +156,14 @@ func TestBoundOnlyCredentialTableUpgradesKeepingCredentials(t *testing.T) {
 	if credential, err := reopened.AuthenticateSessionToken(issued.Token, now); err != nil || credential.SessionID != session {
 		t.Fatalf("credential after upgrade=%+v err=%v", credential, err)
 	}
-	if _, err := reopened.IssueSessionCredential(session, append(readCaps, "spawn"), nil, now); err != nil {
+	if _, err := reopened.RotateSessionCredential(session, now); err != nil {
 		t.Fatalf("live index missing after upgrade: %v", err)
 	}
 	var live int
 	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM session_credentials WHERE session_id=? AND revoked_at_ms=0`, session).Scan(&live); err != nil || live != 1 {
 		t.Fatalf("live=%d err=%v", live, err)
 	}
-	if _, err := reopened.IssuePendingCredential(readCaps, nil, now, time.Minute); err != nil {
+	if _, err := reopened.IssuePendingCredential(now, time.Minute); err != nil {
 		t.Fatalf("pending after upgrade: %v", err)
 	}
 }

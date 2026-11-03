@@ -2,7 +2,6 @@ package surfaces
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -59,31 +58,24 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 	return nil, fmt.Errorf("codexThreadRequest does not send %s", method)
 }
 
-// A loaded thread ignores a resume's config, so a held token rides every resume; without one, the thread's MCP status shows whether it loaded bare.
+// A loaded thread ignores a resume's config, so only a reload replaces a token it holds.
 func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
-		response, err := client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
-		if err != nil || !c.staleMCP(session.ID) {
-			return response, err
-		}
-		if reattached, err := c.reattachWith(ctx, client, credentials, session.ID, params, token, wait); err != nil {
-			credentials.Unattached(session.ID, err)
-		} else {
-			response = reattached
-		}
-		return response, nil
+		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
 	}
 	response, err := client.Request(ctx, codexThreadResume, params, wait)
 	if err != nil {
 		return response, err
 	}
-	connected, err := codexMCPConnected(ctx, client, session.ID)
-	if err != nil {
-		credentials.Unattached(session.ID, fmt.Errorf("read the thread's MCP status: %w", err))
-		return response, nil
-	}
-	if connected {
-		return response, nil
+	if credentials.Current(session.ID) {
+		connected, err := codexMCPConnected(ctx, client, session.ID)
+		if err != nil {
+			credentials.Unattached(session.ID, fmt.Errorf("read the thread's MCP status: %w", err))
+			return response, nil
+		}
+		if connected {
+			return response, nil
+		}
 	}
 	if reattached, err := c.reattachMCP(ctx, client, credentials, session.ID, params, wait); err != nil {
 		credentials.Unattached(session.ID, err)
@@ -93,15 +85,16 @@ func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, cr
 	return response, nil
 }
 
+func (c *Codex) mcpCurrent(threadID string) bool {
+	credentials := c.mcpCredentials()
+	return credentials == nil || credentials.Current(threadID)
+}
+
 func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	token, err := credentials.Rotate(threadID)
 	if err != nil {
 		return nil, fmt.Errorf("rotate the credential: %w", err)
 	}
-	return c.reattachWith(ctx, client, credentials, threadID, params, token, wait)
-}
-
-func (c *Codex) reattachWith(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, token string, wait time.Duration) (map[string]any, error) {
 	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/unsubscribe: %w", err)
 	}
@@ -115,14 +108,6 @@ func (c *Codex) reattachWith(ctx context.Context, client codexClient, credential
 	}
 	if !connected {
 		return response, fmt.Errorf("another client keeps the thread loaded without the agenthail MCP server; it attaches at the thread's next load")
-	}
-	c.clearStaleMCP(threadID)
-	err = credentials.Deliver(threadID, token, func(string) error {
-		c.markStaleMCP(threadID)
-		return ErrMCPDeliveryDeferred
-	})
-	if err != nil && !errors.Is(err, ErrMCPDeliveryDeferred) {
-		return response, fmt.Errorf("record the thread's credential: %w", err)
 	}
 	return response, nil
 }

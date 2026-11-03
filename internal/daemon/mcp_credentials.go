@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -27,9 +26,5 @@ func (d *Daemon) capabilitiesOf(sessionID string) ([]string, error) {
 }
 
 func (d *Daemon) issueSessionCredential(session surface.Session) (registry.IssuedCredential, error) {
-	capabilities, err := d.capabilitiesOf(session.ID)
-	if err != nil {
-		return registry.IssuedCredential{}, err
-	}
-	return d.Registry.IssueSessionCredential(session.ID, capabilities, json.RawMessage(`{}`), time.Now())
+	return d.Registry.IssueSessionCredential(session.ID, time.Now())
 }

@@ -25,6 +25,22 @@ func setAsideBoundOnlyCredentials(tx *sql.Tx) error {
 	return nil
 }
 
+func dropCredentialPolicyColumns(tx *sql.Tx) error {
+	for _, column := range []string{"capabilities", "ceiling", "delivered"} {
+		exists, err := columnExists(tx, "session_credentials", column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE session_credentials DROP COLUMN ` + column); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func upgradeBoundOnlyCredentials(tx *sql.Tx) error {
 	var name string
 	err := tx.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_credentials_bound_only'`).Scan(&name)
@@ -34,8 +50,8 @@ func upgradeBoundOnlyCredentials(tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO session_credentials(id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason)
-		SELECT id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM session_credentials_bound_only`); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_credentials(id,session_id,token_hash,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason)
+		SELECT id,session_id,token_hash,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM session_credentials_bound_only`); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`DROP TABLE session_credentials_bound_only`)

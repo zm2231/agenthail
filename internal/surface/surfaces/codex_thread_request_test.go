@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,13 +62,13 @@ type fakeCredentials struct {
 	unattached []error
 	claims     []string
 	rotateErr  error
-	leadStarts []bool
-	confirmed  []string
+	expired    bool
 }
 
+func (f *fakeCredentials) Current(string) bool { return !f.expired }
+
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
-func (f *fakeCredentials) Pending(ctx context.Context) (string, string, error) {
-	f.leadStarts = append(f.leadStarts, surface.IsLeadStart(ctx))
+func (f *fakeCredentials) Pending(context.Context) (string, string, error) {
 	return "ahs_pending", "ref-1", nil
 }
 func (f *fakeCredentials) Claim(ref, id string) error {
@@ -83,10 +84,6 @@ func (f *fakeCredentials) Rotate(id string) (string, error) {
 	return "ahs_rotated", f.rotateErr
 }
 func (f *fakeCredentials) Unattached(_ string, err error) { f.unattached = append(f.unattached, err) }
-func (f *fakeCredentials) Deliver(id, sent string, _ func(string) error) error {
-	f.confirmed = append(f.confirmed, id)
-	return nil
-}
 
 func TestStartAndForkCarryAPendingCredential(t *testing.T) {
 	for _, method := range []string{codexThreadStart, codexThreadFork} {
@@ -155,6 +152,23 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	}
 	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.rotations, credentials.unattached)
+	}
+}
+
+func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *testing.T) {
+	credentials := &fakeCredentials{expired: true}
+	c := &Codex{}
+	c.SetMCPCredentials(credentials)
+	client := &scriptedThreadClient{connected: []bool{true}}
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{codexThreadResume, "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	if got := client.methods(); !slices.Equal(got, want) {
+		t.Fatalf("calls=%v", got)
+	}
+	if credentials.rotations != 1 || bearerOf(client.calls[2].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
+		t.Fatalf("rotations=%d unattached=%v, the expired token stayed attached", credentials.rotations, credentials.unattached)
 	}
 }
 

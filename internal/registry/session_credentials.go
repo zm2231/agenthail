@@ -6,10 +6,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -42,8 +40,6 @@ func (e CredentialRevokedError) Error() string {
 type SessionCredential struct {
 	ID            int64
 	SessionID     string
-	Capabilities  []string
-	Ceiling       json.RawMessage
 	CreatedAt     time.Time
 	LastUsedAt    time.Time
 	IdleExpiresAt time.Time
@@ -69,25 +65,15 @@ func newSessionToken() (string, error) {
 	return SessionTokenPrefix + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-func (r *Registry) IssueSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time) (IssuedCredential, error) {
-	return r.issueSessionCredential(sessionID, capabilities, ceiling, now, false)
+func (r *Registry) IssueSessionCredential(sessionID string, now time.Time) (IssuedCredential, error) {
+	return r.issueSessionCredential(sessionID, now, false)
 }
 
-func (r *Registry) RotateSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time) (IssuedCredential, error) {
-	return r.issueSessionCredential(sessionID, capabilities, ceiling, now, true)
+func (r *Registry) RotateSessionCredential(sessionID string, now time.Time) (IssuedCredential, error) {
+	return r.issueSessionCredential(sessionID, now, true)
 }
 
-func (r *Registry) issueSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time, rotate bool) (IssuedCredential, error) {
-	capabilities = slices.Sorted(slices.Values(capabilities))
-	capabilities = slices.Compact(capabilities)
-	encodedCaps, err := json.Marshal(capabilities)
-	if err != nil {
-		return IssuedCredential{}, err
-	}
-	encodedCeiling, err := canonicalCeiling(ceiling)
-	if err != nil {
-		return IssuedCredential{}, err
-	}
+func (r *Registry) issueSessionCredential(sessionID string, now time.Time, rotate bool) (IssuedCredential, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return IssuedCredential{}, err
@@ -110,7 +96,7 @@ func (r *Registry) issueSessionCredential(sessionID string, capabilities []strin
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return IssuedCredential{}, err
-	case !rotate && live.MaxExpiresAt.After(now) && string(mustJSON(live.Capabilities)) == string(encodedCaps) && string(live.Ceiling) == string(encodedCeiling):
+	case !rotate && live.MaxExpiresAt.After(now):
 		idle := now.Add(CredentialIdleLifetime)
 		if _, err := tx.Exec(`UPDATE session_credentials SET idle_expires_at_ms=? WHERE id=?`, idle.UnixMilli(), live.ID); err != nil {
 			return IssuedCredential{}, err
@@ -127,8 +113,8 @@ func (r *Registry) issueSessionCredential(sessionID string, capabilities []strin
 		return IssuedCredential{}, err
 	}
 	idle, max := now.Add(CredentialIdleLifetime), now.Add(CredentialMaxLifetime)
-	result, err := tx.Exec(`INSERT INTO session_credentials(session_id,token_hash,capabilities,ceiling,created_at_ms,idle_expires_at_ms,max_expires_at_ms,delivered) VALUES(?,?,?,?,?,?,?,?)`,
-		sessionID, HashSessionToken(token), string(encodedCaps), string(encodedCeiling), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli(), !rotate)
+	result, err := tx.Exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?)`,
+		sessionID, HashSessionToken(token), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli())
 	if err != nil {
 		return IssuedCredential{}, err
 	}
@@ -140,7 +126,7 @@ func (r *Registry) issueSessionCredential(sessionID string, capabilities []strin
 		return IssuedCredential{}, err
 	}
 	return IssuedCredential{Token: token, Credential: SessionCredential{
-		ID: id, SessionID: sessionID, Capabilities: capabilities, Ceiling: encodedCeiling,
+		ID: id, SessionID: sessionID,
 		CreatedAt: time.UnixMilli(now.UnixMilli()), IdleExpiresAt: time.UnixMilli(idle.UnixMilli()), MaxExpiresAt: time.UnixMilli(max.UnixMilli()),
 	}}, nil
 }
@@ -220,7 +206,7 @@ func endedReason(hostID string, archived int) string {
 	return ""
 }
 
-const credentialSelect = `SELECT id,session_id,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM session_credentials`
+const credentialSelect = `SELECT id,session_id,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM session_credentials`
 
 type credentialRow struct {
 	SessionCredential
@@ -230,36 +216,15 @@ type credentialRow struct {
 
 func scanCredential(row *sql.Row) (credentialRow, error) {
 	var result credentialRow
-	var caps, ceiling string
 	var sessionID sql.NullString
 	var created, used, idle, max int64
-	if err := row.Scan(&result.ID, &sessionID, &caps, &ceiling, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason); err != nil {
+	if err := row.Scan(&result.ID, &sessionID, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason); err != nil {
 		return credentialRow{}, err
 	}
 	result.SessionID = sessionID.String
-	if err := json.Unmarshal([]byte(caps), &result.Capabilities); err != nil {
-		return credentialRow{}, fmt.Errorf("decode credential capabilities: %w", err)
-	}
-	result.Ceiling = json.RawMessage(ceiling)
 	result.CreatedAt, result.IdleExpiresAt, result.MaxExpiresAt = time.UnixMilli(created), time.UnixMilli(idle), time.UnixMilli(max)
 	if used > 0 {
 		result.LastUsedAt = time.UnixMilli(used)
 	}
 	return result, nil
-}
-
-func canonicalCeiling(ceiling json.RawMessage) (json.RawMessage, error) {
-	if len(ceiling) == 0 {
-		return json.RawMessage(`{}`), nil
-	}
-	var value any
-	if err := json.Unmarshal(ceiling, &value); err != nil {
-		return nil, fmt.Errorf("decode credential ceiling: %w", err)
-	}
-	return json.Marshal(value)
-}
-
-func mustJSON(value any) []byte {
-	encoded, _ := json.Marshal(value)
-	return encoded
 }

@@ -131,48 +131,6 @@ func TestAResumedCodexThreadKeepsItsCredentialWhileTheDaemonHoldsIt(t *testing.T
 	}
 }
 
-func TestALoadedCodexThreadWhosePermissionsChangeIsReloadedWithItsNewCredentialOnItsNextInput(t *testing.T) {
-	fixture := newMCPCodexFixture(t)
-	cwd := t.TempDir()
-	root, err := canonicalCatalogPath(cwd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First", "cwd": cwd})
-	id := created["session"].(map[string]any)["id"].(string)
-	started := codexBearer(fixture.lifecycle.Daemon().Calls("thread/start")[0])
-	if code, body := fixture.action(t, map[string]any{"action": "coordinator-set", "sessionId": id, "name": "captain"}); code != http.StatusOK {
-		t.Fatalf("coordinator-set status=%d body=%v", code, body)
-	}
-	if status, body := postMCP(t, fixture.server, map[string]string{"Authorization": "Bearer " + started}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
-		t.Fatalf("old credential status=%d body=%v", status, body)
-	}
-	fixture.lifecycle.Daemon().CompleteTurn(id, "done")
-	unsubscribed := len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe"))
-	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Again"}); code != http.StatusOK {
-		t.Fatalf("send status=%d body=%v", code, body)
-	}
-	resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
-	if len(resumes) == 0 || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != unsubscribed+1 {
-		t.Fatalf("the loaded thread was not reloaded with its new credential: resumes=%d", len(resumes))
-	}
-	rotated := codexBearer(resumes[len(resumes)-1])
-	if rotated == "" || rotated == started {
-		t.Fatalf("resume carried %s", redacted(rotated))
-	}
-	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Once more"}); code != http.StatusOK || len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")) != unsubscribed+1 {
-		t.Fatalf("a second send reloaded the thread again: status=%d body=%v", code, body)
-	}
-	whoami, refused := fixture.whoami(t, rotated)
-	capabilities, _ := whoami["capabilities"].([]any)
-	if refused || !slices.Contains(capabilities, any("control.project")) {
-		t.Fatalf("whoami=%v refused=%v", whoami, refused)
-	}
-}
-
 func TestACodexCoordinatorStartedByItsFirstMessageStartsWithItsLeadCredential(t *testing.T) {
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
