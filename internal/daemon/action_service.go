@@ -113,7 +113,6 @@ func (d *Daemon) actionsHTTPHandler(format actionFormat) http.HandlerFunc {
 		}
 		key := r.Header.Get(actionIdempotencyHeader)
 		if len(strings.TrimSpace(key)) > registry.ActionReceiptKeyLimit {
-			r.Body.Close()
 			writeAPIError(w, http.StatusBadRequest, "invalid_idempotency_key", "The Idempotency-Key is too long.")
 			return
 		}

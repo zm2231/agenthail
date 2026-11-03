@@ -23,25 +23,31 @@ func (b failingBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-type untouchedBody struct{ read *bool }
+type untouchedBody struct{ touched *string }
 
 func (b untouchedBody) Read([]byte) (int, error) {
-	*b.read = true
-	select {}
+	*b.touched = "read"
+	return 0, io.EOF
 }
 
-func TestAnOverLongIdempotencyKeyIsRefusedBeforeTheBodyIsRead(t *testing.T) {
+func (b untouchedBody) Close() error {
+	*b.touched = "closed"
+	return nil
+}
+
+func TestAnOverLongIdempotencyKeyIsRefusedWithoutTouchingTheBody(t *testing.T) {
 	for _, front := range parityFormats {
 		t.Run(front.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			d, _, _, _, _ := daemonFixture(t)
-			read := false
-			request := httptest.NewRequest(http.MethodPost, front.path, untouchedBody{&read})
+			touched := ""
+			request := httptest.NewRequest(http.MethodPost, front.path, nil)
+			request.Body = untouchedBody{&touched}
 			request.Header.Set(actionIdempotencyHeader, strings.Repeat("k", registry.ActionReceiptKeyLimit+1))
 			recorder := httptest.NewRecorder()
 			d.actionsHTTPHandler(front.format)(recorder, request)
-			if read || recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_idempotency_key") {
-				t.Fatalf("read=%v status=%d body=%s", read, recorder.Code, recorder.Body)
+			if touched != "" || recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_idempotency_key") {
+				t.Fatalf("body %s; status=%d body=%s", touched, recorder.Code, recorder.Body)
 			}
 		})
 	}
