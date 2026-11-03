@@ -13,6 +13,36 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func TestSessionViewKeysBreakTiesByIDAndSurviveTheirEncoding(t *testing.T) {
+	at := time.Date(2026, 11, 2, 12, 0, 0, 123456789, time.FixedZone("x", -5*3600))
+	rows := []dashboardSession{{ID: "b", LastActive: at}, {ID: "a", LastActive: at}, {ID: "c", LastActive: at.Add(-time.Nanosecond)}}
+	plan := newSessionViewPlan(rows, "all", SessionViewFilters{}, at.Add(time.Hour))
+	order := []string{}
+	for _, family := range plan.view.Families {
+		order = append(order, family.ID)
+	}
+	if fmt.Sprint(order) != "[a b c]" {
+		t.Fatalf("order %v", order)
+	}
+	request := sessionViewRequest{Scope: "all"}
+	cursor, ok := decodeSessionViewCursor(encodeSessionViewCursor(request, plan.view.Families[0].key))
+	if !ok {
+		t.Fatal("the cursor did not decode")
+	}
+	if rest := familiesAfter(plan.view.Families, &cursor.After); len(rest) != 2 || rest[0].ID != "b" {
+		t.Fatalf("after a, the walk resumed at %+v", rest)
+	}
+	last, _ := decodeSessionViewCursor(encodeSessionViewCursor(request, plan.view.Families[2].key))
+	if rest := familiesAfter(plan.view.Families, &last.After); len(rest) != 0 {
+		t.Fatalf("past the last family, the walk returned %+v", rest)
+	}
+	for _, raw := range []string{"", "e30", "not-base64!"} {
+		if _, ok := decodeSessionViewCursor(raw); ok {
+			t.Fatalf("cursor %q decoded", raw)
+		}
+	}
+}
+
 func TestSessionViewPagesSurviveASessionMovingMidWalk(t *testing.T) {
 	d, store, _, _, _ := daemonFixture(t)
 	now := time.Now().UTC().Truncate(time.Second)

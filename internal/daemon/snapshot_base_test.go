@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func baseFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, *da
 }
 
 func TestTheBaseSnapshotCarriesNoSessionStateAndItsTagIgnoresSessionActivity(t *testing.T) {
-	d, reg, fake, dashboard, handler, cwd := baseFixture(t)
+	d, reg, fake, _, handler, cwd := baseFixture(t)
 	first := getSnapshot(t, handler, "/api/v1/snapshot?sessions=none", "")
 	tag := first.Header().Get("ETag")
 	if first.Code != http.StatusOK || tag == "" {
@@ -74,7 +75,7 @@ func TestTheBaseSnapshotCarriesNoSessionStateAndItsTagIgnoresSessionActivity(t *
 	if _, err := reg.SetCoordinator(registry.CoordinatorSpec{ProjectID: projectIDFor(t, body), ProjectRoot: cwd, Name: "base-lead", Surface: string(surface.KindCodex), Cwd: cwd}, registry.CoordinatorChange{SessionID: "to"}); err != nil {
 		t.Fatal(err)
 	}
-	dashboard.invalidate()
+	d.syncLeads()
 	led := getSnapshot(t, handler, "/api/v1/snapshot?sessions=none", tag)
 	if led.Code != http.StatusOK || led.Header().Get("ETag") == tag {
 		t.Fatalf("a new lead kept the base tag: status=%d", led.Code)
@@ -128,5 +129,48 @@ func TestProjectActivityComesFromTheDaemonWithItsOwnTag(t *testing.T) {
 	d.discoverCatalog(context.Background())
 	if moved := getSnapshot(t, handler, "/api/v1/projects/activity", tag); moved.Code != http.StatusOK || moved.Header().Get("ETag") == tag {
 		t.Fatalf("new activity kept the tag: status=%d", moved.Code)
+	}
+}
+
+func TestProjectActivityMatchesTheSnapshotsProjectsAfterAnArchive(t *testing.T) {
+	d, reg, _, _, handler, _ := baseFixture(t)
+	if err := reg.ArchiveSession("from", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	d.dashboard.invalidate()
+	response := getSnapshot(t, handler, "/api/v1/projects/activity", "")
+	var page projectActivityPage
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, _ := marshalAPIJSON(newProjectActivity(state))
+	var want projectActivityPage
+	if err := json.Unmarshal(wire, &want); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(page)
+	expected, _ := json.Marshal(want)
+	if string(got) != string(expected) || len(page.Projects) != 1 || page.Projects[0].SessionCount != 1 {
+		t.Fatalf("activity %s, snapshot projects %s", got, expected)
+	}
+}
+
+func TestAPairedHostMirrorStillGetsTheFullCatalogWhenItAsksForNoSessions(t *testing.T) {
+	d, _, _, dashboard, _, _ := baseFixture(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?sessions=none", nil)
+	request = request.WithContext(context.WithValue(request.Context(), apiHostPrincipalContextKey{}, apiHostPrincipal{host: true, hostID: "h1"}))
+	response := httptest.NewRecorder()
+	d.dashboardStateCached(dashboard, response, request)
+	var body map[string]json.RawMessage
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("status=%d %s", response.Code, response.Body.String())
+	}
+	if _, ok := body["sessions"]; !ok {
+		t.Fatal("a mirror request was answered with the base")
 	}
 }
