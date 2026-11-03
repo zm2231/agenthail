@@ -62,6 +62,9 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		return true
 	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish restarted queue item %d: %s", item.ID, err)
+	}
 	d.log.Printf("delivered queue item %d by starting coordinator %s: %s", item.ID, outcome.Session.ID, outcome.Reason)
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: outcome.Session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: receipt.TurnID, Evidence: receipt.Evidence})
 	return true

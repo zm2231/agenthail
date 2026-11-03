@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -27,6 +28,24 @@ type uuidCapturingSurface struct {
 func (u uuidCapturingSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	*u.uuids = append(*u.uuids, surface.MessageUUID(ctx))
 	return u.daemonSurface.StartSession(ctx, options)
+}
+
+func catalogEventsOfType(t *testing.T, events <-chan registry.CatalogEvent, kind string) int {
+	t.Helper()
+	count := 0
+	for {
+		select {
+		case event, open := <-events:
+			if !open {
+				t.Fatal("catalog subscriber closed")
+			}
+			if event.Type == kind {
+				count++
+			}
+		case <-time.After(300 * time.Millisecond):
+			return count
+		}
+	}
 }
 
 func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) {
@@ -82,11 +101,39 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			if tc.before != "" && r.QueueCount("to") == 0 {
 				t.Fatalf("%s left the sender no notice to retire", tc.before)
 			}
+			if err := d.catalog.flushCommitted(); err != nil {
+				t.Fatal(err)
+			}
+			_, latest, err := r.CatalogState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, follower, err := d.catalog.subscribe(latest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := followCatalog(t, follower)
+			defer follower.Cancel()
 			previous, err := r.Session("from")
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.drainMessageQueue(context.Background(), d.Surfaces[0], previous)
+			window, err := r.CatalogEventsAfter(latest, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.catalog.mu.Lock()
+			published := d.catalog.publishedSeq
+			d.catalog.mu.Unlock()
+			for _, event := range window.Events {
+				if event.Type == "delivery.dismissed" && event.Seq > published {
+					t.Fatalf("dismissal %d committed but not published (published through %d)", event.Seq, published)
+				}
+			}
+			if dismissals := catalogEventsOfType(t, events, "delivery.dismissed"); (tc.before == "held" || tc.before == "failed") != (dismissals == 1) || dismissals > 1 {
+				t.Fatalf("live subscriber saw %d dismissals, want one only for an open problem", dismissals)
+			}
 			if len(uuids) != 1 || uuids[0] != queued.UUID {
 				t.Fatalf("start uuids=%v, want the queued message's %s", uuids, queued.UUID)
 			}
