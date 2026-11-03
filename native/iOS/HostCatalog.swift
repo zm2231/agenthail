@@ -107,9 +107,9 @@ struct HostCatalog {
         }
         for host in paired {
             hosts.append(HostHealth(id: host.id, name: host.name, state: host.shownReachable ? "connected" : "unreachable"))
-            if host.reachable { targets[host.id] = HostTarget(hostID: host.id, remote: nil) }
+            if host.shownReachable { targets[host.id] = HostTarget(hostID: host.id, remote: nil) }
         }
-        for host in paired where host.reachable {
+        for host in paired where host.shownReachable {
             for peer in host.snapshot?.daemon.hosts ?? [] where names[peer.id] == nil {
                 if let index = hosts.firstIndex(where: { $0.id == peer.id }) {
                     if peer.state == "connected" { hosts[index] = HostHealth(id: peer.id, name: hosts[index].name, state: "connected") }

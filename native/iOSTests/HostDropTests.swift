@@ -163,6 +163,19 @@ final class HostDropTests: XCTestCase {
             XCTAssertTrue(error is URLError, "the inbox reports the computer's own error, got \(error)")
         }
     }
+
+    func testSearchAndNewSessionsKeepAComputerHeldThroughTheGrace() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        HostDropProtocol.state.setDown(true)
+        HostDropProtocol.state.dropStreams()
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        for _ in 0..<200 where connection.reachable { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(connection.holding && !connection.reachable, "the computer is held through the grace")
+        XCTAssertEqual(model.creationHosts.first { $0.id == "hdrop" }?.state, "connected", "new sessions stopped offering a computer shown connected")
+        await model.searchSessions("regression")
+        XCTAssertTrue((model.searchError ?? "").contains(connection.name), "search skipped a computer shown connected instead of reporting its error: \(model.searchError ?? "nil")")
+    }
 }
 
 final class HostDropProtocol: URLProtocol, @unchecked Sendable {

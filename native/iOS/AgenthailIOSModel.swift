@@ -1244,7 +1244,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         searchResults = []
         searchError = nil
         searching = false
-        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.reachable)
+        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable)
         guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3, !reachable.isEmpty else { return }
         searching = true
         do {
@@ -1474,7 +1474,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     // serves one of its sessions archives its own checkout.
     private func setRepositoryArchived(_ projectID: String, action: String) async throws {
         let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
-        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.reachable == true }
+        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.shownReachable == true }
         guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         var failures: [String] = []
         for hostID in reachable {
