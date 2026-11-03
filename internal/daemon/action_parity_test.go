@@ -124,6 +124,7 @@ func parityCases() []parityCase {
 		session("respond stale", "respond", `,"requestId":"gone","decision":{"behavior":"allow"}`),
 		session("respond choice", "respond", `,"requestId":"r1","decision":{"choice":"o9"}`),
 		session("respond choice stale", "respond", `,"requestId":"gone","decision":{"choice":"o0"}`),
+		session("request-withdraw from a current session", "request-withdraw", `,"requestId":"r1"`),
 		session("session-fork conflicting points", "session-fork", `,"fork":{"lastTurnId":"a","beforeTurnId":"b"}`),
 		session("session-fork unknown creator", "session-fork", `,"sourceSessionId":"ghost"`),
 		session("session-fork unknown turn", "session-fork", `,"fork":{"beforeTurnId":"never"}`),

@@ -1403,6 +1403,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
   },
+  "api/action request-withdraw from a current session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_replaced\",\"message\":\"only a request from a lead that was replaced can be withdrawn; answer it instead\"}}\n"
+  },
   "api/action respond": {
     "status": 200,
     "header": {
@@ -3778,6 +3790,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"rename\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"new name\"}}\n"
+  },
+  "api/v1/actions request-withdraw from a current session": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_replaced\",\"message\":\"only a request from a lead that was replaced can be withdrawn; answer it instead\"}}\n"
   },
   "api/v1/actions respond": {
     "status": 200,
