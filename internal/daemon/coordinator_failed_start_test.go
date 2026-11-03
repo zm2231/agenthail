@@ -51,7 +51,7 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 		t.Fatalf("the failed conversation leads the project: roles=%+v err=%v", roles, err)
 	}
 
-	if err := r.QueueMessage("from", "held for the coordinator"); err != nil {
+	if _, _, err := r.QueueDeliveryWithIntent("from", "held for the coordinator", "", surface.SendOptions{SourceSessionID: "to"}); err != nil {
 		t.Fatal(err)
 	}
 	previous, err := r.Session("from")
@@ -64,6 +64,17 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 	}
 	if got, queued := lead(), r.QueueCount("from"); got != "from" || queued != 0 {
 		t.Fatalf("lead=%q queued=%d, want the previous lead kept and the message settled, not retried", got, queued)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	perSession := map[string]int{}
+	for _, problem := range problems {
+		perSession[problem.SessionID]++
+	}
+	if perSession["started"] != 1 || perSession["from"] != 1 || len(problems) != 2 {
+		t.Fatalf("problems=%+v, want one per failed message", problems)
 	}
 
 	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out"))
