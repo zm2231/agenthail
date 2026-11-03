@@ -1,7 +1,6 @@
 package surfaces
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -117,47 +116,20 @@ type codexLifecycleScan struct {
 
 func lastCodexLifecycle(file io.ReaderAt, size, limit int64) codexLifecycleScan {
 	var scan codexLifecycleScan
-	var tail []byte
-	for scan.read < size && scan.read < limit {
-		chunk := min(codexStatusReadChunk, size-scan.read, limit-scan.read)
-		start := size - scan.read - chunk
-		part := make([]byte, chunk)
-		if _, err := file.ReadAt(part, start); err != nil && err != io.EOF {
-			return codexLifecycleScan{read: scan.read + chunk}
+	scan.read = scanJSONLBackward(file, size, limit, func(line []byte, offset int64) bool {
+		record, recordAt, ok := parseCodexLiveTurnRecord(line)
+		if !ok {
+			return true
 		}
-		scan.read += chunk
-		tail = append(part, tail...)
-		lines := bytes.Split(tail, []byte{'\n'})
-		offsets := make([]int64, len(lines))
-		at := start
-		for i, line := range lines {
-			offsets[i] = at
-			at += int64(len(line)) + 1
+		if scan.newest.IsZero() {
+			scan.newest = recordAt
 		}
-		first := 1
-		if start == 0 {
-			first = 0
+		if started, ended := codexLifecycle(record); started || ended {
+			scan.offset, scan.found = offset, true
+			return false
 		}
-		for i := len(lines) - 1; i >= first; i-- {
-			record, recordAt, ok := parseCodexLiveTurnRecord(lines[i])
-			if !ok {
-				continue
-			}
-			if scan.newest.IsZero() {
-				scan.newest = recordAt
-			}
-			if started, ended := codexLifecycle(record); started || ended {
-				scan.offset, scan.found = offsets[i], true
-				return scan
-			}
-		}
-		if start == 0 {
-			break
-		}
-		if newline := bytes.IndexByte(tail, '\n'); newline >= 0 {
-			tail = tail[:newline]
-		}
-	}
+		return true
+	})
 	return scan
 }
 

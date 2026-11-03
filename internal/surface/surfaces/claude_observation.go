@@ -48,8 +48,15 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 		if err != nil {
 			return nil, err
 		}
+		start := offset
 		for _, line := range lines {
 			_ = state.apply(line)
+			start -= int64(len(line)) + 1
+		}
+		if state.hasCurrent && state.current.UserID == "" && !state.current.Done && start > 0 {
+			if at, ok := claudeTurnStartBefore(path, start); ok {
+				state.current.StartedAt = at
+			}
 		}
 		state.cursor.offset = offset
 		c.observeState[path] = state
