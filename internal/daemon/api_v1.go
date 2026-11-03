@@ -128,6 +128,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/device", d.apiDeviceSelfHandler)
 	mux.HandleFunc("/api/v1/device/push", d.apiDevicePushHandler)
 	mux.HandleFunc("/api/v1/device/push-receipts", d.apiDevicePushReceiptsHandler)
+	mux.HandleFunc("/api/v1/device/connection-drops", d.apiDeviceConnectionDropsHandler)
 	mux.HandleFunc("/api/v1/pair", d.apiPairHandler)
 }
 

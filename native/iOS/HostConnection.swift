@@ -50,13 +50,18 @@ final class HostConnection {
     private var rereadTask: Task<Void, Never>?
     lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
+    var drops: ConnectionDrops?
 
-    init(credential: PairedHostCredential, session: URLSession) {
+    init(credential: PairedHostCredential, session: URLSession, drops: ConnectionDrops? = .shared) {
         id = credential.hostID
         self.credential = credential
         api = AgenthailAPI(baseURL: credential.endpoint, token: credential.token, session: session)
         isPreview = false
         pushRelayURL = KeychainStore.get(Self.relayAccount(credential.hostID)).flatMap(URL.init(string:))
+        self.drops = drops
+        api.onRelayFailure = { [weak self] host, code in
+            Task { @MainActor in self?.relayFailed(to: host, code: code) }
+        }
     }
 
     init(id: String, name: String, api: AgenthailAPI) {
@@ -99,6 +104,7 @@ final class HostConnection {
         connectionTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, !stopped {
+                let started = Date()
                 do {
                     let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                     guard !Task.isCancelled, !stopped else { return }
@@ -118,7 +124,7 @@ final class HostConnection {
                 } catch {
                     guard !stopped else { return }
                     if stopIfIncompatible(error) { return }
-                    recordFailure(error, during: "connect")
+                    recordFailure(error, during: "connect", elapsed: Date().timeIntervalSince(started))
                 }
                 reconnecting = true
                 delegate?.hostDidChange(self)
@@ -139,6 +145,7 @@ final class HostConnection {
         holding = false
         reconnecting = false
         grace.forget()
+        drops?.stopped(host: id)
     }
 
     func setSnapshot(_ value: DashboardSnapshot?) {
@@ -157,6 +164,7 @@ final class HostConnection {
 
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
+        let started = Date()
         let seq = delegate?.nextStateRequest() ?? 0
         refreshGeneration += 1
         let generation = refreshGeneration
@@ -174,6 +182,7 @@ final class HostConnection {
             pages.adopt(snapshot?.sessions ?? [])
             if !pages.listings.isEmpty, !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty { rereadPages() }
             snapshotSeq = seq
+            _ = drops?.peersConnected(via: id, Set((loaded.daemon.hosts ?? []).filter { $0.state == "connected" }.map(\.id)))
             recovered(by: "snapshot")
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
@@ -190,6 +199,9 @@ final class HostConnection {
             return true
         } catch {
             guard !stopped else { return false }
+            if ConnectionGrace.isTransport(error) {
+                drops?.failed(host: id, path: "request", error: ConnectionDropLog.code(error), elapsed: Date().timeIntervalSince(started), shown: shownReachable ? .held : .offline)
+            }
             connectionError = error.localizedDescription
             delegate?.hostDidChange(self)
             return false
@@ -278,7 +290,9 @@ final class HostConnection {
                     if streamOpen { grace.contact() }
                     streamOpen = false
                     Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
+                    drops?.failed(host: id, path: "stream", error: ConnectionDropLog.code(error), elapsed: nil, shown: shownReachable ? .held : .offline)
                     reconnecting = true
+                    let probed = Date()
                     do {
                         let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                         guard !stopped else { return }
@@ -287,7 +301,7 @@ final class HostConnection {
                     } catch {
                         guard !stopped else { return }
                         if stopIfIncompatible(error) { return }
-                        recordStreamInterruption(probeError: error)
+                        recordStreamInterruption(probeError: error, elapsed: Date().timeIntervalSince(probed))
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
@@ -321,7 +335,7 @@ final class HostConnection {
         return true
     }
 
-    func recordStreamInterruption(probeError: Error?) {
+    func recordStreamInterruption(probeError: Error?, elapsed: TimeInterval? = nil) {
         guard let probeError else {
             recovered(by: "stream probe")
             reconnecting = true
@@ -329,7 +343,7 @@ final class HostConnection {
             delegate?.hostDidChange(self)
             return
         }
-        recordFailure(probeError, during: "stream probe")
+        recordFailure(probeError, during: "stream probe", elapsed: elapsed)
     }
 
     private func recovered(by step: String) {
@@ -337,10 +351,24 @@ final class HostConnection {
         grace.contact()
         reachable = true
         holding = false
+        _ = drops?.recovered(host: id, by: step)
+        uploadDrops()
     }
 
-    private func recordFailure(_ error: Error, during step: String) {
+    private func uploadDrops() {
+        guard let drops else { return }
+        let id = id, api = api
+        Task { await drops.upload(to: id, with: api) }
+    }
+
+    private func relayFailed(to host: String, code: String) {
+        guard !stopped, host != id else { return }
+        drops?.failed(host: host, via: id, path: "request", error: "relay.\(code)", elapsed: nil, shown: .offline)
+    }
+
+    private func recordFailure(_ error: Error, during step: String, elapsed: TimeInterval? = nil) {
         let held = (reachable || holding) && grace.holds(error)
+        drops?.failed(host: id, path: step, error: ConnectionDropLog.code(error), elapsed: elapsed, shown: held ? .held : .offline)
         if held {
             Self.log.notice("\(self.id, privacy: .public) \(step, privacy: .public) failed, still shown connected: \(error.localizedDescription, privacy: .public)")
         } else if reachable || holding {

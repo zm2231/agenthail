@@ -65,6 +65,7 @@ final class AgenthailAPI: @unchecked Sendable {
     private let snapshotLock = NSLock()
     private var heldSnapshot: (tag: String, snapshot: DashboardSnapshot)?
     let tagged = TaggedResponses()
+    var onRelayFailure: (@Sendable (_ host: String, _ code: String) -> Void)?
 
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
@@ -845,6 +846,10 @@ final class AgenthailAPI: @unchecked Sendable {
             }
             if AgenthailAPIError.isUnknownRoute(data) { throw AgenthailAPIError.olderHost }
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let code = (object["error"] as? [String: Any])?["code"] as? String, ["host_unreachable", "host_outcome_unknown"].contains(code),
+                   let host = object["host"] as? String {
+                    onRelayFailure?(host, code)
+                }
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }

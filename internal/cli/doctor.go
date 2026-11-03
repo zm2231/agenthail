@@ -181,8 +181,11 @@ func (a *App) cmdDoctor(args []string) error {
 	var syncHealth []ledgerSyncHealth
 	var push pushHealth
 	var pushErr error
+	var connection connectionHealth
+	var connectionErr error
 	if r := a.registry(); r != nil {
 		push, pushErr = pushHealthOf(r, time.Now())
+		connection, connectionErr = connectionHealthOf(r, time.Now())
 		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		syncHealth, syncErr = a.ledgerSyncHealth(callCtx, r)
 		cancel()
@@ -227,6 +230,10 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if pushErr != nil {
 			report["pushError"] = pushErr.Error()
+		}
+		report["connection"] = connection
+		if connectionErr != nil {
+			report["connectionError"] = connectionErr.Error()
 		}
 		if claudeRootsErr != nil {
 			report["claudeConfigError"] = claudeRootsErr.Error()
@@ -281,6 +288,11 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("push: unknown (%s)\n", pushErr)
 		} else {
 			fmt.Println(push)
+		}
+		if connectionErr != nil {
+			fmt.Printf("connection: unknown (%s)\n", connectionErr)
+		} else {
+			fmt.Println(connection)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:

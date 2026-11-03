@@ -269,6 +269,29 @@ CREATE TABLE IF NOT EXISTS push_sends (
 	received_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS push_sends_device ON push_sends(device_id, sent_at DESC);
+CREATE TABLE IF NOT EXISTS device_connection_drops (
+	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+	drop_id TEXT NOT NULL,
+	host TEXT NOT NULL,
+	via TEXT NOT NULL DEFAULT '',
+	path TEXT NOT NULL,
+	started_at TEXT NOT NULL,
+	recovered_at TEXT NOT NULL,
+	recovered_by TEXT NOT NULL DEFAULT '',
+	first_error TEXT NOT NULL,
+	last_error TEXT NOT NULL,
+	elapsed_ms INTEGER,
+	attempts INTEGER NOT NULL,
+	shown TEXT NOT NULL,
+	since_foreground_ms INTEGER,
+	went_background INTEGER NOT NULL DEFAULT 0,
+	network TEXT NOT NULL DEFAULT '',
+	vpn INTEGER NOT NULL DEFAULT 0,
+	expensive INTEGER NOT NULL DEFAULT 0,
+	constrained INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (device_id, drop_id)
+);
+CREATE INDEX IF NOT EXISTS device_connection_drops_recent ON device_connection_drops(device_id, started_at DESC);
 CREATE TABLE IF NOT EXISTS browser_push_subscriptions (
 	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
 	endpoint TEXT NOT NULL,
