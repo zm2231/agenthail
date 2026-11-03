@@ -36,15 +36,6 @@ func dashboardStartCwd(value string) (string, error) {
 	return filepath.Clean(value), nil
 }
 
-func (d *Daemon) reserveStartName(w http.ResponseWriter, name string) (registry.AliasReservation, bool) {
-	reservation, err := d.reserveName(name)
-	if err != nil {
-		writeActionResult(w, actionResult{}, err)
-		return registry.AliasReservation{}, false
-	}
-	return reservation, true
-}
-
 func (d *Daemon) reserveName(name string) (registry.AliasReservation, error) {
 	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surfaceOperationTimeout+startNameMargin))
 	if err == nil {

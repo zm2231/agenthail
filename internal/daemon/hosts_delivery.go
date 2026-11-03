@@ -12,34 +12,30 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host *pairedHost, request map[string]any, body []byte) {
-	key := r.Header.Get(actionIdempotencyHeader)
+func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string, host *pairedHost, request map[string]any, body []byte) actionReply {
 	if key == "" {
 		key = "fwd-" + uuid.NewString()
 	}
-	header := http.Header{actionIdempotencyHeader: []string{key}, ActionActorHeader: []string{actionActor(r)}}
-	response, err := host.client.Do(r.Context(), http.MethodPost, "/api/v1/actions", nil, body, header)
+	header := http.Header{actionIdempotencyHeader: []string{key}, ActionActorHeader: []string{p.actor()}}
+	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)
 		if readErr == nil {
-			answer.write(w)
-			return
+			return replyWith(answer.write)
 		}
 		err = readErr
 	}
 	action, _ := request["action"].(string)
 	sessionID, _ := request["sessionId"].(string)
 	if action != "send" || sessionID == "" {
-		writeHostError(w, host, err)
-		return
+		return replyWith(func(w http.ResponseWriter) { writeHostError(w, host, err) })
 	}
 	message, _ := request["message"].(string)
 	var notSent hosts.NotSentError
 	sent := !errors.As(err, &notSent)
 	queueID, queueErr := d.Registry.QueueHostDelivery(sessionID, message, key, body, sent)
 	if queueErr != nil {
-		writeHostError(w, host, errors.Join(err, queueErr))
-		return
+		return replyWith(func(w http.ResponseWriter) { writeHostError(w, host, errors.Join(err, queueErr)) })
 	}
 	d.refreshHostQueueCounts()
 	receipt := delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: hosts.Qualify(host.record.ID, sessionID), QueueID: queueID, Detail: fmt.Sprintf("host %s is unreachable; queued until it reconnects", host.record.Name)}
@@ -48,7 +44,9 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 		receipt.Status = "submitted"
 		receipt.Detail = fmt.Sprintf("host %s did not answer; the outcome is unknown until it confirms this request", host.record.Name)
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": receipt})
+	return replyWith(func(w http.ResponseWriter) {
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": receipt})
+	})
 }
 
 func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, message, sourceID, busyDelivery string, hops int) (actionResult, error) {

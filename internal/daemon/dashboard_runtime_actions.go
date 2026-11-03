@@ -12,13 +12,12 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) dashboardCodexLaunch(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doCodexLaunch(ctx context.Context, _ principal, _ dashboardActionRequest) (actionResult, error) {
 	executable, executableErr := os.Executable()
 	if executableErr != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("find Agenthail executable: %s", executableErr))
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", fmt.Sprintf("find Agenthail executable: %s", executableErr))
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	launch := d.launchCodex
 	if launch == nil {
@@ -34,30 +33,25 @@ func (d *Daemon) dashboardCodexLaunch(w http.ResponseWriter, r *http.Request, re
 		} else {
 			detail += ": " + launchErr.Error()
 		}
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", detail)
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", detail)
 	}
 	if adapter := d.adapters().ForSurface(surface.KindCodex); adapter != nil {
 		d.recordSurfaceHealth(ctx, adapter, nil)
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": strings.TrimSpace(string(output))})
-	return
+	return actionOK(map[string]any{"ok": true, "result": strings.TrimSpace(string(output))}), nil
 }
 
-func (d *Daemon) dashboardRuntimeEnsure(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doRuntimeEnsure(ctx context.Context, _ principal, _ dashboardActionRequest) (actionResult, error) {
 	adapter := d.adapters().ForSurface(surface.KindCodex)
 	ensurer, ok := adapter.(surface.RuntimeEnsurer)
 	if adapter == nil || !ok {
-		writeAPIError(w, http.StatusConflict, "conflict", "Codex managed runtime cannot be repaired here")
-		return
+		return actionResult{}, conflict("Codex managed runtime cannot be repaired here")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if err := ensurer.EnsureRuntime(ctx); err != nil {
-		writeAPIError(w, http.StatusBadGateway, "bad_gateway", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
 	}
 	d.recordSurfaceHealth(ctx, adapter, nil)
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }

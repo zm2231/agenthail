@@ -434,24 +434,28 @@ func decodeAPIV1JSON(w http.ResponseWriter, r *http.Request, value any, allowEmp
 
 func apiV1JSONHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		adapter := &apiV1ResponseWriter{target: w, header: make(http.Header)}
-		next(adapter, r)
-		if adapter.passthrough {
-			return
-		}
-		if adapter.status == 0 {
-			adapter.WriteHeader(http.StatusOK)
-			return
-		}
-		message := strings.TrimSpace(adapter.body.String())
-		if adapter.truncated {
-			message += " (response truncated)"
-		}
-		if message == "" {
-			message = http.StatusText(adapter.status)
-		}
-		writeAPIError(w, adapter.status, apiV1StatusCode(adapter.status), message)
+		apiV1Respond(w, func(adapter http.ResponseWriter) { next(adapter, r) })
 	}
+}
+
+func apiV1Respond(w http.ResponseWriter, run func(http.ResponseWriter)) {
+	adapter := &apiV1ResponseWriter{target: w, header: make(http.Header)}
+	run(adapter)
+	if adapter.passthrough {
+		return
+	}
+	if adapter.status == 0 {
+		adapter.WriteHeader(http.StatusOK)
+		return
+	}
+	message := strings.TrimSpace(adapter.body.String())
+	if adapter.truncated {
+		message += " (response truncated)"
+	}
+	if message == "" {
+		message = http.StatusText(adapter.status)
+	}
+	writeAPIError(w, adapter.status, apiV1StatusCode(adapter.status), message)
 }
 
 type apiV1ResponseWriter struct {

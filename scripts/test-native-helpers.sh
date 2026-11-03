@@ -21,6 +21,7 @@ SOURCES=(
   ComposerCompletion.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
+  ConnectionGrace.swift
   CatalogBatch.swift
   CatalogInbox.swift
   CatalogFeed.swift

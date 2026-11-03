@@ -40,7 +40,7 @@ func projectsFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface,
 func runDashboardAction(t *testing.T, d *Daemon, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	response := httptest.NewRecorder()
-	d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body)))
+	d.actionsHTTPHandler(actionFormatDashboard)(response, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body)))
 	return response
 }
 

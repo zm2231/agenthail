@@ -165,10 +165,6 @@ const CLIActor = "the CLI"
 
 const maxActorLength = 160
 
-func actionActor(r *http.Request) string {
-	return principalFromRequest(r).actor()
-}
-
 // claimedActor keeps a forwarded actor to one bounded printable line.
 func claimedActor(value string) string {
 	value = strings.TrimSpace(value)

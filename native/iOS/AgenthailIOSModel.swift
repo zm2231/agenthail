@@ -144,6 +144,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
     private var subagentServers: [String: HostConnection?] = [:]
+    private var subagentFailedUnreachable: Set<String> = []
 
     private var connections: [String: HostConnection] = [:]
     private var hostOrder: [String] = []
@@ -278,8 +279,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func refetchMovedSubagents() {
-        for (parent, recorded) in subagentServers where server(for: parent) !== recorded {
+        for (parent, recorded) in subagentServers {
+            let current = server(for: parent)
+            let recovered = subagentFailedUnreachable.contains(parent) && current?.reachable == true
+            guard current !== recorded || recovered else { continue }
             subagentServers[parent] = nil
+            subagentFailedUnreachable.remove(parent)
             if fetchedSubagents.holds(parent) { fetchedSubagents.refetch(parent) }
         }
     }
@@ -390,7 +395,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
-        guard let hostID = problem.hostID, let connection = connections[hostID], connection.reachable else {
+        guard let hostID = problem.hostID, let connection = connections[hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
         }
         let key = "delivery:\(problem.id)"
@@ -431,6 +436,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard (session.hiddenSubagents?.count ?? 0) > 0 else {
             fetchedSubagents.drop(session.id)
             subagentServers[session.id] = nil
+            subagentFailedUnreachable.remove(session.id)
             return
         }
         let requestServer = server(for: session.id)
@@ -440,10 +446,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             guard !Task.isCancelled, server(for: session.id) === connection else { return }
             fetchedSubagents.store(loaded.map { merged($0, from: route.hostID) }, for: session.id)
             subagentServers.updateValue(connection, forKey: session.id)
+            subagentFailedUnreachable.remove(session.id)
         } catch {
             guard !Task.isCancelled, server(for: session.id) === requestServer else { return }
             fetchedSubagents.fail(AgenthailAPIError.userMessage(error), for: session.id)
             subagentServers.updateValue(requestServer, forKey: session.id)
+            if requestServer?.reachable != true { subagentFailedUnreachable.insert(session.id) }
         }
     }
 
@@ -452,7 +460,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.reachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         return try await InboxPage.load(from: hosts, sessionID: sessionID, before: cursors, partial: partial)
     }
@@ -474,7 +482,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.reachable else {
+        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
         }
         let key = "queue:\(item.listID)"
@@ -666,7 +674,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     private func listingAPI(_ project: ListedProject) throws -> AgenthailAPI {
-        guard let connection = connections[project.hostID], connection.reachable else {
+        guard let connection = connections[project.hostID], connection.shownReachable else {
             throw AgenthailAPIError.unavailable("\(connections[project.hostID]?.name ?? "That computer") can't be reached.")
         }
         return connection.api
@@ -1236,7 +1244,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         searchResults = []
         searchError = nil
         searching = false
-        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.reachable)
+        let reachable = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable)
         guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3, !reachable.isEmpty else { return }
         searching = true
         do {
@@ -1466,7 +1474,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     // serves one of its sessions archives its own checkout.
     private func setRepositoryArchived(_ projectID: String, action: String) async throws {
         let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
-        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.reachable == true }
+        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.shownReachable == true }
         guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         var failures: [String] = []
         for hostID in reachable {

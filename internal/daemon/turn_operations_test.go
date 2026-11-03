@@ -39,7 +39,7 @@ func TestAdvancedOptionsWithoutModelReachDashboardAndOutbox(t *testing.T) {
 	adapter := &operationSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
 	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"send","sessionId":"from","message":"hello","effort":"high","outputSchema":{"type":"object"}}`)))
+	d.actionsHTTPHandler(actionFormatDashboard)(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"send","sessionId":"from","message":"hello","effort":"high","outputSchema":{"type":"object"}}`)))
 	if w.Code != 200 || adapter.options.Effort != "high" || len(adapter.options.OutputSchema) == 0 {
 		t.Fatalf("status=%d options=%+v body=%s", w.Code, adapter.options, w.Body)
 	}
@@ -140,7 +140,7 @@ func TestRetriedNativeQueueStartWithSameKeyStartsOnce(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	adapter := &unknownQueueStartSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
-	handler := d.idempotentActionHandler(d.dashboardActionHandler)
+	handler := d.actionsHTTPHandler(actionFormatDashboard)
 	body := `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"start"}}`
 	first := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")
 	retry := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")

@@ -67,14 +67,14 @@ type actionKeyContextKey struct{}
 // performAction runs one action for any front end: idempotency, routing to the
 // host that owns its target, decoding and dispatch.
 func (d *Daemon) performAction(ctx context.Context, p principal, format actionFormat, body []byte, idempotencyKey string) actionReply {
-	chain := d.hostRoutedAction(d.dashboardActionHandler)
-	if format == actionFormatAPIv1 {
-		chain = apiV1JSONHandler(chain)
-	}
-	chain = d.idempotentActionHandler(chain)
-	recorder := newActionRecorder()
-	chain(recorder, principalRequest(ctx, p, body, idempotencyKey))
-	return recorder.reply()
+	ctx = p.context(ctx)
+	return d.idempotentReply(p.ID, idempotencyKey, body, func(body []byte) actionReply {
+		reply := d.routeHostAction(ctx, p, body, idempotencyKey)
+		if format == actionFormatAPIv1 {
+			reply = apiV1Reply(reply)
+		}
+		return reply
+	})
 }
 
 func withActionKey(ctx context.Context, idempotencyKey string) context.Context {
@@ -89,24 +89,13 @@ func actionKey(ctx context.Context) string {
 // doAction dispatches one decoded action and announces a state change when it succeeds.
 func (d *Daemon) doAction(ctx context.Context, p principal, request dashboardActionRequest) actionReply {
 	recorder := newActionRecorder()
-	d.routeAction(recorder, principalRequest(ctx, p, nil, actionKey(ctx)), request)
+	result, err := d.dispatchAction(p.context(ctx), p, request)
+	writeActionResult(recorder, result, err)
 	reply := recorder.reply()
 	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
 		d.publishEvent("state.changed", "", map[string]string{"source": "action"})
 	}
 	return reply
-}
-
-// principalRequest carries a principal to handlers still written against http.Request.
-func principalRequest(ctx context.Context, p principal, body []byte, idempotencyKey string) *http.Request {
-	r, _ := http.NewRequestWithContext(p.context(ctx), http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
-	if p.Claimed != "" {
-		r.Header.Set(ActionActorHeader, p.Claimed)
-	}
-	if idempotencyKey != "" {
-		r.Header.Set(actionIdempotencyHeader, idempotencyKey)
-	}
-	return r
 }
 
 func (d *Daemon) actionsHTTPHandler(format actionFormat) http.HandlerFunc {

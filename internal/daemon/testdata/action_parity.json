@@ -995,6 +995,18 @@
     },
     "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Notion is not configured\"}}\n"
   },
+  "api/action notion-create under a held name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/action permission-mode": {
     "status": 200,
     "header": {
@@ -1451,6 +1463,30 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"Codex managed runtime cannot be repaired here\"}}\n"
   },
+  "api/action runtime-ensure failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action runtime-ensure repairs the runtime": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/action send": {
     "status": 200,
     "header": {
@@ -1679,6 +1715,198 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"approval policy is invalid\"}}\n"
   },
+  "api/action session-create by a launcher refusing an option": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"launcher does not support this session option\"}}\n"
+  },
+  "api/action session-create by a launcher that accepts without confirming": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"retryable\":false,\"status\":\"submitted\",\"warning\":\"Submitted to parity.\"}\n"
+  },
+  "api/action session-create by a launcher that fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action session-create by a launcher that returns a location": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true}\n"
+  },
+  "api/action session-create by a launcher that returns only an id": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"retryable\":false,\"status\":\"submitted\",\"warning\":\"Submitted to parity.\"}\n"
+  },
+  "api/action session-create by a launcher that returns the session": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"result\":{\"uuid\":\"launched-turn\",\"accepted\":true},\"session\":{\"id\":\"launched\",\"surface\":\"codex\",\"name\":\"launched\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"focusable\":true}},\"sessionId\":\"launched\"}\n"
+  },
+  "api/action session-create by a launcher with a bad name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+  },
+  "api/action session-create by a launcher without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
+  },
+  "api/action session-create by an unavailable launcher": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"the terminal app is closed\"}}\n"
+  },
+  "api/action session-create by an unknown launcher": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"launcher \\\"nope\\\" is unavailable\"}}\n"
+  },
+  "api/action session-create from a session": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/action session-create in a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"working directory: stat \u003ctmp\u003e/agenthail-parity/project/missing: no such file or directory\"}}\n"
+  },
+  "api/action session-create named": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/action session-create on an unconfigured surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this surface cannot start conversations\"}}\n"
+  },
+  "api/action session-create starts a conversation": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/action session-create under a held name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/action session-create unknown creator": {
     "status": 400,
     "header": {
@@ -1690,6 +1918,66 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
+  },
+  "api/action session-create whose first turn fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"deliveryId\":1,\"error\":{\"code\":\"initial_turn_failed\",\"message\":\"the runtime broke\"},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/action session-create whose first turn outcome is unknown": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"deliveryId\":1,\"detail\":\"Submitted to codex:started.\",\"ok\":true,\"retryable\":false,\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}},\"status\":\"submitted\"}\n"
+  },
+  "api/action session-create whose start fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/action session-create whose start outcome is unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_unknown\",\"message\":\"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: delivery outcome is unknown: the runtime broke\"}}\n"
+  },
+  "api/action session-create without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
   },
   "api/action session-focus": {
     "status": 409,
@@ -3059,6 +3347,18 @@
     },
     "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Notion is not configured\"}}\n"
   },
+  "api/v1/actions notion-create under a held name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/v1/actions permission-mode": {
     "status": 200,
     "header": {
@@ -3515,6 +3815,30 @@
     },
     "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"Codex managed runtime cannot be repaired here\"}}\n"
   },
+  "api/v1/actions runtime-ensure failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions runtime-ensure repairs the runtime": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
   "api/v1/actions send": {
     "status": 200,
     "header": {
@@ -3743,6 +4067,198 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"approval policy is invalid\"}}\n"
   },
+  "api/v1/actions session-create by a launcher refusing an option": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"launcher does not support this session option\"}}\n"
+  },
+  "api/v1/actions session-create by a launcher that accepts without confirming": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"retryable\":false,\"status\":\"submitted\",\"warning\":\"Submitted to parity.\"}\n"
+  },
+  "api/v1/actions session-create by a launcher that fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions session-create by a launcher that returns a location": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true}\n"
+  },
+  "api/v1/actions session-create by a launcher that returns only an id": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"retryable\":false,\"status\":\"submitted\",\"warning\":\"Submitted to parity.\"}\n"
+  },
+  "api/v1/actions session-create by a launcher that returns the session": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"ok\":true,\"result\":{\"uuid\":\"launched-turn\",\"accepted\":true},\"session\":{\"id\":\"launched\",\"surface\":\"codex\",\"name\":\"launched\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"runtimeKind\":\"codex-desktop\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"parity\",\"location\":{\"workspace\":\"w2\",\"pane\":\"p2\"},\"focusable\":true}},\"sessionId\":\"launched\"}\n"
+  },
+  "api/v1/actions session-create by a launcher with a bad name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+  },
+  "api/v1/actions session-create by a launcher without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
+  },
+  "api/v1/actions session-create by an unavailable launcher": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"the terminal app is closed\"}}\n"
+  },
+  "api/v1/actions session-create by an unknown launcher": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"launcher \\\"nope\\\" is unavailable\"}}\n"
+  },
+  "api/v1/actions session-create from a session": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/v1/actions session-create in a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"working directory: stat \u003ctmp\u003e/agenthail-parity/project/missing: no such file or directory\"}}\n"
+  },
+  "api/v1/actions session-create named": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/v1/actions session-create on an unconfigured surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this surface cannot start conversations\"}}\n"
+  },
+  "api/v1/actions session-create starts a conversation": {
+    "status": 201,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"uuid\":\"started-turn\",\"accepted\":true},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/v1/actions session-create under a held name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"@held is the name of a conversation being started; choose another name or try again after \u003cclock\u003e\"}}\n"
+  },
   "api/v1/actions session-create unknown creator": {
     "status": 400,
     "header": {
@@ -3754,6 +4270,66 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
+  },
+  "api/v1/actions session-create whose first turn fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"deliveryId\":1,\"error\":{\"code\":\"initial_turn_failed\",\"message\":\"the runtime broke\"},\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}}}\n"
+  },
+  "api/v1/actions session-create whose first turn outcome is unknown": {
+    "status": 202,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"accepted\":true,\"deliveryId\":1,\"detail\":\"Submitted to codex:started.\",\"ok\":true,\"retryable\":false,\"session\":{\"id\":\"started\",\"surface\":\"codex\",\"name\":\"Started conversation\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"pid\":0,\"status\":\"busy\",\"transcript\":\"\",\"hasLocal\":false,\"source\":\"appServer\",\"transport\":\"managed\",\"runtimeKind\":\"codex-app-server\",\"lastActive\":\"\u003ctime\u003e\",\"runtime\":{\"launcher\":\"codex-app-server\",\"focusable\":false}},\"status\":\"submitted\"}\n"
+  },
+  "api/v1/actions session-create whose start fails": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_failed\",\"message\":\"the runtime broke\"}}\n"
+  },
+  "api/v1/actions session-create whose start outcome is unknown": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"create_unknown\",\"message\":\"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: delivery outcome is unknown: the runtime broke\"}}\n"
+  },
+  "api/v1/actions session-create without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
   },
   "api/v1/actions session-focus": {
     "status": 409,
