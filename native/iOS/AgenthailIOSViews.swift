@@ -683,9 +683,10 @@ struct SessionScreen: View {
                         .padding(.horizontal)
                         .padding(.top, 6)
                 } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
-                    RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText)) { decision in
-                        Task { await model.respond(to: request, sessionID: session.id, decision: decision) }
-                    }
+                    RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText),
+                                respond: { decision in Task { await model.respond(to: request, sessionID: session.id, decision: decision) } },
+                                leadNow: request.replacedBy.map { model.leadName($0, requestFrom: session.id) },
+                                withdraw: request.replacedBy == nil ? nil : { Task { await model.withdraw(request, sessionID: session.id) } })
                     .id(request.id)
                     .padding(.horizontal)
                     .padding(.top, 6)

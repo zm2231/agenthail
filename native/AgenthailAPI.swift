@@ -623,6 +623,14 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.result.outcome
     }
 
+    func withdrawRequest(sessionID: String, requestID: String) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "request-withdraw", "sessionId": sessionID, "requestId": requestID])
+    }
+
+    func acknowledgeLeadReplacement(_ id: Int64) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "lead-replacement-ack", "replacementId": id])
+    }
+
     func setPermissionMode(sessionID: String, mode: String) async throws {
         let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "permission-mode", "sessionId": sessionID, "permissionMode": mode])
     }

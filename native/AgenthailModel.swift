@@ -113,6 +113,11 @@ final class AgenthailModel: ObservableObject {
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     private(set) var knownSessions: [SessionState] = []
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
+
+    func sessionName(_ id: String) -> String {
+        knownSessions.first { $0.id == id }?.displayName ?? id
+    }
     private(set) var sessionFamilies: [SessionFamily] = []
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private(set) var sessionTree = SessionTree.build([], filter: .recent, attention: [:])
@@ -1105,6 +1110,24 @@ final class AgenthailModel: ObservableObject {
                 operationError = AgenthailAPIError.userMessage(error)
                 if let position, snapshot?.deliveryProblems?.contains(where: { $0.deliveryId == problem.deliveryId }) == false {
                     snapshot?.deliveryProblems?.insert(problem, at: min(position, snapshot?.deliveryProblems?.count ?? 0))
+                }
+                _ = await refresh(fresh: true)
+            }
+        }
+    }
+
+    func acknowledgeLeadReplacement(_ replacement: LeadReplacement) {
+        guard let api else { return }
+        let position = snapshot?.leadReplacements?.firstIndex { $0.id == replacement.id }
+        snapshot?.leadReplacements?.removeAll { $0.id == replacement.id }
+        Task {
+            do {
+                try await api.acknowledgeLeadReplacement(replacement.id)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+                if let position, snapshot?.leadReplacements?.contains(where: { $0.id == replacement.id }) == false {
+                    snapshot?.leadReplacements?.insert(replacement, at: min(position, snapshot?.leadReplacements?.count ?? 0))
                 }
                 _ = await refresh(fresh: true)
             }
