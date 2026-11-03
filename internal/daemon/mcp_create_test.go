@@ -73,6 +73,23 @@ func TestAChildStartsBoundedByItsSpawnerFromItsFirstCall(t *testing.T) {
 	}
 }
 
+func TestACreateWithoutACeilingLeavesTheRowsItDidBeforeCeilingsExisted(t *testing.T) {
+	f := newMCPCodexFixture(t)
+	id, _, _ := f.startParent(t)
+	var capabilities, ceiling string
+	var delivered, revoked int
+	if err := f.registry.WriteDB().QueryRow(`SELECT capabilities,ceiling,delivered,revoked_at_ms FROM session_credentials WHERE session_id=?`, id).Scan(&capabilities, &ceiling, &delivered, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if capabilities != `["control.descendants","ledger.read","ledger.write","read.project","read.self","requests.answer","spawn"]` || ceiling != `{}` || delivered != 1 || revoked != 0 {
+		t.Fatalf("credential row capabilities=%s ceiling=%s delivered=%d revoked=%d", capabilities, ceiling, delivered, revoked)
+	}
+	var ceilings int
+	if err := f.registry.WriteDB().QueryRow(`SELECT COUNT(*) FROM session_ceilings`).Scan(&ceilings); err != nil || ceilings != 0 {
+		t.Fatalf("session_ceilings rows=%d err=%v, want none for a person's session", ceilings, err)
+	}
+}
+
 func registerChain(t *testing.T, r *registry.Registry, ids ...string) {
 	t.Helper()
 	for index, id := range ids {
