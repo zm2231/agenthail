@@ -277,7 +277,10 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 			options.ConfigRoot = s.ClaudeRoot(ctx)
 		}
 	}
-	messageUUID := uuid.NewString()
+	messageUUID := surface.MessageUUID(ctx)
+	if !queued || messageUUID == "" {
+		messageUUID = uuid.NewString()
+	}
 	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
 	if session == nil {
 		if startErr == nil {

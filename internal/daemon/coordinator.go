@@ -44,6 +44,11 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 	composed, _ := item.Uploads.Compose(item.Message, false)
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
+	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
+		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
+	} else if messageUUID != "" {
+		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
 	outcome, handled, err := coord.Restart(operationCtx, session, composed)
 	if !handled {
 		return false
@@ -53,7 +58,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		return true
 	}
 	receipt := outcome.Receipt
-	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, receipt.Evidence, receipt.TurnID); err != nil {
+	if err := d.Registry.AckRestartedMessage(item.ID, session.ID, outcome.Session.ID, item.RelayHops, receipt.Evidence, receipt.TurnID); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		return true
 	}

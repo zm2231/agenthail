@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -16,6 +17,72 @@ type goneConversationSurface struct {
 
 func (g goneConversationSurface) ConversationExists(_ context.Context, session *surface.Session) (bool, error) {
 	return !g.gone[session.ID], nil
+}
+
+type uuidCapturingSurface struct {
+	goneConversationSurface
+	uuids *[]string
+}
+
+func (u uuidCapturingSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	*u.uuids = append(*u.uuids, surface.MessageUUID(ctx))
+	return u.daemonSurface.StartSession(ctx, options)
+}
+
+func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		startErr error
+		status   registry.DeliveryIntentStatus
+		turn     string
+	}{
+		{name: "accepted", status: registry.DeliveryIntentSent, turn: "started-turn"},
+		{name: "outcome unknown", startErr: surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out")), status: registry.DeliveryIntentSubmitted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, r, fake, repo := projectsFixture(t)
+			if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
+				t.Fatalf("add: %d %s", response.Code, response.Body)
+			}
+			if response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"captain"}`); response.Code != http.StatusOK {
+				t.Fatalf("set: %d %s", response.Code, response.Body)
+			}
+			var uuids []string
+			d.Surfaces[0] = uuidCapturingSurface{goneConversationSurface: goneConversationSurface{daemonSurface: fake, gone: map[string]bool{"from": true}}, uuids: &uuids}
+			fake.startErr = tc.startErr
+			_, intentID, err := r.QueueDeliveryWithIntent("from", "held for the coordinator", "", surface.SendOptions{SourceSessionID: "to"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			queued, err := r.DeliveryIntent(intentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous, err := r.Session("from")
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.drainMessageQueue(context.Background(), d.Surfaces[0], previous)
+			if len(uuids) != 1 || uuids[0] != queued.UUID {
+				t.Fatalf("start uuids=%v, want the queued message's %s", uuids, queued.UUID)
+			}
+			intent, err := r.DeliveryIntent(intentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if intent.TargetSessionID != "started" || intent.Status != tc.status || intent.ProviderKey != tc.turn {
+				t.Fatalf("intent=%+v, want it on the new conversation as %s", intent, tc.status)
+			}
+			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+				t.Fatalf("problems=%+v err=%v", problems, err)
+			}
+			if tc.turn != "" {
+				if reconciled, err := r.ReconcileDeliveryIntent("started", tc.turn); err != nil || !reconciled {
+					t.Fatalf("reconciled=%v err=%v", reconciled, err)
+				}
+			}
+		})
+	}
 }
 
 func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
