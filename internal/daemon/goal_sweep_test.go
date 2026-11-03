@@ -117,7 +117,7 @@ func TestANoticeThatFailsToQueueIsQueuedOnTheNextSweep(t *testing.T) {
 	f.worker = loner
 	now := time.Now()
 	f.d.sweepStoppedGoals(context.Background(), now)
-	if notices := f.notices(t); len(notices) != 0 || desktop.Load() != 0 {
+	if notices := f.notices(t); len(notices) != 0 || desktop.Load() != 1 {
 		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())
 	}
 	spawner := f.fake.sessions["spawner"]
@@ -138,6 +138,28 @@ func TestARestartDoesNotRepeatAStoppedGoalToTheLeadOrThePerson(t *testing.T) {
 	f.d.sweepStoppedGoals(context.Background(), time.Now())
 	restarted := newTestDaemon(t, f.reg, f.d.Surfaces)
 	restarted.notifyDesktop = f.d.notifyDesktop
+	restarted.sweepStoppedGoals(context.Background(), time.Now())
+	if notices := f.notices(t); len(notices) != 1 || desktop.Load() != 1 {
+		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())
+	}
+}
+
+func TestAStopWhoseNoticeWasQueuedButWhosePersonWasNotIsToldToThePersonAfterARestart(t *testing.T) {
+	f, goals, desktop := goalSweepFixture(t)
+	f.setLead(t, "lead")
+	key := goalStopNoticeKey(f.worker.ID, goals.goal)
+	restarted := newTestDaemon(t, f.reg, f.d.Surfaces)
+	restarted.notifyDesktop = f.d.notifyDesktop
+	f.d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error {
+		panic("the daemon stopped before telling the person")
+	}
+	func() {
+		defer func() { _ = recover() }()
+		f.d.sweepStoppedGoals(context.Background(), time.Now())
+	}()
+	if used, err := f.reg.DeliveryKeyUsed(key); err != nil || used {
+		t.Fatalf("the agent notice was queued before the person was told: used=%v err=%v", used, err)
+	}
 	restarted.sweepStoppedGoals(context.Background(), time.Now())
 	if notices := f.notices(t); len(notices) != 1 || desktop.Load() != 1 {
 		t.Fatalf("notices=%+v desktop=%d", notices, desktop.Load())

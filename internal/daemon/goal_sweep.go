@@ -113,30 +113,36 @@ func goalStopNoticeKey(sessionID string, goal *surface.GoalState) string {
 	return "goal-stop-" + hex.EncodeToString(sum[:16])
 }
 
-// With an agent to tell, its keyed notice decides whether the person hears, so a restart does not repeat either.
+// The person is told before the keyed agent notice is queued, since that key is what ends the retries.
 func (d *Daemon) noticeStoppedGoal(ctx context.Context, session surface.Session, goal *surface.GoalState) error {
 	key := goalStopNoticeKey(session.ID, goal)
 	name := d.resolveDisplay(session.ID)
 	note := goalStopNote(d.answerTarget(session.ID), goal)
-	if to, ok := d.noticeRecipient(session); ok {
-		message := fmt.Sprintf("[agenthail] %s stopped working on its goal. %s The person was notified too.", name, note)
-		queued, err := d.sendNotice(to, session, message, key)
-		if err != nil {
-			d.log.Printf("tell the %s that %s stopped on its goal: %s", to.role, name, err)
+	to, ok := d.noticeRecipient(session)
+	if ok {
+		if used, err := d.Registry.DeliveryKeyUsed(key); err != nil || used {
 			return err
 		}
-		if !queued {
-			return nil
-		}
-	} else if !d.goalSweep.firstNotice(session.ID, key) {
+	}
+	if d.goalSweep.firstNotice(session.ID, key) {
+		d.notifyStoppedGoal(ctx, session.ID, key, fmt.Sprintf("%s: %s", name, note))
+	}
+	if !ok {
 		return nil
 	}
-	message := fmt.Sprintf("%s: %s", name, note)
-	if err := d.notifyDesktop("Agenthail", message, session.ID, "agenthail-"+key, "", nil); err != nil {
+	message := fmt.Sprintf("[agenthail] %s stopped working on its goal. %s The person was notified too.", name, note)
+	if _, err := d.sendNotice(to, session, message, key); err != nil {
+		d.log.Printf("tell the %s that %s stopped on its goal: %s", to.role, name, err)
+		return err
+	}
+	return nil
+}
+
+func (d *Daemon) notifyStoppedGoal(ctx context.Context, sessionID, key, message string) {
+	if err := d.notifyDesktop("Agenthail", message, sessionID, "agenthail-"+key, "", nil); err != nil {
 		d.log.Printf("desktop notification: %s", err)
 	}
 	notifyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	d.notifyPairedDevices(notifyCtx, mobileNotification{Title: "Agenthail", Message: message, SessionID: session.ID, EventType: "session.goal.stopped", CollapseID: key})
-	return nil
+	d.notifyPairedDevices(notifyCtx, mobileNotification{Title: "Agenthail", Message: message, SessionID: sessionID, EventType: "session.goal.stopped", CollapseID: key})
 }
