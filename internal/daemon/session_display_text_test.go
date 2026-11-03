@@ -29,23 +29,24 @@ func TestQuietDetailDoesNotRepeatTheInstantLabel(t *testing.T) {
 
 func TestRevisionRowsIgnoreObservationTimes(t *testing.T) {
 	first := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	row := func(at time.Time) []dashboardSession {
-		return []dashboardSession{{ID: "s", ObservedAt: at, Freshness: &registry.CatalogFreshness{Generation: 4, ObservedAt: at}}}
+	record := func(at time.Time) registry.CatalogPresentationRow {
+		return registry.CatalogPresentationRow{ID: "s", Freshness: registry.CatalogFreshness{Generation: 4, ObservedAt: at}}
 	}
-	a, _ := json.Marshal(revisionRows(row(first)))
-	b, _ := json.Marshal(revisionRows(row(first.Add(30 * time.Second))))
+	a, _ := json.Marshal(newRevisionRow(record(first), dashboardSession{}))
+	b, _ := json.Marshal(newRevisionRow(record(first.Add(30*time.Second)), dashboardSession{}))
 	if string(a) != string(b) {
 		t.Fatalf("revision input changed with observation time:\n%s\n%s", a, b)
 	}
-	original := row(first)
-	revisionRows(original)
-	if !original[0].Freshness.ObservedAt.Equal(first) {
-		t.Fatal("revisionRows mutated the served row")
-	}
-	stale := row(first)
-	stale[0].Freshness.Stale = true
-	c, _ := json.Marshal(revisionRows(stale))
+	stale := record(first)
+	stale.Freshness.Stale = true
+	c, _ := json.Marshal(newRevisionRow(stale, dashboardSession{}))
 	if string(a) == string(c) {
 		t.Fatal("staleness must change the revision input")
+	}
+	moved := record(first)
+	moved.Freshness.Generation = 5
+	d, _ := json.Marshal(newRevisionRow(moved, dashboardSession{}))
+	if string(a) == string(d) {
+		t.Fatal("a new projection generation must change the revision input")
 	}
 }
