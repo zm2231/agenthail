@@ -10,6 +10,23 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
+func TestStoppingAStartingJobOfUnknownRootRunsInTheRootThatListsIt(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	f := claudetest.New(t)
+	daemonRoot := f.Root
+	f.Job("bg-starting", fixtureConversation, f.Home, "starting", 0)
+	if err := surface.RecordDaemonClaudeRoot(f.Home); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", f.AddRoot("other-root"))
+	if _, err := NewClaude(nil, f.Home).SessionAction(context.Background(), &surface.Session{ID: fixtureConversation}, "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if in, other := f.InvocationsIn(daemonRoot, "stop", "bg-starting"), f.InvocationsIn(f.Root, "stop", "bg-starting"); in != 1 || other != 0 {
+		t.Fatalf("stop ran %d times in the job's root and %d in the caller's, want once in the job's", in, other)
+	}
+}
+
 func TestClaudeConversationStateIsGoneOnlyOnPositiveEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
