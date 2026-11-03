@@ -35,7 +35,7 @@ func (r *Registry) AckRestartedMessage(id int64, from, to string, relayHops int,
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not inflight", id)
+		return queueItemNotInflight(id)
 	}
 	intents, err := restartedIntents(tx, id)
 	if err != nil {

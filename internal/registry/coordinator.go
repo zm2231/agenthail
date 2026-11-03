@@ -665,7 +665,7 @@ func (r *Registry) MoveClaimedMessage(id int64, sessionID string) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not inflight", id)
+		return queueItemNotInflight(id)
 	}
 	if _, err := tx.Exec(`UPDATE delivery_intents SET target_session_id=?,updated_at=datetime('now') WHERE queue_id=?`, sessionID, id); err != nil {
 		return err

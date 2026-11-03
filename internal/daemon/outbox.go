@@ -118,7 +118,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if result == nil {
 		unknownErr := fmt.Errorf("provider returned empty delivery result")
-		if err := d.Registry.DeadLetterUnknown(item.ID, unknownErr); err != nil {
+		err := d.Registry.DeadLetterUnknown(item.ID, unknownErr)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
+		if err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
@@ -126,7 +130,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if !result.Accepted {
 		busyErr := fmt.Errorf("target remained busy")
-		if _, err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
+		_, err := d.Registry.DeferMessage(item.ID, busyErr, now)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
+		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
@@ -229,6 +237,9 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 			sendErr = heldError{err: sendErr, reason: shared.HeldReason()}
 		}
 		refusal, err := d.Registry.DeferMessage(item.ID, sendErr, now)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
 		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
@@ -239,7 +250,11 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		return
 	}
 	if surface.IsDeliveryOutcomeUnknown(sendErr) {
-		if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
+		err := d.Registry.DeadLetterUnknown(item.ID, sendErr)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
+		if err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
@@ -247,6 +262,9 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 	}
 	if surface.IsDeliveryTerminal(sendErr) {
 		notified, err := d.Registry.DeadLetterMessage(item.ID, sendErr)
+		if d.settledElsewhere(item.ID, err) {
+			return
+		}
 		if err != nil {
 			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
 		}
@@ -259,7 +277,11 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		}
 		return
 	}
-	if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
+	err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts)
+	if d.settledElsewhere(item.ID, err) {
+		return
+	}
+	if err != nil {
 		d.log.Printf("nack queue item %d: %s", item.ID, err)
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
