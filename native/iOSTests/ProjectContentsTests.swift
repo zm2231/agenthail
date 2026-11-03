@@ -127,6 +127,23 @@ final class ProjectContentsTests: XCTestCase {
         XCTAssertFalse(ProjectContents.resumable(rows[2]), "a lead whose computer is offline was offered Resume")
     }
 
+    func testTheLeadOffersResumeOnlyWhenIdleAndAsksForALifecycleResumeOnlyWhenTheSessionCan() throws {
+        var capable = Self.row("capable")
+        var capabilities = capable["capabilities"] as? [String: Any] ?? [:]
+        capabilities["lifecycle"] = ["resume": true]
+        capable["capabilities"] = capabilities
+        var offline = capable
+        offline["id"] = "offline"
+        offline["host"] = ["id": "hpeer", "name": "peer", "state": "unreachable"]
+        offline["unavailableReason"] = "peer can't be reached"
+        let rows = try Self.sessions([Self.row("busy", status: "busy"), capable, Self.row("plain"), offline])
+
+        XCTAssertEqual(ProjectContents.leadActions(rows[0]), [.open, .message], "a working lead was offered Resume")
+        XCTAssertEqual(ProjectContents.leadActions(rows[1]), [.resume(enabled: true, lifecycle: true), .open])
+        XCTAssertEqual(ProjectContents.leadActions(rows[2]), [.resume(enabled: true, lifecycle: false), .open], "Resume without the lifecycle capability opens the lead to message it and sends no resume")
+        XCTAssertEqual(ProjectContents.leadActions(rows[3]), [.resume(enabled: false, lifecycle: false), .open], "an offline lead's Resume must be disabled and send nothing")
+    }
+
     func testAWorkingRowShowsHowLongItHasWorkedNeverItsLastActiveTime() throws {
         let now = Date()
         let stamp = ISO8601DateFormatter()

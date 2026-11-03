@@ -1705,8 +1705,10 @@ struct IOSSessionRow: View {
                 if !showsTime {
                     EmptyView()
                 } else if session.isWorking {
-                    Text(SessionRowTime.working(session, now: Date())).font(.caption).foregroundStyle(PhonePalette.muted)
-                        .lineLimit(1).fixedSize()
+                    TimelineView(.everyMinute) { context in
+                        Text(SessionRowTime.working(session, now: context.date)).font(.caption).foregroundStyle(PhonePalette.muted)
+                            .lineLimit(1).fixedSize()
+                    }
                 } else if let value = session.lastActive, let date = TimestampParser.date(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()

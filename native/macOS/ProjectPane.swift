@@ -28,6 +28,13 @@ extension View {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func prominent(_ primary: Bool) -> some View {
+        if primary { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
+    }
+}
+
 struct ProjectPane: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
@@ -90,19 +97,22 @@ struct ProjectPane: View {
             VStack(alignment: .leading, spacing: DesktopSpace.s) {
                 Text("@" + lead.name).font(.system(size: DesktopType.title, weight: .semibold)).foregroundStyle(DesktopPalette.text)
                 if let session = contents.leadSession {
-                    Text([SessionRefinement.surfaceLabel(session.surface), session.remoteHostName ?? model.snapshot?.daemon.host?.name, SessionRowTime.status(session, now: Date())].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
-                        .accessibilityIdentifier("project-lead-status")
+                    TimelineView(.everyMinute) { context in
+                        Text([SessionRefinement.surfaceLabel(session.surface), session.remoteHostName ?? model.snapshot?.daemon.host?.name, SessionRowTime.status(session, now: context.date)].compactMap { $0 }.joined(separator: " · "))
+                            .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
+                            .accessibilityIdentifier("project-lead-status")
+                    }
                     HStack(spacing: DesktopSpace.s) {
-                        if session.isWorking {
-                            Button("Open") { pane.select(session.id) }.buttonStyle(.borderedProminent)
-                        } else {
-                            Button("Resume") { resume(session) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(!ProjectContents.resumable(session))
-                            Button("Open") { pane.select(session.id) }
+                        ForEach(Array(ProjectContents.leadActions(session).enumerated()), id: \.offset) { index, action in
+                            switch action {
+                            case .resume(let enabled, let lifecycle):
+                                Button("Resume") { resume(session, lifecycle: lifecycle) }.disabled(!enabled).prominent(index == 0)
+                            case .open:
+                                Button("Open") { pane.select(session.id) }.prominent(index == 0)
+                            case .message:
+                                Button("Message…") { pane.select(session.id) }.prominent(index == 0)
+                            }
                         }
-                        Button("Message…") { pane.select(session.id) }
                     }
                     if !session.isWorking && session.isUnavailable {
                         Text("Resume needs \(session.remoteHostName ?? "its computer") to be reachable.")
@@ -171,9 +181,8 @@ struct ProjectPane: View {
         Text(text).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2).padding(.vertical, DesktopSpace.xs)
     }
 
-    private func resume(_ session: SessionState) {
-        guard ProjectContents.resumable(session) else { return }
-        if session.capabilities.lifecycle.resume { model.perform(action: "session-lifecycle-resume", sessionID: session.id) }
+    private func resume(_ session: SessionState, lifecycle: Bool) {
+        if lifecycle { model.perform(action: "session-lifecycle-resume", sessionID: session.id) }
         pane.select(session.id)
     }
 

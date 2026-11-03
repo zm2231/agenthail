@@ -10,6 +10,13 @@ enum ConversationRoute {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func prominent(_ primary: Bool) -> some View {
+        if primary { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
+    }
+}
+
 struct ProjectScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     let projectID: String
@@ -111,19 +118,24 @@ struct ProjectScreen: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("project-lead")
-                    Text(SessionRowTime.status(session, now: Date()))
-                        .font(.subheadline).foregroundStyle(PhonePalette.muted)
-                        .accessibilityIdentifier("project-lead-status")
+                    TimelineView(.everyMinute) { context in
+                        Text(SessionRowTime.status(session, now: context.date))
+                            .font(.subheadline).foregroundStyle(PhonePalette.muted)
+                            .accessibilityIdentifier("project-lead-status")
+                    }
                     HStack(spacing: 10) {
-                        if session.isWorking {
-                            Button("Open") { openSession(session.id) }.buttonStyle(.borderedProminent)
-                            Button("Message") { openSession(session.id) }.buttonStyle(.bordered)
-                        } else {
-                            Button("Resume") { resume(session) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(!ProjectContents.resumable(session))
-                                .accessibilityIdentifier("project-lead-resume")
-                            Button("Open") { openSession(session.id) }.buttonStyle(.bordered)
+                        ForEach(Array(ProjectContents.leadActions(session).enumerated()), id: \.offset) { index, action in
+                            switch action {
+                            case .resume(let enabled, let lifecycle):
+                                Button("Resume") { resume(session, lifecycle: lifecycle) }
+                                    .disabled(!enabled)
+                                    .accessibilityIdentifier("project-lead-resume")
+                                    .prominent(index == 0)
+                            case .open:
+                                Button("Open") { openSession(session.id) }.prominent(index == 0)
+                            case .message:
+                                Button("Message") { openSession(session.id) }.prominent(index == 0)
+                            }
                         }
                     }
                     if !session.isWorking && session.isUnavailable {
@@ -159,9 +171,8 @@ struct ProjectScreen: View {
         .accessibilityIdentifier("project-session-" + session.id)
     }
 
-    private func resume(_ session: SessionState) {
-        guard ProjectContents.resumable(session) else { return }
-        if session.capabilities.lifecycle.resume { Task { await model.resume(session.id) } }
+    private func resume(_ session: SessionState, lifecycle: Bool) {
+        if lifecycle { Task { await model.resume(session.id) } }
         openSession(session.id)
     }
 

@@ -7,7 +7,18 @@ struct ProjectContents: Equatable {
     var recent: [SessionState] = []
     var earlier: [SessionState] = []
 
+    enum LeadAction: Equatable {
+        case resume(enabled: Bool, lifecycle: Bool)
+        case open
+        case message
+    }
+
     static func resumable(_ session: SessionState) -> Bool { !session.isWorking && !session.isUnavailable }
+
+    static func leadActions(_ session: SessionState) -> [LeadAction] {
+        if session.isWorking { return [.open, .message] }
+        return [.resume(enabled: resumable(session), lifecycle: resumable(session) && session.capabilities.lifecycle.resume), .open]
+    }
 
     static func running(_ session: SessionState) -> Bool {
         session.isWorking || session.waitingOn != nil || session.queueCount > 0
