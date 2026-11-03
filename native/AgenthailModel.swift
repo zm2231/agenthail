@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 
 @MainActor
 final class AgenthailModel: ObservableObject {
@@ -51,6 +52,10 @@ final class AgenthailModel: ObservableObject {
     var daemonBuildNotice: String? { AgenthailBuild.daemonNotice(app: .app(Bundle.main.infoDictionary), daemon: daemonBuild) }
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
+    var grace = ConnectionGrace()
+    private var streamOpen = false
+    private(set) var heldByGrace = false
+    private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
     @Published var operationError: String?
     @Published var pendingForks: Set<String> = []
     @Published var loading = false
@@ -1138,6 +1143,8 @@ final class AgenthailModel: ObservableObject {
                     )
                 } catch {
                     if Task.isCancelled { return }
+                    if streamOpen { grace.contact() }
+                    streamOpen = false
                     reconnecting = true
                     do {
                         let reloadedAPI = try AgenthailAPI()
@@ -1214,6 +1221,7 @@ final class AgenthailModel: ObservableObject {
     private func eventStreamConnected() {
         if let api { interface.load(from: api) }
         reconnecting = false
+        streamOpen = true
         clearConnectionError()
     }
 
@@ -1237,11 +1245,24 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func clearConnectionError() {
-        if connectionError != nil { connectionError = nil }
+        grace.contact()
+        if connectionError != nil || heldByGrace {
+            Self.connectionLog.notice("daemon reachable again")
+            connectionError = nil
+            heldByGrace = false
+        }
         if daemonSlow { daemonSlow = false }
     }
 
     private func connectionFailed(_ error: Error) {
+        if isConnected, grace.holds(error) {
+            Self.connectionLog.notice("daemon request failed, still shown connected: \(error.localizedDescription, privacy: .public)")
+            heldByGrace = true
+            if !reconnecting { reconnecting = true }
+            return
+        }
+        heldByGrace = false
+        if isConnected { Self.connectionLog.notice("daemon shown unreachable: \(error.localizedDescription, privacy: .public)") }
         connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
     }
