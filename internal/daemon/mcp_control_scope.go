@@ -35,6 +35,16 @@ func (d *Daemon) mcpControlTarget(caller *mcpCaller, ref string, upward bool) (*
 	if host, err := d.Registry.SessionHost(session.ID); err != nil || host != "" {
 		return nil, refuse("out_of_scope", "That session runs on another host; reach a project's coordinator there by sending with project instead.")
 	}
+	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if slices.Contains(ancestors, session.ID) {
+		if upward {
+			return session, nil
+		}
+		return nil, refuse("out_of_scope", mcpDownOnly)
+	}
 	if caller.has("control.all") {
 		return session, nil
 	}
@@ -50,35 +60,27 @@ func (d *Daemon) mcpControlTarget(caller *mcpCaller, ref string, upward bool) (*
 	if caller.has("control.project") && d.sameProject(caller, *session) {
 		return session, d.mcpCeilingCovers(caller, session.ID)
 	}
-	if upward {
-		above, err := d.mcpAbove(caller, session.ID)
-		if err != nil || above {
-			return session, err
+	if d.mcpIsProjectLead(caller, session.ID) {
+		if upward {
+			return session, nil
 		}
-	}
-	if d.mcpIsAbove(caller, session.ID) {
-		return nil, refuse("out_of_scope", "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, change its goal or send now.")
+		return nil, refuse("out_of_scope", mcpDownOnly)
 	}
 	return nil, refuse("out_of_scope", "That session is not one you spawned or, as its project's coordinator, lead.")
 }
 
-func (d *Daemon) mcpAbove(caller *mcpCaller, sessionID string) (bool, error) {
-	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
-	if err != nil {
-		return false, err
-	}
-	if slices.Contains(ancestors, sessionID) {
-		return true, nil
-	}
+const mcpDownOnly = "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, answer, change its goal or settings, or send now."
+
+func (d *Daemon) mcpIsProjectLead(caller *mcpCaller, sessionID string) bool {
 	if caller.project == nil {
-		return false, nil
+		return false
 	}
 	spec, err := d.Registry.Coordinator(caller.project.ID)
 	if err != nil || spec.HostID != "" {
-		return false, nil
+		return false
 	}
 	lead, err := d.Registry.CoordinatorSessionID(spec)
-	return err == nil && lead == sessionID, nil
+	return err == nil && lead == sessionID
 }
 
 func (d *Daemon) mcpCeilingCovers(caller *mcpCaller, targetID string) error {
@@ -98,9 +100,4 @@ func (d *Daemon) mcpCeilingCovers(caller *mcpCaller, targetID string) error {
 		return &mcpRefusal{Code: "exceeds_ceiling", Message: "That session may do more than you may, so you cannot control it.", Detail: map[string]any{"axis": "target", "limit": limit}}
 	}
 	return nil
-}
-
-func (d *Daemon) mcpIsAbove(caller *mcpCaller, sessionID string) bool {
-	above, err := d.mcpAbove(caller, sessionID)
-	return err == nil && above
 }

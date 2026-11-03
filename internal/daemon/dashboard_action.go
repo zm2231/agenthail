@@ -11,6 +11,7 @@ var typedActions = map[string]actionOperation{
 	"delivery-dismiss": (*Daemon).doDeliveryDismiss,
 	"queue-retry":      (*Daemon).doQueueRetry,
 	"queue-cancel":     (*Daemon).doQueueCancel,
+	"queue-clear":      (*Daemon).doQueueClear,
 	"channel-create":   (*Daemon).doChannelCreate,
 	"channel-delete":   (*Daemon).doChannelDelete,
 	"channel-send":     (*Daemon).doChannelSend,

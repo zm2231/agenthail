@@ -52,6 +52,12 @@ func (d *Daemon) registerMCPTools(server *mcp.Server) {
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."}, d.mcpSteer)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."}, d.mcpInterrupt)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_goal", Description: "Set, edit, clear, pause or resume the goal of a Codex session you spawned or, as coordinator, lead, or change its token budget."}, d.mcpGoal)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_answer", Description: "Allow or deny an open request (a permission prompt, question or MCP input) of a session you spawned or, as coordinator, lead. Recorded as answered by you. You never answer your own requests or those of a session above you."}, d.mcpAnswer)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_session_settings", Description: "Change the model, permission mode or effort of a session you spawned or, as coordinator, lead, or compact its context. A permission mode cannot exceed the session's ceiling."}, d.mcpSessionSettings)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_alias", Description: "Name a session you spawned or, as coordinator, lead, so it can be reached as @name."}, d.mcpAlias)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."}, d.mcpQueue)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_relay", Description: "Add, remove or list relays that pass one session's replies to another. For the person's voice operator only."}, d.mcpRelay)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_channel", Description: "Create, delete, rename or list channels, and add or remove their members. For the person's voice operator only."}, d.mcpChannel)
 }
 
 func addMCPTool[In any](server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {

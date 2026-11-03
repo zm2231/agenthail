@@ -45,13 +45,7 @@ func TestOnlyTheOperatorChoosesCoordinatorsAndReadsEveryonesHistory(t *testing.T
 	if code := refusalCode(t, f.parent, "agenthail_history", nil); code != "capability_missing" {
 		t.Fatalf("worker reading all history: code=%q", code)
 	}
-	server := mcpServer(t, f.d)
-	f.d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
-	operator, _ := f.d.Registry.Session("from")
-	makeVoiceOperator(t, f.d, *operator)
-	f.d.leadsChanged()
-	token, _ := f.d.mcpCredentials.Load().Live("from")
-	session := mcpSession(t, server, token)
+	session := asOperator(t, f.d, mcpServer(t, f.d), "from")
 	callMCP(t, session, "agenthail_send", map[string]any{"target": "to", "message": "logged", "clientRequestId": "h1"})
 	history, refused := callMCP(t, session, "agenthail_history", map[string]any{"limit": 5})
 	if refused || !strings.Contains(mustJSONString(t, history), "logged") {
@@ -59,6 +53,45 @@ func TestOnlyTheOperatorChoosesCoordinatorsAndReadsEveryonesHistory(t *testing.T
 	}
 	if out, refused := callMCP(t, session, "agenthail_history", map[string]any{"view": "queue"}); refused {
 		t.Fatalf("operator queue: %v", out)
+	}
+}
+
+func TestQueueRelayChannelAndNotionToolsAreTheOperators(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	workerCalls := map[string]map[string]any{
+		"agenthail_queue":   {"action": "clear", "target": "to", "clientRequestId": "w1"},
+		"agenthail_relay":   {"action": "list"},
+		"agenthail_channel": {"action": "list"},
+		"agenthail_create":  {"surface": "notion", "message": "draft notes", "clientRequestId": "w2"},
+	}
+	for tool, args := range workerCalls {
+		if code := refusalCode(t, f.parent, tool, args); code != "capability_missing" && code != "exceeds_ceiling" {
+			t.Fatalf("worker calling %s: code=%q", tool, code)
+		}
+	}
+	if err := f.r.QueueMessage("to", "stale instruction"); err != nil {
+		t.Fatal(err)
+	}
+	operator := asOperator(t, f.d, mcpServer(t, f.d), "from")
+	if out, refused := callMCP(t, operator, "agenthail_queue", map[string]any{"action": "clear", "target": "to", "clientRequestId": "o1"}); refused || f.r.QueueCount("to") != 0 {
+		t.Fatalf("operator clearing the queue: %v, pending=%d", out, f.r.QueueCount("to"))
+	}
+	if out, refused := callMCP(t, operator, "agenthail_channel", map[string]any{"action": "create", "channel": "ops", "clientRequestId": "o2"}); refused {
+		t.Fatalf("operator creating a channel: %v", out)
+	}
+	if out, refused := callMCP(t, operator, "agenthail_channel", map[string]any{"action": "add", "channel": "ops", "target": "to", "clientRequestId": "o3"}); refused {
+		t.Fatalf("operator adding a member: %v", out)
+	}
+	channels, refused := callMCP(t, operator, "agenthail_channel", map[string]any{"action": "list"})
+	if refused || !strings.Contains(mustJSONString(t, channels), `"to"`) {
+		t.Fatalf("channel list=%v", channels)
+	}
+	if out, refused := callMCP(t, operator, "agenthail_relay", map[string]any{"action": "add", "from": "to", "to": "from", "pattern": "DONE", "clientRequestId": "o4"}); refused {
+		t.Fatalf("operator adding a relay: %v", out)
+	}
+	relays, refused := callMCP(t, operator, "agenthail_relay", map[string]any{"action": "list"})
+	if refused || !strings.Contains(mustJSONString(t, relays), `"DONE"`) {
+		t.Fatalf("relay list=%v", relays)
 	}
 }
 

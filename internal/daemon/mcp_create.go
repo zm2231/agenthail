@@ -16,8 +16,8 @@ const (
 
 type mcpCreateInput struct {
 	mcpWrite
-	Surface        string `json:"surface" jsonschema:"claude or codex."`
-	Cwd            string `json:"cwd" jsonschema:"Absolute folder the session works in; it must be inside the folders you may work in."`
+	Surface        string `json:"surface" jsonschema:"claude, codex, or notion (a Notion AI thread; for the person's voice operator only)."`
+	Cwd            string `json:"cwd,omitempty" jsonschema:"Claude and Codex: absolute folder the session works in; it must be inside the folders you may work in."`
 	Message        string `json:"message" jsonschema:"The session's first message."`
 	Model          string `json:"model,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"Claude: plan, default, acceptEdits, auto or bypassPermissions. Codex: untrusted, on-request or never. It cannot exceed your own ceiling; omitted, the session gets your ceiling's level."`
@@ -29,11 +29,17 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refuse("capability_missing", "This session may not start sessions.")
 	}
 	kind := surface.SurfaceKind(strings.TrimSpace(input.Surface))
-	if kind != surface.KindClaude && kind != surface.KindCodex {
-		return nil, refuse("invalid", "surface is claude or codex.")
-	}
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
+	}
+	if kind == surface.KindNotion {
+		if !caller.has("control.all") {
+			return nil, &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; starting one is for the person's voice operator.", Detail: map[string]any{"axis": "surface"}}
+		}
+		return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})
+	}
+	if kind != surface.KindClaude && kind != surface.KindCodex {
+		return nil, refuse("invalid", "surface is claude, codex or notion.")
 	}
 	if !filepath.IsAbs(strings.TrimSpace(input.Cwd)) {
 		return nil, refuse("invalid", "cwd must be an absolute folder.")

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -18,6 +19,22 @@ func callerCapabilities(t *testing.T, server *httptest.Server, token string) []a
 	}
 	capabilities, _ := whoami["capabilities"].([]any)
 	return capabilities
+}
+
+func asOperator(t *testing.T, d *Daemon, server *httptest.Server, sessionID string) *mcp.ClientSession {
+	t.Helper()
+	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))
+	session, err := d.Registry.Session(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeVoiceOperator(t, d, *session)
+	d.leadsChanged()
+	token, ok := d.mcpCredentials.Load().Live(sessionID)
+	if !ok || !slices.Contains(liveCapabilities(t, d.Registry, sessionID), "control.all") {
+		t.Fatalf("%s did not become the operator", sessionID)
+	}
+	return mcpSession(t, server, token)
 }
 
 func makeVoiceOperator(t *testing.T, d *Daemon, session surface.Session) {
