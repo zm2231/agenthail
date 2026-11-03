@@ -69,6 +69,35 @@ func claudeCommandEnv(home string) []string {
 	}
 	return append(env, "HOME="+home)
 }
+
+type rootedBackground struct {
+	claudeBackground
+	root string
+}
+
+// backgroundJobs lists root's job catalog, or every root's when root is
+// unknown, since a job still starting has written nothing that names its root.
+func (c *Claude) backgroundJobs(ctx context.Context, root string) ([]rootedBackground, error) {
+	roots := []string{root}
+	if root == "" {
+		var err error
+		if roots, err = surface.ClaudeConfigRoots(c.home); err != nil {
+			return nil, err
+		}
+	}
+	var jobs []rootedBackground
+	for _, each := range roots {
+		listed, err := c.backgroundSessions(ctx, each)
+		if err != nil {
+			return nil, err
+		}
+		for _, job := range listed {
+			jobs = append(jobs, rootedBackground{claudeBackground: job, root: each})
+		}
+	}
+	return jobs, nil
+}
+
 func (c *Claude) backgroundSessions(ctx context.Context, root string) ([]claudeBackground, error) {
 	data, err := c.backgroundCommand(ctx, root, "", "agents", "--json", "--all")
 	if err != nil {
@@ -214,7 +243,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if claudeHosted(session) {
 		return c.hostSessionAction(ctx, session, action)
 	}
-	records, err := c.backgroundSessions(ctx, root)
+	records, err := c.backgroundJobs(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +251,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if record.Kind != "background" || record.SessionID != session.ID || session.HolderPID > 0 && record.PID != session.HolderPID {
 			continue
 		}
+		root := record.root
 		if action == "status" {
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}

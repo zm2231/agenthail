@@ -38,16 +38,25 @@ func AgenthailConfigPath(home string) string {
 const maxAgenthailConfigBytes = 64 * 1024
 
 // ClaudeConfigRoots returns every Claude config root Agenthail reads: the
-// primary root first, then each claudeConfigDirs entry from the Agenthail
-// config. A root named twice, including through a symlink, appears once. A
+// caller's primary root first, then the daemon's recorded primary root, so
+// a caller in another root still sees the daemon's set, then each
+// claudeConfigDirs entry from the Agenthail config. A root named twice, including through a symlink, appears once. A
 // config that cannot be read as that list is an error, never an empty list.
 func ClaudeConfigRoots(home string) ([]string, error) {
 	configured, err := configuredClaudeRoots(home)
 	if err != nil {
 		return nil, err
 	}
+	daemonRoot, err := recordedDaemonClaudeRoot(home)
+	if err != nil {
+		return nil, err
+	}
 	roots := []string{filepath.Clean(ClaudeConfigDir(home))}
 	seen := map[string]bool{claudeRootIdentity(roots[0]): true}
+	if daemonRoot != "" && !seen[claudeRootIdentity(daemonRoot)] {
+		seen[claudeRootIdentity(daemonRoot)] = true
+		roots = append(roots, daemonRoot)
+	}
 	for _, root := range configured {
 		if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) {
 			return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs entries must be absolute paths, got %q", AgenthailConfigPath(home), root)

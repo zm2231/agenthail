@@ -25,6 +25,17 @@ type Service struct {
 	Dispatcher   delivery.Dispatcher
 	ClaudeRoot   func(context.Context) string
 	LeadsChanged func()
+	Now          func() time.Time
+}
+
+// GoneGrace covers a conversation started moments ago that has not yet written its transcript or process record.
+const GoneGrace = 2 * time.Minute
+
+func (s Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 type Outcome struct {
@@ -212,15 +223,33 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 		return nil, nil, "", err
 	}
 	if keeper, ok := adapter.(surface.ConversationKeeper); ok {
-		exists, err := keeper.ConversationExists(ctx, session)
-		if err != nil {
-			return session, adapter, "", surface.DeliveryUnavailable(fmt.Errorf("check coordinator conversation %s: %w", id, err))
-		}
-		if !exists {
+		state, err := s.conversationState(ctx, keeper, session)
+		switch state {
+		case surface.ConversationGone:
 			return session, adapter, fmt.Sprintf("conversation %s no longer exists", id), nil
+		case surface.ConversationUnknown:
+			return session, adapter, "", surface.DeliveryUnavailable(fmt.Errorf("check coordinator conversation %s: %w", id, err))
 		}
 	}
 	return session, adapter, "", nil
+}
+
+func (s Service) conversationState(ctx context.Context, keeper surface.ConversationKeeper, session *surface.Session) (surface.ConversationState, error) {
+	state, err := keeper.ConversationState(ctx, session)
+	if state == surface.ConversationUnknown && err == nil {
+		err = errors.New("its state could not be read")
+	}
+	if state != surface.ConversationGone {
+		return state, err
+	}
+	seen, err := s.Registry.SessionLastSeen(session.ID)
+	if err != nil {
+		return surface.ConversationUnknown, fmt.Errorf("read when it was last seen: %w", err)
+	}
+	if since := s.now().Sub(seen); since < GoneGrace {
+		return surface.ConversationUnknown, fmt.Errorf("nothing of it was found, but it was seen %s ago, too recently to count as gone", since.Round(time.Second))
+	}
+	return surface.ConversationGone, nil
 }
 
 // deliverTo steers a busy coordinator unless the sender chose otherwise.

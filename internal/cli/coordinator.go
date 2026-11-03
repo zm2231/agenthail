@@ -30,7 +30,7 @@ func (a *App) coordinator() coordinator.Service {
 	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}, ClaudeRoot: func(ctx context.Context) string {
 		pick, _ := a.claudeRootPick(ctx)
 		return pick.Root
-	}}
+	}, Now: a.coordinatorNow}
 }
 
 func (a *App) cmdCoordinator(args []string) error {

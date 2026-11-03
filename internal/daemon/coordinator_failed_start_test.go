@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -16,8 +17,15 @@ type goneConversationSurface struct {
 	gone map[string]bool
 }
 
-func (g goneConversationSurface) ConversationExists(_ context.Context, session *surface.Session) (bool, error) {
-	return !g.gone[session.ID], nil
+func (g goneConversationSurface) ConversationState(_ context.Context, session *surface.Session) (surface.ConversationState, error) {
+	if g.gone[session.ID] {
+		return surface.ConversationGone, nil
+	}
+	return surface.ConversationLive, nil
+}
+
+func pastGoneGrace(d *Daemon) {
+	d.coordinatorNow = func() time.Time { return time.Now().Add(coordinator.GoneGrace + time.Minute) }
 }
 
 type uuidCapturingSurface struct {
@@ -73,6 +81,7 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			}
 			var uuids []string
 			d.Surfaces[0] = uuidCapturingSurface{goneConversationSurface: goneConversationSurface{daemonSurface: fake, gone: map[string]bool{"from": true}}, uuids: &uuids}
+			pastGoneGrace(d)
 			fake.startErr = tc.startErr
 			_, intentID, err := r.QueueDeliveryWithIntent("from", "held for the coordinator", "", surface.SendOptions{SourceSessionID: "to"})
 			if err != nil {
@@ -168,6 +177,7 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 		t.Fatalf("set: %d %s", response.Code, response.Body)
 	}
 	d.Surfaces[0] = goneConversationSurface{daemonSurface: fake, gone: map[string]bool{"from": true}}
+	pastGoneGrace(d)
 	lead := func() string {
 		t.Helper()
 		spec, err := r.CoordinatorNamed("captain")

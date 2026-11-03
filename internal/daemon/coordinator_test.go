@@ -53,6 +53,7 @@ func newCoordinatorFixture(t *testing.T) *coordinatorFixture {
 	}
 	posts := &orphanPosts{}
 	f.daemon = newTestDaemon(t, r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, f.claude.Home, posts.request)})
+	pastGoneGrace(f.daemon)
 	f.handler = dashboardRouter(f.daemon)
 	f.token = pairedControlToken(t, r)
 	return f

@@ -36,6 +36,7 @@ type App struct {
 	daemonSessionPageReader   func() (sessionPageReader, error)
 	daemonSessionStreamReader func() (sessionStreamReader, error)
 	daemonAPIOverride         func() (*daemonAPIClient, error)
+	coordinatorNow            func() time.Time
 }
 
 type registryUnavailable struct{ err error }
