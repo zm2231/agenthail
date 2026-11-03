@@ -47,8 +47,7 @@ struct TurnNoticeSettingsSection: View {
     var body: some View {
         Section {
             Toggle("Terminal session note", isOn: Binding(get: { !hidden }, set: { shown in
-                hidden = !shown
-                if shown { dismissed = "" }
+                (hidden, dismissed) = TurnNoticePreference.setting(shown: shown, dismissed: dismissed)
             }))
             .accessibilityIdentifier("turn-notice-setting")
         } header: {

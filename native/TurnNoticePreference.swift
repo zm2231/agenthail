@@ -11,6 +11,10 @@ enum TurnNoticePreference {
         !hidden && !dismissed(stored).contains(sessionID)
     }
 
+    static func setting(shown: Bool, dismissed stored: String) -> (hidden: Bool, dismissed: String) {
+        (!shown, shown ? "" : stored)
+    }
+
     static func dismissing(_ sessionID: String, in stored: String) -> String {
         let kept = dismissed(stored).filter { $0 != sessionID }
         return (kept + [sessionID]).suffix(remembered).joined(separator: "\n")

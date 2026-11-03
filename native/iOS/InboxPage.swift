@@ -12,6 +12,7 @@ struct InboxPage {
     var items: [QueueState] = []
     var cursors: [String: Int64] = [:]
     var unreachable: [String] = []
+    var answered: Set<String> = []
 
     var hasOlder: Bool { !cursors.isEmpty }
 
@@ -35,10 +36,12 @@ struct InboxPage {
                 case .success(let loaded):
                     page.items += loaded.items.map { qualified($0, host: host.id) }.filter { sessionID == nil || $0.sessionId == sessionID }
                     page.items.sort(by: Self.newestFirst)
+                    page.answered.insert(host.id)
                     if let next = loaded.nextBefore { page.cursors[host.id] = next }
                 case .failure(let error):
                     page.unreachable.append(host.name)
                     page.unreachable.sort()
+                    if let before = cursors?[host.id] { page.cursors[host.id] = before }
                     failure = error
                 }
                 if answered < asked.count, let partial { await partial(page) }
@@ -60,19 +63,23 @@ struct InboxPage {
     static func newestFirst(_ lhs: QueueState, _ rhs: QueueState) -> Bool {
         switch (lhs.queuedDate, rhs.queuedDate) {
         case let (left?, right?) where left != right: return left > right
-        default: return lhs.listID > rhs.listID
+        default: return lhs.hostID == rhs.hostID ? lhs.id > rhs.id : (lhs.hostID ?? "") > (rhs.hostID ?? "")
         }
     }
 
+    // A host that has not answered keeps what was loaded from it, including how to load more.
     func refreshed(with first: InboxPage) -> InboxPage {
         let fresh = Set(first.items.map(\.listID))
         let kept = items.filter { item in
-            guard !fresh.contains(item.listID), item.isHistorical, let cursor = first.cursors[item.hostID ?? ""] else { return false }
+            let host = item.hostID ?? ""
+            guard !fresh.contains(item.listID) else { return false }
+            guard first.answered.contains(host) else { return true }
+            guard item.isHistorical, let cursor = first.cursors[host] else { return false }
             return item.id < cursor
         }
         var merged = first
         merged.items = (first.items + kept).sorted(by: Self.newestFirst)
-        for host in Set(kept.compactMap(\.hostID)) { merged.cursors[host] = cursors[host] }
+        for host in Set(kept.compactMap(\.hostID)).union(cursors.keys.filter { !first.answered.contains($0) }) { merged.cursors[host] = cursors[host] }
         return merged
     }
 
@@ -80,7 +87,7 @@ struct InboxPage {
         let known = Set(items.map(\.listID))
         var merged = self
         merged.items = (items + older.items.filter { !known.contains($0.listID) }).sorted(by: Self.newestFirst)
-        for host in cursors.keys { merged.cursors[host] = older.cursors[host] }
+        for host in cursors.keys where older.answered.contains(host) { merged.cursors[host] = older.cursors[host] }
         for host in older.unreachable where !merged.unreachable.contains(host) { merged.unreachable.append(host) }
         return merged
     }

@@ -3,6 +3,7 @@ import XCTest
 
 private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [String] = []
+    nonisolated(unsafe) static var failing: Set<String> = []
     private static let lock = NSLock()
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -13,6 +14,10 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
         let url = request.url!
         Self.lock.withLock { Self.requests.append(url.host! + "?" + (url.query ?? "")) }
         if url.host == "slow.invalid" { return }
+        if Self.lock.withLock({ Self.failing.contains(url.host!) }) {
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let before = query.first { $0.name == "before" }?.value
         let body: String
@@ -75,5 +80,33 @@ final class InboxPageTests: XCTestCase {
         let refreshed = merged.refreshed(with: first)
         XCTAssertEqual(refreshed.items.map(\.listID), ["older/9", "older/8", "older/3"])
         XCTAssertFalse(refreshed.hasOlder)
+    }
+
+    func testAHostThatFailsKeepsItsLoadedRowsAndCursor() async throws {
+        defer { InboxHostProtocol.failing = [] }
+        let first = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        XCTAssertEqual(first.cursors, ["older": 8])
+
+        InboxHostProtocol.failing = ["older.invalid"]
+        let refresh = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        XCTAssertEqual(refresh.unreachable, ["older"])
+        let refreshed = first.refreshed(with: refresh)
+        XCTAssertEqual(refreshed.items.map(\.listID), ["older/9", "fast/5", "older/8", "older/7"])
+        XCTAssertEqual(refreshed.cursors, ["older": 8], "the failed host can still load older history once it answers")
+        XCTAssertEqual(refreshed.unreachable, ["older"])
+
+        do {
+            _ = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil, before: refreshed.cursors)
+            XCTFail("load older from only a failing host throws, leaving the page as it was")
+        } catch {}
+
+        var twoHosts = first
+        twoHosts.cursors = ["older": 8, "fast": 5]
+        let partlyFailed = InboxPage(items: [], cursors: ["older": 8], unreachable: ["older"], answered: ["fast"])
+        XCTAssertEqual(twoHosts.appending(partlyFailed).cursors, ["older": 8], "a host that failed keeps its cursor; one that answered with no more pages drops it")
+
+        InboxHostProtocol.failing = []
+        let back = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        XCTAssertEqual(refreshed.refreshed(with: back).unreachable, [])
     }
 }

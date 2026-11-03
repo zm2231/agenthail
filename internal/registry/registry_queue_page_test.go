@@ -34,6 +34,28 @@ func pageIDs(rows []QueueRow) []int64 {
 	return ids
 }
 
+func TestQueuePageCapsItsLimit(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "a")
+	for i := 0; i < queueHistoryPageMax+5; i++ {
+		deliverForPageTest(t, r, "a", "row", 0)
+	}
+	page, err := r.QueuePage(QueuePageRequest{SessionID: "a", Limit: 10_000}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.History) != queueHistoryPageMax || page.NextBefore == 0 {
+		t.Fatalf("history=%d next=%d", len(page.History), page.NextBefore)
+	}
+	rest, err := r.QueuePage(QueuePageRequest{SessionID: "a", Before: page.NextBefore, Limit: 10_000}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest.History) != 5 || rest.NextBefore != 0 {
+		t.Fatalf("rest=%d next=%d", len(rest.History), rest.NextBefore)
+	}
+}
+
 func TestQueuePageScopesToSessionAndWindowsHistory(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "a")

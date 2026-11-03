@@ -30,6 +30,10 @@ struct TurnNoticeTest {
         check(TurnNoticePreference.dismissed(dismissed) == ["a"], "dismissing twice records the session once")
         for index in 0..<(TurnNoticePreference.remembered + 5) { dismissed = TurnNoticePreference.dismissing("s\(index)", in: dismissed) }
         check(TurnNoticePreference.dismissed(dismissed).count == TurnNoticePreference.remembered && TurnNoticePreference.shows(for: "a", hidden: false, dismissed: dismissed), "only the most recent dismissals are remembered")
+        let off = TurnNoticePreference.setting(shown: false, dismissed: dismissed)
+        check(off.hidden && off.dismissed == dismissed, "turning the setting off hides the note and keeps per-session choices")
+        let on = TurnNoticePreference.setting(shown: true, dismissed: dismissed)
+        check(!on.hidden && TurnNoticePreference.shows(for: "s0", hidden: on.hidden, dismissed: on.dismissed) && TurnNoticePreference.shows(for: "s504", hidden: on.hidden, dismissed: on.dismissed), "turning it back on shows it on every session again")
     }
 
     private static func check(_ condition: Bool, _ message: String) {

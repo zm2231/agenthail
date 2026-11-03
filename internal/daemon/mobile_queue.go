@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -49,6 +50,7 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 	for _, row := range page.History {
 		items = append(items, d.dashboardQueueItem(row))
 	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
 	writeDashboardJSON(w, http.StatusOK, mobileQueuePage{Items: items, NextBefore: page.NextBefore})
 }
 

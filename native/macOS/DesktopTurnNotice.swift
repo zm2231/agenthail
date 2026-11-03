@@ -37,8 +37,7 @@ struct DesktopTurnNoticeSetting: View {
 
     var body: some View {
         Toggle("Show the terminal session note above the composer", isOn: Binding(get: { !hidden }, set: { shown in
-            hidden = !shown
-            if shown { dismissed = "" }
+            (hidden, dismissed) = TurnNoticePreference.setting(shown: shown, dismissed: dismissed)
         }))
     }
 }

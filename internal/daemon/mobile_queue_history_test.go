@@ -47,6 +47,14 @@ func TestMobileQueueRetainsActiveItemsAndPagesTerminalHistory(t *testing.T) {
 	handler := dashboardRouter(d)
 
 	first := getMobileQueue(t, handler, "")
+	for i := 1; i < len(first.Items); i++ {
+		if first.Items[i-1].ID <= first.Items[i].ID {
+			t.Fatalf("items are not newest first at %d: %d then %d", i, first.Items[i-1].ID, first.Items[i].ID)
+		}
+	}
+	if newest := first.Items[0]; newest.ID < pendingID || !terminal[newest.ID] {
+		t.Fatalf("the newest delivered row %d does not lead older active rows", newest.ID)
+	}
 	seen := map[int64]dashboardQueue{}
 	terminalSeen := 0
 	for _, item := range first.Items {
