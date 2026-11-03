@@ -139,8 +139,13 @@ SOURCES=(
 )
 
 # Helper tests run on a person's Mac: a window ordered on screen appears on their display.
-if grep -nE 'orderFront|makeKeyAndOrderFront|orderBack|orderWindow|setIsVisible' "$ROOT"/native/tests/*_test.swift; then
-  echo "helper tests lay out windows without ordering them on screen"
+shown=0
+grep -nE '[oO]rderFront|[oO]rderBack|orderWindow|orderedIndex[[:space:]]*=[^=]|setIsVisible|showWindow|runModal|beginSheet|beginCriticalSheet|beginWithCompletionHandler|NSSavePanel|NSOpenPanel' "$ROOT"/native/tests/*_test.swift || shown=$?
+if [ "$shown" -eq 0 ]; then
+  echo "helper tests lay out windows without putting them on screen"
+  exit 1
+elif [ "$shown" -ne 1 ]; then
+  echo "could not scan the helper tests for windows put on screen"
   exit 1
 fi
 
