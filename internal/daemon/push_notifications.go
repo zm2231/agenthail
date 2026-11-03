@@ -84,7 +84,7 @@ func (d *Daemon) notifyPairedDevices(ctx context.Context, notification mobileNot
 					d.log.Printf("record push sent %s: %s", target.DeviceID, recordErr)
 				}
 				receipt, sendErr = sendDevicePushWithRetry(ctx, target, sent)
-				if settleErr := d.Registry.SettlePushSent(sent.PushID, receipt); settleErr != nil {
+				if settleErr := d.Registry.SettlePushSent(sent.PushID, receipt, time.Now()); settleErr != nil {
 					d.log.Printf("settle push sent %s: %s", target.DeviceID, settleErr)
 				}
 			case <-ctx.Done():

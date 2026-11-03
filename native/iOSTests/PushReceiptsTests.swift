@@ -25,6 +25,15 @@ final class PushReceiptsTests: XCTestCase {
         XCTAssertNotEqual(PushReceipts.account(many[0]), PushReceipts.account(PushReceipt(host: "h2", pushId: "p0", receivedAt: at, alerts: "on")), "the same id from another computer is another push")
     }
 
+    func testForgettingAComputerDropsOnlyItsWaitingReceipts() {
+        PushReceipts.pending().forEach(PushReceipts.remove)
+        defer { PushReceipts.pending().forEach(PushReceipts.remove) }
+        PushReceipts.enqueue(PushReceipt(host: "gone", pushId: "gone00001", receivedAt: Date(), alerts: "on"))
+        PushReceipts.enqueue(PushReceipt(host: "kept", pushId: "kept00001", receivedAt: Date(), alerts: "on"))
+        PushReceipts.forget(host: "gone")
+        XCTAssertEqual(PushReceipts.pending().map(\.host), ["kept"])
+    }
+
     func testAReceiptQueuedWhileOthersAreSentIsKept() async {
         PushReceipts.pending().forEach(PushReceipts.remove)
         defer { PushReceipts.pending().forEach(PushReceipts.remove) }

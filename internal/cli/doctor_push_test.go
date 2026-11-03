@@ -66,7 +66,7 @@ func TestDoctorFailsWhenAcceptedPushesNeverReachThePhone(t *testing.T) {
 		if err := reg.RecordPushSent(device, id, "session.waiting", sent.Add(time.Duration(i)*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
-		if err := reg.SettlePushSent(id, true); err != nil {
+		if err := reg.SettlePushSent(id, true, sent); err != nil {
 			t.Fatal(err)
 		}
 	}

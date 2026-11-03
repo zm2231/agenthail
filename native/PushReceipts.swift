@@ -88,6 +88,10 @@ enum PushReceipts {
         }
     }
 
+    static func forget(host: String) {
+        pending().filter { $0.host == host }.forEach(remove)
+    }
+
     static func remove(_ receipt: PushReceipt) {
         SecItemDelete(item(account(receipt)) as CFDictionary)
     }
