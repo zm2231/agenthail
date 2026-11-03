@@ -390,12 +390,13 @@ private final class MirrorDropProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         guard request.url?.host == "mirror.tailnet.ts.net", !Self.state.offline else {
             respond(503, #"{"error":"offline"}"#, finish: true)
             return
         }
         switch request.url!.path {
-        case "/api/v1/version": respond(200, #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#, finish: true)
+        case "/api/v1/version": respond(200, #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#, finish: true)
         case "/api/v1/snapshot":
             var value = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
             var sessions = value["sessions"] as! [[String: Any]]
@@ -425,12 +426,13 @@ private final class SplitHostsProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         guard request.url?.host == "up.tailnet.ts.net" else {
             respond(503, #"{"error":"offline"}"#, finish: true)
             return
         }
         switch request.url!.path {
-        case "/api/v1/version": respond(200, #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#, finish: true)
+        case "/api/v1/version": respond(200, #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#, finish: true)
         case "/api/v1/snapshot": respond(200, SessionPreview.snapshotJSON, finish: true)
         case "/api/v1/events", "/api/v1/catalog-events": respond(200, ": connected\n\n", finish: false)
         default: respond(200, "{}", finish: true)
@@ -474,9 +476,10 @@ private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         switch request.url!.path {
         case "/api/v1/snapshot":
-            if !Self.state.snapshot(self) {
+            if request.url?.query?.contains("sessions=none") != true || !Self.state.snapshot(self) {
                 var value = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
                 value["daemon"] = ["running": true, "stale": true]
                 respond(String(data: try! JSONSerialization.data(withJSONObject: value), encoding: .utf8)!)
@@ -487,7 +490,7 @@ private final class HeldSnapshotProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/events":
             Self.state.connect()
             respond(": connected\n\n")
-        case "/api/v1/version": respond(#"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#)
+        case "/api/v1/version": respond(#"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#)
         default: respond("{}")
         }
     }
@@ -521,6 +524,7 @@ private final class StaleConnectionProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         let path = request.url!.path
         let body: String
         if path == "/api/v1/events" {
@@ -530,7 +534,7 @@ private final class StaleConnectionProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
             return
         } else if path == "/api/v1/version" {
-            body = #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#
+            body = #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#
         } else if path == "/api/v1/snapshot" { body = Self.state.snapshot() }
         else { body = "{}" }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
@@ -594,6 +598,7 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         let host = request.url?.host?.split(separator: ".").first.map(String.init) ?? ""
         let path = request.url!.path
         Self.state.record(host, path)
@@ -606,7 +611,7 @@ private final class ServedSessionProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         switch path {
-        case "/api/v1/version": respond(#"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#)
+        case "/api/v1/version": respond(#"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#)
         case "/api/v1/pair":
             respond(#"{"device":{"id":"d","name":"Phone","scopes":["read","control"],"createdAt":"now","pushEnabled":false},"token":"new-token","protocol":1,"host":{"id":"hsrv","name":"srv"}}"#)
         case "/api/v1/snapshot":

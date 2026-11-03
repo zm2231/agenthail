@@ -256,6 +256,7 @@ struct SessionPreview: View {
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
 
+    nonisolated static let projectActivityJSON = #"{"projects":[]}"#
     nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11T18:20:00.000000000Z"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"canceled","evidence":"canceled","attempts":0,"queuedAt":"2026-09-09T11:00:00.000000000Z"}]}"#
 
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
@@ -321,6 +322,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
                 else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
+            case "/api/v1/projects/activity": captured = SessionPreview.projectActivityJSON
             case "/api/v1/session":
                 let before = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "timelineBefore" })?.value
                 captured = before == nil || before == "0" ? capture.detailJSON[id] : nil
@@ -349,6 +351,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
+        case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/usage": body = UsagePreview.json()

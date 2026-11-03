@@ -459,6 +459,26 @@ final class AgenthailIOSTests: XCTestCase {
         KeychainStore.removeAll()
     }
 
+    @MainActor
+    func testAComputerOnAnOlderAgenthailAsksToBeUpdatedAndDoesNotRetry() async throws {
+        KeychainStore.removeAll()
+        try Self.pair("hold", "https://old.tailnet.ts.net")
+        IncompatibleConnectionURLProtocol.requests.reset()
+        IncompatibleConnectionURLProtocol.version = #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#
+        defer { IncompatibleConnectionURLProtocol.version = #"{"protocol":3,"minimumProtocol":3,"maximumProtocol":3}"# }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [IncompatibleConnectionURLProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model.connect()
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(IncompatibleConnectionURLProtocol.requests.snapshot().count, 1, "an older computer was asked for a snapshot it cannot serve")
+        XCTAssertFalse(model.reconnecting)
+        let connection = try XCTUnwrap(model.connection("hold"))
+        XCTAssertEqual(connection.connectionError, "Update Agenthail on \(connection.name) to connect.")
+        model.forgetHost("hold")
+        KeychainStore.removeAll()
+    }
+
     func testPairingLinksRequireSecureTailscaleEndpoint() throws {
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=http%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fattacker.example&secret=12345678901234567890")!))
@@ -786,13 +806,14 @@ private final class FlakyConnectionURLProtocol: URLProtocol, @unchecked Sendable
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if answeredProjectActivity() { return }
         let path = request.url?.path ?? ""
         if path == "/api/v1/version", Self.state.nextVersionRequest() == 1 {
             respond(status: 503, body: #"{"error":"offline"}"#)
             return
         }
         if path == "/api/v1/version" {
-            respond(status: 200, body: #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#)
+            respond(status: 200, body: #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#)
             return
         }
         if path == "/api/v1/snapshot" {
@@ -821,6 +842,7 @@ private final class FlakyConnectionURLProtocol: URLProtocol, @unchecked Sendable
 
 private final class IncompatibleConnectionURLProtocol: URLProtocol, @unchecked Sendable {
     static let requests = RequestRecorder()
+    nonisolated(unsafe) static var version = #"{"protocol":3,"minimumProtocol":3,"maximumProtocol":3}"#
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -828,7 +850,7 @@ private final class IncompatibleConnectionURLProtocol: URLProtocol, @unchecked S
     override func startLoading() {
         Self.requests.record(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
-        let body = #"{"protocol":2,"minimumProtocol":2,"maximumProtocol":2}"#
+        let body = Self.version
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)

@@ -30,6 +30,9 @@ final class HostConnection {
     private(set) var build: AgenthailBuild?
     private(set) var catalogStreamCursor: UInt64 = 0
     private(set) var snapshotSeq: UInt64 = 0
+    private var refreshGeneration: UInt64 = 0
+    private var appliedGeneration: UInt64 = 0
+    var refreshTimeout: TimeInterval = 25
     private var snapshotCoversEventStream = false
     private var stopped = false
     private var catalogHostEpoch: String?
@@ -85,7 +88,7 @@ final class HostConnection {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, !stopped {
                 do {
-                    let version = try await api.version()
+                    let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                     guard !Task.isCancelled, !stopped else { return }
                     grace.contact()
                     build = version.build
@@ -103,7 +106,8 @@ final class HostConnection {
                 } catch {
                     guard !stopped else { return }
                     recordFailure(error, during: "connect")
-                    if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
+                    if let apiError = error as? AgenthailAPIError, case .incompatible(let hostProtocol) = apiError {
+                        if hostProtocol < AgenthailAPI.snapshotProtocol { connectionError = "Update Agenthail on \(name) to connect." }
                         reconnecting = false
                         delegate?.hostDidChange(self)
                         return
@@ -146,9 +150,16 @@ final class HostConnection {
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
         let seq = delegate?.nextStateRequest() ?? 0
+        refreshGeneration += 1
+        let generation = refreshGeneration
         do {
-            let loaded = try await api.snapshot(fresh: fresh)
+            async let base = api.snapshotBase(fresh: fresh, timeout: refreshTimeout)
+            async let current = api.scopeSessions("current", timeout: refreshTimeout)
+            async let activity = api.projectActivity(fresh: fresh, timeout: refreshTimeout)
+            let loaded = try await DashboardSnapshot(base: base, current: current, activity: activity)
             guard !stopped else { return false }
+            guard generation > appliedGeneration else { return true }
+            appliedGeneration = generation
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             snapshotSeq = seq
@@ -194,7 +205,7 @@ final class HostConnection {
                     Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
                     reconnecting = true
                     do {
-                        let version = try await api.version()
+                        let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                         guard !stopped else { return }
                         build = version.build
                         recordStreamInterruption(probeError: nil)

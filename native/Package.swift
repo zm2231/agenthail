@@ -28,6 +28,7 @@ let package = Package(
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
+                "TaggedResponses.swift",
                 "UIConfig.swift",
                 "SurfaceMode.swift",
                 "PaletteTokens.swift",

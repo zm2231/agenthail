@@ -58,12 +58,13 @@ enum AgenthailAPIError: LocalizedError {
 }
 
 final class AgenthailAPI: @unchecked Sendable {
-    private let session: URLSession
+    let session: URLSession
     private let baseURL: URL
     private let token: String
     var holderPins = HolderPins.shared
     private let snapshotLock = NSLock()
     private var heldSnapshot: (tag: String, snapshot: DashboardSnapshot)?
+    let tagged = TaggedResponses()
 
     init(baseURL: URL, token: String, session: URLSession = .shared) {
         self.session = session
@@ -105,9 +106,9 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 #endif
 
-    func version() async throws -> APIVersion {
+    func version(requiring protocolVersion: Int = 1) async throws -> APIVersion {
         let version: APIVersion = try await get("/api/v1/version")
-        guard version.minimumProtocol <= 1, version.maximumProtocol >= 1 else {
+        guard version.minimumProtocol <= protocolVersion, version.maximumProtocol >= protocolVersion else {
             throw AgenthailAPIError.incompatible(version.protocolVersion)
         }
         return version
@@ -766,7 +767,7 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func authorizedRequest(path: String) -> URLRequest {
+    func authorizedRequest(path: String) -> URLRequest {
         var request = URLRequest(url: URL(string: path, relativeTo: baseURL)!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -834,7 +835,7 @@ final class AgenthailAPI: @unchecked Sendable {
         }
     }
 
-    private func validate(response: URLResponse, data: Data?) throws {
+    func validate(response: URLResponse, data: Data?) throws {
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
             var message = HTTPURLResponse.localizedString(forStatusCode: response.statusCode)

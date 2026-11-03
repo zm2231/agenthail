@@ -30,6 +30,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     static let voiceHostKey = "voiceHost"
+    var hostRefreshWait: Duration = HostRefresh.wait
 
     @Published private(set) var snapshot: DashboardSnapshot? {
         didSet {
@@ -912,11 +913,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
-        var any = false
-        for id in hostOrder {
-            if let connection = connections[id], await connection.refresh(fresh: fresh) { any = true }
-        }
-        return any
+        await HostRefresh.all(hostOrder.compactMap { connections[$0] }, fresh: fresh, within: hostRefreshWait)
     }
 
     private func refresh(host hostID: String) async {

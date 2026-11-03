@@ -14,6 +14,7 @@ JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(
   AgenthailAPI.swift
+  TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModels.swift
   ComposerAttachment.swift

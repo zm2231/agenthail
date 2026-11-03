@@ -541,6 +541,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if answeredProjectActivity() { return }
         var status = 200
         var body = #"{"items":[]}"#
         switch request.url?.path {
