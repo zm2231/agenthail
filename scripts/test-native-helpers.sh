@@ -37,6 +37,9 @@ SOURCES=(
   SessionSelection.swift
   ProjectActions.swift
   ProjectContents.swift
+  ScopePages.swift
+  ScopeReader.swift
+  SnapshotParts.swift
   SessionRowTime.swift
   HostNames.swift
   ClaudeRootLabels.swift

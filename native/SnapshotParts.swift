@@ -27,10 +27,26 @@ struct ScopeSessions {
 }
 
 struct ScopePage: Decodable {
+    struct Count: Decodable, Equatable {
+        let families: Int
+        let sessions: Int
+    }
+
+    struct Surface: Decodable, Equatable {
+        let surface: String
+        let counts: [String: Count]
+    }
+
+    struct View: Decodable, Equatable {
+        let counts: [String: Count]
+        let surfaces: [Surface]
+    }
+
     let sessions: [SessionState]
     var nextCursor: String? = nil
     var hostEpoch: String? = nil
     var catalogSeq: UInt64? = nil
+    var view: View? = nil
 }
 
 private struct ProjectActivityPage: Decodable {
@@ -55,7 +71,7 @@ extension AgenthailAPI {
         var seen: [String: Int] = [:]
         var cursor: String?
         repeat {
-            let page = try await scopePage(scope, cursor: cursor, limit: 200, timeout: timeout)
+            let page = try await scopePage(ScopeRequest(scope: scope), cursor: cursor, limit: 200, timeout: timeout)
             for session in page.sessions {
                 if let index = seen[session.id] { result.sessions[index] = session } else {
                     seen[session.id] = result.sessions.count
@@ -69,12 +85,13 @@ extension AgenthailAPI {
         return result
     }
 
-    func scopePage(_ scope: String, projectID: String? = nil, query: String? = nil, cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 25) async throws -> ScopePage {
+    func scopePage(_ request: ScopeRequest, cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 25) async throws -> ScopePage {
         var components = URLComponents()
         components.path = "/api/v1/snapshot"
-        components.queryItems = [URLQueryItem(name: "scope", value: scope), URLQueryItem(name: "members", value: "1"), URLQueryItem(name: "limit", value: String(limit))]
-        if let projectID { components.queryItems?.append(URLQueryItem(name: "projectId", value: projectID)) }
-        if let query, !query.isEmpty { components.queryItems?.append(URLQueryItem(name: "q", value: query)) }
+        components.queryItems = [URLQueryItem(name: "scope", value: request.scope), URLQueryItem(name: "members", value: "1"), URLQueryItem(name: "limit", value: String(limit))]
+        for (name, value) in [("projectId", request.projectID), ("surface", request.surface), ("status", request.status), ("q", request.query)] {
+            if let value, !value.isEmpty { components.queryItems?.append(URLQueryItem(name: name, value: value)) }
+        }
         if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         var request = authorizedRequest(path: path)
