@@ -60,6 +60,7 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 		}
 	}()
 	d.log.Printf("dashboard enabled on http://%s", config.Listen)
+	d.attachMCPCredentials(listener.Addr().String())
 	return dashboard, nil
 }
 

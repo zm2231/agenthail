@@ -70,6 +70,14 @@ func newSessionToken() (string, error) {
 }
 
 func (r *Registry) IssueSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time) (IssuedCredential, error) {
+	return r.issueSessionCredential(sessionID, capabilities, ceiling, now, false)
+}
+
+func (r *Registry) RotateSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time) (IssuedCredential, error) {
+	return r.issueSessionCredential(sessionID, capabilities, ceiling, now, true)
+}
+
+func (r *Registry) issueSessionCredential(sessionID string, capabilities []string, ceiling json.RawMessage, now time.Time, rotate bool) (IssuedCredential, error) {
 	capabilities = slices.Sorted(slices.Values(capabilities))
 	capabilities = slices.Compact(capabilities)
 	encodedCaps, err := json.Marshal(capabilities)
@@ -102,7 +110,7 @@ func (r *Registry) IssueSessionCredential(sessionID string, capabilities []strin
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return IssuedCredential{}, err
-	case live.MaxExpiresAt.After(now) && string(mustJSON(live.Capabilities)) == string(encodedCaps) && string(live.Ceiling) == string(encodedCeiling):
+	case !rotate && live.MaxExpiresAt.After(now) && string(mustJSON(live.Capabilities)) == string(encodedCaps) && string(live.Ceiling) == string(encodedCeiling):
 		idle := now.Add(CredentialIdleLifetime)
 		if _, err := tx.Exec(`UPDATE session_credentials SET idle_expires_at_ms=? WHERE id=?`, idle.UnixMilli(), live.ID); err != nil {
 			return IssuedCredential{}, err
