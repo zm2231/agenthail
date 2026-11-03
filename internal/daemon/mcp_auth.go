@@ -76,7 +76,9 @@ func writeMCPAuthError(w http.ResponseWriter, err error) {
 	case errors.Is(err, registry.ErrCredentialUnknown):
 		writeAPIErrorWith(w, http.StatusUnauthorized, "unauthenticated", "A valid Agenthail session credential is required.", map[string]any{"retryable": false})
 	case errors.Is(err, registry.ErrCredentialExpired):
-		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_expired", "This session's credential expired; it works again after the session's next turn.", map[string]any{"retryable": true})
+		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_expired", "This session's credential expired after a day unused; it works again after the session's next turn.", map[string]any{"retryable": true, "detail": map[string]any{"reason": "idle"}})
+	case errors.Is(err, registry.ErrCredentialMaxExpired):
+		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_expired", "This session's credential reached its 30-day limit; the session gets a new one when it is next started or resumed.", map[string]any{"retryable": false, "detail": map[string]any{"reason": "max"}})
 	case errors.As(err, &revoked):
 		writeAPIErrorWith(w, http.StatusUnauthorized, "credential_revoked", "This session's credential was revoked ("+revoked.Reason+").", map[string]any{"retryable": false, "detail": map[string]any{"reason": revoked.Reason}})
 	default:

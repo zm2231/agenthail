@@ -126,7 +126,7 @@ func TestSessionCredentialMaxExpiryNeedsANewCredential(t *testing.T) {
 	if err := r.ReviveSessionCredential(session, past); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AuthenticateSessionToken(issued.Token, past); !errors.Is(err, ErrCredentialExpired) {
+	if _, err := r.AuthenticateSessionToken(issued.Token, past); !errors.Is(err, ErrCredentialMaxExpired) {
 		t.Fatalf("max err=%v", err)
 	}
 	fresh, err := r.IssueSessionCredential(session, readCaps, nil, past)

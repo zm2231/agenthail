@@ -14,7 +14,12 @@ const (
 	mcpFilterAllVisible = "all-visible"
 )
 
-func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]surface.Session, error) {
+type visibleSession struct {
+	surface.Session
+	order int64
+}
+
+func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visibleSession, error) {
 	if filter == "" {
 		filter = mcpFilterAllVisible
 	}
@@ -32,22 +37,22 @@ func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]surface
 		}
 	}
 	withProject := caller.has("read.project") && caller.project != nil && filter != mcpFilterMine
-	ids, err := d.Registry.LiveLocalSessionIDs()
+	refs, err := d.Registry.LiveLocalSessions()
 	if err != nil {
 		return nil, err
 	}
-	visible := []surface.Session{}
-	for _, id := range ids {
-		self := id == caller.session.ID && caller.has("read.self") && filter == mcpFilterAllVisible
-		if !self && !descendants[id] && !withProject {
+	visible := []visibleSession{}
+	for _, ref := range refs {
+		self := ref.ID == caller.session.ID && caller.has("read.self") && filter == mcpFilterAllVisible
+		if !self && !descendants[ref.ID] && !withProject {
 			continue
 		}
-		session, err := d.Registry.Session(id)
+		session, err := d.Registry.Session(ref.ID)
 		if err != nil {
 			continue
 		}
-		if self || descendants[id] || d.sameProject(caller, *session) {
-			visible = append(visible, *session)
+		if self || descendants[ref.ID] || d.sameProject(caller, *session) {
+			visible = append(visible, visibleSession{Session: *session, order: ref.Order})
 		}
 	}
 	return visible, nil
@@ -73,7 +78,7 @@ func (d *Daemon) mcpReadableSession(caller *mcpCaller, ref string) (*surface.Ses
 	}
 	for index := range visible {
 		if visible[index].ID == id {
-			return &visible[index], nil
+			return &visible[index].Session, nil
 		}
 	}
 	if _, err := d.Registry.Session(id); err != nil {
@@ -82,15 +87,26 @@ func (d *Daemon) mcpReadableSession(caller *mcpCaller, ref string) (*surface.Ses
 	return nil, refuse("out_of_scope", fmt.Sprintf("Session %s is not yours, not one you spawned, and not in your project.", ref))
 }
 
-func decodeOffsetCursor(cursor string) (int, error) {
+var errBadCursor = refuse("invalid", "The cursor is invalid; use the nextCursor a previous call returned.")
+
+func decodeOrderCursor(cursor string) (int64, error) {
 	if cursor == "" {
 		return 0, nil
 	}
-	offset, err := strconv.Atoi(cursor)
-	if err != nil || offset < 0 {
-		return 0, refuse("invalid", "The cursor is invalid; use the nextCursor a previous call returned.")
+	after, err := strconv.ParseInt(cursor, 10, 64)
+	if err != nil || after < 0 {
+		return 0, errBadCursor
 	}
-	return offset, nil
+	return after, nil
+}
+
+func visibleAfter(visible []visibleSession, after int64) []visibleSession {
+	for index, session := range visible {
+		if session.order > after {
+			return visible[index:]
+		}
+	}
+	return nil
 }
 
 func pageLimit(requested, fallback, max int) (int, error) {

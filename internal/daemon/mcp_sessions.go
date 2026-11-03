@@ -31,19 +31,20 @@ func (d *Daemon) mcpSessions(_ context.Context, caller *mcpCaller, input mcpSess
 	if err != nil {
 		return nil, err
 	}
-	offset, err := decodeOffsetCursor(input.Cursor)
+	after, err := decodeOrderCursor(input.Cursor)
 	if err != nil {
 		return nil, err
 	}
-	visible, err := d.mcpVisibleSessions(caller, input.Filter)
+	all, err := d.mcpVisibleSessions(caller, input.Filter)
 	if err != nil {
 		return nil, err
 	}
+	visible := visibleAfter(all, after)
 	views := []mcpSessionView{}
 	used := 0
-	next := offset
+	next := 0
 	for ; next < len(visible) && len(views) < limit; next++ {
-		session := visible[next]
+		session := visible[next].Session
 		alias, _ := d.Registry.ReverseAlias(session.ID)
 		project, _ := d.sessionProject(session)
 		view := mcpSessionView{ID: session.ID, Alias: alias, Name: session.Name, Surface: string(session.Surface), Status: string(session.Status), Cwd: session.Cwd, Project: projectView(project)}
@@ -57,9 +58,9 @@ func (d *Daemon) mcpSessions(_ context.Context, caller *mcpCaller, input mcpSess
 		used += len(encoded)
 		views = append(views, view)
 	}
-	result := map[string]any{"sessions": views, "total": len(visible), "truncated": next < len(visible)}
+	result := map[string]any{"sessions": views, "total": len(all), "truncated": next < len(visible)}
 	if next < len(visible) {
-		result["nextCursor"] = strconv.Itoa(next)
+		result["nextCursor"] = strconv.FormatInt(visible[next-1].order, 10)
 	}
 	return result, nil
 }

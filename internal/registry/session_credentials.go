@@ -28,8 +28,9 @@ const (
 )
 
 var (
-	ErrCredentialUnknown = errors.New("unknown session credential")
-	ErrCredentialExpired = errors.New("session credential expired")
+	ErrCredentialUnknown    = errors.New("unknown session credential")
+	ErrCredentialExpired    = errors.New("session credential expired")
+	ErrCredentialMaxExpired = errors.New("session credential reached its maximum lifetime")
 )
 
 type CredentialRevokedError struct{ Reason string }
@@ -170,7 +171,10 @@ func (r *Registry) AuthenticateSessionToken(token string, now time.Time) (Sessio
 		}
 		return SessionCredential{}, CredentialRevokedError{Reason: ended}
 	}
-	if !credential.MaxExpiresAt.After(now) || !credential.IdleExpiresAt.After(now) {
+	if !credential.MaxExpiresAt.After(now) {
+		return SessionCredential{}, ErrCredentialMaxExpired
+	}
+	if !credential.IdleExpiresAt.After(now) {
 		return SessionCredential{}, ErrCredentialExpired
 	}
 	idle := now.Add(CredentialIdleLifetime)

@@ -11,6 +11,9 @@ import (
 
 const mcpOutputLimit = 16 << 10
 
+// Every tool answers in structuredContent, which 2025-06-18 introduced.
+var mcpProtocolVersions = []string{"2026-07-28", "2025-11-25", "2025-06-18"}
+
 type mcpRefusal struct {
 	Code      string         `json:"code"`
 	Message   string         `json:"message"`
@@ -25,7 +28,7 @@ func refuse(code, message string) *mcpRefusal {
 }
 
 func (d *Daemon) mcpHandler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions})
 	d.registerMCPTools(server)
 	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	return d.mcpAuth(http.NewCrossOriginProtection().Handler(stream))
