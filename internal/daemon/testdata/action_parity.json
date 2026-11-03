@@ -755,6 +755,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
   },
+  "api/action lead-replacement-ack missing": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"no open lead replacement has that id\"}}\n"
+  },
   "api/action lifecycle stop on a daemon session": {
     "status": 200,
     "header": {
@@ -3118,6 +3130,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+  },
+  "api/v1/actions lead-replacement-ack missing": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"no open lead replacement has that id\"}}\n"
   },
   "api/v1/actions lifecycle stop on a daemon session": {
     "status": 200,

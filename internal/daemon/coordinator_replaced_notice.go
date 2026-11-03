@@ -78,6 +78,7 @@ func (d *Daemon) announceReplacement(ctx context.Context, entry registry.Coordin
 		return err
 	}
 	delete(d.replacements.pushed, entry.ID)
+	d.publishEvent("state.changed", "", map[string]any{"source": "lead-replacement"})
 	d.background.start(func(ctx context.Context) { d.tellReplacedLead(ctx, entry) })
 	return nil
 }

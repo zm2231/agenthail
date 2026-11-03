@@ -37,6 +37,7 @@ type dashboardActionRequest struct {
 	RelayID         int64                      `json:"relayId"`
 	RelayHops       int                        `json:"relayHops"`
 	DeliveryID      int64                      `json:"deliveryId"`
+	ReplacementID   int64                      `json:"replacementId"`
 	Surface         string                     `json:"surface"`
 	Cwd             string                     `json:"cwd"`
 	Launcher        string                     `json:"launcher"`
