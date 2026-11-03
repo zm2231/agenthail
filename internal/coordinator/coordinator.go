@@ -23,7 +23,8 @@ type Service struct {
 	Registry     *registry.Registry
 	Adapters     surface.Adapters
 	Dispatcher   delivery.Dispatcher
-	ClaudeRoot   func(context.Context) string
+	// ClaudeRoot is the root of a lead conversation that replaces previous, which is empty for a first start.
+	ClaudeRoot   func(previous string) (string, error)
 	LeadsChanged func()
 	// Replaced runs after a handover is recorded, so its notices go out.
 	Replaced func()
@@ -172,10 +173,25 @@ func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, mes
 	if session != nil {
 		previous = session.ID
 	}
+	root, err := s.startRoot(spec, previous)
+	if err != nil {
+		return s.queueUnavailable(session, message, options, allowQueue, err)
+	}
 	// A new conversation's first turn is text, so attached files are named
 	// by their stored paths.
 	composed, _ := options.Uploads.Compose(message, false)
-	return s.start(ctx, spec, previous, reason, options.Sender(), composed, false)
+	return s.start(ctx, spec, previous, root, reason, options.Sender(), composed, false)
+}
+
+func (s Service) startRoot(spec registry.CoordinatorSpec, previous string) (string, error) {
+	if spec.Surface != string(surface.KindClaude) || s.ClaudeRoot == nil {
+		return "", nil
+	}
+	root, err := s.ClaudeRoot(previous)
+	if err != nil {
+		return "", surface.DeliveryUnavailable(err)
+	}
+	return root, nil
 }
 
 // Restart starts a new conversation for a message the outbox holds for
@@ -211,7 +227,11 @@ func (s Service) Restart(ctx context.Context, session *surface.Session, message 
 	if changedBy == "" {
 		changedBy = RestartedByDaemon
 	}
-	outcome, err := s.start(ctx, spec, current.ID, reason, changedBy, message, true)
+	root, err := s.startRoot(spec, current.ID)
+	if err != nil {
+		return nil, true, err
+	}
+	outcome, err := s.start(ctx, spec, current.ID, root, reason, changedBy, message, true)
 	return outcome, true, err
 }
 
@@ -305,7 +325,7 @@ func (s Service) queueUnavailable(session *surface.Session, message string, opti
 }
 
 // A queued message already owns its delivery record, so a start that serves it records none of its own.
-func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, reason, sender, message string, queued bool) (*Outcome, error) {
+func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, root, reason, sender, message string, queued bool) (*Outcome, error) {
 	adapter := s.Adapters.ForSurface(surface.SurfaceKind(spec.Surface))
 	starter, ok := adapter.(surface.SessionStarter)
 	if adapter == nil || !ok {
@@ -314,10 +334,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	first := FirstTurn(spec, reason, message)
 	options := surface.SessionStartOptions{Message: first, Cwd: spec.Cwd, Model: spec.Model}
 	if spec.Surface == string(surface.KindClaude) {
-		options.Name, options.PermissionMode = spec.Name, spec.PermissionMode
-		if s.ClaudeRoot != nil {
-			options.ConfigRoot = s.ClaudeRoot(ctx)
-		}
+		options.Name, options.PermissionMode, options.ConfigRoot = spec.Name, spec.PermissionMode, root
 	}
 	messageUUID := surface.MessageUUID(ctx)
 	if !queued || messageUUID == "" {

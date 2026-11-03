@@ -1,11 +1,8 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,20 +83,6 @@ func stopAtLimit(t *testing.T, node *moveNode, session *surface.Session, account
 	node.daemon.limitResumes.moves.forget()
 }
 
-func turnOnAutoMove(t *testing.T, node *moveNode) {
-	t.Helper()
-	policy := claudepick.DefaultPolicy()
-	policy.AutoMove = true
-	data, _ := json.Marshal(map[string]any{"action": "claude-accounts", "claudeAccounts": policy})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/settings", bytes.NewReader(data))
-	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
-	response := httptest.NewRecorder()
-	node.handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !node.daemon.claudeAccountPolicy().AutoMove {
-		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())
-	}
-}
-
 func limitStopState(t *testing.T, node *moveNode, sessionID string) registry.LimitResumeState {
 	t.Helper()
 	stop, found, err := node.reg.LimitResumeFor(sessionID)
@@ -139,12 +122,12 @@ func TestAModelScopedWeekNeverHidesAFullWeekFromTheOffer(t *testing.T) {
 		{Provider: "claude", Name: "default", Root: "/home/dev/.claude", Primary: true, Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 100)}},
 		{Provider: "claude", Name: "team", Root: "/home/dev/.team/.claude", Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 18), meter("weekly_all", 92), meter("weekly_scoped", 40)}},
 	}
-	candidates := claudePickCandidates(sets, nil, now)
-	if pick, ok := claudepick.MoveTarget(candidates, "/home/dev/.claude", claudepick.DefaultPolicy()); ok {
+	candidates := limitMoveCandidates(sets, now)
+	if pick, ok := claudepick.MoveTarget(candidates, "/home/dev/.claude"); ok {
 		t.Fatalf("a root whose week is 92%% was offered by its scoped 40%%: %+v", pick)
 	}
 	sets[1].Meters[1].Percent = 40
-	if pick, ok := claudepick.MoveTarget(claudePickCandidates(sets, nil, now), "/home/dev/.claude", claudepick.DefaultPolicy()); !ok || pick.Reason != "most headroom, session 18%, week 40%" {
+	if pick, ok := claudepick.MoveTarget(limitMoveCandidates(sets, now), "/home/dev/.claude"); !ok || pick.Reason != "most headroom, session 18%, week 40%" {
 		t.Fatalf("pick=%+v ok=%v", pick, ok)
 	}
 }
@@ -182,11 +165,6 @@ func TestACanceledStopIsNotMovedOrReleasedByAMove(t *testing.T) {
 	}
 	if transcriptUnder(primary, session.ID) == "" {
 		t.Fatal("a canceled stop was moved")
-	}
-	turnOnAutoMove(t, node)
-	node.daemon.autoMoveLimitStops(context.Background(), time.Now())
-	if transcriptUnder(primary, session.ID) == "" {
-		t.Fatal("a canceled stop was moved automatically")
 	}
 	if _, err := node.daemon.moveSessionToRoot(context.Background(), sessionMoveRequest{SessionID: session.ID, Root: "work"}); err != nil {
 		t.Fatal(err)
@@ -229,61 +207,5 @@ func TestAStopCannotBeCanceledOrResumedWhileItsSessionMoves(t *testing.T) {
 	}
 	if claimed, _ := f.d.claimLimitMove("worker", ""); claimed {
 		t.Fatal("a canceled stop was claimed for a move")
-	}
-}
-
-func TestStoppedSessionsMoveAutomaticallyOnlyWhenTheSettingIsOn(t *testing.T) {
-	node, second, pool := limitMoveNode(t, "10")
-	primary := filepath.Join(node.host.Home, ".claude")
-	first, next, proxied := startMovable(t, node), startMovable(t, node), startMovable(t, node)
-	refusedAt := time.Now().Add(-time.Minute)
-	stopAtLimit(t, node, first, primary, "u1", refusedAt)
-	stopAtLimit(t, node, next, primary, "u2", refusedAt.Add(time.Second))
-	stopAtLimit(t, node, proxied, pool, "u3", refusedAt)
-	readClaudeUsage(t, node.daemon)
-	now := time.Now()
-	node.daemon.autoMoveLimitStops(context.Background(), now)
-	if transcriptUnder(second, first.ID) != "" {
-		t.Fatal("a session moved with the setting off")
-	}
-	turnOnAutoMove(t, node)
-	node.daemon.autoMoveLimitStops(context.Background(), now)
-	if transcriptUnder(second, first.ID) == "" || transcriptUnder(second, next.ID) != "" {
-		t.Fatal("one pass moves the oldest stop and only it")
-	}
-	node.daemon.autoMoveLimitStops(context.Background(), now.Add(time.Second))
-	if transcriptUnder(second, next.ID) != "" {
-		t.Fatal("a second move into the same account was not spaced")
-	}
-	node.daemon.autoMoveLimitStops(context.Background(), now.Add(limitResumeSpacing))
-	if transcriptUnder(second, next.ID) == "" {
-		t.Fatal("the next stop did not move once the spacing passed")
-	}
-	if offer := node.daemon.limitMoveOffer(proxied.ID, now.Add(2*limitResumeSpacing)); offer == nil {
-		t.Fatal("the proxied stop has no offer to refuse")
-	}
-	node.daemon.autoMoveLimitStops(context.Background(), now.Add(2*limitResumeSpacing))
-	if transcriptUnder(primary, proxied.ID) == "" || limitStopState(t, node, proxied.ID) != registry.LimitResumeWaiting {
-		t.Fatal("a session on a proxy account was moved")
-	}
-	moves := node.daemon.limitResumes.moves
-	tracked := func() (int, int) {
-		moves.mu.Lock()
-		defer moves.mu.Unlock()
-		return len(moves.tried), len(moves.movedAt)
-	}
-	if tried, movedAt := tracked(); tried != 0 || movedAt != 0 {
-		t.Fatalf("released stops and spaced-out roots are still tracked: tried=%d movedAt=%d", tried, movedAt)
-	}
-	moves.mu.Lock()
-	moves.tried["gone:u9"], moves.movedAt["work"] = true, now
-	moves.mu.Unlock()
-	config, err := LoadDashboardConfig()
-	if err != nil || config.SetClaudeAccountPolicy(claudepick.DefaultPolicy()) != nil || SaveDashboardConfig(config) != nil {
-		t.Fatalf("turning the setting off: %v", err)
-	}
-	node.daemon.autoMoveLimitStops(context.Background(), now.Add(limitResumeSpacing))
-	if tried, movedAt := tracked(); tried != 0 || movedAt != 0 {
-		t.Fatalf("turning the setting off left moves tracked: tried=%d movedAt=%d", tried, movedAt)
 	}
 }

@@ -328,17 +328,13 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
     func claudeRootPick(host: String? = nil) async throws -> ClaudeRootPick {
-        struct Policy: Decodable { let sessionCeiling: Double; let weeklyCeiling: Double }
-        struct Answer: Decodable { let pick: ClaudeRootPick; var policy: Policy? = nil }
+        struct Answer: Decodable { let pick: ClaudeRootPick }
         var components = URLComponents()
         components.path = "/api/v1/session-options/claude-pick"
         components.queryItems = host.map { [URLQueryItem(name: "host", value: $0)] }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         let answer: Answer = try await get(path)
-        var pick = answer.pick
-        pick.sessionCeiling = answer.policy?.sessionCeiling
-        pick.weeklyCeiling = answer.policy?.weeklyCeiling
-        return pick
+        return answer.pick
     }
     func usage() async throws -> UsageReport {
         try await get("/api/v1/usage")
@@ -485,6 +481,10 @@ final class AgenthailAPI: @unchecked Sendable {
 
     func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
+    }
+
+    func setClaudeDefaultRoot(_ name: String) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "claude-default-root", "claudeDefaultRoot": name])
     }
 
     func setResumeAfterLimit(_ enabled: Bool) async throws {

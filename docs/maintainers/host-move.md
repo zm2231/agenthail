@@ -193,23 +193,15 @@ under its new root. A canceled or lapsed stop stays held.
 While a limit stop waits and the host has two or more roots, the dashboard
 projection's `limitResume.moveTo{root, account, reason}` names the target
 `claudepick.MoveTarget` chooses from the cached usage readings: a claude.ai
-root other than the stop's, with a reading, under both ceilings, the least
-loaded first. Proxy, API-key, signed-out and unread roots are never
+root other than the stop's, with a reading, under 90% of its session and week
+(or the proxy's own ceiling), the least loaded first. Proxy, API-key, signed-out and unread roots are never
 offered. The offers are computed for every waiting stop at once and kept
 five seconds, or until a stop changes. The `limit-move` action
 (`configRoot` optional, defaulting to the offer) runs the move above, and
-refuses a session whose stop is not waiting. It and the automatic move
-claim the waiting stop first; while the claim holds, `limit-resume` and
-`limit-resume-cancel` on that session are refused, so a cancel either
-lands before the move starts or after it finishes.
-
-With the policy's `autoMove` on, each limit pass makes at most one move:
-the oldest waiting stop with an offer, not on a proxy root, not tried
-before and still waiting when the move starts, whose target has not taken
-a move in the last 30 seconds. The move runs inside the pass, so the
-pass's own resumes never interleave with it. It never
-waits for a busy session or stops a terminal, so those are refused and the
-stop stays.
+refuses a session whose stop is not waiting. It claims the waiting stop
+first; while the claim holds, `limit-resume` and `limit-resume-cancel` on
+that session are refused, so a cancel either lands before the move starts or
+after it finishes. Nothing moves a stopped session unless the person asks.
 
 ## Not in this slice
 

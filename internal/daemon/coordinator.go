@@ -22,9 +22,9 @@ import (
 )
 
 func (d *Daemon) coordinator() coordinator.Service {
-	return coordinator.Service{Registry: d.Registry, Adapters: d.adapters(), Dispatcher: d.dispatcher(), ClaudeRoot: func(ctx context.Context) string {
-		pick, _ := d.claudeRootPick(ctx, false)
-		return pick.Root
+	return coordinator.Service{Registry: d.Registry, Adapters: d.adapters(), Dispatcher: d.dispatcher(), ClaudeRoot: func(previous string) (string, error) {
+		pick, err := d.placeClaudeSession("", previous)
+		return pick.Root, err
 	}, LeadsChanged: d.syncLeads, Replaced: d.announceReplacementsSoon, Now: d.coordinatorNow}
 }
 

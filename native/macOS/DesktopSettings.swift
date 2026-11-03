@@ -140,6 +140,18 @@ struct GeneralSettings: View {
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
+            if let roots = model.settings?.claudeRoots, roots.count > 1 {
+                Section {
+                    Picker("Claude root for sessions you start", selection: Binding(get: { model.claudeDefaultRoot }, set: { model.setClaudeDefaultRoot($0) })) {
+                        Text("The primary root").tag("")
+                        ForEach(roots, id: \.self) { Text($0).tag($0) }
+                    }
+                } footer: {
+                    Text("A session an agent starts stays in the agent's root, and a replacement lead in the old lead's root. Sessions never move to another root on their own.")
+                        .font(.system(size: DesktopType.secondary))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
+            }
             if let remoteControl = model.claudeRemoteControl, remoteControl.available, !remoteControl.roots.isEmpty {
                 Section {
                     ForEach(remoteControl.roots) { root in

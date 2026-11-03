@@ -962,6 +962,21 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    var claudeDefaultRoot: String { settings?.claudeDefaultRoot ?? "" }
+
+    func setClaudeDefaultRoot(_ name: String) {
+        guard let api, name != claudeDefaultRoot else { return }
+        Task {
+            do {
+                try await api.setClaudeDefaultRoot(name)
+                settings = try await api.settings()
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     private func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) {
         guard let api else { return }
         Task {

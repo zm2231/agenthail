@@ -161,6 +161,8 @@ final class HostCatalogTests: XCTestCase {
         ])
         XCTAssertEqual(catalog.target(forHost: "hlaptop"), HostTarget(hostID: "hlaptop", remote: nil))
         XCTAssertEqual(catalog.target(forHost: "hserver"), HostTarget(hostID: "hlaptop", remote: "hserver"))
+        XCTAssertEqual(catalog.target(forHost: "hlaptop")?.takesSettings, true)
+        XCTAssertEqual(catalog.target(forHost: "hserver")?.takesSettings, false, "a computer reached through another cannot be sent settings")
         XCTAssertNil(catalog.target(forHost: "hbuild"))
         XCTAssertEqual(catalog.hosts.map(\.id), ["hlaptop", "hserver", "hbuild"])
         XCTAssertEqual(catalog.hosts.first { $0.id == "hbuild" }?.state, "unreachable")

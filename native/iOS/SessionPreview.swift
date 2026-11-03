@@ -384,7 +384,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         switch request.url?.path {
         case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}],"claudeConfigRoots":[{"name":"default","root":"/Users/demo/.claude","primary":true,"signedInAs":{"email":"demo@example.com"}},{"name":"team","root":"/Users/demo/.team/.claude","primary":false,"signedInAs":{"email":"team@example.com"}},{"name":"shared","root":"/Users/demo/.shared/.claude","primary":false,"login":"proxy","proxy":"shared"}]}"#
         case "/api/v1/session-options/claude-pick":
-            body = #"{"pick":{"root":"/Users/demo/.team/.claude","name":"team","account":"team@example.com","reason":"most headroom, session 12%, week 30%"},"policy":{"auto":true,"sessionCeiling":90,"weeklyCeiling":90}}"#
+            body = #"{"pick":{"root":"/Users/demo/.team/.claude","name":"team","account":"team@example.com","reason":"your default root for new sessions"}}"#
         case "/api/v1/session-options/claude-usage":
             let root = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "root" })?.value ?? ""
             let (session, week) = root.hasSuffix(".team/.claude") ? (12, 30) : root.hasSuffix(".shared/.claude") ? (18, 41) : (40, 93)

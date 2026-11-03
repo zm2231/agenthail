@@ -150,8 +150,6 @@ struct ClaudeRootPick: Decodable, Hashable {
     let name: String
     var account: String? = nil
     let reason: String
-    var sessionCeiling: Double? = nil
-    var weeklyCeiling: Double? = nil
 }
 
 struct ClaudeRootUsage: Decodable {
@@ -1684,6 +1682,8 @@ struct DashboardSettingsState: Decodable {
     let dashboard: DashboardConfigState
     let remoteAccess: RemoteAccessState
     let notifications: NotificationStatusState
+    var claudeDefaultRoot: String? = nil
+    var claudeRoots: [String]? = nil
 }
 
 struct NotificationStatusState: Decodable {

@@ -10,16 +10,12 @@ export function rootTitles(roots, host) {
   return names.map((name, index) => (names.filter((other) => other === name).length > 1 ? `${name} · ${roots[index].name}` : name));
 }
 
-export function rootUsage(root, policy) {
+export function rootUsage(root) {
   const parts = [];
-  let over = false;
-  for (const [label, test, ceiling] of [["session", (kind) => kind === "session" || kind === "5h", policy?.sessionCeiling], ["week", (kind) => kind === "weekly" || kind === "weekly_all", policy?.weeklyCeiling]]) {
+  for (const [label, test] of [["session", (kind) => kind === "session" || kind === "5h"], ["week", (kind) => kind === "weekly" || kind === "weekly_all"]]) {
     const limit = (root.usage?.limits || []).find((item) => test(item.kind));
-    if (!limit) continue;
-    parts.push(`${label} ${Math.round(limit.percent)}%`);
-    if (ceiling && limit.percent >= ceiling) over = true;
+    if (limit) parts.push(`${label} ${Math.round(limit.percent)}%`);
   }
-  if (over) parts.push("over limit");
   return parts.join(", ");
 }
 

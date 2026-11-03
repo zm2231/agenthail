@@ -59,9 +59,9 @@ struct NewSessionView: View {
                 let titles = ClaudeRootLabels.titles(roots, host: draft.hostName)
                 Divider()
                 Picker("Account", selection: $draft.form.configRoot) {
-                    Text(ClaudeRootLabels.automatic(draft.hosts.claudePick, roots: roots, titles: titles)).tag("")
+                    Text(ClaudeRootLabels.byDefault(draft.hosts.claudePick, roots: roots, titles: titles)).tag("")
                     ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
-                        Text(ClaudeRootLabels.option(root, title: title, pick: draft.hosts.claudePick)).tag(root.root).selectionDisabled(!root.selectable)
+                        Text(ClaudeRootLabels.option(root, title: title)).tag(root.root).selectionDisabled(!root.selectable)
                     }
                 }
                 .pickerStyle(.inline)

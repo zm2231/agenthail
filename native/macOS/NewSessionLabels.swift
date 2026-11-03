@@ -12,7 +12,7 @@ enum NewSessionLabels {
     static func account(_ roots: [ClaudeConfigRootOption], choice: String, pick: ClaudeRootPick?, host: String) -> String? {
         guard roots.count > 1 else { return nil }
         let titles = ClaudeRootLabels.titles(roots, host: host)
-        if choice.isEmpty { return pick.map { "\(ClaudeRootLabels.picked($0, roots: roots, titles: titles)) (auto)" } }
+        if choice.isEmpty { return pick.map { "\(ClaudeRootLabels.picked($0, roots: roots, titles: titles)) (default)" } }
         return roots.firstIndex { $0.root == choice }.map { titles[$0] }
     }
 }

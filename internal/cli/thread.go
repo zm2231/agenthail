@@ -106,7 +106,7 @@ func (a *App) cmdThread(args []string) error {
 	}
 	var pick *claudepick.Pick
 	if request.surface == surface.KindClaude && request.options.ConfigRoot == "" {
-		chosen, err := a.claudeRootPick(context.Background())
+		chosen, err := a.placeClaudeSession(creator)
 		if err != nil {
 			return err
 		}

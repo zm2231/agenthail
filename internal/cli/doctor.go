@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/permissions"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -130,6 +131,11 @@ func (a *App) cmdDoctor(args []string) error {
 		results = append(results, result)
 	}
 	signins := a.signinStatus(ctx)
+	_, settingsErr := daemon.LoadDashboardConfig()
+	if settingsErr != nil {
+		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait: %w", daemon.DashboardConfigPath(), settingsErr)
+		failures++
+	}
 	home, _ := os.UserHomeDir()
 	claudeRoots, claudeRootsErr := surface.ClaudeConfigRoots(home)
 	if claudeRootsErr != nil {
@@ -232,6 +238,9 @@ func (a *App) cmdDoctor(args []string) error {
 			report["pushError"] = pushErr.Error()
 		}
 		report["connection"] = connection
+		if settingsErr != nil {
+			report["settingsError"] = settingsErr.Error()
+		}
 		if connectionErr != nil {
 			report["connectionError"] = connectionErr.Error()
 		}
@@ -249,6 +258,9 @@ func (a *App) cmdDoctor(args []string) error {
 	} else {
 		if personName != "" {
 			fmt.Println(describePersonName(personName, personSet))
+		}
+		if settingsErr != nil {
+			fmt.Printf("settings: %s\n", settingsErr)
 		}
 		if claudeRootsErr != nil {
 			fmt.Printf("claude config: %s\n", claudeRootsErr)

@@ -17,45 +17,20 @@ type limitMoveOffer struct {
 }
 
 type limitMoves struct {
-	mu      sync.Mutex
-	offers  map[string]*limitMoveOffer
-	readAt  time.Time
-	fresh   bool
-	tried   map[string]bool
-	movedAt map[string]time.Time
+	mu     sync.Mutex
+	offers map[string]*limitMoveOffer
+	readAt time.Time
+	fresh  bool
 }
 
 func newLimitMoves() *limitMoves {
-	return &limitMoves{tried: map[string]bool{}, movedAt: map[string]time.Time{}}
+	return &limitMoves{}
 }
 
 func (m *limitMoves) forget() {
 	m.mu.Lock()
 	m.fresh = false
 	m.mu.Unlock()
-}
-
-func limitMoveKey(stop registry.LimitResume) string {
-	return stop.SessionID + ":" + stop.TurnID
-}
-
-func (m *limitMoves) prune(stops []registry.LimitResume, now time.Time) {
-	waiting := map[string]bool{}
-	for _, stop := range stops {
-		waiting[limitMoveKey(stop)] = stop.State == registry.LimitResumeWaiting
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for key := range m.tried {
-		if !waiting[key] {
-			delete(m.tried, key)
-		}
-	}
-	for root, at := range m.movedAt {
-		if now.Sub(at) >= limitResumeSpacing {
-			delete(m.movedAt, root)
-		}
-	}
 }
 
 func (d *Daemon) limitMoveOffer(sessionID string, now time.Time) *limitMoveOffer {
@@ -94,26 +69,17 @@ func (d *Daemon) limitMoveOffers(stops []registry.LimitResume, now time.Time) ma
 	if len(roots) < 2 {
 		return nil
 	}
-	policy := d.claudeAccountPolicy()
-	candidates := claudePickCandidates(d.claudeCachedUsageSets(roots, now), nil, now)
+	candidates := limitMoveCandidates(d.claudeCachedUsageSets(roots, now), now)
 	offers := map[string]*limitMoveOffer{}
 	for _, stop := range stops {
 		if stop.State != registry.LimitResumeWaiting {
 			continue
 		}
-		if target, ok := claudepick.MoveTarget(candidates, stop.AccountKey, policy); ok {
+		if target, ok := claudepick.MoveTarget(candidates, stop.AccountKey); ok {
 			offers[stop.SessionID] = &limitMoveOffer{Root: target.Name, Account: target.Account, Reason: target.Reason}
 		}
 	}
 	return offers
-}
-
-func (d *Daemon) claudeAccountPolicy() claudepick.Policy {
-	config, err := LoadDashboardConfig()
-	if err != nil {
-		return claudepick.DefaultPolicy()
-	}
-	return config.ClaudeAccountPolicy()
 }
 
 func sameLimitMoveOffer(a, b *limitMoveOffer) bool {
