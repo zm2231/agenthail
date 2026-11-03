@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -65,6 +67,33 @@ func TestRootsDefaultShowsAndChangesWhereAPersonsSessionsStart(t *testing.T) {
 	}
 	if chosen, _ := show(); chosen != "" {
 		t.Fatalf("none clears the default: %q", chosen)
+	}
+}
+
+func TestDoctorReportsAnUnreadableSettingsFile(t *testing.T) {
+	claudeRootsHome(t)
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	report := func() (bool, string) {
+		t.Helper()
+		output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+		var answer struct {
+			OK            bool   `json:"ok"`
+			SettingsError string `json:"settingsError"`
+		}
+		if err := json.Unmarshal([]byte(output), &answer); err != nil {
+			t.Fatalf("output=%s err=%v", output, err)
+		}
+		return answer.OK, answer.SettingsError
+	}
+	if _, problem := report(); problem != "" {
+		t.Fatalf("no settings file is not a problem: %s", problem)
+	}
+	if err := os.WriteFile(daemon.DashboardConfigPath(), []byte(`{not json`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ok, problem := report()
+	if ok || !strings.Contains(problem, daemon.DashboardConfigPath()) || !strings.Contains(problem, "parse dashboard config") {
+		t.Fatalf("doctor names the file and the parse error: ok=%v problem=%q", ok, problem)
 	}
 }
 

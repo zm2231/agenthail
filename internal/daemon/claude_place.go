@@ -14,7 +14,7 @@ func (d *Daemon) placeClaudeSession(creator, previous string) (claudepick.Pick, 
 	return claudepick.Place(d.claudeConfigRoots(), origin, func() (string, error) {
 		config, err := LoadDashboardConfig()
 		if err != nil {
-			return "", fmt.Errorf("read the default Claude root, so the session would not start where it should: %w", err)
+			return "", fmt.Errorf("the settings file %s cannot be read, so the default Claude root is not known: %w", DashboardConfigPath(), err)
 		}
 		return config.ClaudeDefaultRoot(), nil
 	})
