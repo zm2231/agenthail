@@ -49,6 +49,39 @@ final class HostDropTests: XCTestCase {
         XCTAssertEqual(seen, ["connected"], "a single failed probe on resume flipped every session: \(seen)")
     }
 
+    func testAStreamDropWithAFailedProbeIsReportedOnceToTheComputerWhenItAnswersAgain() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let suite = "connection-drops-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let drops = ConnectionDrops(defaults: defaults, watchesNetwork: false)
+        drops.network = NetworkSnapshot(interface: "cellular", vpn: true, expensive: true, constrained: false)
+        drops.foregrounded()
+        model.connection("hdrop")!.drops = drops
+        HostDropProtocol.state.failNextProbes(1)
+        HostDropProtocol.state.dropStreams()
+        for _ in 0..<300 where HostDropProtocol.state.dropUploads.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let upload = try XCTUnwrap(HostDropProtocol.state.dropUploads.first, "the drop was never reported")
+        let rows = try XCTUnwrap((try JSONSerialization.jsonObject(with: upload) as? [String: Any])?["drops"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, 1, "retries were reported as separate drops: \(rows)")
+        let row = rows[0]
+        XCTAssertEqual(row["host"] as? String, "hdrop")
+        XCTAssertNil(row["via"], "the phone's own link was reported as relayed")
+        XCTAssertEqual(row["path"] as? String, "stream")
+        XCTAssertEqual(row["firstError"] as? String, "URLError.-1005")
+        XCTAssertEqual(row["lastError"] as? String, "URLError.-1001")
+        XCTAssertEqual(row["attempts"] as? Int, 2)
+        XCTAssertEqual(row["shown"] as? String, "held")
+        XCTAssertEqual(row["network"] as? String, "cellular")
+        XCTAssertEqual(row["vpn"] as? Bool, true)
+        XCTAssertNotNil(row["sinceForegroundMs"])
+        XCTAssertNotNil(row["recoveredBy"])
+        XCTAssertNotNil((row["startedAt"] as? String).flatMap { try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0) }, "dates are not RFC 3339")
+        for _ in 0..<100 where !drops.log.closed.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(drops.log.closed.isEmpty, "a reported drop stayed queued")
+    }
+
     func testAComputerThatStaysDownPastTheGraceIsMarkedUnreachable() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
@@ -187,7 +220,10 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         private var refused = false
         private var snapshotsFail = false
         private var subagentsFail = false
-        func reset() { lock.withLock { open = []; failing = 0; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false } }
+        private var drops: [Data] = []
+        func reset() { lock.withLock { open = []; failing = 0; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false; drops = [] } }
+        func postedDrops(_ body: Data) { lock.withLock { drops.append(body) } }
+        var dropUploads: [Data] { lock.withLock { drops } }
         func setSnapshotFails(_ value: Bool) { lock.withLock { snapshotsFail = value } }
         func setSubagentsFail(_ value: Bool) { lock.withLock { subagentsFail = value } }
         func fails(snapshotFor query: String?) -> Bool {
@@ -235,6 +271,9 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
+        if path == "/api/v1/device/connection-drops" {
+            Self.state.postedDrops(request.httpBody ?? request.httpBodyStream.map(Self.read) ?? Data())
+        }
         if path == "/api/v1/version", Self.state.takeProbeFailure() {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
@@ -251,4 +290,17 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() { Self.state.closed(self) }
+
+    private static func read(_ stream: InputStream) -> Data {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }

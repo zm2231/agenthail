@@ -112,8 +112,12 @@ struct AgenthailIOSApp: App {
                 model.operationError = notification.object as? String ?? "This device could not register for notifications."
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task.detached { await PushReceipts.flush() } }
+                if phase == .active {
+                    ConnectionDrops.shared.foregrounded()
+                    Task.detached { await PushReceipts.flush() }
+                }
                 if phase == .background {
+                    ConnectionDrops.shared.backgrounded()
                     wasInBackground = true
                 } else if phase == .active, wasInBackground {
                     wasInBackground = false

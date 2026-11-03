@@ -1563,6 +1563,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         KeychainStore.remove(PairedCredential.account(for: hostID))
         KeychainStore.remove(HostConnection.relayAccount(hostID))
         PushReceipts.forget(host: hostID)
+        ConnectionDrops.shared.forget(host: hostID)
         clearStoredPush(hostID)
         pushStatus.removeValue(forKey: hostID)
         let prefix = hostID + HostCatalog.separator
