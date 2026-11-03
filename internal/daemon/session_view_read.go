@@ -32,6 +32,10 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
+	leads, err := d.Registry.LocalLeadSessions()
+	if err != nil {
+		return SessionViewSnapshot{}, err
+	}
 	now := time.Now().UTC()
 	result := SessionViewSnapshot{PresentationPosition: PresentationPosition{HostID: d.hostIdentity().ID, Epoch: d.presentation.epoch, Sequence: d.presentation.sequence}, Sessions: []dashboardSession{}, Counts: map[string]int{}}
 	var plan sessionViewPlan
@@ -61,7 +65,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 				session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}
 				adapter, adapterErr := d.adapters().For(&session)
 				if adapterErr == nil {
-					row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+					row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
 				}
 			}
 			if limit, ok := read.Limits[record.ID]; ok {
@@ -112,9 +116,6 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		if request.Revision != "" && request.Revision != plan.view.Revision {
 			return nil, errPresentationChanged
 		}
-		if request.Offset > len(plan.view.Families) {
-			return nil, errPresentationCursor
-		}
 		result.TotalSessions = plan.view.Counts[request.Scope].Sessions
 		for scope, count := range plan.view.Counts {
 			result.Counts[scope] = count.Families
@@ -134,11 +135,12 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			}
 			plan.view.Families = []SessionViewFamily{}
 		} else {
-			end := min(request.Offset+request.Limit, len(plan.view.Families))
-			if end < len(plan.view.Families) {
-				result.NextCursor = encodeSessionViewCursor(request, plan.view.Revision, end)
+			rest := familiesAfter(plan.view.Families, request.After)
+			end := min(request.Limit, len(rest))
+			if end < len(rest) {
+				result.NextCursor = encodeSessionViewCursor(request, rest[end-1].key)
 			}
-			plan.view.Families = plan.view.Families[request.Offset:end]
+			plan.view.Families = rest[:end]
 			for _, family := range plan.view.Families {
 				selected = append(selected, family.RootID)
 			}

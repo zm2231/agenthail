@@ -28,4 +28,5 @@ assert.equal(
   "a wait outranks the quiet note",
 );
 assert.equal(context.presenceLabel({ name: "builder", status: "idle", currentReason: "recent", activity: { lastProgressAt: "2026-10-23T09:00:00Z" } }, now), "Recent");
+assert.equal(context.presenceLabel({ name: "lead", status: "idle", currentReason: "lead" }, now), "Lead");
 console.log("dashboard activity ok");

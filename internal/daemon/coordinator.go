@@ -87,6 +87,9 @@ type coordinatorRequest struct {
 // A set runs where its conversation lives, which the action router picks
 // from the session or the host the request names.
 func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request coordinatorRequest) (actionResult, error) {
+	if request.Action != "coordinator-send" {
+		defer d.syncLeads()
+	}
 	switch request.Action {
 	case "coordinator-set":
 		session, err := d.Registry.Session(request.SessionID)
