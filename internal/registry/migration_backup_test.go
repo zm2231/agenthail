@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -154,6 +156,55 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 	var integrity string
 	if err := restored.read.QueryRow(`PRAGMA integrity_check`).Scan(&integrity); err != nil || integrity != "ok" {
 		t.Fatalf("integrity_check = %q, %v", integrity, err)
+	}
+}
+
+func TestABackupWorksInADirectoryWithAnOddName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), `home odd" it's $HOME back\slash -n %41 #1`)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "registry.db")
+	registryAtSchema(t, path, schemaVersion-1)
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	backup := migrationBackupPath(path, schemaVersion)
+	if got := schemaOf(backup); got != schemaVersion-1 {
+		t.Fatalf("backup schema=%d, want %d", got, schemaVersion-1)
+	}
+}
+
+func TestAFailedPageCopyReportsItsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	registryAtSchema(t, path, schemaVersion-1)
+	holder, err := connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	var mode string
+	if err := holder.db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+		t.Fatalf("journal_mode=%q err=%v", mode, err)
+	}
+	conn, err := holder.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), `BEGIN EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.ExecContext(context.Background(), `ROLLBACK`)
+	source, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err := copyPages(source, path+".copy"); err == nil {
+		t.Fatal("a copy of a locked registry reported success")
 	}
 }
 

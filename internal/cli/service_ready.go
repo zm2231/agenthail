@@ -68,7 +68,7 @@ func (s daemonStart) wait() (int, error) {
 	}
 }
 
-// The pid file must name launchd's own pid, so a daemon outside launchd never counts as started.
+// The pid file must name the service's own pid, so a daemon outside the service never counts as started.
 func launchdDaemonStart(label string, previous int) daemonStart {
 	return daemonStart{
 		previous:   previous,
@@ -86,8 +86,9 @@ func launchdDaemonStart(label string, previous int) daemonStart {
 
 func (s *systemdService) daemonStart(previous int) daemonStart {
 	return daemonStart{
-		previous:  previous,
-		goneBound: daemonGoneBound,
+		previous:   previous,
+		supervised: true,
+		goneBound:  daemonGoneBound,
 		process: func() int {
 			output, err := s.systemctl("show", systemdUnitName, "--property=MainPID", "--value")
 			if err != nil {

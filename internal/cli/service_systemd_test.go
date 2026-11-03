@@ -43,6 +43,7 @@ type fakeSystemctl struct {
 	linger        bool
 	lingerRefused bool
 	startFails    bool
+	otherMainPID  int
 }
 
 func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
@@ -86,6 +87,9 @@ func (f *fakeSystemctl) run(name string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if strings.Join(args, " ") == "--user show "+systemdUnitName+" --property=MainPID --value" {
+		if f.otherMainPID != 0 {
+			return []byte(strconv.Itoa(f.otherMainPID) + "\n"), nil
+		}
 		if f.process == nil || f.managerDown {
 			return []byte("0\n"), nil
 		}
