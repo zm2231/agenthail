@@ -20,7 +20,13 @@ func (d *Daemon) dashboardCodexLaunch(w http.ResponseWriter, r *http.Request, re
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	output, launchErr := exec.CommandContext(ctx, executable, "launch", "codex").CombinedOutput()
+	launch := d.launchCodex
+	if launch == nil {
+		launch = func(ctx context.Context, executable string) ([]byte, error) {
+			return exec.CommandContext(ctx, executable, "launch", "codex").CombinedOutput()
+		}
+	}
+	output, launchErr := launch(ctx, executable)
 	if launchErr != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail == "" {

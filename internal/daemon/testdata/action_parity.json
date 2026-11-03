@@ -85,6 +85,24 @@
       }
     }
   },
+  "codex-launch": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": "Codex is running"
+    }
+  },
+  "codex-launch failing": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "bad_gateway",
+        "message": "Codex is not installed: exit status 1"
+      }
+    }
+  },
   "compact": {
     "status": 200,
     "contentType": "application/json; charset=utf-8",

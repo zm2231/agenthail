@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -27,9 +28,16 @@ type parityCase struct {
 	setup  func(t *testing.T, d *Daemon, r *registry.Registry)
 }
 
-// parityNotRun names actions the table lists but cannot execute in a test, with why.
-var parityNotRun = map[string]string{
-	"codex-launch": "it executes the running binary with 'launch codex', which in a test is the test binary",
+func withCodexLaunched(t *testing.T, d *Daemon, _ *registry.Registry) {
+	t.Helper()
+	d.launchCodex = func(context.Context, string) ([]byte, error) { return []byte("Codex is running\n"), nil }
+}
+
+func withCodexLaunchFailing(t *testing.T, d *Daemon, _ *registry.Registry) {
+	t.Helper()
+	d.launchCodex = func(context.Context, string) ([]byte, error) {
+		return []byte("Codex is not installed\n"), errors.New("exit status 1")
+	}
 }
 
 func withChannel(t *testing.T, _ *Daemon, r *registry.Registry) {
@@ -119,7 +127,8 @@ func parityCases() []parityCase {
 		{name: "relay-add", action: "relay-add", body: `{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`},
 		{name: "relay-remove", action: "relay-remove", body: `{"action":"relay-remove","relayId":1}`, setup: withRelay},
 		{name: "runtime-ensure", action: "runtime-ensure", body: `{"action":"runtime-ensure"}`},
-		{name: "codex-launch", action: "codex-launch"},
+		{name: "codex-launch", action: "codex-launch", body: `{"action":"codex-launch"}`, setup: withCodexLaunched},
+		{name: "codex-launch failing", action: "codex-launch", body: `{"action":"codex-launch"}`, setup: withCodexLaunchFailing},
 		{name: "project-add", action: "project-add", body: `{"action":"project-add","path":"relative/path"}`},
 		{name: "project-remove", action: "project-remove", body: `{"action":"project-remove","projectId":"missing"}`},
 		{name: "project-rename", action: "project-rename", body: `{"action":"project-rename","projectId":"missing","title":"New"}`},
@@ -203,10 +212,6 @@ func TestEveryActionRepliesTheSameThroughEveryFrontEnd(t *testing.T) {
 	}
 	got := map[string]parityReply{}
 	for _, c := range parityCases() {
-		if reason, skip := parityNotRun[c.action]; skip {
-			t.Logf("%s: not run, %s", c.name, reason)
-			continue
-		}
 		t.Run(c.name, func(t *testing.T) {
 			viaHTTP, viaService := parityDaemon(t, c.setup), parityDaemon(t, c.setup)
 			overHTTP := replyOverHTTP(t, viaHTTP, c.body)
