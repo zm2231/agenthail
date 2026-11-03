@@ -1,4 +1,4 @@
--- schemaVersion 43
+-- schemaVersion 44
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -522,6 +522,7 @@ CREATE TABLE session_credentials (
 	max_expires_at_ms INTEGER NOT NULL,
 	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
 	revoked_reason TEXT NOT NULL DEFAULT '',
+	delivered INTEGER NOT NULL DEFAULT 1,
 	CHECK ((session_id IS NULL) <> (pending_ref IS NULL))
 );
 
