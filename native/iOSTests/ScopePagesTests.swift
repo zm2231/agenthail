@@ -20,7 +20,7 @@ final class ScopePagesTests: XCTestCase {
         for host in hosts { try AgenthailIOSTests.pair(host, "https://\(host).tailnet.ts.net") }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ScopeServer.self]
-        model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
         _ = await model.refresh(fresh: true)
         return model
     }
@@ -149,7 +149,7 @@ final class ScopePagesTests: XCTestCase {
 
         _ = await host.refresh(fresh: true)
         await model.listMore(.all)
-        XCTAssertTrue(ScopeServer.state.requests("one").last?.contains("cursor=1") == true, "the next page did not resume from the held cursor")
+        XCTAssertTrue(ScopeServer.state.requests("one").last { $0.contains("scope=all") }?.contains("cursor=1") == true, "the next page did not resume from the held cursor")
         XCTAssertEqual(listed(.all), ["one::a", "one::b"])
     }
 

@@ -9,7 +9,7 @@ final class HostDropTests: XCTestCase {
         HostDropProtocol.state.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HostDropProtocol.self]
-        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
         model.connect()
         for _ in 0..<200 where !(HostDropProtocol.state.streaming && model.snapshot?.sessions.first?.host?.state == "connected") {
             try await Task.sleep(for: .milliseconds(20))

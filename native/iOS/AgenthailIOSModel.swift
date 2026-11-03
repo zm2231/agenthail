@@ -178,6 +178,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var pushStatus: [String: String] = [:]
     private var registeringPush: Set<String> = []
     private let networkSession: URLSession
+    private let connectionDrops: ConnectionDrops?
     private let automaticallyConnect: Bool
     private let previewPaired: Bool
 
@@ -187,12 +188,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
     var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
-    init(autoConnect: Bool = true, session: URLSession = .shared) {
+    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared) {
         networkSession = session
+        connectionDrops = drops
         automaticallyConnect = autoConnect
         previewPaired = false
         voiceHostID = UserDefaults.standard.string(forKey: Self.voiceHostKey)
-        for credential in PairedCredential.all() { add(HostConnection(credential: credential, session: session)) }
+        for credential in PairedCredential.all() { add(HostConnection(credential: credential, session: session, drops: drops)) }
         rebuild()
         Task { await retireLegacyPairing() }
         if autoConnect { connect() }
@@ -200,6 +202,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer") {
         networkSession = .shared
+        connectionDrops = nil
         automaticallyConnect = false
         previewPaired = paired
         add(HostConnection(id: hostID, name: hostName, api: api))
@@ -877,7 +880,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 }
                 let credential = PairedHostCredential(hostID: hostID, hostName: response.host.name, endpoint: pendingPairing.endpoint, token: response.token, pairedAt: previous == nil ? Date() : PairedCredential.all().first { $0.hostID == hostID }?.pairedAt ?? Date())
                 try PairedCredential.save(credential)
-                add(HostConnection(credential: credential, session: networkSession))
+                add(HostConnection(credential: credential, session: networkSession, drops: connectionDrops))
                 attachmentCache.removeAll()
                 attachmentCacheBytes = 0
                 pairing = false
@@ -1563,7 +1566,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         KeychainStore.remove(PairedCredential.account(for: hostID))
         KeychainStore.remove(HostConnection.relayAccount(hostID))
         PushReceipts.forget(host: hostID)
-        ConnectionDrops.shared.forget(host: hostID)
+        connectionDrops?.forget(host: hostID)
         clearStoredPush(hostID)
         pushStatus.removeValue(forKey: hostID)
         let prefix = hostID + HostCatalog.separator

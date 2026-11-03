@@ -1,6 +1,14 @@
 import XCTest
 @testable import Agenthail
 
+extension ConnectionDrops {
+    static func isolated() -> ConnectionDrops {
+        let suite = "agenthail-tests-connection-drops"
+        UserDefaults().removePersistentDomain(forName: suite)
+        return ConnectionDrops(defaults: UserDefaults(suiteName: suite)!, watchesNetwork: false)
+    }
+}
+
 @MainActor
 final class ConnectionDropsTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_793_000_000)
