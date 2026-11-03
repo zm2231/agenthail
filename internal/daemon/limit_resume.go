@@ -81,7 +81,6 @@ func (d *Daemon) resumeAfterLimitEnabled() bool {
 // resumes it; a paired host shows what this one publishes.
 func (d *Daemon) resumeAfterLimits(ctx context.Context, now time.Time) {
 	d.sweepLimitStops(ctx, now)
-	d.autoMoveLimitStops(ctx, now)
 	resumes, err := d.Registry.LimitResumes()
 	if err != nil {
 		d.log.Printf("read usage-limit stops: %s", err)

@@ -85,12 +85,16 @@ func (f pickFixture) call(method, path string, body any, into any) int {
 }
 
 func (f pickFixture) create(configRoot string) (claudepick.Pick, *string) {
+	return f.createFrom(configRoot, "")
+}
+
+func (f pickFixture) createFrom(configRoot, source string) (claudepick.Pick, *string) {
 	f.t.Helper()
 	var receipt struct {
 		Session surface.Session  `json:"session"`
 		Account *claudepick.Pick `json:"account"`
 	}
-	request := map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": f.host.Cwd, "configRoot": configRoot}
+	request := map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": f.host.Cwd, "configRoot": configRoot, "sourceSessionId": source}
 	if code := f.call(http.MethodPost, "/api/v1/actions", request, &receipt); code != http.StatusCreated {
 		f.t.Fatalf("create status=%d", code)
 	}
@@ -105,85 +109,81 @@ func (f pickFixture) create(configRoot string) (claudepick.Pick, *string) {
 	return pick, spawns[0].ConfigDir
 }
 
-func TestANewClaudeSessionStartsInTheAccountWithMostHeadroom(t *testing.T) {
-	f := newPickFixture(t, true)
-	var preview struct {
-		Pick   claudepick.Pick   `json:"pick"`
-		Policy claudepick.Policy `json:"policy"`
+func (f pickFixture) setDefault(name string) int {
+	f.t.Helper()
+	return f.call(http.MethodPost, "/api/v1/settings", map[string]any{"action": "claude-default-root", "claudeDefaultRoot": name}, nil)
+}
+
+func (f pickFixture) claudeSessionIn(id, root string) string {
+	f.t.Helper()
+	session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transcript: filepath.Join(root, "projects", "-repo", id+".jsonl")}
+	if err := f.daemon.Registry.RegisterSession(session); err != nil {
+		f.t.Fatal(err)
 	}
-	if code := f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, &preview); code != http.StatusOK || preview.Pick.Name != "work" || preview.Pick.Reason != "most headroom, session 10%" || !preview.Policy.Auto || preview.Policy.SessionCeiling != 90 {
-		t.Fatalf("preview=%+v", preview)
+	return id
+}
+
+func TestAPersonsNewSessionStartsInTheDefaultRootAndNoUsageIsRead(t *testing.T) {
+	f := newPickFixture(t, true)
+	if code := f.setDefault("nope"); code != http.StatusBadRequest {
+		t.Fatalf("an unknown default root is refused: %d", code)
+	}
+	var preview struct {
+		Pick claudepick.Pick `json:"pick"`
+	}
+	if f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, &preview); preview.Pick.Name != "default" || preview.Pick.Reason != "the primary root" {
+		t.Fatalf("with no default the primary, even though work has more headroom: %+v", preview.Pick)
+	}
+	if code := f.setDefault("work"); code != http.StatusOK {
+		t.Fatalf("settings status=%d", code)
+	}
+	var settings struct {
+		ClaudeDefaultRoot string `json:"claudeDefaultRoot"`
+	}
+	if f.call(http.MethodGet, "/api/v1/settings", nil, &settings); settings.ClaudeDefaultRoot != "work" {
+		t.Fatalf("settings=%+v", settings)
 	}
 	pick, dir := f.create("")
-	if dir == nil || *dir != f.second || pick.Name != "work" || pick.Account != "work@example.com" {
-		t.Fatalf("an unnamed root follows the policy: pick=%+v dir=%v", pick, dir)
+	if dir == nil || *dir != f.second || pick.Name != "work" || pick.Account != "work@example.com" || pick.Reason != "your default root for new sessions" {
+		t.Fatalf("pick=%+v dir=%v", pick, dir)
 	}
 	pick, dir = f.create(filepath.Join(f.host.Home, ".claude"))
 	if dir != nil || pick.Name != "" {
 		t.Fatalf("a named root is always used and reports no choice: pick=%+v dir=%v", pick, dir)
 	}
+	if n := f.reads.Load(); n != 0 {
+		t.Fatalf("placing sessions read claude.ai %d times", n)
+	}
 }
 
-func TestAPreferredRootIsChosenWhileUnderItsCeilings(t *testing.T) {
+func TestAnAgentsNewSessionStartsInTheAgentsRootWhateverTheDefault(t *testing.T) {
 	f := newPickFixture(t, true)
-	policy := claudepick.Policy{Auto: true, Preferred: "nope", SessionCeiling: 90, WeeklyCeiling: 90}
-	if code := f.call(http.MethodPost, "/api/v1/settings", map[string]any{"action": "claude-accounts", "claudeAccounts": policy}, nil); code != http.StatusBadRequest {
-		t.Fatalf("an unknown preferred root is refused: %d", code)
-	}
-	policy.Preferred = "default"
-	if code := f.call(http.MethodPost, "/api/v1/settings", map[string]any{"action": "claude-accounts", "claudeAccounts": policy}, nil); code != http.StatusOK {
+	if code := f.setDefault("default"); code != http.StatusOK {
 		t.Fatalf("settings status=%d", code)
 	}
-	var settings struct {
-		ClaudeAccounts claudepick.Policy `json:"claudeAccounts"`
-	}
-	if f.call(http.MethodGet, "/api/v1/settings", nil, &settings); settings.ClaudeAccounts != policy {
-		t.Fatalf("settings=%+v", settings.ClaudeAccounts)
-	}
-	f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, nil)
-	pick, dir := f.create("")
-	if dir != nil || pick.Name != "default" || pick.Reason != "preferred, session 80%" {
-		t.Fatalf("pick=%+v dir=%v", pick, dir)
-	}
-}
-
-func TestAReadingNeverFollowsARootToItsNextLogin(t *testing.T) {
-	f := newPickFixture(t, true)
-	f.call(http.MethodGet, "/api/v1/session-options/claude-pick", nil, nil)
-	writeUsageFixture(t, map[string]string{filepath.Join(f.second, ".claude.json"): `{"oauthAccount":{"accountUuid":"acct-c","emailAddress":"new@example.com","organizationUuid":"org-c"}}`})
-	if pick, dir := f.create(""); dir != nil || pick.Name != "default" || pick.Reason != "most headroom, session 80%" {
-		t.Fatalf("the new login starts unknown, not with the old login's 10%%: pick=%+v dir=%v", pick, dir)
-	}
-}
-
-func TestACreateNeverWaitsOnClaudeAIForUsage(t *testing.T) {
-	f := newPickFixture(t, true)
-	f.delay.Store(int64(3 * time.Second))
-	started := time.Now()
-	pick, dir := f.create("")
-	if took := time.Since(started); took > time.Second || dir != nil || pick.Reason != "no usage reading" {
-		t.Fatalf("a cold cache starts in the primary at once: took=%v pick=%+v dir=%v", took, pick, dir)
-	}
-	f.delay.Store(0)
-	deadline := time.Now().Add(10 * time.Second)
-	for f.daemon.claudeUsage.entry(f.second).last.Load() == nil {
-		if time.Now().After(deadline) {
-			t.Fatal("the stale reading was not refreshed in the background")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if pick, dir := f.create(""); dir == nil || *dir != f.second || pick.Reason != "most headroom, session 10%" {
-		t.Fatalf("the refreshed readings decide the next start: pick=%+v dir=%v", pick, dir)
-	}
-}
-
-func TestASingleRootStartsAsItAlwaysHas(t *testing.T) {
-	f := newPickFixture(t, false)
-	pick, dir := f.create("")
-	if dir != nil || pick.Name != "default" || pick.Account != "me@example.com" || pick.Reason != "the only account" {
+	agent := f.claudeSessionIn("agent-in-work", f.second)
+	pick, dir := f.createFrom("", agent)
+	if dir == nil || *dir != f.second || pick.Name != "work" || pick.Reason != "the root of the session that created it" {
 		t.Fatalf("pick=%+v dir=%v", pick, dir)
 	}
 	if n := f.reads.Load(); n != 0 {
-		t.Fatalf("a single root waited on %d claude.ai reads before starting", n)
+		t.Fatalf("placing sessions read claude.ai %d times", n)
+	}
+}
+
+func TestAReplacementLeadStartsInTheReplacedLeadsRoot(t *testing.T) {
+	f := newPickFixture(t, true)
+	if code := f.setDefault("default"); code != http.StatusOK {
+		t.Fatalf("settings status=%d", code)
+	}
+	root := f.daemon.coordinator().ClaudeRoot
+	if got := root(f.claudeSessionIn("old-lead", f.second)); got != f.second {
+		t.Fatalf("a replacement goes where the old lead lived, not the default: %q", got)
+	}
+	if got := root(""); got != "" {
+		t.Fatalf("a first lead starts in the default root, here the primary: %q", got)
+	}
+	if n := f.reads.Load(); n != 0 {
+		t.Fatalf("placing a lead read claude.ai %d times", n)
 	}
 }

@@ -77,17 +77,14 @@ login the root holds. A base URL that matches no
 configured proxy is an API key, as before. With no `proxies` entry nothing
 changes.
 
-The automatic account choice for new Claude sessions treats a root through a
-proxy like a claude.ai root. Its readings are those of the proxy's Claude
-account with the most headroom: one that is not cooling and is under the
-proxy's own ceiling for each window, or under Agenthail's ceilings where the
-proxy sets none. When every account is full, the root frees up when the first
-account does: its cooling ends or its windows over a ceiling reset. A proxy
-whose accounts this host cannot read ranks as a root with no reading. A
-preferred proxy root is kept even when every account is full, because the
-proxy waits for an account itself and leaving it would route the session
-around the proxy; the reason says when the first account frees up. Disabled
-and unavailable accounts never count. The new-session forms read such a root
+Usage never chooses a new session's root (see the root order in
+[claude-peers.md](claude-peers.md)); balancing work across accounts is the
+proxy's job. A root through a proxy reads as the proxy's Claude account with
+the most headroom: one that is not cooling and is under the proxy's own
+ceiling for each window, or under 90% where the proxy sets none. When every
+account is full, the root frees up when the first account does: its cooling
+ends or its windows over a ceiling reset. Disabled and unavailable accounts
+never count. The new-session forms read such a root
 as `shared via proxy · next: team · session 18%, week 41%`: the account with
 the most headroom, the one the proxy would use next, where the status strip
 names the fullest. The readings come from

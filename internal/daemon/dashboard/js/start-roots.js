@@ -9,7 +9,7 @@ export function renderStartConfigRoots(roots, pick = null) {
   const select = $("#new-conversation-config-root");
   const current = select.value;
   const titles = rootTitles(roots, app.startOptions?.host?.name);
-  select.innerHTML = [`<option value="">${escape(automaticOption(pick, roots, titles))}</option>`, ...roots.map((root, index) =>
+  select.innerHTML = [`<option value="">${escape(defaultOption(pick, roots, titles))}</option>`, ...roots.map((root, index) =>
     `<option value="${escape(root.root)}"${root.signedInAs || root.login === "api_key" || root.login === "proxy" ? "" : " disabled"}>${escape(claudeConfigRootOption(root, titles[index]))}</option>`,
   )].join("");
   if (roots.some(root => root.root === current)) select.value = current;
@@ -20,14 +20,14 @@ export function renderStartConfigRoots(roots, pick = null) {
 
 export function syncStartRootDetail(pick = app.startOptions?.claudePick) {
   const roots = app.startOptions?.claudeConfigRoots || [];
-  const automatic = pick && $("#new-conversation-config-root").value === "";
-  const name = automatic ? pickedTitle(pick, roots, rootTitles(roots, app.startOptions?.host?.name)) : "";
-  $("#new-conversation-config-root-detail").textContent = automatic ? `Automatic picks ${name}: ${pick.reason}` : "";
+  const byDefault = pick && $("#new-conversation-config-root").value === "";
+  const name = byDefault ? pickedTitle(pick, roots, rootTitles(roots, app.startOptions?.host?.name)) : "";
+  $("#new-conversation-config-root-detail").textContent = byDefault ? `Default is ${name}: ${pick.reason}` : "";
 }
 
-export function automaticOption(pick, roots = [], titles = []) {
-  if (!pick) return "Automatic";
-  return `Automatic (${pickedTitle(pick, roots, titles)}, ${shortReason(pick.reason)})`;
+export function defaultOption(pick, roots = [], titles = []) {
+  if (!pick) return "Default";
+  return `Default (${pickedTitle(pick, roots, titles)}, ${shortReason(pick.reason)})`;
 }
 
 export function loadStartRootPick(options, host) {
@@ -37,7 +37,6 @@ export function loadStartRootPick(options, host) {
     .then(answer => {
       if (!answer || host !== app.startHost || app.startOptions !== options) return;
       options.claudePick = answer.pick;
-      options.claudePolicy = answer.policy;
       renderStartConfigRoots(options.claudeConfigRoots, options.claudePick);
     })
     .catch(() => {});
@@ -62,7 +61,7 @@ export function claudeConfigRootOption(root, title = root.name) {
   const exhausted = claudeUsageExhausted(root);
   const detail = exhausted
     ? `out of usage until ${new Date(exhausted).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-    : rootUsage(root, app.startOptions?.claudePolicy);
+    : rootUsage(root);
   return [title, root.best ? `next: ${root.best.split("@")[0]}` : null, detail].filter(Boolean).join(" · ");
 }
 

@@ -23,14 +23,10 @@ export async function loadSettings() {
   }
 }
 
-export function renderClaudeAccounts(policy, roots) {
-  if (!policy) return;
-  $("#settings-claude-auto").value = policy.auto ? "on" : "off";
-  $("#settings-claude-preferred").innerHTML = [`<option value="">None</option>`, ...roots.map(name => `<option value="${escape(name)}">${escape(name)}</option>`)].join("");
-  $("#settings-claude-preferred").value = policy.preferred || "";
-  $("#settings-claude-session").value = String(policy.sessionCeiling);
-  $("#settings-claude-weekly").value = String(policy.weeklyCeiling);
-  $("#settings-claude-automove").value = policy.autoMove ? "on" : "off";
+export function renderClaudeDefaultRoot(chosen, roots) {
+  const select = $("#settings-claude-default-root");
+  select.innerHTML = [`<option value="">The primary root</option>`, ...roots.map(name => `<option value="${escape(name)}">${escape(name)}</option>`)].join("");
+  select.value = chosen || "";
 }
 
 export function renderSettings() {
@@ -39,7 +35,7 @@ export function renderSettings() {
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
   $("#settings-resume-after-limit").checked = dashboard.resumeAfterLimit !== false;
-  renderClaudeAccounts(app.settings.claudeAccounts, app.settings.claudeRoots || []);
+  renderClaudeDefaultRoot(app.settings.claudeDefaultRoot, app.settings.claudeRoots || []);
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible

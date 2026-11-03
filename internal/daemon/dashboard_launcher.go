@@ -57,7 +57,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	}
 	options := startOptions(cwd)
 	var extra map[string]any
-	if pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options); pick != nil {
+	if pick := d.resolveClaudeStart(surface.SurfaceKind(request.Surface), creator, &options); pick != nil {
 		extra = map[string]any{"account": pick}
 	}
 	session, sent, startErr := starter.StartSession(ctx, options)
@@ -139,7 +139,7 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		return actionResult{Status: http.StatusCreated, Body: map[string]any{"ok": true, "launcher": request.Launcher, "location": location}}
 	}
 	options := startOptions(cwd)
-	pick := d.resolveClaudeStart(ctx, surface.SurfaceKind(request.Surface), &options)
+	pick := d.resolveClaudeStart(surface.SurfaceKind(request.Surface), creator, &options)
 	launchRequest := surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: options}
 	if credentials := d.mcpCredentials.Load(); credentials != nil {
 		mcp, err := credentials.terminalLaunch(request.Launcher, launchRequest.Surface)

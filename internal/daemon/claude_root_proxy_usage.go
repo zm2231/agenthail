@@ -10,44 +10,35 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) proxyPickPools(ctx context.Context, fresh bool, now time.Time) map[string][]claudepick.Member {
+func (d *Daemon) readProxyPool(ctx context.Context, name string, now time.Time) ([]claudepick.Member, bool) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	configs, err := surface.ConfiguredProxies(home)
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	pools := map[string][]claudepick.Member{}
 	for _, config := range configs {
-		var reading *proxyReading
-		if fresh {
-			read := d.proxyUsage.read(ctx, config, now)
-			reading = &read
-		} else {
-			reading = d.proxyUsage.cached(config, now)
+		if config.Name != name {
+			continue
 		}
-		if reading != nil && reading.err == nil {
-			pools[config.Name] = proxyPool(reading.accounts, now)
+		if reading := d.proxyUsage.read(ctx, config, now); reading.err == nil {
+			return proxyPool(reading.accounts, now), true
 		}
+		return nil, false
 	}
-	return pools
+	return nil, false
 }
 
 func (d *Daemon) proxyRootUsage(ctx context.Context, root surface.ClaudeConfigRoot, now time.Time) map[string]any {
 	answer := map[string]any{"root": root.Root, "proxy": root.Proxy}
-	pool, ok := d.proxyPickPools(ctx, true, now)[root.Proxy]
+	pool, ok := d.readProxyPool(ctx, root.Proxy, now)
 	if !ok {
 		answer["usageProblem"] = "the " + root.Proxy + " proxy's accounts are not readable from this host"
 		return answer
 	}
-	config, err := LoadDashboardConfig()
-	policy := config.ClaudeAccountPolicy()
-	if err != nil {
-		policy = claudepick.DefaultPolicy()
-	}
-	best := claudepick.Pooled(pool, policy, now)
+	best := claudepick.Pooled(pool, now)
 	if best.Best == "" {
 		answer["usageProblem"] = "the " + root.Proxy + " proxy reports no Claude account"
 		return answer

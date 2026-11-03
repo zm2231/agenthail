@@ -70,18 +70,12 @@ export function bindSettingsEvents() {
       toast(error.message);
     }
   });
-  $("#claude-accounts-form").addEventListener("submit", async (event) => {
+  $("#claude-default-root-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      await updateSettings({ action: "claude-accounts", claudeAccounts: {
-        auto: $("#settings-claude-auto").value === "on",
-        preferred: $("#settings-claude-preferred").value,
-        sessionCeiling: Number($("#settings-claude-session").value),
-        weeklyCeiling: Number($("#settings-claude-weekly").value),
-        autoMove: $("#settings-claude-automove").value === "on",
-      } });
+      await updateSettings({ action: "claude-default-root", claudeDefaultRoot: $("#settings-claude-default-root").value });
       await load(true);
-      toast("New Claude sessions follow the saved account choice.");
+      toast("Sessions you start go to the saved root.");
     } catch (error) {
       toast(error.message);
     }
