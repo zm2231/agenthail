@@ -10,11 +10,13 @@ import { resizeComposer, syncComposerAction } from "./composer.js";
 import { responseError } from "./http.js";
 import { renderChat } from "./chat.js";
 import { loadSessionMetadata } from "./session-metadata.js";
+import { leaveProject } from "./project-pane.js";
 
 export async function selectSession(id, focus = false) {
   if (app.selected?.id !== id) { for (const selector of ["#turn-effort", "#turn-mode", "#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
   const session = app.state.sessions.find((item) => item.id === id) || app.codexSearch.results.find((item) => item.id === id);
   if (!session) return;
+  leaveProject();
   if (app.selected?.id !== id) stopLiveStream(true);
   if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
   app.selected = session;

@@ -121,6 +121,9 @@ func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *follow
 		}
 		fake.sessions[session.ID] = session
 	}
+	if _, err := store.SetCoordinator(registry.CoordinatorSpec{ProjectID: "p-agenthail", ProjectRoot: "/work/agenthail", Name: "release-lead", Surface: string(surface.KindCodex), Cwd: "/work/agenthail"}, registry.CoordinatorChange{SessionID: "research", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	fake.caps = surface.Capabilities{Stream: true}
 	fake.usage = &surface.Usage{FetchedAt: now, Limits: []surface.UsageWindow{
 		{Kind: "5h", Percent: 62, ResetsAt: now.Add(2 * time.Hour)},

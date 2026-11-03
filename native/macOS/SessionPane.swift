@@ -191,7 +191,6 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Shows a session. With tabs, it opens in the preview tab unless kept,
     /// or switches to the tab it is already in.
     func select(_ id: String, keep: Bool = false) {
-        shownProjectID = nil
         let id = model.resolveSessionID(id)
         if tabsEnabled, !closed {
             tabs.open(id, keep: keep, preview: model.interface.config.tabPreview)
@@ -259,7 +258,6 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func activateTab(_ id: String) {
         tabs.activate(id)
-        shownProjectID = nil
         showActiveTab()
     }
 
@@ -296,7 +294,6 @@ final class SessionPane: ObservableObject, Identifiable {
     func stepTab(_ offset: Int) {
         guard let next = tabs.neighbour(offset) else { return }
         tabs.activate(next)
-        shownProjectID = nil
         showActiveTab()
     }
 
@@ -356,7 +353,9 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func show(_ id: String) {
-        guard !closed, id != selectedSessionID || detail == nil else { return }
+        guard !closed else { return }
+        shownProjectID = nil
+        guard id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
         frozenOlderCursor = nil

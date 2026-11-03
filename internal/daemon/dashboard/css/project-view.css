@@ -1,0 +1,122 @@
+button.project-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.project-name:hover,
+.project-header.selected button.project-name {
+  color: var(--accent);
+}
+.project-pane {
+  overflow-y: auto;
+  padding: 28px 32px;
+}
+.project-view-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.project-view-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+.project-view-header .project-actions {
+  margin-left: auto;
+}
+.project-view-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+.project-view-main,
+.project-view-side {
+  display: grid;
+  gap: 16px;
+}
+.project-card {
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.project-card > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.project-card h2 {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.project-card .link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+}
+.project-lead-name {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 650;
+}
+.project-note,
+.project-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.project-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.project-view-header .project-actions {
+  margin-top: 0;
+}
+.project-folders {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.project-folders li {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+  color: var(--muted);
+}
+.project-folders code {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .project-view-columns {
+    grid-template-columns: 1fr;
+  }
+  .project-view-header {
+    flex-wrap: wrap;
+    padding: 14px 16px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  .project-pane {
+    padding: 18px 16px;
+  }
+}
