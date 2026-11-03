@@ -37,7 +37,7 @@ func (d *Daemon) registerMCPTools(server *mcp.Server) {
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_capabilities", Description: "What you may do: capabilities, ceiling, which sessions you can read, which surfaces you may start, and the output limits."}, d.mcpCapabilities)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_requests", Description: "Which sessions you can read are waiting on a prompt or question, or one session's open requests in full."}, d.mcpRequests)
 	addMCPTool(server, &mcp.Tool{Name: "agenthail_ledger_read", Description: "Your project's intent ledger: the board, or one list (goals, asks, decisions, questions, work, ready), paged."}, d.mcpLedgerRead)
-	addMCPTool(server, &mcp.Tool{Name: "agenthail_read",Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."}, d.mcpRead)
+	addMCPTool(server, &mcp.Tool{Name: "agenthail_read", Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."}, d.mcpRead)
 }
 
 func addMCPTool[In any](server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {
