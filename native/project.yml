@@ -52,6 +52,7 @@ targets:
       - path: SessionDisplayKind.swift
       - path: SessionDetailState.swift
       - path: SnapshotParts.swift
+      - path: LeadReplacement.swift
       - path: SessionRowTime.swift
       - path: HostNames.swift
       - path: ClaudeRootLabels.swift

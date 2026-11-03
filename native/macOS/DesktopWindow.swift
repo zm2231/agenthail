@@ -723,9 +723,10 @@ struct ConversationPane: View {
                                     .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
                             } else if let request = pane.requests?.requests.first, !session.isReadOnly {
-                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText)) { decision in
-                                    Task { await pane.respond(to: request, decision: decision) }
-                                }
+                                RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText),
+                                            respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
+                                            leadNow: request.replacedBy.map { model.sessionName($0) },
+                                            withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } })
                                 .id(request.id)
                                 .scrimSurface(radius: 12)
                                 .frame(maxWidth: DesktopColumns.reading)
@@ -1374,6 +1375,10 @@ struct ComposerView: View {
                     VStack(spacing: 0) {
                         ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
                             DeliveryProblemBanner(problem: problem, model: model)
+                                .padding(.bottom, DesktopSpace.s)
+                        }
+                        ForEach(model.leadReplacements.filter { $0.sessionId == session.id }, id: \.listID) { replacement in
+                            LeadReplacementBanner(replacement: replacement) { model.acknowledgeLeadReplacement(replacement) }
                                 .padding(.bottom, DesktopSpace.s)
                         }
                         DesktopTurnNotice(sessionID: session.id, notice: session.composerTurnNotice)

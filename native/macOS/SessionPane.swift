@@ -849,6 +849,23 @@ final class SessionPane: ObservableObject, Identifiable {
         await loadSession(id)
     }
 
+    func withdraw(_ request: SessionRequest) async {
+        guard let api = model.api, let id = selectedSessionID, answeringRequest == nil else { return }
+        answeringRequest = request.id
+        defer { answeringRequest = nil }
+        do {
+            try await api.withdrawRequest(sessionID: id, requestID: request.id)
+            if requestError != nil { requestError = nil }
+        } catch AgenthailAPIError.requestStale {
+            requests = requests?.removing(request.id)
+            requestError = "That request was already answered or has expired."
+        } catch {
+            requestError = error.localizedDescription
+        }
+        await fetchRequests(id, key: requestsKey)
+        await loadSession(id)
+    }
+
     func setPermissionMode(_ mode: String) async {
         guard let api = model.api, let id = selectedSessionID else { return }
         do {

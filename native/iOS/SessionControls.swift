@@ -96,6 +96,13 @@ struct QueueListView: View {
                         .foregroundStyle(PhonePalette.muted).font(.footnote)
                         .accessibilityIdentifier("inbox-unreachable")
                 }
+                if sessionID == nil, !model.leadReplacements.isEmpty {
+                    Section("Lead replaced") {
+                        ForEach(model.leadReplacements, id: \.listID) { replacement in
+                            leadReplacementRow(replacement)
+                        }
+                    }
+                }
                 let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
                 if !problems.isEmpty {
                     Section("Delivery problems") {
@@ -227,6 +234,24 @@ struct QueueListView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func leadReplacementRow(_ replacement: LeadReplacement) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("@\(replacement.name) runs in a new conversation").font(.subheadline.weight(.semibold))
+            Text(replacement.reason).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
+            Text("Replaced by \(replacement.changedBy)").font(.footnote).foregroundStyle(PhonePalette.muted)
+            Button("Acknowledge") {
+                Task {
+                    error = nil
+                    do { try await model.acknowledgeLeadReplacement(replacement) }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.pendingControls.contains("lead-replacement:\(replacement.listID)"))
+        }
+        .padding(.vertical, 6)
     }
 
     private func deliveryProblemRow(_ problem: DeliveryProblem) -> some View {

@@ -573,6 +573,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var activity: SessionActivity? = nil
     var plan: SessionPlan? = nil
     var holders: [SessionHolder]? = nil
+    var replacedLead: [CoordinatorTenure]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
     /// The turn notice, with the app's own remedy when it can adopt the session.
@@ -1325,6 +1326,7 @@ struct DashboardSnapshot: Decodable {
     var person: PersonState? = nil
     /// Only a whole-catalog snapshot carries projects; a page leaves them out.
     var projects: [ProjectState]? = nil
+    var leadReplacements: [LeadReplacement]? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -1341,7 +1343,8 @@ struct DashboardSnapshot: Decodable {
             busyDelivery == other.busyDelivery &&
             signin == other.signin &&
             person == other.person &&
-            projects == other.projects
+            projects == other.projects &&
+            leadReplacements == other.leadReplacements
     }
 
     /// Sessions, surfaces and delivery problems change only through catalog
@@ -2073,12 +2076,14 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     let alwaysAllow: Bool
     var input: String? = nil
     var elicitation: Elicitation? = nil
+    /// The project's current lead when this request is from a lead a restart replaced.
+    var replacedBy: String? = nil
 
     var isQuestion: Bool { kind == "question" }
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation
+        case id, kind, tool, title, displayName, description, reason, blockedPath, questions, alwaysAllow, input, elicitation, replacedBy
     }
 
     init(id: String, kind: String, tool: String, title: String? = nil, questions: [Question]? = nil, alwaysAllow: Bool = false, input: String? = nil) {
@@ -2098,6 +2103,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         questions = try container.decodeIfPresent([Question].self, forKey: .questions)
         elicitation = try container.decodeIfPresent(Elicitation.self, forKey: .elicitation)
         alwaysAllow = try container.decodeIfPresent(Bool.self, forKey: .alwaysAllow) ?? false
+        replacedBy = try container.decodeIfPresent(String.self, forKey: .replacedBy)
         if let raw = try container.decodeIfPresent(RequestInput.self, forKey: .input), let data = try? JSONEncoder().encode(raw) {
             input = String(data: data, encoding: .utf8)
         }

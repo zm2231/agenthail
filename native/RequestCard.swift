@@ -5,10 +5,21 @@ struct RequestCard: View {
     let answering: Bool
     let accent: AnyShapeStyle
     let respond: (RequestDecision) -> Void
+    /// Who leads the project now, for a request from a lead a restart replaced.
+    var leadNow: String? = nil
+    var withdraw: (() -> Void)? = nil
     @State private var form = ElicitationForm()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let leadNow, let withdraw {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("From a replaced lead. \(leadNow) leads this project now, so this request no longer needs you.")
+                        .font(.footnote).foregroundStyle(RoleStyle(.muted))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Withdraw", action: withdraw).disabled(answering)
+                }
+            }
             if request.kind == "input", let elicitation = request.elicitation {
                 inputView(elicitation)
             } else {

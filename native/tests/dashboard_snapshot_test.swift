@@ -33,6 +33,20 @@ struct DashboardSnapshotTest {
         var problemChange = transportOnlyChange
         problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", attentionSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
+        let replacementJSON = #"{"id":7,"projectId":"p","name":"release-lead","sessionId":"new","previousSessionId":"old","changedBy":"the daemon","reason":"conversation old no longer exists","at":"2026-11-03T12:00:00.123456789Z"}"#
+        let replacement = try! JSONDecoder().decode(LeadReplacement.self, from: Data(replacementJSON.utf8))
+        precondition(replacement.id == 7 && replacement.sessionId == "new" && replacement.hostID == nil && replacement.listID == "/7")
+        let detail = replacement.detail(now: TimestampParser.date("2026-11-03T14:30:00Z")!)
+        precondition(detail.hasPrefix("Replaced ") && detail.contains("2 hours ago") && detail.hasSuffix("by the daemon, because conversation old no longer exists"), detail)
+        var replacementChange = transportOnlyChange
+        replacementChange.leadReplacements = [replacement]
+        precondition(!current.hasSamePresentation(as: replacementChange), "a new lead replacement is shown")
+        let project = try! JSONDecoder().decode(ProjectState.self, from: Data(#"{"id":"p","displayName":"P","checkouts":[],"coordinators":[{"name":"release-lead","surface":"claude","sessionId":"new","replaced":\#(replacementJSON)}]}"#.utf8))
+        precondition(project.coordinators?.first?.replaced?.reason == "conversation old no longer exists")
+        let oldLead = try! JSONDecoder().decode(SessionState.self, from: Data(#"{"id":"old","surface":"claude","name":"Lead","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"replacedLead":[{"name":"release-lead","from":"2026-11-03T09:00:00Z","until":"2026-11-03T12:00:00Z"}]}"#.utf8))
+        precondition(oldLead.replacedLead == [CoordinatorTenure(name: "release-lead", from: "2026-11-03T09:00:00Z", until: "2026-11-03T12:00:00Z")])
+        let requests = try! JSONDecoder().decode(SessionRequests.self, from: Data(#"{"permissionMode":"","requests":[{"id":"q1","kind":"question","tool":"AskUserQuestion","replacedBy":"new"},{"id":"q2","kind":"question","tool":"AskUserQuestion"}]}"#.utf8))
+        precondition(requests.requests.map(\.replacedBy) == ["new", nil], "a replaced lead's request names its replacement")
         var renamed = transportOnlyChange
         renamed.person = PersonState(name: "Ada", set: true)
         precondition(!current.hasSamePresentation(as: renamed), "a new name for the person is shown")

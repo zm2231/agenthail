@@ -128,6 +128,13 @@ struct ProjectPane: View {
                     Text("\(SessionRefinement.surfaceLabel(lead.surface)) · starts with the first message sent to it")
                         .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
                 }
+                if let replaced = lead.replaced {
+                    TimelineView(.everyMinute) { context in
+                        Text(replaced.detail(now: context.date))
+                            .font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2)
+                            .accessibilityIdentifier("project-lead-replaced")
+                    }
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: DesktopSpace.s) {

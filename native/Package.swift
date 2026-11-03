@@ -51,6 +51,7 @@ let package = Package(
                 "SessionDisplayKind.swift",
                 "SessionDetailState.swift",
                 "SnapshotParts.swift",
+                "LeadReplacement.swift",
                 "SessionRowTime.swift",
                 "HostNames.swift",
                 "ClaudeRootLabels.swift",

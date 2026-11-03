@@ -15,6 +15,7 @@ struct ProjectState: Decodable, Hashable, Identifiable {
         let surface: String
         /// Empty until the lead's first message starts its conversation.
         var sessionId: String? = nil
+        var replaced: LeadReplacement? = nil
     }
 
     let id: String
