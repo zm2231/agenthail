@@ -336,6 +336,20 @@ func TestASendThatStartsANewLeadFollowsTheNewConversation(t *testing.T) {
 	}
 }
 
+func TestASendThatStartsANewLeadWithoutFollowingOpensNoStream(t *testing.T) {
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	streams := &followedStreams{replies: startedConversation}
+	c.app.daemonSessionStreamReader = func() (sessionStreamReader, error) { return streams, nil }
+	c.answers(startedWithTurn)
+	output, err := c.run(t, "send", goneConversation, "task")
+	if err != nil || !strings.Contains(output, "Started a new conversation for coordinator @fixture-lead") || !strings.Contains(output, "agenthail last "+startedConversation) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if got := streams.entries(); len(got) != 0 {
+		t.Fatalf("streams=%v, want none for a send that does not follow", got)
+	}
+}
+
 func TestASendThatStartsANewLeadWithoutAConfirmedTurnSaysItCannotFollowIt(t *testing.T) {
 	c := newCoordinatorCLI(t).withGoneCoordinator(t)
 	c.answers(`{"ok":true,"started":true,"result":{"evidence":"submitted","status":"submitted","sessionId":"` + startedConversation + `","started":true,"detail":"Started a new conversation for coordinator @fixture-lead."}}`)

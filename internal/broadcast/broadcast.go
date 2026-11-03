@@ -356,6 +356,9 @@ func (b Broadcaster) toSession(ctx context.Context, target Target, sessionID, pa
 	if err != nil {
 		return failed(recipient, err)
 	}
+	if receipt != nil && receipt.SessionID != "" {
+		recipient.SessionID = receipt.SessionID
+	}
 	return received(recipient, receipt)
 }
 

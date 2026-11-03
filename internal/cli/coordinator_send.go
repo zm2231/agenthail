@@ -59,6 +59,19 @@ func (a *App) coordinatorSend(ctx context.Context, spec registry.CoordinatorSpec
 	return answer, json.Unmarshal(data, &answer)
 }
 
+func (a *App) receiptSession(receipt delivery.Receipt, addressed surface.Session) *surface.Session {
+	if receipt.SessionID == "" || receipt.SessionID == addressed.ID {
+		return &addressed
+	}
+	session := surface.Session{ID: receipt.SessionID, Surface: addressed.Surface}
+	if a.registry() != nil {
+		if stored, err := a.registry().Session(receipt.SessionID); err == nil {
+			session = *stored
+		}
+	}
+	return &session
+}
+
 // followReceipt moves a send that follows its turn onto the conversation its
 // receipt names. A conversation started for the message is followed from the
 // start of its journal; any other move cancels following and returns the note
@@ -71,12 +84,7 @@ func (a *App) followReceipt(ctx context.Context, receipt delivery.Receipt, addre
 		stream.Cancel()
 	}
 	*stream = sessionstream.Subscription{}
-	session := surface.Session{ID: receipt.SessionID, Surface: addressed.Surface}
-	if a.registry() != nil {
-		if stored, err := a.registry().Session(receipt.SessionID); err == nil {
-			session = *stored
-		}
-	}
+	session := *a.receiptSession(receipt, addressed)
 	if !receipt.Started {
 		return &session, fmt.Sprintf("the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'", session.ID, session.ID)
 	}

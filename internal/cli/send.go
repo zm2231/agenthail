@@ -149,21 +149,22 @@ func (a *App) cmdSend(args []string) error {
 			if !byName && answer.Started {
 				ref = answer.Result.SessionID
 			}
-			following, note := a.followReceipt(ctx, answer.Result, addressed, &daemonStream)
-			if note != "" && (wantStream || wantReply) {
-				fmt.Fprintln(os.Stderr, note)
-				wantStream, wantReply = false, false
+			sess = a.receiptSession(answer.Result, addressed)
+			if wantStream || wantReply {
+				following, note := a.followReceipt(ctx, answer.Result, addressed, &daemonStream)
+				if note != "" {
+					fmt.Fprintln(os.Stderr, note)
+					wantStream, wantReply = false, false
+				} else if following.ID != addressed.ID {
+					if !jsonOut {
+						fmt.Println(answer.Result.Detail)
+					}
+					addressed, useDaemonStream, followsJournal = *following, true, true
+				}
 			}
 			if answer.Started && !wantStream && !wantReply {
 				return printCoordinatorAnswer(answer, ref, jsonOut)
 			}
-			if following.ID != addressed.ID && note == "" {
-				if !jsonOut {
-					fmt.Println(answer.Result.Detail)
-				}
-				addressed, useDaemonStream, followsJournal = *following, true, true
-			}
-			sess = following
 		}
 	} else if hasFlag(args, "--no-queue") || syntheticNotion {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
