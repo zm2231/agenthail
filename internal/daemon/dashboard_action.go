@@ -1,11 +1,28 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 )
+
+type actionOperation func(*Daemon, context.Context, principal, dashboardActionRequest) (actionResult, error)
+
+var typedActions = map[string]actionOperation{
+	"delivery-dismiss": (*Daemon).doDeliveryDismiss,
+	"queue-retry":      (*Daemon).doQueueRetry,
+	"queue-cancel":     (*Daemon).doQueueCancel,
+	"channel-create":   (*Daemon).doChannelCreate,
+	"channel-delete":   (*Daemon).doChannelDelete,
+	"channel-send":     (*Daemon).doChannelSend,
+	"channel-rename":   (*Daemon).doChannelRename,
+	"channel-add":      (*Daemon).doChannelMembership,
+	"channel-remove":   (*Daemon).doChannelMembership,
+	"relay-add":        (*Daemon).doRelayAdd,
+	"relay-remove":     (*Daemon).doRelayRemove,
+}
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -34,8 +51,9 @@ func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request das
 		d.coordinatorAction(r, w, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName})
 		return
 	}
-	if request.Action == "delivery-dismiss" {
-		d.dashboardDeliveryDismiss(w, r, request)
+	if operation, typed := typedActions[request.Action]; typed {
+		result, err := operation(d, r.Context(), principalFromRequest(r), request)
+		writeActionResult(w, result, err)
 		return
 	}
 	if request.Action == "session-create" {
@@ -44,42 +62,6 @@ func (d *Daemon) routeAction(w http.ResponseWriter, r *http.Request, request das
 	}
 	if request.Action == "notion-create" {
 		d.dashboardNotionCreate(w, r, request)
-		return
-	}
-	if request.Action == "queue-retry" {
-		d.dashboardQueueRetry(w, r, request)
-		return
-	}
-	if request.Action == "queue-cancel" {
-		d.dashboardQueueCancel(w, r, request)
-		return
-	}
-	if request.Action == "channel-create" {
-		d.dashboardChannelCreate(w, r, request)
-		return
-	}
-	if request.Action == "channel-delete" {
-		d.dashboardChannelDelete(w, r, request)
-		return
-	}
-	if request.Action == "channel-send" {
-		d.dashboardChannelSend(w, r, request)
-		return
-	}
-	if request.Action == "channel-rename" {
-		d.dashboardChannelRename(w, r, request)
-		return
-	}
-	if request.Action == "channel-add" || request.Action == "channel-remove" {
-		d.dashboardChannelMembership(w, r, request)
-		return
-	}
-	if request.Action == "relay-add" {
-		d.dashboardRelayAdd(w, r, request)
-		return
-	}
-	if request.Action == "relay-remove" {
-		d.dashboardRelayRemove(w, r, request)
 		return
 	}
 	if request.Action == "codex-launch" {

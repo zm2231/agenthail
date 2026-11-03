@@ -11,48 +11,39 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) dashboardChannelCreate(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doChannelCreate(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if strings.TrimSpace(request.Channel) == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel name is required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "channel name is required")
 	}
 	name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
 	if err := broadcast.ValidateChannelName(d.Registry, name); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	if _, err := d.Registry.CreateChannel(name); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
 
-func (d *Daemon) dashboardChannelDelete(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doChannelDelete(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if err := d.Registry.DeleteChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
 
-func (d *Daemon) dashboardChannelSend(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if strings.TrimSpace(request.Channel) == "" || strings.TrimSpace(request.Message) == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel and message are required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "channel and message are required")
 	}
 	target, err := broadcast.Resolve(d.Registry, request.Channel)
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "author must be \"person\" and name no source session when set")
 	}
 	service := d.coordinator()
 	source, label := request.SourceSessionID, "the Agenthail CLI"
@@ -62,15 +53,13 @@ func (d *Daemon) dashboardChannelSend(w http.ResponseWriter, r *http.Request, re
 	case request.Author == surface.AuthorPerson:
 		source = surface.PersonSessionID
 		if label, err = d.Registry.PersonName(); err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
+			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	}
 	broadcaster := broadcast.Broadcaster{Registry: d.Registry, Coordinators: service, Delivery: daemonBroadcastDelivery{d: d, sender: coordinator.Sender{Service: service}}}
 	result, err := broadcaster.Send(operationCtx, target, request.Message, label, source)
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	sent, queued, submitted, failed := result.Count(broadcast.OutcomeSent), result.Count(broadcast.OutcomeQueued), result.Count(broadcast.OutcomeSubmitted), result.Count(broadcast.OutcomeFailed)
 	if failed > 0 {
@@ -86,54 +75,44 @@ func (d *Daemon) dashboardChannelSend(w http.ResponseWriter, r *http.Request, re
 			}
 			outcomes = append(outcomes, outcome)
 		}
-		writeAPIError(w, http.StatusConflict, "conflict", fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")))
-		return
+		return actionResult{}, actionFailed(http.StatusConflict, "conflict", fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed (%s)", sent, queued, submitted, failed, strings.Join(outcomes, "; ")))
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
-	return
+	return actionOK(map[string]any{"ok": true, "target": result.Target, "recipients": result.Recipients, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed}), nil
 }
 
-func (d *Daemon) dashboardChannelRename(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doChannelRename(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
 	newName := strings.TrimPrefix(strings.TrimSpace(request.NewChannel), "#")
 	if err := broadcast.ValidateChannelName(d.Registry, newName); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	if err := d.Registry.RenameChannel(name, newName); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
 
-func (d *Daemon) dashboardChannelMembership(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doChannelMembership(ctx context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if request.TargetID == "" || strings.TrimSpace(request.Channel) == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "channel and targetId are required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "channel and targetId are required")
 	}
 	targetID, resolveErr := d.resolveLinkTarget(request.TargetID)
 	if resolveErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve agent: %s", resolveErr))
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve agent: %s", resolveErr))
 	}
 	var actionErr error
 	if request.Action == "channel-add" {
 		target, targetErr := d.Registry.Session(targetID)
 		if targetErr != nil {
-			writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
-			return
+			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "session not found")
 		}
 		if !d.hostOwned(target.ID) {
 			adapter, adapterErr := d.adapters().For(target)
 			if adapterErr != nil {
-				writeAPIError(w, http.StatusConflict, "conflict", "target surface is not configured")
-				return
+				return actionResult{}, actionFailed(http.StatusConflict, "conflict", "target surface is not configured")
 			}
-			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-				writeAPIError(w, http.StatusConflict, "conflict", err.Error())
-				return
+			if err := d.ensureDashboardWritable(ctx, adapter, target); err != nil {
+				return actionResult{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 			}
 		}
 		actionErr = d.Registry.AddToChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
@@ -141,9 +120,7 @@ func (d *Daemon) dashboardChannelMembership(w http.ResponseWriter, r *http.Reque
 		actionErr = d.Registry.RemoveFromChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
 	}
 	if actionErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", actionErr.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", actionErr.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }

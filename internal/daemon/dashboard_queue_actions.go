@@ -1,77 +1,63 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 )
 
-func (d *Daemon) dashboardDeliveryDismiss(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doDeliveryDismiss(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if request.DeliveryID <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "deliveryId is required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "deliveryId is required")
 	}
 	dismissed, err := d.Registry.DismissDeliveryProblem(request.DeliveryID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeAPIError(w, http.StatusNotFound, "not_found", "delivery problem not found")
-			return
+			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "delivery problem not found")
 		}
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
 	if err := d.catalog.flushCommitted(); err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("publish delivery dismissal: %s", err))
-		return
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", fmt.Sprintf("publish delivery dismissal: %s", err))
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "dismissed": dismissed})
-	return
+	return actionOK(map[string]any{"ok": true, "dismissed": dismissed}), nil
 }
 
-func (d *Daemon) dashboardQueueRetry(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doQueueRetry(ctx context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if request.QueueID <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "queueId is required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "queueId is required")
 	}
 	item, itemErr := d.Registry.QueueItem(request.QueueID, d.adapters())
 	if itemErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", itemErr.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", itemErr.Error())
 	}
 	target, targetErr := d.Registry.Session(item.SessionID)
 	if targetErr != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", targetErr.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", targetErr.Error())
 	}
 	if owner, ownerErr := d.Registry.SessionHost(target.ID); ownerErr != nil || owner == "" {
 		adapter, adapterErr := d.adapters().For(target)
 		if adapterErr != nil {
-			writeAPIError(w, http.StatusConflict, "conflict", "target surface is not configured")
-			return
+			return actionResult{}, actionFailed(http.StatusConflict, "conflict", "target surface is not configured")
 		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-			writeAPIError(w, http.StatusConflict, "conflict", err.Error())
-			return
+		if err := d.ensureDashboardWritable(ctx, adapter, target); err != nil {
+			return actionResult{}, actionFailed(http.StatusConflict, "conflict", err.Error())
 		}
 	}
 	if err := d.Registry.RetryMessage(request.QueueID); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
 
-func (d *Daemon) dashboardQueueCancel(w http.ResponseWriter, r *http.Request, request dashboardActionRequest) {
+func (d *Daemon) doQueueCancel(_ context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
 	if request.QueueID <= 0 {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "queueId is required")
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "queueId is required")
 	}
 	if err := d.Registry.CancelMessage(request.QueueID); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	return
+	return actionOK(map[string]any{"ok": true}), nil
 }
