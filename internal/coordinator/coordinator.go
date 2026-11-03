@@ -156,7 +156,7 @@ func (s Service) deliver(ctx context.Context, spec registry.CoordinatorSpec, mes
 	// A new conversation's first turn is text, so attached files are named
 	// by their stored paths.
 	composed, _ := options.Uploads.Compose(message, false)
-	return s.start(ctx, spec, previous, reason, options.Sender(), composed)
+	return s.start(ctx, spec, previous, reason, options.Sender(), composed, false)
 }
 
 // Restart starts a new conversation for a message the outbox holds for
@@ -188,7 +188,7 @@ func (s Service) Restart(ctx context.Context, session *surface.Session, message 
 	if reason == "" || current == nil || current.ID != session.ID {
 		return nil, false, nil
 	}
-	outcome, err := s.start(ctx, spec, current.ID, reason, surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx)}.Sender(), message)
+	outcome, err := s.start(ctx, spec, current.ID, reason, surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx)}.Sender(), message, true)
 	return outcome, true, err
 }
 
@@ -262,7 +262,8 @@ func (s Service) queueUnavailable(session *surface.Session, message string, opti
 	return &Outcome{Receipt: receipt, Session: session}, nil
 }
 
-func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, reason, sender, message string) (*Outcome, error) {
+// A queued message already owns its delivery record, so a start that serves it records none of its own.
+func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previous, reason, sender, message string, queued bool) (*Outcome, error) {
 	adapter := s.Adapters.ForSurface(surface.SurfaceKind(spec.Surface))
 	starter, ok := adapter.(surface.SessionStarter)
 	if adapter == nil || !ok {
@@ -276,7 +277,10 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 			options.ConfigRoot = s.ClaudeRoot(ctx)
 		}
 	}
-	messageUUID := uuid.NewString()
+	messageUUID := surface.MessageUUID(ctx)
+	if !queued || messageUUID == "" {
+		messageUUID = uuid.NewString()
+	}
 	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
 	if session == nil {
 		if startErr == nil {
@@ -294,22 +298,36 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if err := s.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: session.ID, Via: registry.OriginCoordinator}); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded as the coordinator's: %w", session.ID, err))
 	}
+	var intent *registry.DeliveryIntent
+	if startErr != nil {
+		if !queued {
+			recorded, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, sender, messageUUID, message)
+			if intentErr != nil {
+				return nil, errors.Join(startErr, intentErr)
+			}
+			intent = recorded
+		}
+		if !surface.IsDeliveryOutcomeUnknown(startErr) {
+			if intent != nil {
+				_, _ = s.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
+			}
+			_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
+			if !surface.IsDeliveryTerminal(startErr) {
+				startErr = surface.DeliveryTerminal(startErr)
+			}
+			return nil, startErr
+		}
+	}
 	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {
-		intent, intentErr := s.Registry.RecordSessionCreationIntent(session.ID, sender, messageUUID, message)
-		if intentErr != nil {
-			return nil, errors.Join(startErr, intentErr)
-		}
-		if !surface.IsDeliveryOutcomeUnknown(startErr) {
-			_, _ = s.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
-			_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
-			return nil, startErr
-		}
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
-		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: startedDetail(spec, previous, reason)}
+		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Detail: startedDetail(spec, previous, reason)}
+		if intent != nil {
+			outcome.Receipt.DeliveryID, outcome.Receipt.MessageID = intent.ID, intent.UUID
+		}
 		return outcome, nil
 	}
 	turn := ""

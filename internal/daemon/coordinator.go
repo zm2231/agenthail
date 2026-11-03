@@ -44,6 +44,11 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 	composed, _ := item.Uploads.Compose(item.Message, false)
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
+	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
+		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
+	} else if messageUUID != "" {
+		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
 	outcome, handled, err := coord.Restart(operationCtx, session, composed)
 	if !handled {
 		return false
@@ -53,9 +58,12 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		return true
 	}
 	receipt := outcome.Receipt
-	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, receipt.Evidence, receipt.TurnID); err != nil {
+	if err := d.Registry.AckRestartedMessage(item.ID, session.ID, outcome.Session.ID, item.RelayHops, receipt.Evidence, receipt.TurnID); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		return true
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish restarted queue item %d: %s", item.ID, err)
 	}
 	d.log.Printf("delivered queue item %d by starting coordinator %s: %s", item.ID, outcome.Session.ID, outcome.Reason)
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: outcome.Session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: receipt.TurnID, Evidence: receipt.Evidence})
