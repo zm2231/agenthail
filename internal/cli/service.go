@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,16 +100,13 @@ func startUnsupervisedDaemon() error {
 		return fmt.Errorf("spawn daemon: %w", err)
 	}
 	pid := cmd.Process.Pid
-	cmd.Process.Release()
 	logFile.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
-		if runningPID, ok := daemon.IsRunning(); ok && runningPID == pid {
-			return true, nil
-		}
-		return false, nil
-	}); err == nil {
+	var exited atomic.Bool
+	go func() {
+		_ = cmd.Wait()
+		exited.Store(true)
+	}()
+	if _, err := spawnedDaemonStart(pid, exited.Load).wait(); err == nil {
 		fmt.Printf("daemon started (pid %d)\n", pid)
 		fmt.Printf("log: %s\n", logPath)
 		fmt.Printf("stop: agenthail daemon stop\n")

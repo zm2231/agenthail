@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,6 +19,7 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
+	timing := MigrationTiming{From: version, To: schemaVersion}
 	switch {
 	case version == schemaVersion:
 		return nil
@@ -26,14 +28,32 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 	case version > 0 && version < schemaVersion && !allowUpgrade:
 		return &DevUpgradeError{Path: r.diskPath(), Found: version, Target: schemaVersion}
 	case version > 0 && version < schemaVersion:
+		began := time.Now()
 		if err := r.backUpBeforeMigration(version, schemaVersion); err != nil {
 			return err
 		}
+		timing.Backup = time.Since(began)
 	}
+	began := time.Now()
 	if err := migrateTx(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	timing.Migrate = time.Since(began)
+	if version > 0 {
+		r.migration = &timing
+	}
+	return nil
+}
+
+// Migration is what opening this registry spent upgrading it, if it did.
+func (r *Registry) Migration() (MigrationTiming, bool) {
+	if r.migration == nil {
+		return MigrationTiming{}, false
+	}
+	return *r.migration, true
 }
 
 func (r *Registry) newerSchemaError(found int) *NewerSchemaError {

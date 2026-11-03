@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -78,6 +79,131 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 	}
 	if _, err := os.Stat(backup + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("the temporary copy was left behind: %v", err)
+	}
+}
+
+func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	var ignored int
+	if err := holder.read.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&ignored); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "in-wal", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "in-wal"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`PRAGMA user_version=` + strconv.Itoa(schemaVersion-1)); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	if info, err := os.Stat(path + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("the fixture must leave its rows in the WAL: %v", err)
+	}
+
+	migrated, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timing, recorded := migrated.Migration()
+	migrated.Close()
+	if !recorded || timing.From != schemaVersion-1 || timing.To != schemaVersion || timing.Backup <= 0 || timing.Migrate <= 0 {
+		t.Fatalf("migration timing = %+v, %v", timing, recorded)
+	}
+
+	backup := migrationBackupPath(path, schemaVersion)
+	header := make([]byte, 20)
+	file, err := os.Open(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Read(header); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	if header[18] != 1 || header[19] != 1 {
+		t.Fatalf("the copy's journal format is %d/%d; a copy in WAL mode is not one self-contained file", header[18], header[19])
+	}
+	if entries, _ := filepath.Glob(backup + "*"); len(entries) != 1 {
+		t.Fatalf("files beside the copy: %v", entries)
+	}
+	alone := filepath.Join(t.TempDir(), "restored.db")
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alone, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(alone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if _, err := restored.Session("in-wal"); err != nil {
+		t.Fatalf("the copy lost a row that was still in the WAL: %v", err)
+	}
+	var integrity string
+	if err := restored.read.QueryRow(`PRAGMA integrity_check`).Scan(&integrity); err != nil || integrity != "ok" {
+		t.Fatalf("integrity_check = %q, %v", integrity, err)
+	}
+}
+
+// An open during a migration waits on busy_timeout (15 s), which the page copy stays well under.
+func TestAnOpenDuringAMigrationWaitsAndSucceeds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	registryAtSchema(t, path, schemaVersion-1)
+	migrating, err := connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrating.Close()
+	tx, err := migrating.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	type result struct {
+		registry *Registry
+		err      error
+	}
+	opened := make(chan result, 1)
+	go func() {
+		r, err := Open(path)
+		opened <- result{r, err}
+	}()
+	if err := migrating.backUpBeforeMigration(schemaVersion-1, schemaVersion); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-opened:
+		t.Fatalf("an open finished while the migration held the lock: %v", got.err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := migrateTx(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	got := <-opened
+	if got.err != nil {
+		t.Fatalf("an open during a migration failed: %v", got.err)
+	}
+	defer got.registry.Close()
+	if _, migrated := got.registry.Migration(); migrated {
+		t.Fatal("the open that waited did not migrate, so it has no migration to report")
+	}
+	if schema := schemaOf(path); schema != schemaVersion {
+		t.Fatalf("schema = %d", schema)
 	}
 }
 

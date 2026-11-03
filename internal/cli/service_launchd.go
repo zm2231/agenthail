@@ -21,10 +21,6 @@ const (
 	homebrewDaemonLaunchdLabel = "homebrew.mxcl.agenthail"
 )
 
-// launchdReadyTimeout covers launchd's 10s respawn throttle for a daemon that
-// exits right after it starts.
-var launchdReadyTimeout = 15 * time.Second
-
 type launchdService struct{}
 
 func (launchdService) Name() string { return "launchd" }
@@ -224,12 +220,13 @@ func (launchdService) Install() error {
 	// RunAtLoad starts the daemon as bootstrap loads it. A kickstart here races
 	// that launch: launchd can abandon the half-started instance, which then runs
 	// unsupervised while launchd's own copy exits on the daemon lock.
-	if pid, ok := waitForSupervisedDaemon(daemonLaunchdLabel, 0, launchdReadyTimeout); ok {
-		fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
-		printCodexSetupNote()
-		return nil
+	pid, err := launchdDaemonStart(daemonLaunchdLabel, 0).wait()
+	if err != nil {
+		return fmt.Errorf("launchd service loaded but %w", err)
 	}
-	return fmt.Errorf("launchd service loaded but its daemon did not become ready; inspect %s", logPath)
+	fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
+	printCodexSetupNote()
+	return nil
 }
 
 func (launchdService) Uninstall() error {
@@ -254,36 +251,17 @@ func restartLaunchdDaemon(label string) error {
 	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
-	if pid, ok := waitForSupervisedDaemon(label, before, launchdReadyTimeout); ok {
-		fmt.Printf("daemon restarted (pid %d)\n", pid)
-		return nil
+	pid, err := launchdDaemonStart(label, before).wait()
+	if err != nil {
+		return fmt.Errorf("launchd restarted the service but %w", err)
 	}
-	return fmt.Errorf("launchd restarted the service but the daemon did not become ready")
+	fmt.Printf("daemon restarted (pid %d)\n", pid)
+	return nil
 }
 
 func daemonServiceLoaded() bool {
 	_, loaded := launchdServiceJob(daemonLaunchdLabel)
 	return loaded
-}
-
-// waitForSupervisedDaemon waits for a daemon other than previous that launchd
-// runs for label: the pid in the daemon's pid file must be the service's pid,
-// so a daemon running outside launchd never counts as started.
-func waitForSupervisedDaemon(label string, previous int, timeout time.Duration) (int, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	pid := 0
-	_ = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
-		runningPID, running := daemon.IsRunning()
-		if running && runningPID != previous {
-			if job, loaded := launchdServiceJob(label); loaded && job.pid == runningPID {
-				pid = runningPID
-				return true, nil
-			}
-		}
-		return false, nil
-	})
-	return pid, pid != 0
 }
 
 // launchdJob is a job loaded in this user's launchd domain. Labels are per

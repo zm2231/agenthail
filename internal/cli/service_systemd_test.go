@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +42,7 @@ type fakeSystemctl struct {
 	managerDown   bool
 	linger        bool
 	lingerRefused bool
+	startFails    bool
 }
 
 func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
@@ -83,6 +85,12 @@ func (f *fakeSystemctl) stopDaemon() {
 func (f *fakeSystemctl) run(name string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.Join(args, " ") == "--user show "+systemdUnitName+" --property=MainPID --value" {
+		if f.process == nil || f.managerDown {
+			return []byte("0\n"), nil
+		}
+		return []byte(strconv.Itoa(f.process.Process.Pid) + "\n"), nil
+	}
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
@@ -122,7 +130,9 @@ func (f *fakeSystemctl) run(name string, args ...string) ([]byte, error) {
 		}
 	case "restart " + systemdUnitName:
 		f.stopDaemon()
-		f.startDaemon()
+		if !f.startFails {
+			f.startDaemon()
+		}
 	case "stop " + systemdUnitName:
 		f.stopDaemon()
 	case "is-active " + systemdUnitName:
