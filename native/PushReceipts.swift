@@ -58,7 +58,10 @@ enum PushReceipts {
         let waiting = pending()
         for host in Set(waiting.map(\.host)).sorted() {
             let receipts = waiting.filter { $0.host == host }
-            guard let paired = credential(host) else { continue }
+            guard let paired = credential(host) else {
+                receipts.forEach(remove)
+                continue
+            }
             if await post(receipts, endpoint: paired.endpoint, token: paired.token, session: session) {
                 receipts.forEach(remove)
             }

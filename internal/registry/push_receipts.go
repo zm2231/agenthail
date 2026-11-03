@@ -30,6 +30,10 @@ func (r *Registry) SettlePushSent(pushID string, passedOn bool, now time.Time) e
 		}
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM push_sends WHERE device_id=? AND confirmed=0 AND push_id!=? AND julianday(sent_at)<julianday(?)`,
+		deviceID, pushID, formatTimestamp(now.Add(-24*time.Hour))); err != nil {
+		return err
+	}
 	if !passedOn {
 		if _, err := tx.Exec(`DELETE FROM push_sends WHERE push_id=? AND received_at=''`, pushID); err != nil {
 			return err
@@ -41,10 +45,6 @@ func (r *Registry) SettlePushSent(pushID string, passedOn bool, now time.Time) e
 	}
 	if _, err := tx.Exec(`DELETE FROM push_sends WHERE device_id=? AND confirmed=1 AND push_id NOT IN
 		(SELECT push_id FROM push_sends WHERE device_id=? AND confirmed=1 ORDER BY julianday(sent_at) DESC LIMIT ?)`, deviceID, deviceID, pushSendsKept); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM push_sends WHERE device_id=? AND confirmed=0 AND received_at='' AND julianday(sent_at)<julianday(?)`,
-		deviceID, formatTimestamp(now.Add(-24*time.Hour))); err != nil {
 		return err
 	}
 	return tx.Commit()

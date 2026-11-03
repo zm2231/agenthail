@@ -34,6 +34,18 @@ final class PushReceiptsTests: XCTestCase {
         XCTAssertEqual(PushReceipts.pending().map(\.host), ["kept"])
     }
 
+    func testAReceiptQueuedAfterItsComputerWasForgottenIsDroppedOnTheNextFlush() async {
+        PushReceipts.pending().forEach(PushReceipts.remove)
+        defer { PushReceipts.pending().forEach(PushReceipts.remove) }
+        PushReceipts.enqueue(PushReceipt(host: "gone", pushId: "late00001", receivedAt: Date(), alerts: "on"))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReceiptStub.self]
+        ReceiptStub.reset(status: 503)
+        await PushReceipts.flush(credential: { _ in nil }, session: URLSession(configuration: configuration))
+        XCTAssertTrue(PushReceipts.pending().isEmpty, "a receipt for a computer this phone no longer knows has nowhere to go")
+        XCTAssertTrue(ReceiptStub.requests.isEmpty)
+    }
+
     func testAReceiptQueuedWhileOthersAreSentIsKept() async {
         PushReceipts.pending().forEach(PushReceipts.remove)
         defer { PushReceipts.pending().forEach(PushReceipts.remove) }

@@ -56,20 +56,33 @@ func TestWithdrawnSendsNeverEvictConfirmedPushHistory(t *testing.T) {
 	if err := r.RecordPushSent(device.ID, "stranded", "session.waiting", base); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RecordPushSent(device.ID, "newest", "session.waiting", base.Add(48*time.Hour)); err != nil {
+	if err := r.RecordPushSent(device.ID, "receivedunconfirmed", "session.waiting", base); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SettlePushSent("newest", true, base.Add(48*time.Hour)); err != nil {
+	if arrived, err := r.RecordPushReceipt(device.ID, "receivedunconfirmed", base, "on"); err != nil || !arrived {
+		t.Fatalf("arrived=%v err=%v", arrived, err)
+	}
+	if err := r.SettlePushSent("receivedunconfirmed", false, base); err != nil {
 		t.Fatal(err)
 	}
-	var stranded, confirmed int
-	if err := r.read.QueryRow(`SELECT COUNT(*) FROM push_sends WHERE push_id='stranded'`).Scan(&stranded); err != nil {
+	beforeCleanup := unarrived()
+	if err := r.RecordPushSent(device.ID, "withdrawnlater", "session.waiting", base.Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SettlePushSent("withdrawnlater", false, base.Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var unconfirmed, confirmed int
+	if err := r.read.QueryRow(`SELECT COUNT(*) FROM push_sends WHERE confirmed=0`).Scan(&unconfirmed); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.read.QueryRow(`SELECT COUNT(*) FROM push_sends WHERE confirmed=1`).Scan(&confirmed); err != nil {
 		t.Fatal(err)
 	}
-	if stranded != 0 || confirmed != pushSendsKept {
-		t.Fatalf("a confirmed send should keep the newest %d confirmed and drop a day-old unconfirmed one: stranded=%d confirmed=%d", pushSendsKept, stranded, confirmed)
+	if unconfirmed != 0 || confirmed != pushSendsKept {
+		t.Fatalf("any later settle should drop day-old unconfirmed records, received or not, and keep the confirmed history: unconfirmed=%d confirmed=%d", unconfirmed, confirmed)
+	}
+	if got := unarrived(); got != beforeCleanup {
+		t.Fatalf("cleanup changed the lost-push count: %d, was %d", got, beforeCleanup)
 	}
 }
