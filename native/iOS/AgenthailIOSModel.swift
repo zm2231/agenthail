@@ -768,6 +768,16 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
     }
 
+    func resume(_ sessionID: String) async {
+        do {
+            let (api, route) = try resolve(sessionID)
+            try await api.action("session-lifecycle-resume", sessionID: route.sessionID)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
     /// Stops a session and resumes it, which clears a prompt nothing shows.
     func stopAndResume(_ sessionID: String) {
         guard case let (api, route)? = try? resolve(sessionID) else { return }
@@ -920,10 +930,24 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var listedHosts: [HostConnection] { hostOrder.compactMap { connections[$0] } }
 
     func listMore(_ filter: SessionFilter) async {
-        await SessionScopes.readMore(filter, on: listedHosts)
+        await SessionScopes.readMore(SessionScopes.targets(filter, on: listedHosts))
     }
 
-    func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(filter, on: listedHosts) }
+    func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(SessionScopes.targets(filter, on: listedHosts)) }
+
+    private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
+        var seen: Set<ScopeRequest> = []
+        return project.state.checkouts.compactMap { checkout in
+            let hostID = checkout.host.state == "local" ? project.hostID : checkout.host.id
+            let request = ScopeRequest(scope: "all", projectID: checkout.projectId)
+            guard let host = connections[hostID], seen.insert(ScopeRequest(scope: hostID, projectID: checkout.projectId)).inserted else { return nil }
+            return ScopeTarget(host: host, request: request)
+        }
+    }
+
+    func listEarlier(_ project: ListedProject) async { await SessionScopes.readMore(earlierTargets(project)) }
+
+    func hasEarlier(_ project: ListedProject) -> Bool { SessionScopes.hasMore(earlierTargets(project)) }
 
     var listingError: String? { SessionScopes.error(on: listedHosts) }
 

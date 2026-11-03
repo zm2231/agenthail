@@ -172,6 +172,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             var searches: [String: (rows: [[String: Any]], delay: Duration)]
             var epoch: String
             var requests: [String] = []
+            var projects: [[String: Any]] = []
         }
 
         private let lock = NSLock()
@@ -185,6 +186,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             }
         }
         func requests(_ host: String) -> [String] { lock.withLock { hosts[host]?.requests ?? [] } }
+        func list(_ host: String, projects: [[String: Any]]) { lock.withLock { hosts[host]?.projects = projects } }
         func record(_ host: String, _ path: String) -> Host? {
             lock.withLock {
                 hosts[host]?.requests.append(path)
@@ -219,6 +221,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             var base = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
             base.removeValue(forKey: "sessions")
             base["hostEpoch"] = host.epoch
+            if !host.projects.isEmpty { base["projects"] = host.projects }
             base["catalogSeq"] = 1
             respond(200, Self.json(base))
         case "/api/v1/snapshot" where query["scope"] == "current":

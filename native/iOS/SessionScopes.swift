@@ -10,20 +10,28 @@ extension SessionFilter {
     }
 }
 
+struct ScopeTarget {
+    let host: HostConnection
+    let request: ScopeRequest
+}
+
 @MainActor
 enum SessionScopes {
-    static func readMore(_ filter: SessionFilter, on hosts: [HostConnection]) async {
-        guard let scope = filter.pagedScope else { return }
+    static func targets(_ filter: SessionFilter, on hosts: [HostConnection]) -> [ScopeTarget] {
+        guard let scope = filter.pagedScope else { return [] }
+        return hosts.map { ScopeTarget(host: $0, request: ScopeRequest(scope: scope)) }
+    }
+
+    static func readMore(_ targets: [ScopeTarget]) async {
         await withTaskGroup(of: Void.self) { group in
-            for host in hosts where host.reachable {
-                group.addTask { await host.readMore(scope) }
+            for target in targets where target.host.reachable {
+                group.addTask { await target.host.readMore(target.request) }
             }
         }
     }
 
-    static func hasMore(_ filter: SessionFilter, on hosts: [HostConnection]) -> Bool {
-        guard let scope = filter.pagedScope else { return false }
-        return hosts.contains { $0.reachable && $0.pages.hasMore(scope) }
+    static func hasMore(_ targets: [ScopeTarget]) -> Bool {
+        targets.contains { $0.host.reachable && $0.host.pages.hasMore($0.request) }
     }
 
     static func search(_ query: String, filter: SessionFilter, on hosts: [HostConnection]) async {
