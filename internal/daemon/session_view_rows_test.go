@@ -91,7 +91,7 @@ func TestPresentationRowsMatchTheMergePatchOfTheCatalog(t *testing.T) {
 	active := time.Date(2026, 11, 3, 12, 0, 0, 123000000, time.UTC)
 	waiting := &surface.Waiting{ID: "q1", Answerable: true}
 	recordPresentation(t, store, surface.Session{ID: "waiting", Name: "Asks", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy, LastActive: active, Cwd: "/work", WaitingOn: waiting},
-		dashboardSession{Name: "old name", Cwd: "/old", WaitingOn: &surface.Waiting{ID: "stale", Kind: "approval", Since: active}, Alias: "projected", Capabilities: surface.Capabilities{Send: true}, Plan: &surface.Plan{}, ConfiguredModel: "big"})
+		dashboardSession{Name: "old name", Cwd: "/old", WaitingOn: &surface.Waiting{ID: "stale", Kind: "approval", Since: active}, BackgroundTasks: &surface.BackgroundTasks{Running: true, Source: "host"}, Alias: "projected", Capabilities: surface.Capabilities{Send: true}, Plan: &surface.Plan{}, ConfiguredModel: "big"})
 	recordPresentation(t, store, surface.Session{ID: "plain", Name: "Plain", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle},
 		dashboardSession{Name: "projected", Archived: true, Subagent: &surface.Subagent{ParentID: "x", Nickname: "kept"}, BackgroundTasks: &surface.BackgroundTasks{Running: true}})
 	recordPresentation(t, store, surface.Session{ID: "child", Name: "Child", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Subagent: &surface.Subagent{ParentID: "plain", RootID: "plain", Depth: 1, Role: "explorer"}},
