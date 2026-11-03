@@ -206,7 +206,13 @@ func (a *App) prepareDaemonSessionStream(ctx context.Context, adapter surface.Su
 	if page.UnavailableReason != "" {
 		return sessionstream.Subscription{}, fmt.Errorf("active daemon session source unavailable: %s", page.UnavailableReason)
 	}
+	return a.openDaemonSessionStream(ctx, session, page.JournalSeq)
+}
+
+// after 0 replays the journal from its start, so a just-started conversation's first turn is not missed.
+func (a *App) openDaemonSessionStream(ctx context.Context, session *surface.Session, after uint64) (sessionstream.Subscription, error) {
 	var reader sessionStreamReader
+	var err error
 	if a.daemonSessionStreamReader != nil {
 		reader, err = a.daemonSessionStreamReader()
 	} else {
@@ -218,7 +224,7 @@ func (a *App) prepareDaemonSessionStream(ctx context.Context, adapter surface.Su
 	if reader == nil {
 		return sessionstream.Subscription{}, errors.New("open active daemon session stream: reader is unavailable")
 	}
-	return reader.OpenSessionStream(ctx, session, page.JournalSeq)
+	return reader.OpenSessionStream(ctx, session, after)
 }
 
 func streamEventDelta(event sessionstream.Event, bodies map[string]string, versions map[string]uint64) string {

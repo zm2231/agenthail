@@ -146,10 +146,19 @@ func (a *App) cmdSend(args []string) error {
 				if !byName {
 					ref = answer.Result.SessionID
 				}
-				if wantStream || wantReply {
-					fmt.Fprintf(os.Stderr, "the coordinator started a new conversation %s for this message, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", answer.Result.SessionID, ref)
+				if !wantStream && !wantReply {
+					return printCoordinatorAnswer(answer, ref, jsonOut)
 				}
-				return printCoordinatorAnswer(answer, ref, jsonOut)
+				replacement, stream, followErr := a.followStartedCoordinator(ctx, answer.Result, spec)
+				if followErr != nil {
+					fmt.Fprintf(os.Stderr, "the coordinator started a new conversation %s for this message, but this send cannot follow it (%s); read the reply with 'agenthail last %s'\n", answer.Result.SessionID, followErr, ref)
+					return printCoordinatorAnswer(answer, ref, jsonOut)
+				}
+				defer stream.Cancel()
+				if !jsonOut {
+					fmt.Println(answer.Result.Detail)
+				}
+				sess, addressed, daemonStream, useDaemonStream = replacement, *replacement, stream, true
 			}
 			receipt = &answer.Result
 			if answer.Result.SessionID != "" && answer.Result.SessionID != addressed.ID {

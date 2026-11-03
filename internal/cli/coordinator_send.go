@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -55,4 +57,21 @@ func (a *App) coordinatorSend(ctx context.Context, spec registry.CoordinatorSpec
 		return answer, actionError(data)
 	}
 	return answer, json.Unmarshal(data, &answer)
+}
+
+// followStartedCoordinator opens the stream of the conversation the daemon
+// started for a send, so a send that asked for its reply follows the new lead.
+func (a *App) followStartedCoordinator(ctx context.Context, receipt delivery.Receipt, spec registry.CoordinatorSpec) (*surface.Session, sessionstream.Subscription, error) {
+	if receipt.SessionID == "" || receipt.TurnID == "" {
+		return nil, sessionstream.Subscription{}, errors.New("its first turn was submitted but not confirmed")
+	}
+	session := surface.Session{ID: receipt.SessionID, Surface: surface.SurfaceKind(spec.Surface)}
+	if stored, err := a.registry().Session(receipt.SessionID); err == nil {
+		session = *stored
+	}
+	stream, err := a.openDaemonSessionStream(ctx, &session, 0)
+	if err != nil {
+		return nil, sessionstream.Subscription{}, err
+	}
+	return &session, stream, nil
 }

@@ -1,16 +1,20 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -245,24 +249,56 @@ func captureStderr(t *testing.T, run func() error) (string, error) {
 	return string(data), runErr
 }
 
-func TestASendThatStartsANewLeadSaysItCannotFollowIt(t *testing.T) {
+// followedStreams answers the replacement's turn on its own stream and
+// nothing on any other, and records where each stream was opened.
+type followedStreams struct {
+	mu     sync.Mutex
+	opened []string
+}
+
+func (f *followedStreams) OpenSessionStream(_ context.Context, session *surface.Session, after uint64) (sessionstream.Subscription, error) {
+	f.mu.Lock()
+	f.opened = append(f.opened, fmt.Sprintf("%s@%d", session.ID, after))
+	f.mu.Unlock()
+	if session.ID != startedConversation {
+		return testSessionStreamReader{blocked: true}.OpenSessionStream(context.Background(), session, after)
+	}
+	return testSessionStreamReader{events: []sessionstream.Event{
+		{Kind: "message", Role: "assistant", TurnID: "started-turn", ItemID: "reply", Body: "the new lead's reply", Version: 1},
+		{Kind: "done", Status: "completed", TurnID: "started-turn"},
+	}}.OpenSessionStream(context.Background(), session, after)
+}
+
+func TestASendThatStartsANewLeadFollowsTheNewConversation(t *testing.T) {
+	const started = `{"ok":true,"started":true,"result":{"evidence":"delivered","status":"sent","sessionId":"` + startedConversation + `","turnId":"started-turn","detail":"Started a new conversation for coordinator @fixture-lead (conversation ` + goneConversation + ` no longer exists)."}}`
 	for _, follow := range []string{"--reply", "--stream"} {
 		t.Run(follow, func(t *testing.T) {
 			c := newCoordinatorCLI(t).withGoneCoordinator(t)
-			c.answers(startedAnswer)
-			var output string
-			stderr, err := captureStderr(t, func() error {
-				var runErr error
-				output, runErr = c.run(t, "send", goneConversation, "task", follow, "--timeout", "3s")
-				return runErr
-			})
-			if err != nil || !strings.Contains(output, "agenthail last "+startedConversation) {
-				t.Fatalf("output=%q stderr=%q err=%v", output, stderr, err)
+			streams := &followedStreams{}
+			c.app.daemonSessionStreamReader = func() (sessionStreamReader, error) { return streams, nil }
+			c.answers(started)
+			output, err := c.run(t, "send", goneConversation, "task", follow, "--timeout", "3s")
+			if err != nil || !strings.Contains(output, "the new lead's reply") || !strings.Contains(output, "Started a new conversation for coordinator @fixture-lead") {
+				t.Fatalf("output=%q err=%v, want the replacement's reply and word that the lead was replaced", output, err)
 			}
-			if !strings.Contains(stderr, "cannot follow its turns") || !strings.Contains(stderr, startedConversation) {
-				t.Fatalf("stderr=%q, want the sender told the new conversation is not followed", stderr)
+			if opened := streams.opened; len(opened) == 0 || opened[len(opened)-1] != startedConversation+"@0" {
+				t.Fatalf("streams opened=%v, want the new conversation followed from its start", opened)
 			}
 		})
+	}
+}
+
+func TestASendThatStartsANewLeadWithoutAConfirmedTurnSaysItCannotFollowIt(t *testing.T) {
+	c := newCoordinatorCLI(t).withGoneCoordinator(t)
+	c.answers(`{"ok":true,"started":true,"result":{"evidence":"submitted","status":"submitted","sessionId":"` + startedConversation + `","detail":"Started a new conversation for coordinator @fixture-lead."}}`)
+	var output string
+	stderr, err := captureStderr(t, func() error {
+		var runErr error
+		output, runErr = c.run(t, "send", goneConversation, "task", "--reply", "--timeout", "3s")
+		return runErr
+	})
+	if err != nil || !strings.Contains(output, "agenthail last "+startedConversation) || !strings.Contains(stderr, "cannot follow it") {
+		t.Fatalf("output=%q stderr=%q err=%v", output, stderr, err)
 	}
 }
 
