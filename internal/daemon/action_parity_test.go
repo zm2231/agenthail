@@ -174,7 +174,7 @@ func parityCases() []parityCase {
 		{name: "coordinator-clear", action: "coordinator-clear", body: `{"action":"coordinator-clear","path":"relative/path"}`},
 		{name: "coordinator-send", action: "coordinator-send", body: `{"action":"coordinator-send","name":"nobody","message":"hi"}`},
 	}
-	return append(cases, parityFailureCases()...)
+	return append(append(cases, parityFailureCases()...), parityProjectCases()...)
 }
 
 type paritySurface struct {
@@ -395,8 +395,12 @@ func TestEveryActionRepliesTheSameThroughEveryFrontEnd(t *testing.T) {
 }
 
 func TestTheParityTableCoversEveryDispatchedAction(t *testing.T) {
-	covered := map[string]bool{}
+	covered, named := map[string]bool{}, map[string]bool{}
 	for _, c := range parityCases() {
+		if named[c.name] {
+			t.Errorf("two parity cases are named %q; the second would overwrite the first's recording", c.name)
+		}
+		named[c.name] = true
 		covered[c.action] = true
 	}
 	var missing []string

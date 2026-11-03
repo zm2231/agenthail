@@ -215,7 +215,55 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"context\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
+  "api/action coordinator action unknown": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown coordinator action\"}}\n"
+  },
   "api/action coordinator-clear": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
+  },
+  "api/action coordinator-clear a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"cleared\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true}\n"
+  },
+  "api/action coordinator-clear without a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"cleared\":null,\"ok\":true}\n"
+  },
+  "api/action coordinator-clear without an id": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -239,6 +287,138 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
   },
+  "api/action coordinator-new codex": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/action coordinator-new named": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"crew\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/action coordinator-new of a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project/missing is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/action coordinator-new of an unconfigured surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
+  },
+  "api/action coordinator-new of an unknown surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator is a claude or codex conversation, not \\\"notion\\\"\"}}\n"
+  },
+  "api/action coordinator-new outside a project": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"\u003ctmp\u003e/agenthail-parity/loose is not in a project on \u003chost\u003e; use a Git repository or run 'agenthail project add \\u003cfolder\\u003e'\"}}\n"
+  },
+  "api/action coordinator-new over a coordinator": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"coordinator_exists\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project already has coordinator @parity-lead; replace it to take over\"}}\n"
+  },
+  "api/action coordinator-new replacing a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"crew\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"}]}\n"
+  },
+  "api/action coordinator-new the same coordinator again": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/action coordinator-new with a bad name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, :, or #\"}}\n"
+  },
+  "api/action coordinator-new with a claude permission mode": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"--permission-mode applies to a claude coordinator only\"}}\n"
+  },
   "api/action coordinator-send": {
     "status": 404,
     "header": {
@@ -251,6 +431,66 @@
     },
     "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
   },
+  "api/action coordinator-send as a person naming a session": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a person's message cannot also name a source session\"}}\n"
+  },
+  "api/action coordinator-send from a session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/action coordinator-send from an unknown session": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
+  },
+  "api/action coordinator-send to a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/action coordinator-send without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name and a message are required\"}}\n"
+  },
   "api/action coordinator-set": {
     "status": 400,
     "header": {
@@ -262,6 +502,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"to has no working directory on this host to start again in\"}}\n"
+  },
+  "api/action coordinator-set a session in the project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"sessionId\":\"to\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/action coordinator-set an unknown session": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
   },
   "api/action delivery-dismiss": {
     "status": 404,
@@ -695,6 +959,18 @@
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
+  "api/action project action unknown": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown project action\"}}\n"
+  },
   "api/action project-add": {
     "status": 400,
     "header": {
@@ -706,6 +982,66 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/action project-add a folder": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":true,\"ok\":true,\"project\":{\"id\":\"p-\u003cuuid\u003e\",\"localId\":\"p-\u003cuuid\u003e\",\"displayName\":\"project\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
+  },
+  "api/action project-add a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project/missing is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/action project-add a title too long": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
+  "api/action project-add again": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":false,\"ok\":true,\"project\":{\"id\":\"p-parity\",\"localId\":\"p-parity\",\"displayName\":\"Parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
+  },
+  "api/action project-add with a title": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":true,\"ok\":true,\"project\":{\"id\":\"p-\u003cuuid\u003e\",\"localId\":\"p-\u003cuuid\u003e\",\"displayName\":\"Named\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
   },
   "api/action project-archive": {
     "status": 404,
@@ -719,6 +1055,18 @@
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
+  "api/action project-archive an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
   "api/action project-remove": {
     "status": 404,
     "header": {
@@ -730,6 +1078,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/action project-remove an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}\n"
+  },
+  "api/action project-remove without an id": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
   "api/action project-rename": {
     "status": 404,
@@ -743,6 +1115,42 @@
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
+  "api/action project-rename an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\",\"title\":\"Renamed\"}\n"
+  },
+  "api/action project-rename to nothing": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
+  "api/action project-rename too long": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
   "api/action project-unarchive": {
     "status": 404,
     "header": {
@@ -754,6 +1162,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/action project-unarchive an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
   },
   "api/action queue-cancel": {
     "status": 200,
@@ -1799,7 +2219,55 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"context\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
+  "api/v1/actions coordinator action unknown": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown coordinator action\"}}\n"
+  },
   "api/v1/actions coordinator-clear": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
+  },
+  "api/v1/actions coordinator-clear a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"cleared\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true}\n"
+  },
+  "api/v1/actions coordinator-clear without a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"cleared\":null,\"ok\":true}\n"
+  },
+  "api/v1/actions coordinator-clear without an id": {
     "status": 400,
     "header": {
       "Cache-Control": [
@@ -1823,6 +2291,138 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
   },
+  "api/v1/actions coordinator-new codex": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/v1/actions coordinator-new named": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"crew\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/v1/actions coordinator-new of a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project/missing is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions coordinator-new of an unconfigured surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions coordinator-new of an unknown surface": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator is a claude or codex conversation, not \\\"notion\\\"\"}}\n"
+  },
+  "api/v1/actions coordinator-new outside a project": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"\u003ctmp\u003e/agenthail-parity/loose is not in a project on \u003chost\u003e; use a Git repository or run 'agenthail project add \\u003cfolder\\u003e'\"}}\n"
+  },
+  "api/v1/actions coordinator-new over a coordinator": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"coordinator_exists\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project already has coordinator @parity-lead; replace it to take over\"}}\n"
+  },
+  "api/v1/actions coordinator-new replacing a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"crew\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"}]}\n"
+  },
+  "api/v1/actions coordinator-new the same coordinator again": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"changedBy\":\"setup\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/v1/actions coordinator-new with a bad name": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, :, or #\"}}\n"
+  },
+  "api/v1/actions coordinator-new with a claude permission mode": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"--permission-mode applies to a claude coordinator only\"}}\n"
+  },
   "api/v1/actions coordinator-send": {
     "status": 404,
     "header": {
@@ -1835,6 +2435,66 @@
     },
     "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
   },
+  "api/v1/actions coordinator-send as a person naming a session": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a person's message cannot also name a source session\"}}\n"
+  },
+  "api/v1/actions coordinator-send from a session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/v1/actions coordinator-send from an unknown session": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
+  },
+  "api/v1/actions coordinator-send to a coordinator": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/v1/actions coordinator-send without a message": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name and a message are required\"}}\n"
+  },
   "api/v1/actions coordinator-set": {
     "status": 400,
     "header": {
@@ -1846,6 +2506,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"to has no working directory on this host to start again in\"}}\n"
+  },
+  "api/v1/actions coordinator-set a session in the project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"coordinator\":{\"projectId\":\"p-parity\",\"projectRoot\":\"\u003ctmp\u003e/agenthail-parity/project\",\"name\":\"parity-lead\",\"surface\":\"codex\",\"cwd\":\"\u003ctmp\u003e/agenthail-parity/project\",\"sessionId\":\"to\",\"changedBy\":\"the dashboard\",\"changedAt\":\"\u003ctime\u003e\"},\"ok\":true,\"replaced\":[]}\n"
+  },
+  "api/v1/actions coordinator-set an unknown session": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
   },
   "api/v1/actions delivery-dismiss": {
     "status": 404,
@@ -2279,6 +2963,18 @@
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
+  "api/v1/actions project action unknown": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unknown project action\"}}\n"
+  },
   "api/v1/actions project-add": {
     "status": 400,
     "header": {
@@ -2290,6 +2986,66 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions project-add a folder": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":true,\"ok\":true,\"project\":{\"id\":\"p-\u003cuuid\u003e\",\"localId\":\"p-\u003cuuid\u003e\",\"displayName\":\"project\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
+  },
+  "api/v1/actions project-add a missing folder": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ctmp\u003e/agenthail-parity/project/missing is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions project-add a title too long": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
+  "api/v1/actions project-add again": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":false,\"ok\":true,\"project\":{\"id\":\"p-parity\",\"localId\":\"p-parity\",\"displayName\":\"Parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
+  },
+  "api/v1/actions project-add with a title": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"created\":true,\"ok\":true,\"project\":{\"id\":\"p-\u003cuuid\u003e\",\"localId\":\"p-\u003cuuid\u003e\",\"displayName\":\"Named\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
   },
   "api/v1/actions project-archive": {
     "status": 404,
@@ -2303,6 +3059,18 @@
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
+  "api/v1/actions project-archive an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
   "api/v1/actions project-remove": {
     "status": 404,
     "header": {
@@ -2314,6 +3082,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions project-remove an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}\n"
+  },
+  "api/v1/actions project-remove without an id": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
   "api/v1/actions project-rename": {
     "status": 404,
@@ -2327,6 +3119,42 @@
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
+  "api/v1/actions project-rename an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\",\"title\":\"Renamed\"}\n"
+  },
+  "api/v1/actions project-rename to nothing": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
+  "api/v1/actions project-rename too long": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a project name is 1 to 120 characters\"}}\n"
+  },
   "api/v1/actions project-unarchive": {
     "status": 404,
     "header": {
@@ -2338,6 +3166,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions project-unarchive an added project": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
   },
   "api/v1/actions queue-cancel": {
     "status": 200,
