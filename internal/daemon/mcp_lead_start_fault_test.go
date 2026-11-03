@@ -88,7 +88,7 @@ func TestAFailedCoordinatorCorrectionIsStillMadeAfterAgenthailRestarts(t *testin
 	if _, err := fixture.registry.WriteDB().Exec(`DROP TRIGGER fail_rotation`); err != nil {
 		t.Fatal(err)
 	}
-	fixture.daemon.syncLeads()
+	fixture.daemon.leadsChanged()
 	if !refusedAsRevoked(t, fixture.server, first) {
 		t.Fatal("the correction a restart interrupted was never made")
 	}
@@ -104,7 +104,7 @@ func TestALeadThatStepsDownWhileAgenthailIsStoppedLosesProjectControlOnRestart(t
 		t.Fatal(err)
 	}
 	fixture.restartAgenthail(t)
-	fixture.daemon.syncLeads()
+	fixture.daemon.leadsChanged()
 	if !refusedAsRevoked(t, fixture.server, first) {
 		t.Fatal("a lead credential outlived its lead across a restart")
 	}
@@ -123,7 +123,7 @@ func TestACredentialWhoseCapabilitiesAreWrongWhenAgenthailStartsIsFixedWithinOne
 		t.Fatal(err)
 	}
 	fixture.restartAgenthail(t)
-	fixture.daemon.syncLeads()
+	fixture.daemon.leadsChanged()
 	if !refusedAsRevoked(t, fixture.server, wrong.Token) {
 		t.Fatal("a credential granting project control to a non-lead survived a tick")
 	}
@@ -169,7 +169,7 @@ func TestAStartedCoordinatorWhoseCorrectionFailsIsRetriedUntilItTakes(t *testing
 	if _, err := f.registry.WriteDB().Exec(`DROP TRIGGER fail_rotation`); err != nil {
 		t.Fatal(err)
 	}
-	f.daemon.syncLeads()
+	f.daemon.leadsChanged()
 	if !refusedAsRevoked(t, f.server, first) {
 		t.Fatal("the failed correction was not retried")
 	}

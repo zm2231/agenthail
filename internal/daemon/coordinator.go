@@ -25,7 +25,7 @@ func (d *Daemon) coordinator() coordinator.Service {
 	return coordinator.Service{Registry: d.Registry, Adapters: d.adapters(), Dispatcher: d.dispatcher(), ClaudeRoot: func(ctx context.Context) string {
 		pick, _ := d.claudeRootPick(ctx, false)
 		return pick.Root
-	}, LeadsChanged: d.syncLeads}
+	}, LeadsChanged: d.leadsChanged}
 }
 
 // restartCoordinator delivers a queued message by starting the coordinator
@@ -88,7 +88,7 @@ type coordinatorRequest struct {
 // from the session or the host the request names.
 func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request coordinatorRequest) (actionResult, error) {
 	if request.Action != "coordinator-send" {
-		defer d.syncLeads()
+		defer d.leadsChanged()
 	}
 	switch request.Action {
 	case "coordinator-set":

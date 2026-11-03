@@ -35,7 +35,7 @@ func TestARuntimeThatRefusesItsNewCredentialGetsTheSameTokenRetriedNotANewOne(t 
 	id, _ := f.create(t)
 	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
 	for range 10 {
-		f.daemon.syncLeads()
+		f.daemon.leadsChanged()
 	}
 	if rows := credentialRows(t, f.registry, id); rows != 2 {
 		t.Fatalf("credentials=%d, want the first and exactly one rotation", rows)
@@ -58,7 +58,7 @@ func TestAnUndeliveredCredentialAfterARestartIsMintedOnceThenRetried(t *testing.
 	f.daemon = newTestDaemon(t, f.registry, f.daemon.Surfaces)
 	f.daemon.attachMCPCredentials(f.server.Listener.Addr().String())
 	for range 10 {
-		f.daemon.syncLeads()
+		f.daemon.leadsChanged()
 	}
 	if rows := credentialRows(t, f.registry, id); rows != 3 {
 		t.Fatalf("credentials=%d, want one more mint after the restart and none after", rows)
@@ -76,7 +76,7 @@ func TestAConversationNoHostHoldsIsDeliveredByItsNextOpen(t *testing.T) {
 	id, _ := f.create(t)
 	f.host.KillHost(t)
 	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
-	f.daemon.syncLeads()
+	f.daemon.leadsChanged()
 	if !liveDelivered(t, f.registry, id) {
 		t.Fatal("a conversation no host holds was left undelivered; its next open carries the live token")
 	}
@@ -126,7 +126,9 @@ func TestALateOlderPushNeverLeavesARevokedTokenInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { done <- credentials.Deliver(id, "", func(token string) error { runtime.install(token); return nil }) }()
+	go func() {
+		done <- credentials.Deliver(id, "", func(token string) error { runtime.install(token); return nil })
+	}()
 	time.Sleep(50 * time.Millisecond)
 	close(release)
 	for range 2 {
@@ -163,5 +165,51 @@ func TestAResumeThatRacedARotationEndsOnTheLiveToken(t *testing.T) {
 	}
 	if rows := credentialRows(t, f.registry, id); rows != 3 {
 		t.Fatalf("credentials=%d, confirming a resume must not mint", rows)
+	}
+}
+
+func TestDeliveryLocksAreReleasedWithTheirLastHolder(t *testing.T) {
+	var locks keyedLocks
+	release, _ := locks.acquire("a", true)
+	if _, ok := locks.acquire("a", false); ok {
+		t.Fatal("a held session was locked twice")
+	}
+	waited := make(chan struct{})
+	go func() {
+		again, _ := locks.acquire("a", true)
+		again()
+		close(waited)
+	}()
+	release()
+	<-waited
+	for i := range 100 {
+		done, _ := locks.acquire(fmt.Sprintf("s-%d", i), true)
+		done()
+	}
+	if size := locks.size(); size != 0 {
+		t.Fatalf("locks kept=%d after every holder released", size)
+	}
+}
+
+func TestASlowRuntimeDoesNotHoldUpTheStatusLoop(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	f.addProject(t)
+	id, _ := f.create(t)
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
+	credentials := f.daemon.mcpCredentials.Load()
+	release, _ := credentials.deliveries.acquire(id, true)
+	defer release()
+	if _, err := f.registry.WriteDB().Exec(`UPDATE session_credentials SET delivered=0 WHERE session_id=? AND revoked_at_ms=0`, id); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan struct{})
+	go func() {
+		f.daemon.leadsChanged()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a pass waited on a session whose delivery was still in flight")
 	}
 }

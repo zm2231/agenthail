@@ -170,14 +170,14 @@ func TestALeadChangeWhoseRotationFailsIsRetriedUntilItTakes(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.action(t, fmt.Sprintf(`{"action":"coordinator-set","sessionId":%q,"name":"captain"}`, id))
-	f.daemon.syncLeads()
+	f.daemon.leadsChanged()
 	if len(f.replacedTokens(t, id)) != 0 || slices.Contains(f.capabilities(t, first), any("control.project")) {
 		t.Fatal("a failed rotation was reported as done")
 	}
 	if _, err := f.registry.WriteDB().Exec(`DROP TRIGGER fail_rotation`); err != nil {
 		t.Fatal(err)
 	}
-	f.daemon.syncLeads()
+	f.daemon.leadsChanged()
 	replaced := f.replacedTokens(t, id)
 	if len(replaced) != 1 || !slices.Contains(f.capabilities(t, replaced[0]), any("control.project")) {
 		t.Fatalf("the lead change was not retried: replaced=%s", redacted(replaced))

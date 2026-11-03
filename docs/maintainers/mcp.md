@@ -68,7 +68,8 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 
 **Delivery.** A rotated credential is stored with `delivered=0`, and it becomes `1` only once a runtime confirms it holds that exact token while it is still live. That covers a Claude host's `replaceMcp` or `open` on resume, a conversation no host has open (its next open carries the live token), and a Codex thread reattached with it. Every pass delivers each `delivered=0` credential after releasing the lead lock, through `Deliver`:
 
-- One delivery runs at a time per session, under a per-session lock.
+- One delivery runs at a time per session, under a per-session lock that is dropped once no one holds or awaits it.
+- A pass starts its deliveries in the background and skips a session whose delivery is still in flight, so a slow or hung runtime never holds up the status loop. A coordinator action waits for the deliveries its own pass started.
 - It pushes the live token read at push time, never a token captured earlier, and re-reads the live token after the push. If a rotation landed meanwhile, it pushes again, so the last token a runtime receives is the live one.
 - It mints a new token only when this process does not hold the raw token of the live credential, which happens only after the daemon restarts, since the registry stores hashes. A runtime that keeps refusing is sent the same token on every pass and never causes another rotation.
 - A loaded Codex thread takes its token at the next input or resume, which reattaches it and confirms delivery.

@@ -20,16 +20,27 @@ type daemonMCPCredentials struct {
 	url        string
 	mu         sync.Mutex
 	tokens     map[string]string
-	deliveries sync.Map
+	deliveries keyedLocks
 }
 
 const deliveryAttempts = 3
 
 // Deliver confirms sent if it is still the live token; otherwise it pushes the live token read now (minting one only when this process does not hold it) until a pushed token is still live once the push returns.
 func (c *daemonMCPCredentials) Deliver(sessionID, sent string, push func(token string) error) error {
-	lock, _ := c.deliveries.LoadOrStore(sessionID, &sync.Mutex{})
-	lock.(*sync.Mutex).Lock()
-	defer lock.(*sync.Mutex).Unlock()
+	_, err := c.deliver(sessionID, sent, push, true)
+	return err
+}
+
+func (c *daemonMCPCredentials) deliver(sessionID, sent string, push func(token string) error, wait bool) (bool, error) {
+	release, ok := c.deliveries.acquire(sessionID, wait)
+	if !ok {
+		return false, nil
+	}
+	defer release()
+	return true, c.deliverLocked(sessionID, sent, push)
+}
+
+func (c *daemonMCPCredentials) deliverLocked(sessionID, sent string, push func(token string) error) error {
 	token := sent
 	for range deliveryAttempts {
 		if token != "" {

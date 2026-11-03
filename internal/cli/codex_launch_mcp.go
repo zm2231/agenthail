@@ -28,8 +28,12 @@ func (c launchMCPCredentials) Claim(ref, threadID string) error { return c.claim
 
 func (c launchMCPCredentials) Live(string) (string, bool) { return "", false }
 
-func (c launchMCPCredentials) Rotate(string) (string, error) {
-	return "", errors.New("a terminal launch only starts its thread")
+var errLaunchOnlyStarts = errors.New("a terminal launch only starts its thread")
+
+func (c launchMCPCredentials) Rotate(string) (string, error) { return "", errLaunchOnlyStarts }
+
+func (c launchMCPCredentials) Deliver(string, string, func(string) error) error {
+	return errLaunchOnlyStarts
 }
 
 func (c launchMCPCredentials) Unattached(threadID string, err error) {

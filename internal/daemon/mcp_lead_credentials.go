@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -44,16 +45,19 @@ func sameCapabilities(a, b []string) bool {
 	return slices.Equal(slices.Compact(slices.Sorted(slices.Values(a))), slices.Compact(slices.Sorted(slices.Values(b))))
 }
 
-func (d *Daemon) deliverCredentials(sessionIDs []string) {
+// A session whose delivery is still in flight is skipped; the next pass finds it undelivered if that one fails.
+func (d *Daemon) deliverCredentials(deliveries *sync.WaitGroup, sessionIDs []string) {
 	credentials := d.mcpCredentials.Load()
 	if credentials == nil {
 		return
 	}
 	for _, id := range sessionIDs {
-		err := credentials.Deliver(id, "", func(token string) error { return d.pushCredential(id, credentials.URL(), token) })
-		if err != nil && !errors.Is(err, surfaces.ErrMCPDeliveryDeferred) {
-			d.log.Printf("mcp: delivering %s's new credential is retried: %s", d.resolveDisplay(id), err)
-		}
+		deliveries.Go(func() {
+			push := func(token string) error { return d.pushCredential(id, credentials.URL(), token) }
+			if _, err := credentials.deliver(id, "", push, false); err != nil && !errors.Is(err, surfaces.ErrMCPDeliveryDeferred) {
+				d.log.Printf("mcp: delivering %s's new credential is retried: %s", d.resolveDisplay(id), err)
+			}
+		})
 	}
 }
 
