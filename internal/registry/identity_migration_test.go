@@ -175,6 +175,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	}
 	exec(`INSERT INTO session_runtime(session_id) VALUES(?),(?),('conversation-native')`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_archive(session_id,archived_at_ms) VALUES(?,1)`, rekeyedBridge)
+	exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,'hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_context(session_id,fingerprint,delivered_at_ms) VALUES(?,'f',1)`, rekeyedBridge)
 	exec(`INSERT INTO limit_resumes(session_id,turn_id,refused_at_ms) VALUES(?,'refused',1)`, rekeyedBridge)

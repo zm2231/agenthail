@@ -225,6 +225,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	if observation.ActiveTurnID != "" && observation.ActiveTurnID != previous.ActiveTurnID || completionChanged {
+		if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
+			d.log.Printf("revive session credential %s: %s", d.resolveDisplay(session.ID), err)
+		}
+	}
 	if held != previous.HeldCompletionTurnID {
 		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {
 			d.log.Printf("hold completion %s: %s", d.resolveDisplay(session.ID), err)

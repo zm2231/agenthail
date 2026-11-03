@@ -1,4 +1,4 @@
--- schemaVersion 41
+-- schemaVersion 42
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -50,6 +50,9 @@ CREATE INDEX paired_devices_active ON paired_devices(revoked_at, created_at DESC
 
 -- index relay_events_source
 CREATE INDEX relay_events_source ON relay_events(source_key,id);
+
+-- index session_credentials_live
+CREATE UNIQUE INDEX session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0;
 
 -- index session_journal_bodies_session
 CREATE INDEX session_journal_bodies_session ON session_journal_bodies(session_id);
@@ -476,6 +479,21 @@ CREATE TABLE session_context (
 	fingerprint TEXT NOT NULL,
 	start_key TEXT NOT NULL DEFAULT '',
 	delivered_at_ms INTEGER NOT NULL
+);
+
+-- table session_credentials
+CREATE TABLE session_credentials (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL UNIQUE,
+	capabilities TEXT NOT NULL DEFAULT '[]',
+	ceiling TEXT NOT NULL DEFAULT '{}',
+	created_at_ms INTEGER NOT NULL,
+	last_used_at_ms INTEGER NOT NULL DEFAULT 0,
+	idle_expires_at_ms INTEGER NOT NULL,
+	max_expires_at_ms INTEGER NOT NULL,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_reason TEXT NOT NULL DEFAULT ''
 );
 
 -- table session_journal

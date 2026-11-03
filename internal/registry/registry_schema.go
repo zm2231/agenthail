@@ -300,6 +300,20 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
+CREATE TABLE IF NOT EXISTS session_credentials (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL UNIQUE,
+	capabilities TEXT NOT NULL DEFAULT '[]',
+	ceiling TEXT NOT NULL DEFAULT '{}',
+	created_at_ms INTEGER NOT NULL,
+	last_used_at_ms INTEGER NOT NULL DEFAULT 0,
+	idle_expires_at_ms INTEGER NOT NULL,
+	max_expires_at_ms INTEGER NOT NULL,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0;
 CREATE TABLE IF NOT EXISTS action_receipts (
 	idempotency_key TEXT PRIMARY KEY,
 	request_hash TEXT NOT NULL,
