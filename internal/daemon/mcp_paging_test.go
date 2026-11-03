@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -86,17 +87,11 @@ func TestMCPMaxExpiryIsFinalButIdleExpiryRevives(t *testing.T) {
 	}
 }
 
-func TestMCPSessionPagesSurviveReorderingAndNewSessions(t *testing.T) {
-	d, r, _, _, _ := daemonFixture(t)
-	project := addLedgerProject(t, r, "p-pages", "pages")
-	lead := project.session(t, r, "page-lead")
-	for index := range 5 {
-		project.session(t, r, fmt.Sprintf("page-%d", index))
-	}
-	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, lead))
+func traverseSessions(t *testing.T, session *mcp.ClientSession, between func(page int)) map[string]int {
+	t.Helper()
 	seen := map[string]int{}
 	cursor := ""
-	for page := 0; page < 10; page++ {
+	for page := 0; page < 20; page++ {
 		args := map[string]any{"filter": "project", "limit": 2}
 		if cursor != "" {
 			args["cursor"] = cursor
@@ -108,28 +103,55 @@ func TestMCPSessionPagesSurviveReorderingAndNewSessions(t *testing.T) {
 		for _, id := range sessionIDs(t, listing) {
 			seen[id]++
 		}
-		if page == 0 {
-			moved, _ := r.Session("page-4")
-			moved.LastActive = time.Now().Add(time.Hour)
-			if err := r.RegisterSession(*moved); err != nil {
-				t.Fatal(err)
-			}
-			project.session(t, r, "page-new")
-		}
+		between(page)
 		next, _ := listing["nextCursor"].(string)
 		if next == "" {
-			break
+			return seen
 		}
 		cursor = next
 	}
-	for _, id := range []string{"page-lead", "page-0", "page-1", "page-2", "page-3", "page-4", "page-new"} {
+	t.Fatal("paging did not end")
+	return nil
+}
+
+func TestMCPSessionTraversalReturnsEveryStandingSessionOnce(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	project := addLedgerProject(t, r, "p-pages", "pages")
+	lead := project.session(t, r, "page-lead")
+	for index := range 5 {
+		project.session(t, r, fmt.Sprintf("page-%d", index))
+	}
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, lead))
+	seen := traverseSessions(t, session, func(page int) {
+		if page != 0 {
+			return
+		}
+		moved, _ := r.Session("page-4")
+		moved.LastActive = time.Now().Add(time.Hour)
+		if err := r.RegisterSession(*moved); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.WriteDB().Exec(`DELETE FROM sessions WHERE id IN ('page-3','page-4')`); err != nil {
+			t.Fatal(err)
+		}
+		project.session(t, r, "page-new")
+	})
+	for _, id := range []string{"page-lead", "page-0", "page-1", "page-2"} {
 		if seen[id] != 1 {
 			t.Fatalf("%s seen %d times: %v", id, seen[id], seen)
 		}
 	}
+	for id, count := range seen {
+		if count > 1 {
+			t.Fatalf("%s repeated: %v", id, seen)
+		}
+	}
+	if again := traverseSessions(t, session, func(int) {}); again["page-new"] != 1 {
+		t.Fatalf("the next traversal misses the session that joined: %v", again)
+	}
 }
 
-func TestMCPRequestPagesReachEveryOpenRequest(t *testing.T) {
+func TestMCPRequestsReturnEveryOpenRequestInOneCall(t *testing.T) {
 	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
@@ -147,38 +169,31 @@ func TestMCPRequestPagesReachEveryOpenRequest(t *testing.T) {
 	for index := range 9 {
 		responder.open = append(responder.open, surface.Request{ID: fmt.Sprintf("req-%d", index), Kind: surface.WaitingApproval, Tool: "Bash", Title: strings.Repeat("x", 3800), CreatedAt: created.Add(time.Duration(index%3) * time.Second)})
 	}
+	responder.open = append(responder.open, surface.Request{ID: "req-same-ms", Kind: surface.WaitingApproval, Tool: "Bash", CreatedAt: created})
 	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, worker))
-	seen := map[string]int{}
-	cursor := ""
-	for page := 0; page < 12; page++ {
-		args := map[string]any{"sessionId": worker.ID}
-		if cursor != "" {
-			args["cursor"] = cursor
+	result, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID})
+	requests, _ := result["requests"].([]any)
+	if refused || len(requests) != 10 || result["total"] != 10.0 || result["truncated"] != false {
+		t.Fatalf("requests=%d total=%v truncated=%v refused=%v", len(requests), result["total"], result["truncated"], refused)
+	}
+	seen := map[string]bool{}
+	for _, request := range requests {
+		row := request.(map[string]any)
+		seen[row["id"].(string)] = true
+		if row["id"] != "req-same-ms" && row["clipped"] != true {
+			t.Fatalf("a long prompt was not clipped to fit: %v", row["id"])
 		}
-		result, refused := callMCP(t, session, "agenthail_requests", args)
-		if refused {
-			t.Fatalf("page %d: %v", page, result)
-		}
-		requests, _ := result["requests"].([]any)
-		for _, request := range requests {
-			seen[request.(map[string]any)["id"].(string)]++
-		}
-		if page == 0 {
-			responder.open = append(responder.open, surface.Request{ID: "req-late", Kind: surface.WaitingApproval, Tool: "Bash", CreatedAt: time.Now()})
-		}
-		next, _ := result["nextCursor"].(string)
-		if next == "" {
-			break
-		}
-		cursor = next
 	}
 	if len(seen) != 10 {
-		t.Fatalf("saw %d requests: %v", len(seen), seen)
+		t.Fatalf("ids=%v", seen)
 	}
-	for id, count := range seen {
-		if count != 1 {
-			t.Fatalf("%s seen %d times", id, count)
-		}
+	one, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": "req-4"})
+	full, _ := one["request"].(map[string]any)
+	if refused || len(full["prompt"].(string)) != 3800 || full["clipped"] == true {
+		t.Fatalf("one request=%v", one)
+	}
+	if refusal, refused := callMCP(t, session, "agenthail_requests", map[string]any{"sessionId": worker.ID, "requestId": "answered"}); !refused || refusal["code"] != "not_found" {
+		t.Fatalf("missing request=%v", refusal)
 	}
 }
 
