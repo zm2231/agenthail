@@ -20,7 +20,7 @@ type launchMCPCredentials struct {
 
 func (c launchMCPCredentials) URL() string { return c.credential.URL }
 
-func (c launchMCPCredentials) Pending() (string, string, error) {
+func (c launchMCPCredentials) Pending(context.Context) (string, string, error) {
 	return c.credential.Token, c.credential.Ref, nil
 }
 

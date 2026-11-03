@@ -61,19 +61,20 @@ func TestACheckerOpensWithoutTheAgenthailServer(t *testing.T) {
 }
 
 func TestAResumedClaudeConversationKeepsRotatesOrClaimsItsCredential(t *testing.T) {
+	ctx := context.Background()
 	held := &fakeCredentials{live: map[string]string{"c": "ahs_live"}}
-	if token, err := claudeHostToken(held, "c", true); err != nil || token != "ahs_live" || held.rotations != 0 {
-		t.Fatalf("held token=%q err=%v rotations=%d", token, err, held.rotations)
+	if token, err := claudeHostToken(ctx, held, "c", true); err != nil || token != "ahs_live" || held.rotations != 0 {
+		t.Fatalf("err=%v rotations=%d, the held token was not reused", err, held.rotations)
 	}
 	registered := &fakeCredentials{}
-	if token, err := claudeHostToken(registered, "c", true); err != nil || token != "ahs_rotated" || len(registered.claims) != 0 {
-		t.Fatalf("rotated token=%q err=%v claims=%v", token, err, registered.claims)
+	if token, err := claudeHostToken(ctx, registered, "c", true); err != nil || token != "ahs_rotated" || len(registered.claims) != 0 {
+		t.Fatalf("err=%v claims=%d, the credential was not rotated", err, len(registered.claims))
 	}
 	unregistered := &fakeCredentials{rotateErr: errors.New("session c: not found")}
-	if token, err := claudeHostToken(unregistered, "c", true); err != nil || token != "ahs_pending" || len(unregistered.claims) != 1 {
-		t.Fatalf("claimed token=%q err=%v claims=%v", token, err, unregistered.claims)
+	if token, err := claudeHostToken(ctx, unregistered, "c", true); err != nil || token != "ahs_pending" || len(unregistered.claims) != 1 {
+		t.Fatalf("err=%v claims=%d, no pending credential was claimed", err, len(unregistered.claims))
 	}
-	if _, err := claudeHostToken(&fakeCredentials{}, "", false); err == nil {
+	if _, err := claudeHostToken(ctx, &fakeCredentials{}, "", false); err == nil {
 		t.Fatal("a conversation without an id got a credential")
 	}
 }

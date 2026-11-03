@@ -45,7 +45,7 @@ func TestATerminalCodexLaunchHandsItsCredentialToTheCLIOnce(t *testing.T) {
 	}
 	taken, err := TakeManagedCodexLaunchCredential(*session)
 	if err != nil || taken == nil || *taken != *credential {
-		t.Fatalf("taken=%+v err=%v", taken, err)
+		t.Fatalf("taken=%v err=%v", taken != nil, err)
 	}
 	if again, err := TakeManagedCodexLaunchCredential(*session); err != nil || again != nil {
 		t.Fatalf("second take=%+v err=%v", again, err)
@@ -104,7 +104,7 @@ func TestALaunchCredentialThatIsNotPrivateIsRefusedAndRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	if taken, err := TakeManagedCodexLaunchCredential("agenthail-open"); err == nil || taken != nil {
-		t.Fatalf("taken=%+v err=%v", taken, err)
+		t.Fatalf("taken=%v err=%v", taken != nil, err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("refused credential left behind: %v", err)

@@ -61,10 +61,12 @@ type fakeCredentials struct {
 	unattached []error
 	claims     []string
 	rotateErr  error
+	leadStarts []bool
 }
 
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
-func (f *fakeCredentials) Pending() (string, string, error) {
+func (f *fakeCredentials) Pending(ctx context.Context) (string, string, error) {
+	f.leadStarts = append(f.leadStarts, surface.IsLeadStart(ctx))
 	return "ahs_pending", "ref-1", nil
 }
 func (f *fakeCredentials) Claim(ref, id string) error {
@@ -147,7 +149,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 		}
 	}
 	if credentials.rotations != 1 || bearerOf(client.calls[3].params) != "Bearer ahs_rotated" || len(credentials.unattached) != 0 {
-		t.Fatalf("rotations=%d bearer=%q unattached=%v", credentials.rotations, bearerOf(client.calls[3].params), credentials.unattached)
+		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.rotations, credentials.unattached)
 	}
 }
 

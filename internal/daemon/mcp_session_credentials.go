@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -11,7 +13,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
+const (
+	pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
+	leadCapability            = "control.project"
+)
 
 // Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
 type daemonMCPCredentials struct {
@@ -33,12 +38,16 @@ func (c *daemonMCPCredentials) remember(token string) {
 
 func (c *daemonMCPCredentials) URL() string { return c.url }
 
-func (c *daemonMCPCredentials) Pending() (string, string, error) {
-	return c.issuePending(pendingCredentialLifetime)
+func (c *daemonMCPCredentials) Pending(ctx context.Context) (string, string, error) {
+	capabilities := defaultSessionCapabilities
+	if surface.IsLeadStart(ctx) {
+		capabilities = append(slices.Clone(defaultSessionCapabilities), leadCapability)
+	}
+	return c.issuePending(capabilities, pendingCredentialLifetime)
 }
 
-func (c *daemonMCPCredentials) issuePending(lifetime time.Duration) (string, string, error) {
-	pending, err := c.d.Registry.IssuePendingCredential(defaultSessionCapabilities, json.RawMessage(`{}`), time.Now(), lifetime)
+func (c *daemonMCPCredentials) issuePending(capabilities []string, lifetime time.Duration) (string, string, error) {
+	pending, err := c.d.Registry.IssuePendingCredential(capabilities, json.RawMessage(`{}`), time.Now(), lifetime)
 	if err != nil {
 		return "", "", err
 	}
@@ -51,7 +60,7 @@ func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.Sur
 		return nil, nil
 	}
 	c.d.pruneLaunchCredentials()
-	token, ref, err := c.issuePending(pendingLaunchLifetime)
+	token, ref, err := c.issuePending(defaultSessionCapabilities, pendingLaunchLifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +107,7 @@ func (d *Daemon) sessionCapabilities(session surface.Session) []string {
 	capabilities := append([]string(nil), defaultSessionCapabilities...)
 	if project, _ := d.sessionProject(session); project != nil {
 		if spec, err := d.Registry.Coordinator(project.ID); err == nil && spec.SessionID == session.ID {
-			capabilities = append(capabilities, "control.project")
+			capabilities = append(capabilities, leadCapability)
 		}
 	}
 	return capabilities

@@ -173,6 +173,37 @@ func TestALoadedCodexThreadWhosePermissionsChangeIsReloadedWithItsNewCredentialO
 	}
 }
 
+func TestACodexCoordinatorStartedByItsFirstMessageStartsWithItsLeadCredential(t *testing.T) {
+	fixture := newMCPCodexFixture(t)
+	cwd := t.TempDir()
+	root, err := canonicalCatalogPath(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := fixture.action(t, map[string]any{"action": "coordinator-new", "surface": "codex", "cwd": cwd, "name": "captain"}); code != http.StatusOK {
+		t.Fatalf("coordinator-new status=%d body=%v", code, body)
+	}
+	if code, body := fixture.action(t, map[string]any{"action": "coordinator-send", "name": "captain", "message": "hello"}); code != http.StatusOK || body["started"] != true {
+		t.Fatalf("coordinator-send status=%d body=%s", code, redacted(body))
+	}
+	starts := fixture.lifecycle.Daemon().Calls("thread/start")
+	if len(starts) != 1 {
+		t.Fatalf("thread/start calls=%d", len(starts))
+	}
+	first := codexBearer(starts[0])
+	whoami, refused := fixture.whoami(t, first)
+	capabilities, _ := whoami["capabilities"].([]any)
+	if refused || !slices.Contains(capabilities, any("control.project")) {
+		t.Fatalf("refused=%v, the coordinator's first credential cannot control its project", refused)
+	}
+	if unsubscribes := len(fixture.lifecycle.Daemon().Calls("thread/unsubscribe")); unsubscribes != 0 {
+		t.Fatalf("the coordinator was reloaded %d times after its first turn began", unsubscribes)
+	}
+}
+
 func TestAfterAnAgenthailRestartAResumeThatLoadsTheThreadBareRotatesAndReattaches(t *testing.T) {
 	fixture := newMCPCodexFixture(t)
 	_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First", "cwd": t.TempDir()})

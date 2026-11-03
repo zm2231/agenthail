@@ -18,7 +18,7 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 	if id == "" {
 		id = request.SessionID
 	}
-	token, err := claudeHostToken(credentials, id, request.Resume != "")
+	token, err := claudeHostToken(ctx, credentials, id, request.Resume != "")
 	if err != nil {
 		credentials.Unattached(id, err)
 		return c.host.client.Open(ctx, request)
@@ -36,7 +36,7 @@ func (c *Claude) ReplaceMCPCredential(ctx context.Context, sessionID, url, token
 	return err
 }
 
-func claudeHostToken(credentials MCPCredentials, id string, resume bool) (string, error) {
+func claudeHostToken(ctx context.Context, credentials MCPCredentials, id string, resume bool) (string, error) {
 	if id == "" {
 		return "", errors.New("the conversation has no id before it opens")
 	}
@@ -48,7 +48,7 @@ func claudeHostToken(credentials MCPCredentials, id string, resume bool) (string
 			return token, nil
 		}
 	}
-	token, ref, err := credentials.Pending()
+	token, ref, err := credentials.Pending(ctx)
 	if err != nil {
 		return "", fmt.Errorf("issue the conversation's credential: %w", err)
 	}

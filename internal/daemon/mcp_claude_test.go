@@ -153,9 +153,12 @@ func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *tes
 	if err != nil || spec.SessionID == "" {
 		t.Fatalf("spec=%+v err=%v", spec, err)
 	}
-	replaced := f.replacedTokens(t, spec.SessionID)
-	if len(replaced) != 1 || !slices.Contains(f.capabilities(t, replaced[0]), any("control.project")) {
-		t.Fatalf("the started coordinator still runs a non-lead credential: replaced=%s", redacted(replaced))
+	spawns := f.host.Spawns(t, spec.SessionID)
+	if len(spawns) != 1 || !slices.Contains(f.capabilities(t, spawnBearer(t, spawns[0])), any("control.project")) {
+		t.Fatalf("spawns=%d, the coordinator's first credential cannot control its project", len(spawns))
+	}
+	if replaced := f.replacedTokens(t, spec.SessionID); len(replaced) != 0 {
+		t.Fatalf("the coordinator's credential was swapped after its first turn began: %d swaps", len(replaced))
 	}
 }
 

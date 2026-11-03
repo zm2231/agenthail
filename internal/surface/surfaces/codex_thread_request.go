@@ -36,7 +36,7 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 	}
 	switch method {
 	case codexThreadStart, codexThreadFork:
-		token, ref, err := credentials.Pending()
+		token, ref, err := credentials.Pending(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("issue the new thread's credential: %w", err)
 		}

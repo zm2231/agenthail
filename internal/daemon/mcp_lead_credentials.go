@@ -14,6 +14,13 @@ type mcpCredentialReplacer interface {
 	ReplaceMCPCredential(ctx context.Context, sessionID, url, token string) error
 }
 
+func (d *Daemon) coordinatorStarted(sessionID string) {
+	d.syncLeads()
+	if err := d.reconcileSessionCredential(sessionID); err != nil {
+		d.log.Printf("mcp: %s", err)
+	}
+}
+
 func (d *Daemon) reconcileLeadCredentials(previous, current map[string]bool) error {
 	var failed []error
 	for id := range previous {

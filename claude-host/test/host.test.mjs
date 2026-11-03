@@ -303,13 +303,15 @@ test('a session opened with its agenthail credential has the agenthail MCP serve
     return at >= 0 ? spawned.argv[at + 1] : undefined;
   };
   const config = JSON.parse(flag('--mcp-config'));
-  assert.deepEqual(config.mcpServers.agenthail, { type: 'http', url, headers: { Authorization: 'Bearer ahs_first' }, timeout: 3_700_000 });
+  const server = config.mcpServers.agenthail;
+  assert.ok(server?.type === 'http' && server.url === url && server.timeout === 3_700_000, 'the agenthail server is an http server at the daemon url');
+  assert.ok(server.headers?.Authorization === 'Bearer ahs_first', 'the agenthail server carries the session credential');
   assert.equal(flag('--allowedTools'), 'mcp__agenthail', spawned.argv.join(' '));
   await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_first' } });
   await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url, token: 'ahs_second' } });
   const controls = fs.readFileSync(path.join(f.claudeDir, 'controls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.subtype === 'mcp_set_servers');
   assert.equal(controls.length, 1);
-  assert.equal(controls[0].servers.agenthail.headers.Authorization, 'Bearer ahs_second');
+  assert.ok(controls[0].servers.agenthail.headers.Authorization === 'Bearer ahs_second', 'the live swap carries the new credential');
   c.close();
 });
 

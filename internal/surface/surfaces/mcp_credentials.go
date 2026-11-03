@@ -1,6 +1,9 @@
 package surfaces
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 const (
 	mcpServerName     = "agenthail"
@@ -9,7 +12,7 @@ const (
 
 type MCPCredentials interface {
 	URL() string
-	Pending() (token, ref string, err error)
+	Pending(ctx context.Context) (token, ref string, err error)
 	Claim(ref, sessionID string) error
 	Live(sessionID string) (token string, ok bool)
 	Rotate(sessionID string) (token string, err error)

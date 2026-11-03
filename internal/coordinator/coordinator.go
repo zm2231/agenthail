@@ -24,7 +24,7 @@ type Service struct {
 	Adapters     surface.Adapters
 	Dispatcher   delivery.Dispatcher
 	ClaudeRoot   func(context.Context) string
-	LeadsChanged func()
+	LeadsChanged func(started string)
 }
 
 type Outcome struct {
@@ -277,7 +277,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		}
 	}
 	messageUUID := uuid.NewString()
-	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
+	session, sent, startErr := starter.StartSession(surface.WithLeadStart(surface.WithMessageUUID(ctx, messageUUID)), options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
@@ -291,11 +291,12 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if err := s.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: session.ID, Via: registry.OriginCoordinator}); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded as the coordinator's: %w", session.ID, err))
 	}
-	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
-	}
+	handOverErr := s.Registry.HandOverCoordinator(spec, previous, session.ID)
 	if s.LeadsChanged != nil {
-		s.LeadsChanged()
+		s.LeadsChanged(session.ID)
+	}
+	if handOverErr != nil {
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, handOverErr))
 	}
 	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
 	if startErr != nil {
