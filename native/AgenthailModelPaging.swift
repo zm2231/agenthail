@@ -74,9 +74,9 @@ extension AgenthailModel {
         }
     }
 
-    func indexSpotlight(_ publish: @escaping ([SpotlightEntry]) -> Void) {
+    func indexSpotlight(priority: TaskPriority = .utility, _ publish: @escaping ([SpotlightEntry]) -> Void) {
         guard spotlightCatalog == nil else { return }
-        let catalog = SpotlightCatalog(api: { [weak self] in self?.api }, publish: publish)
+        let catalog = SpotlightCatalog(priority: priority, api: { [weak self] in self?.api }, publish: publish)
         spotlightCatalog = catalog
         catalog.epoch(snapshot?.hostEpoch)
     }

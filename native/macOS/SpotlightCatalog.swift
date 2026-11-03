@@ -10,8 +10,10 @@ final class SpotlightCatalog {
     private var touched: Set<String> = []
     private let api: () -> AgenthailAPI?
     private let publish: ([SpotlightEntry]) -> Void
+    private let priority: TaskPriority
 
-    init(api: @escaping () -> AgenthailAPI?, publish: @escaping ([SpotlightEntry]) -> Void) {
+    init(priority: TaskPriority = .utility, api: @escaping () -> AgenthailAPI?, publish: @escaping ([SpotlightEntry]) -> Void) {
+        self.priority = priority
         self.api = api
         self.publish = publish
     }
@@ -23,7 +25,7 @@ final class SpotlightCatalog {
         walkedEpoch = epoch
         walk?.cancel()
         touched = []
-        walk = Task(priority: .background) { [weak self] in
+        walk = Task(priority: priority) { [weak self] in
             await self?.walkAll(epoch: epoch)
         }
     }

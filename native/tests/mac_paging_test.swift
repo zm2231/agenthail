@@ -62,7 +62,8 @@ struct MacPagingTest {
 
     @MainActor
     static func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<300 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() && Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
         return condition()
     }
 
@@ -132,9 +133,9 @@ struct MacPagingTest {
         model.sessionFilter = .all
         try? await Task.sleep(for: .milliseconds(1))
         let deadline = Date().addingTimeInterval(3)
-        while PagingDaemon.lock.withLock({ PagingDaemon.servedFirstAll }) == served && Date() < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        while PagingDaemon.lock.withLock({ PagingDaemon.servedFirstAll }) == served && Date() < deadline { usleep(5_000) }
         check(Date() < deadline, "All asked for its first page")
-        Thread.sleep(forTimeInterval: 0.05)
+        usleep(50_000)
         PagingDaemon.firstAll = ["fresh"]
         model.sessionFilter = .archived
         model.sessionFilter = .all
@@ -145,8 +146,9 @@ struct MacPagingTest {
         model.sessionFilter = .recent
 
         var published: [[SpotlightEntry]] = []
-        model.indexSpotlight { published.append($0) }
-        check(await settle { !published.isEmpty }, "Spotlight is walked once")
+        model.indexSpotlight(priority: .userInitiated) { published.append($0) }
+        _ = await settle { !published.isEmpty || model.spotlightCatalog?.walking != true }
+        check(!published.isEmpty, "Spotlight is walked once: walking \(model.spotlightCatalog?.walking == true), epoch \(model.spotlightCatalog?.walkedEpoch ?? "none"), \(PagingDaemon.lock.withLock { PagingDaemon.requests.suffix(6) })")
         check(Set(published.last!.map(\.id)) == ["live", "older", "oldest", "zeta", "shelved"], "the walk covers every session, archived too: \(published.last!.map(\.id))")
         let walks = PagingDaemon.requests.filter { $0.contains("scope=archived") }.count
         _ = await model.refresh()
