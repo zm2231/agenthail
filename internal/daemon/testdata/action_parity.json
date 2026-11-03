@@ -1,0 +1,702 @@
+{
+  "alias": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "alias": "renamed",
+      "ok": true
+    }
+  },
+  "alias invalid": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "name must be 1 to 80 characters without spaces, /, or #"
+      }
+    }
+  },
+  "attachments outside send": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "attachments are only accepted with send"
+      }
+    }
+  },
+  "channel-add": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "channel-create": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "channel-create taken": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "constraint failed: UNIQUE constraint failed: channels.name (2067)"
+      }
+    }
+  },
+  "channel-delete": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "channel-remove": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "session \"to\" is not a member of channel \"team\""
+      }
+    }
+  },
+  "channel-rename": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "channel-send": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "#team has no members other than the sender"
+      }
+    }
+  },
+  "compact": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "evidence": "delivered",
+        "sessionId": "to",
+        "status": ""
+      }
+    }
+  },
+  "context": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support Claude Remote Control commands"
+      }
+    }
+  },
+  "coordinator-clear": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "projectId is required"
+      }
+    }
+  },
+  "coordinator-new": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "claude is not configured to start conversations on \u003chost\u003e"
+      }
+    }
+  },
+  "coordinator-send": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "no_coordinator",
+        "message": "\u003chost\u003e has no coordinator @nobody"
+      }
+    }
+  },
+  "coordinator-set": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "to has no working directory on this host to start again in"
+      }
+    }
+  },
+  "delivery-dismiss": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "not_found",
+        "message": "delivery problem not found"
+      }
+    }
+  },
+  "effort": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support Claude Remote Control commands"
+      }
+    }
+  },
+  "goal-budget": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support typed goal controls"
+      }
+    }
+  },
+  "goal-budget invalid": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support typed goal controls"
+      }
+    }
+  },
+  "goal-clear": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
+      }
+    }
+  },
+  "goal-edit": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
+      }
+    }
+  },
+  "goal-pause": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support typed goal controls"
+      }
+    }
+  },
+  "goal-resume": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support typed goal controls"
+      }
+    }
+  },
+  "goal-set": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
+      }
+    }
+  },
+  "interrupt": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "action": "interrupt",
+        "evidence": "delivered",
+        "sessionId": "to",
+        "source": "codex"
+      }
+    }
+  },
+  "invalid json": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid dashboard request"
+      }
+    }
+  },
+  "limit-move": {
+    "status": 409,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "move_refused",
+        "message": "this session is not waiting on a usage limit"
+      }
+    }
+  },
+  "limit-resume": {
+    "status": 409,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "conflict",
+        "message": "this session is not stopped by a usage limit"
+      }
+    }
+  },
+  "limit-resume-cancel": {
+    "status": 409,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "conflict",
+        "message": "this session is not stopped by a usage limit"
+      }
+    }
+  },
+  "model": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "action": "model",
+        "evidence": "delivered",
+        "sessionId": "to",
+        "source": "codex"
+      }
+    }
+  },
+  "model empty": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "model is required"
+      }
+    }
+  },
+  "native-queue": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_operation_failed",
+        "message": "operation not supported by this surface"
+      }
+    }
+  },
+  "no session": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "sessionId is required"
+      }
+    }
+  },
+  "notion-create": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "bad_gateway",
+        "message": "Notion is not configured"
+      }
+    }
+  },
+  "permission-mode": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "action": "permission-mode",
+        "evidence": "delivered",
+        "sessionId": "to",
+        "source": "codex"
+      }
+    }
+  },
+  "project-add": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "folder_not_found",
+        "message": "\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e"
+      }
+    }
+  },
+  "project-archive": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "project_not_found",
+        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
+      }
+    }
+  },
+  "project-remove": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "project_not_found",
+        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
+      }
+    }
+  },
+  "project-rename": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "project_not_found",
+        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
+      }
+    }
+  },
+  "project-unarchive": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "project_not_found",
+        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
+      }
+    }
+  },
+  "queue-cancel": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "queue-retry": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "queue item 1 is not dead-lettered"
+      }
+    }
+  },
+  "queue-retry missing": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "sql: no rows in result set"
+      }
+    }
+  },
+  "relay-add": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "relay-remove": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true
+    }
+  },
+  "rename": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support Claude Remote Control commands"
+      }
+    }
+  },
+  "respond": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session's requests are not answered through Agenthail"
+      }
+    }
+  },
+  "runtime-ensure": {
+    "status": 409,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "conflict",
+        "message": "Codex managed runtime cannot be repaired here"
+      }
+    }
+  },
+  "send": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "deliveryId": 1,
+        "detail": "Sent to to.",
+        "evidence": "delivered",
+        "messageId": "\u003cuuid\u003e",
+        "sessionId": "to",
+        "status": "sent",
+        "turnId": "turn"
+      }
+    }
+  },
+  "send as person": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "deliveryId": 1,
+        "detail": "Sent to to.",
+        "evidence": "delivered",
+        "messageId": "\u003cuuid\u003e",
+        "sessionId": "to",
+        "status": "sent",
+        "turnId": "turn"
+      }
+    }
+  },
+  "send empty": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "message is required"
+      }
+    }
+  },
+  "send from session": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "deliveryId": 1,
+        "detail": "Sent to to.",
+        "evidence": "delivered",
+        "messageId": "\u003cuuid\u003e",
+        "sessionId": "to",
+        "status": "sent",
+        "turnId": "turn"
+      }
+    }
+  },
+  "send unknown source": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "source session not found"
+      }
+    }
+  },
+  "session-adopt": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_adopt_unsupported",
+        "message": "codex sessions cannot be opened in Agenthail"
+      }
+    }
+  },
+  "session-archive": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "archived": true,
+      "ok": true,
+      "sessionId": "to"
+    }
+  },
+  "session-create": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "approval policy is invalid"
+      }
+    }
+  },
+  "session-create unknown creator": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "sourceSessionId ghost is not a session here"
+      }
+    }
+  },
+  "session-focus": {
+    "status": 409,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "conflict",
+        "message": "session is not focusable"
+      }
+    }
+  },
+  "session-fork": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_operation_failed",
+        "message": "operation not supported by this surface"
+      }
+    }
+  },
+  "session-lifecycle-logs": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_operation_failed",
+        "message": "operation not supported by this surface"
+      }
+    }
+  },
+  "session-lifecycle-status": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_operation_failed",
+        "message": "operation not supported by this surface"
+      }
+    }
+  },
+  "session-lifecycle-stop": {
+    "status": 502,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "session_operation_failed",
+        "message": "operation not supported by this surface"
+      }
+    }
+  },
+  "session-unarchive": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "archived": false,
+      "ok": true,
+      "sessionId": "to"
+    }
+  },
+  "status": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support Claude Remote Control commands"
+      }
+    }
+  },
+  "steer": {
+    "status": 200,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "ok": true,
+      "result": {
+        "deliveryId": 1,
+        "detail": "Sent to to.",
+        "evidence": "delivered",
+        "messageId": "\u003cuuid\u003e",
+        "sessionId": "to",
+        "source": "codex",
+        "status": "sent"
+      }
+    }
+  },
+  "unknown action": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "unsupported dashboard action"
+      }
+    }
+  },
+  "unknown session": {
+    "status": 404,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "not_found",
+        "message": "session not found"
+      }
+    }
+  },
+  "usage": {
+    "status": 400,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "message": "this session does not support Claude Remote Control commands"
+      }
+    }
+  }
+}
