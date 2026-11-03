@@ -10,9 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var actionRequestTypes = map[string]bool{"dashboardActionRequest": true, "projectRequest": true, "coordinatorRequest": true}
+
+// actionFamilies lists the members of a prefix-dispatched family whose names
+// are passed on to a surface rather than compared in this package.
+var actionFamilies = map[string][]string{"session-lifecycle-": surface.LifecycleOperations}
 
 func dispatchedActionNames(t *testing.T) []string {
 	t.Helper()
@@ -21,6 +27,7 @@ func dispatchedActionNames(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	names := map[string]bool{}
+	prefixes := map[string]bool{}
 	fset := token.NewFileSet()
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
@@ -41,6 +48,10 @@ func dispatchedActionNames(t *testing.T) []string {
 			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				switch node := node.(type) {
+				case *ast.CallExpr:
+					if call, ok := node.Fun.(*ast.SelectorExpr); ok && call.Sel.Name == "HasPrefix" && len(node.Args) == 2 && isActionExpr(node.Args[0]) {
+						addLiteral(prefixes, node.Args[1])
+					}
 				case *ast.BinaryExpr:
 					if node.Op == token.EQL || node.Op == token.NEQ {
 						if isActionExpr(node.X) {
@@ -60,6 +71,21 @@ func dispatchedActionNames(t *testing.T) []string {
 				}
 				return true
 			})
+		}
+	}
+	for prefix := range prefixes {
+		if members, declared := actionFamilies[prefix]; declared {
+			for _, member := range members {
+				names[prefix+member] = true
+			}
+			continue
+		}
+		listed := false
+		for name := range names {
+			listed = listed || strings.HasPrefix(name, prefix)
+		}
+		if !listed {
+			t.Fatalf("actions starting %q are dispatched by prefix, but none is named in the source; declare the family in actionFamilies", prefix)
 		}
 	}
 	list := make([]string, 0, len(names))
@@ -112,7 +138,7 @@ func addLiteral(names map[string]bool, expr ast.Expr) {
 func TestDispatchedActionNamesAreFound(t *testing.T) {
 	names := dispatchedActionNames(t)
 	t.Logf("%d actions: %s", len(names), strings.Join(names, " "))
-	for _, want := range []string{"send", "steer", "respond", "session-create", "session-fork", "coordinator-send", "project-add", "channel-send", "relay-add", "goal-set"} {
+	for _, want := range []string{"send", "steer", "respond", "session-create", "session-fork", "coordinator-send", "project-add", "channel-send", "relay-add", "goal-set", "session-lifecycle-resume", "codex-launch"} {
 		if sort.SearchStrings(names, want) == len(names) || names[sort.SearchStrings(names, want)] != want {
 			t.Fatalf("the scan missed %q; it found %v", want, names)
 		}

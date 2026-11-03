@@ -110,6 +110,7 @@ func parityCases() []parityCase {
 		session("session-lifecycle-stop", "session-lifecycle-stop", ``),
 		session("session-lifecycle-status", "session-lifecycle-status", ``),
 		session("session-lifecycle-logs", "session-lifecycle-logs", ``),
+		session("session-lifecycle-resume", "session-lifecycle-resume", ``),
 		{name: "session-create", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","approvalPolicy":"sometimes"}`},
 		{name: "session-create unknown creator", action: "session-create", body: `{"action":"session-create","surface":"codex","message":"go","sourceSessionId":"ghost"}`},
 		{name: "notion-create", action: "notion-create", body: `{"action":"notion-create","message":"go","alias":"bad name"}`},
@@ -142,11 +143,18 @@ func parityCases() []parityCase {
 	return cases
 }
 
+type parityLifecycleSurface struct{ *daemonSurface }
+
+func (s parityLifecycleSurface) SessionAction(_ context.Context, session *surface.Session, action string) (map[string]any, error) {
+	return map[string]any{"action": action, "sessionId": session.ID}, nil
+}
+
 func parityDaemon(t *testing.T, setup func(*testing.T, *Daemon, *registry.Registry)) *Daemon {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.caps = surface.Capabilities{Send: true, Steer: true, Interrupt: true, Compact: true, Goal: true, Model: true, PermissionMode: true, Commands: true, Attach: true}
+	d.Surfaces = []surface.Surface{parityLifecycleSurface{fake}}
 	d.notifyDesktop = func(string, string, string, string, string, []surface.RequestAction) error { return nil }
 	if setup != nil {
 		setup(t, d, r)
@@ -155,9 +163,18 @@ func parityDaemon(t *testing.T, setup func(*testing.T, *Daemon, *registry.Regist
 }
 
 type parityReply struct {
-	Status      int    `json:"status"`
-	ContentType string `json:"contentType"`
-	Body        any    `json:"body"`
+	Status int                 `json:"status"`
+	Header map[string][]string `json:"header"`
+	Body   string              `json:"body"`
+}
+
+var parityFormats = []struct {
+	name   string
+	format actionFormat
+	path   string
+}{
+	{"api/v1/actions", actionFormatAPIv1, "/api/v1/actions"},
+	{"api/action", actionFormatDashboard, "/api/action"},
 }
 
 var parityVolatile = []struct {
@@ -168,8 +185,9 @@ var parityVolatile = []struct {
 	{regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`), "<uuid>"},
 }
 
-func normalizeParity(t *testing.T, d *Daemon, raw []byte) any {
-	t.Helper()
+var parityTestDir = regexp.MustCompile(`<tmp>/Test[^/"\s]*/\d+`)
+
+func normalizeParity(d *Daemon, raw []byte) string {
 	text := string(raw)
 	if cwd, err := os.Getwd(); err == nil {
 		text = strings.ReplaceAll(text, cwd, "<cwd>")
@@ -177,24 +195,23 @@ func normalizeParity(t *testing.T, d *Daemon, raw []byte) any {
 	if host := d.hostIdentity().Name; host != "" {
 		text = strings.ReplaceAll(text, host, "<host>")
 	}
-	for _, dir := range []string{os.TempDir(), filepath.Clean(os.TempDir()), "/private" + filepath.Clean(os.TempDir())} {
+	for _, dir := range []string{"/private" + filepath.Clean(os.TempDir()), filepath.Clean(os.TempDir())} {
 		text = strings.ReplaceAll(text, dir, "<tmp>")
 	}
-	text = regexp.MustCompile(`<tmp>/?[^"\s]*`).ReplaceAllString(text, "<tmp>")
+	text = parityTestDir.ReplaceAllString(text, "<tmp>")
 	for _, volatile := range parityVolatile {
 		text = volatile.pattern.ReplaceAllString(text, volatile.value)
 	}
-	var value any
-	if err := json.Unmarshal([]byte(text), &value); err != nil {
-		return text
-	}
-	return value
+	return text
 }
 
-func replyOverHTTP(t *testing.T, d *Daemon, body string) actionReply {
-	t.Helper()
+func parityOf(d *Daemon, reply actionReply) parityReply {
+	return parityReply{Status: reply.Status, Header: reply.Header, Body: normalizeParity(d, reply.Body)}
+}
+
+func replyOverHTTP(d *Daemon, format actionFormat, path, body string) actionReply {
 	recorder := httptest.NewRecorder()
-	d.actionsHTTPHandler(actionFormatAPIv1)(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(body)))
+	d.actionsHTTPHandler(format)(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
 	return actionReply{Status: recorder.Code, Header: recorder.Header(), Body: recorder.Body.Bytes()}
 }
 
@@ -212,30 +229,31 @@ func TestEveryActionRepliesTheSameThroughEveryFrontEnd(t *testing.T) {
 	}
 	got := map[string]parityReply{}
 	for _, c := range parityCases() {
-		t.Run(c.name, func(t *testing.T) {
-			viaHTTP, viaService := parityDaemon(t, c.setup), parityDaemon(t, c.setup)
-			overHTTP := replyOverHTTP(t, viaHTTP, c.body)
-			direct := viaService.performAction(context.Background(), principal{ID: "parity", Kind: principalPerson}, actionFormatAPIv1, []byte(c.body), "")
-			httpReply := parityReply{Status: overHTTP.Status, ContentType: overHTTP.Header.Get("Content-Type"), Body: normalizeParity(t, viaHTTP, overHTTP.Body)}
-			directReply := parityReply{Status: direct.Status, ContentType: direct.Header.Get("Content-Type"), Body: normalizeParity(t, viaService, direct.Body)}
-			httpJSON, _ := json.Marshal(httpReply)
-			directJSON, _ := json.Marshal(directReply)
-			if !bytes.Equal(httpJSON, directJSON) {
-				t.Fatalf("HTTP replied %s, the service replied %s", httpJSON, directJSON)
-			}
-			got[c.name] = httpReply
-			if *updateActionParity {
-				return
-			}
-			want, ok := recorded[c.name]
-			if !ok {
-				t.Fatalf("no recorded reply for %q; record it with -update-action-parity", c.name)
-			}
-			wantJSON, _ := json.Marshal(want)
-			if !bytes.Equal(httpJSON, wantJSON) {
-				t.Fatalf("reply changed:\n got %s\nwant %s", httpJSON, wantJSON)
-			}
-		})
+		for _, front := range parityFormats {
+			key := front.name + " " + c.name
+			t.Run(key, func(t *testing.T) {
+				viaHTTP, viaService := parityDaemon(t, c.setup), parityDaemon(t, c.setup)
+				httpJSON, _ := json.Marshal(parityOf(viaHTTP, replyOverHTTP(viaHTTP, front.format, front.path, c.body)))
+				directJSON, _ := json.Marshal(parityOf(viaService, viaService.performAction(context.Background(), principal{ID: "parity", Kind: principalPerson}, front.format, []byte(c.body), "")))
+				if !bytes.Equal(httpJSON, directJSON) {
+					t.Fatalf("HTTP replied %s, the service replied %s", httpJSON, directJSON)
+				}
+				var reply parityReply
+				_ = json.Unmarshal(httpJSON, &reply)
+				got[key] = reply
+				if *updateActionParity {
+					return
+				}
+				want, ok := recorded[key]
+				if !ok {
+					t.Fatalf("no recorded reply for %q; record it with -update-action-parity", key)
+				}
+				wantJSON, _ := json.Marshal(want)
+				if !bytes.Equal(httpJSON, wantJSON) {
+					t.Fatalf("reply changed:\n got %s\nwant %s", httpJSON, wantJSON)
+				}
+			})
+		}
 	}
 	if *updateActionParity {
 		raw, err := json.MarshalIndent(got, "", "  ")

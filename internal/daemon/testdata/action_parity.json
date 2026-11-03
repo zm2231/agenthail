@@ -1,720 +1,1730 @@
 {
-  "alias": {
+  "api/action alias": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "alias": "renamed",
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"alias\":\"renamed\",\"ok\":true}\n"
   },
-  "alias invalid": {
+  "api/action alias invalid": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "name must be 1 to 80 characters without spaces, /, or #"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
   },
-  "attachments outside send": {
+  "api/action attachments outside send": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "attachments are only accepted with send"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"attachments are only accepted with send\"}}\n"
   },
-  "channel-add": {
+  "api/action channel-add": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "channel-create": {
+  "api/action channel-create": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "channel-create taken": {
+  "api/action channel-create taken": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "constraint failed: UNIQUE constraint failed: channels.name (2067)"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"constraint failed: UNIQUE constraint failed: channels.name (2067)\"}}\n"
   },
-  "channel-delete": {
+  "api/action channel-delete": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "channel-remove": {
+  "api/action channel-remove": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "session \"to\" is not a member of channel \"team\""
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"session \\\"to\\\" is not a member of channel \\\"team\\\"\"}}\n"
   },
-  "channel-rename": {
+  "api/action channel-rename": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "channel-send": {
+  "api/action channel-send": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "#team has no members other than the sender"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"#team has no members other than the sender\"}}\n"
   },
-  "codex-launch": {
+  "api/action codex-launch": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": "Codex is running"
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":\"Codex is running\"}\n"
   },
-  "codex-launch failing": {
+  "api/action codex-launch failing": {
     "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "bad_gateway",
-        "message": "Codex is not installed: exit status 1"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Codex is not installed: exit status 1\"}}\n"
   },
-  "compact": {
+  "api/action compact": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "evidence": "delivered",
-        "sessionId": "to",
-        "status": ""
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
   },
-  "context": {
+  "api/action context": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support Claude Remote Control commands"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
   },
-  "coordinator-clear": {
+  "api/action coordinator-clear": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "projectId is required"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
-  "coordinator-new": {
+  "api/action coordinator-new": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "claude is not configured to start conversations on \u003chost\u003e"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
   },
-  "coordinator-send": {
+  "api/action coordinator-send": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "no_coordinator",
-        "message": "\u003chost\u003e has no coordinator @nobody"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
   },
-  "coordinator-set": {
+  "api/action coordinator-set": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "to has no working directory on this host to start again in"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"to has no working directory on this host to start again in\"}}\n"
   },
-  "delivery-dismiss": {
+  "api/action delivery-dismiss": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "not_found",
-        "message": "delivery problem not found"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery problem not found\"}}\n"
   },
-  "effort": {
+  "api/action effort": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support Claude Remote Control commands"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
   },
-  "goal-budget": {
+  "api/action goal-budget": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support typed goal controls"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
   },
-  "goal-budget invalid": {
+  "api/action goal-budget invalid": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support typed goal controls"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
   },
-  "goal-clear": {
+  "api/action goal-clear": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
   },
-  "goal-edit": {
+  "api/action goal-edit": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
   },
-  "goal-pause": {
+  "api/action goal-pause": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support typed goal controls"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
   },
-  "goal-resume": {
+  "api/action goal-resume": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support typed goal controls"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
   },
-  "goal-set": {
+  "api/action goal-set": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "delivery rejected [invalid request]: codex cannot set or clear this session's goal"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
   },
-  "interrupt": {
+  "api/action interrupt": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "action": "interrupt",
-        "evidence": "delivered",
-        "sessionId": "to",
-        "source": "codex"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
   },
-  "invalid json": {
+  "api/action invalid json": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "invalid dashboard request"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
   },
-  "limit-move": {
+  "api/action limit-move": {
     "status": 409,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "move_refused",
-        "message": "this session is not waiting on a usage limit"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"this session is not waiting on a usage limit\"}}\n"
   },
-  "limit-resume": {
+  "api/action limit-resume": {
     "status": 409,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "conflict",
-        "message": "this session is not stopped by a usage limit"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
-  "limit-resume-cancel": {
+  "api/action limit-resume-cancel": {
     "status": 409,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "conflict",
-        "message": "this session is not stopped by a usage limit"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
   },
-  "model": {
+  "api/action model": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "action": "model",
-        "evidence": "delivered",
-        "sessionId": "to",
-        "source": "codex"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
   },
-  "model empty": {
+  "api/action model empty": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "model is required"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"model is required\"}}\n"
   },
-  "native-queue": {
+  "api/action native-queue": {
     "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_operation_failed",
-        "message": "operation not supported by this surface"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
   },
-  "no session": {
+  "api/action no session": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "sessionId is required"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sessionId is required\"}}\n"
   },
-  "notion-create": {
+  "api/action notion-create": {
     "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "bad_gateway",
-        "message": "Notion is not configured"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Notion is not configured\"}}\n"
   },
-  "permission-mode": {
+  "api/action permission-mode": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "action": "permission-mode",
-        "evidence": "delivered",
-        "sessionId": "to",
-        "source": "codex"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
   },
-  "project-add": {
+  "api/action project-add": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "folder_not_found",
-        "message": "\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e\"}}\n"
   },
-  "project-archive": {
+  "api/action project-archive": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "project_not_found",
-        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
-  "project-remove": {
+  "api/action project-remove": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "project_not_found",
-        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
-  "project-rename": {
+  "api/action project-rename": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "project_not_found",
-        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
-  "project-unarchive": {
+  "api/action project-unarchive": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "project_not_found",
-        "message": "project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
-  "queue-cancel": {
+  "api/action queue-cancel": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "queue-retry": {
+  "api/action queue-retry": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "queue item 1 is not dead-lettered"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"queue item 1 is not dead-lettered\"}}\n"
   },
-  "queue-retry missing": {
+  "api/action queue-retry missing": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "sql: no rows in result set"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sql: no rows in result set\"}}\n"
   },
-  "relay-add": {
+  "api/action relay-add": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "relay-remove": {
+  "api/action relay-remove": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
   },
-  "rename": {
+  "api/action rename": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support Claude Remote Control commands"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
   },
-  "respond": {
+  "api/action respond": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session's requests are not answered through Agenthail"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session's requests are not answered through Agenthail\"}}\n"
   },
-  "runtime-ensure": {
+  "api/action runtime-ensure": {
     "status": 409,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "conflict",
-        "message": "Codex managed runtime cannot be repaired here"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"Codex managed runtime cannot be repaired here\"}}\n"
   },
-  "send": {
+  "api/action send": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "deliveryId": 1,
-        "detail": "Sent to to.",
-        "evidence": "delivered",
-        "messageId": "\u003cuuid\u003e",
-        "sessionId": "to",
-        "status": "sent",
-        "turnId": "turn"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
-  "send as person": {
+  "api/action send as person": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "deliveryId": 1,
-        "detail": "Sent to to.",
-        "evidence": "delivered",
-        "messageId": "\u003cuuid\u003e",
-        "sessionId": "to",
-        "status": "sent",
-        "turnId": "turn"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
-  "send empty": {
+  "api/action send empty": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "message is required"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
   },
-  "send from session": {
+  "api/action send from session": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "deliveryId": 1,
-        "detail": "Sent to to.",
-        "evidence": "delivered",
-        "messageId": "\u003cuuid\u003e",
-        "sessionId": "to",
-        "status": "sent",
-        "turnId": "turn"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
   },
-  "send unknown source": {
+  "api/action send unknown source": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "source session not found"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
-  "session-adopt": {
+  "api/action session-adopt": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_adopt_unsupported",
-        "message": "codex sessions cannot be opened in Agenthail"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_unsupported\",\"message\":\"codex sessions cannot be opened in Agenthail\"}}\n"
   },
-  "session-archive": {
+  "api/action session-archive": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "archived": true,
-      "ok": true,
-      "sessionId": "to"
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":true,\"ok\":true,\"sessionId\":\"to\"}\n"
   },
-  "session-create": {
+  "api/action session-create": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "approval policy is invalid"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"approval policy is invalid\"}}\n"
   },
-  "session-create unknown creator": {
+  "api/action session-create unknown creator": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "sourceSessionId ghost is not a session here"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
   },
-  "session-focus": {
+  "api/action session-focus": {
     "status": 409,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "conflict",
-        "message": "session is not focusable"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
   },
-  "session-fork": {
+  "api/action session-fork": {
     "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_operation_failed",
-        "message": "operation not supported by this surface"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
   },
-  "session-lifecycle-logs": {
-    "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_operation_failed",
-        "message": "operation not supported by this surface"
-      }
-    }
-  },
-  "session-lifecycle-status": {
-    "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_operation_failed",
-        "message": "operation not supported by this surface"
-      }
-    }
-  },
-  "session-lifecycle-stop": {
-    "status": 502,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "session_operation_failed",
-        "message": "operation not supported by this surface"
-      }
-    }
-  },
-  "session-unarchive": {
+  "api/action session-lifecycle-logs": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "archived": false,
-      "ok": true,
-      "sessionId": "to"
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"logs\",\"sessionId\":\"to\"}}\n"
   },
-  "status": {
-    "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support Claude Remote Control commands"
-      }
-    }
-  },
-  "steer": {
+  "api/action session-lifecycle-resume": {
     "status": 200,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "ok": true,
-      "result": {
-        "deliveryId": 1,
-        "detail": "Sent to to.",
-        "evidence": "delivered",
-        "messageId": "\u003cuuid\u003e",
-        "sessionId": "to",
-        "source": "codex",
-        "status": "sent"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"resume\",\"sessionId\":\"to\"}}\n"
   },
-  "unknown action": {
+  "api/action session-lifecycle-status": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"status\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/action session-lifecycle-stop": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/action session-unarchive": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/action status": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "unsupported dashboard action"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
   },
-  "unknown session": {
+  "api/action steer": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"codex\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/action unknown action": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unsupported dashboard action\"}}\n"
+  },
+  "api/action unknown session": {
     "status": 404,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "not_found",
-        "message": "session not found"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"session not found\"}}\n"
   },
-  "usage": {
+  "api/action usage": {
     "status": 400,
-    "contentType": "application/json; charset=utf-8",
-    "body": {
-      "error": {
-        "code": "invalid_request",
-        "message": "this session does not support Claude Remote Control commands"
-      }
-    }
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+  },
+  "api/v1/actions alias": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"alias\":\"renamed\",\"ok\":true}\n"
+  },
+  "api/v1/actions alias invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name must be 1 to 80 characters without spaces, /, or #\"}}\n"
+  },
+  "api/v1/actions attachments outside send": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"attachments are only accepted with send\"}}\n"
+  },
+  "api/v1/actions channel-add": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions channel-create": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions channel-create taken": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"constraint failed: UNIQUE constraint failed: channels.name (2067)\"}}\n"
+  },
+  "api/v1/actions channel-delete": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions channel-remove": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"session \\\"to\\\" is not a member of channel \\\"team\\\"\"}}\n"
+  },
+  "api/v1/actions channel-rename": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions channel-send": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"#team has no members other than the sender\"}}\n"
+  },
+  "api/v1/actions codex-launch": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":\"Codex is running\"}\n"
+  },
+  "api/v1/actions codex-launch failing": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Codex is not installed: exit status 1\"}}\n"
+  },
+  "api/v1/actions compact": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions context": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+  },
+  "api/v1/actions coordinator-clear": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
+  },
+  "api/v1/actions coordinator-new": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"claude is not configured to start conversations on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions coordinator-send": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_coordinator\",\"message\":\"\u003chost\u003e has no coordinator @nobody\"}}\n"
+  },
+  "api/v1/actions coordinator-set": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"to has no working directory on this host to start again in\"}}\n"
+  },
+  "api/v1/actions delivery-dismiss": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery problem not found\"}}\n"
+  },
+  "api/v1/actions effort": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+  },
+  "api/v1/actions goal-budget": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+  },
+  "api/v1/actions goal-budget invalid": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+  },
+  "api/v1/actions goal-clear": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
+  },
+  "api/v1/actions goal-edit": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
+  },
+  "api/v1/actions goal-pause": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+  },
+  "api/v1/actions goal-resume": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support typed goal controls\"}}\n"
+  },
+  "api/v1/actions goal-set": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: codex cannot set or clear this session's goal\"}}\n"
+  },
+  "api/v1/actions interrupt": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"interrupt\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+  },
+  "api/v1/actions invalid json": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"invalid dashboard request\"}}\n"
+  },
+  "api/v1/actions limit-move": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"move_refused\",\"message\":\"this session is not waiting on a usage limit\"}}\n"
+  },
+  "api/v1/actions limit-resume": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
+  },
+  "api/v1/actions limit-resume-cancel": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"this session is not stopped by a usage limit\"}}\n"
+  },
+  "api/v1/actions model": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"model\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+  },
+  "api/v1/actions model empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"model is required\"}}\n"
+  },
+  "api/v1/actions native-queue": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+  },
+  "api/v1/actions no session": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sessionId is required\"}}\n"
+  },
+  "api/v1/actions notion-create": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"Notion is not configured\"}}\n"
+  },
+  "api/v1/actions permission-mode": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"codex\"}}\n"
+  },
+  "api/v1/actions project-add": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"folder_not_found\",\"message\":\"\u003ccwd\u003e/relative/path is not a folder on \u003chost\u003e\"}}\n"
+  },
+  "api/v1/actions project-archive": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions project-remove": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions project-rename": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions project-unarchive": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
+  },
+  "api/v1/actions queue-cancel": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions queue-retry": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"queue item 1 is not dead-lettered\"}}\n"
+  },
+  "api/v1/actions queue-retry missing": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sql: no rows in result set\"}}\n"
+  },
+  "api/v1/actions relay-add": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions relay-remove": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions rename": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+  },
+  "api/v1/actions respond": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session's requests are not answered through Agenthail\"}}\n"
+  },
+  "api/v1/actions runtime-ensure": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"Codex managed runtime cannot be repaired here\"}}\n"
+  },
+  "api/v1/actions send": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions send as person": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions send empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"message is required\"}}\n"
+  },
+  "api/v1/actions send from session": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions send unknown source": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
+  },
+  "api/v1/actions session-adopt": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_adopt_unsupported\",\"message\":\"codex sessions cannot be opened in Agenthail\"}}\n"
+  },
+  "api/v1/actions session-archive": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":true,\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions session-create": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"approval policy is invalid\"}}\n"
+  },
+  "api/v1/actions session-create unknown creator": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"sourceSessionId ghost is not a session here\"}}\n"
+  },
+  "api/v1/actions session-focus": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"session is not focusable\"}}\n"
+  },
+  "api/v1/actions session-fork": {
+    "status": 502,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"operation not supported by this surface\"}}\n"
+  },
+  "api/v1/actions session-lifecycle-logs": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"logs\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions session-lifecycle-resume": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"resume\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions session-lifecycle-status": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"status\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions session-lifecycle-stop": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"action\":\"stop\",\"sessionId\":\"to\"}}\n"
+  },
+  "api/v1/actions session-unarchive": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions status": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
+  },
+  "api/v1/actions steer": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"codex\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+  },
+  "api/v1/actions unknown action": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"unsupported dashboard action\"}}\n"
+  },
+  "api/v1/actions unknown session": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"session not found\"}}\n"
+  },
+  "api/v1/actions usage": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session does not support Claude Remote Control commands\"}}\n"
   }
 }

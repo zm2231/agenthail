@@ -199,7 +199,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 	}
 }
 func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, action string) (map[string]any, error) {
-	if action != "stop" && action != "resume" && action != "logs" && action != "status" {
+	if !slices.Contains(surface.LifecycleOperations, action) {
 		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
 	root, err := c.conversationRoot(session.ID)

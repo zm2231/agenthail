@@ -5,6 +5,9 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type actionFormat int
@@ -108,8 +111,20 @@ func (d *Daemon) actionsHTTPHandler(format actionFormat) http.HandlerFunc {
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
-		body, _ := io.ReadAll(io.LimitReader(r.Body, actionRequestBodyLimit+1))
+		key := r.Header.Get(actionIdempotencyHeader)
+		body, err := io.ReadAll(io.LimitReader(r.Body, actionRequestBodyLimit+1))
 		r.Body.Close()
-		d.performAction(r.Context(), principalFromRequest(r), format, body, r.Header.Get(actionIdempotencyHeader)).write(w)
+		if err != nil {
+			if trimmed := strings.TrimSpace(key); len(trimmed) > registry.ActionReceiptKeyLimit {
+				writeAPIError(w, http.StatusBadRequest, "invalid_idempotency_key", "The Idempotency-Key is too long.")
+				return
+			} else if trimmed != "" {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
+				return
+			}
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
+			return
+		}
+		d.performAction(r.Context(), principalFromRequest(r), format, body, key).write(w)
 	}
 }

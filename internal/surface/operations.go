@@ -54,6 +54,8 @@ type SessionForker interface {
 	ForkSession(context.Context, *Session, ForkOptions) (*Session, error)
 }
 
+var LifecycleOperations = []string{"status", "stop", "resume", "logs"}
+
 // SessionLifecycle runs a status, logs, stop or resume action on a session.
 // A resume points the session at the process it reached, so the caller can
 // register a session that now runs elsewhere.
