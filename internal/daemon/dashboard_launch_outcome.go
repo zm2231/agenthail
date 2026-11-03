@@ -8,7 +8,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail, notice string) {
+func (d *Daemon) acceptedLaunch(launcher string, location *surface.Location, detail, notice string) actionResult {
 	d.log.Printf("accepted %s launch: %s", launcher, detail)
 	warning := fmt.Sprintf("Submitted to %s.", launcher)
 	if notice != "" {
@@ -25,7 +25,7 @@ func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, loc
 	if location != nil {
 		body["location"] = location
 	}
-	writeDashboardJSON(w, http.StatusAccepted, body)
+	return actionResult{Status: http.StatusAccepted, Body: body}
 }
 
 func untracked(alias string) string {
