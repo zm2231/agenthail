@@ -2,9 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 )
 
@@ -26,20 +23,6 @@ var typedActions = map[string]actionOperation{
 	"notion-create":    (*Daemon).doNotionCreate,
 	"codex-launch":     (*Daemon).doCodexLaunch,
 	"runtime-ensure":   (*Daemon).doRuntimeEnsure,
-}
-
-func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-		return
-	}
-	defer r.Body.Close()
-	var request dashboardActionRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
-		return
-	}
-	d.doAction(withActionKey(r.Context(), r.Header.Get(actionIdempotencyHeader)), principalFromRequest(r), request).write(w)
 }
 
 func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashboardActionRequest) (actionResult, error) {

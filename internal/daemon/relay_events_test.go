@@ -214,7 +214,7 @@ func TestDashboardRelayConditionRoundTripAndUnsupportedGoal(t *testing.T) {
 	for _, handoff := range []string{"goal_completed", "invalid", "turn_finished"} {
 		request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(fmt.Sprintf(`{"action":"relay-add","fromId":"from","toId":"to","handoff":%q}`, handoff)))
 		response := httptest.NewRecorder()
-		d.dashboardActionHandler(response, request)
+		d.actionsHTTPHandler(actionFormatDashboard)(response, request)
 		want := http.StatusBadRequest
 		if handoff == "turn_finished" {
 			want = http.StatusOK
@@ -225,7 +225,7 @@ func TestDashboardRelayConditionRoundTripAndUnsupportedGoal(t *testing.T) {
 	}
 	fake.caps = surface.Capabilities{Goal: true}
 	response := httptest.NewRecorder()
-	d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"relay-add","fromId":"from","toId":"to","handoff":"goal_completed","once":true}`)))
+	d.actionsHTTPHandler(actionFormatDashboard)(response, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"relay-add","fromId":"from","toId":"to","handoff":"goal_completed","once":true}`)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d %s", response.Code, response.Body.String())
 	}

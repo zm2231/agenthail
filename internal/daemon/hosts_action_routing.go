@@ -1,66 +1,12 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
-	"github.com/zm2231/agenthail/internal/registry"
 )
-
-func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			next(w, r)
-			return
-		}
-		raw, err := io.ReadAll(io.LimitReader(r.Body, actionRequestBodyLimit+1))
-		r.Body.Close()
-		if err != nil || len(raw) > actionRequestBodyLimit {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid dashboard request")
-			return
-		}
-		r.Body = io.NopCloser(bytes.NewReader(raw))
-		var request map[string]any
-		if json.Unmarshal(raw, &request) != nil {
-			next(w, r)
-			return
-		}
-		host, rewritten, err := d.routeActionRequest(r.Context(), request)
-		if err != nil {
-			var owned registry.SessionOwnedError
-			if errors.As(err, &owned) {
-				writeRouteError(w, err)
-				return
-			}
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
-		}
-		if host == nil {
-			if rewritten {
-				raw, _ = json.Marshal(request)
-				r.Body = io.NopCloser(bytes.NewReader(raw))
-			}
-			next(w, r)
-			return
-		}
-		if err := d.hostTransit(r.Context(), host); err != nil {
-			writeActionResult(w, actionResult{}, err)
-			return
-		}
-		if !writeIncompatibleHost(w, host) {
-			return
-		}
-		body, _ := json.Marshal(request)
-		d.forwardHostAction(w, r, host, request, body)
-	}
-}
 
 var actionSessionFields = []string{"sessionId", "targetId", "fromId", "toId"}
 

@@ -52,7 +52,8 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 			writeActionResult(w, actionResult{}, err)
 			return
 		}
-		if !writeIncompatibleHost(w, host) {
+		if err := incompatibleHost(host); err != nil {
+			writeActionResult(w, actionResult{}, err)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "-stream") {
@@ -72,13 +73,12 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 	}
 }
 
-func writeIncompatibleHost(w http.ResponseWriter, host *pairedHost) bool {
+func incompatibleHost(host *pairedHost) error {
 	state, detail := host.status()
 	if state != hostStateIncompatible {
-		return true
+		return nil
 	}
-	writeAPIError(w, http.StatusConflict, "host_incompatible", fmt.Sprintf("Host %s needs an update: %s", host.record.Name, detail))
-	return false
+	return actionFailed(http.StatusConflict, "host_incompatible", fmt.Sprintf("Host %s needs an update: %s", host.record.Name, detail))
 }
 
 func writeRouteError(w http.ResponseWriter, err error) {
