@@ -1,4 +1,4 @@
--- schemaVersion 45
+-- schemaVersion 46
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);

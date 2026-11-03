@@ -136,7 +136,7 @@ func TestBoundOnlyCredentialTableUpgradesKeepingCredentials(t *testing.T) {
 		`DROP INDEX session_credentials_live`,
 		`CREATE TABLE session_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, capabilities TEXT NOT NULL DEFAULT '[]', ceiling TEXT NOT NULL DEFAULT '{}', created_at_ms INTEGER NOT NULL, last_used_at_ms INTEGER NOT NULL DEFAULT 0, idle_expires_at_ms INTEGER NOT NULL, max_expires_at_ms INTEGER NOT NULL, revoked_at_ms INTEGER NOT NULL DEFAULT 0, revoked_reason TEXT NOT NULL DEFAULT '')`,
 		`CREATE UNIQUE INDEX session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0`,
-		`INSERT INTO session_credentials(id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason) SELECT id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM current_credentials`,
+		`INSERT INTO session_credentials(id,session_id,token_hash,capabilities,ceiling,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason) SELECT id,session_id,token_hash,'[]','{}',created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM current_credentials`,
 		`DROP TABLE current_credentials`,
 		`PRAGMA user_version=42`,
 	} {
