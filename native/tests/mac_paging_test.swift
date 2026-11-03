@@ -5,7 +5,9 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [String] = []
     nonisolated(unsafe) static var epoch = "e1"
     nonisolated(unsafe) static var archived: [String] = ["shelved"]
-    nonisolated(unsafe) static var slowNextPage = false
+    nonisolated(unsafe) static var slowPages: Set<String> = []
+    nonisolated(unsafe) static var firstAll = ["live", "older"]
+    nonisolated(unsafe) static var servedFirstAll = 0
     static let lock = NSLock()
 
     static func row(_ id: String, status: String = "idle", current: Bool = false, name: String? = nil) -> String {
@@ -32,14 +34,15 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         case ("/api/v1/snapshot", nil, _, _): body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(Self.epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", "current", _, _): body = Self.page(["live", "lead"], next: nil, current: true)
         case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : [], next: nil)
-        case ("/api/v1/snapshot", "all", nil, _): body = Self.page(["live", "older"], next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")
+        case ("/api/v1/snapshot", "all", nil, _): body = Self.page(Self.firstAll, next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")
         case ("/api/v1/snapshot", "all", "p2", _): body = Self.page(["oldest", "zeta"], next: nil)
         case ("/api/v1/snapshot", "archived", _, _): body = Self.page(Self.archived, next: nil)
         default: body = "{}"
         }
-        guard query["cursor"] == "p2" && Self.slowNextPage else { return finish(url, body) }
-        Thread.sleep(forTimeInterval: 0.3)
+        let plainAll = query["scope"] == "all" && query["q"] == nil && query["status"] == nil
+        if plainAll && Self.slowPages.contains(query["cursor"] ?? "first") { Thread.sleep(forTimeInterval: 0.3) }
         finish(url, body)
+        if plainAll && query["cursor"] == nil { Self.lock.withLock { Self.servedFirstAll += 1 } }
     }
 
     private func finish(_ url: URL, _ body: String) {
@@ -80,12 +83,12 @@ struct MacPagingTest {
         model.sessionFilter = .all
         check(await settle { ids().contains("older") }, "All reads its first page")
         check(model.listHasMore, "All knows another page waits")
-        PagingDaemon.slowNextPage = true
+        PagingDaemon.slowPages = ["p2"]
         let shown = Task { await model.listMore() }
         try? await Task.sleep(for: .milliseconds(50))
         shown.cancel()
         await model.listMore()
-        PagingDaemon.slowNextPage = false
+        PagingDaemon.slowPages = []
         check(ids().isSuperset(of: ["oldest", "zeta"]) && !model.listHasMore, "a page keeps loading when the row that asked for it goes away: \(ids())")
 
         model.sessionRefinement = SessionRefinement(status: .working, surface: "claude")
@@ -107,6 +110,24 @@ struct MacPagingTest {
         model.findSessions("")
         check(await settle { model.pages.found.isEmpty }, "clearing the search drops what it found")
         check(model.knownSessions.contains { $0.id == "zeta" }, "a session opened from search stays open after the search clears")
+
+        PagingDaemon.firstAll = ["stale"]
+        model.sessionFilter = .archived
+        let served = PagingDaemon.lock.withLock { PagingDaemon.servedFirstAll }
+        model.sessionFilter = .all
+        try? await Task.sleep(for: .milliseconds(1))
+        let deadline = Date().addingTimeInterval(3)
+        while PagingDaemon.lock.withLock({ PagingDaemon.servedFirstAll }) == served && Date() < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        check(Date() < deadline, "All asked for its first page")
+        Thread.sleep(forTimeInterval: 0.05)
+        PagingDaemon.firstAll = ["fresh"]
+        model.sessionFilter = .archived
+        model.sessionFilter = .all
+        check(await settle { ids().contains("fresh") }, "All read again after leaving and returning reads its own first page: \(ids()) \(PagingDaemon.requests.suffix(8)) \(model.pages.listings.mapValues { $0.rows.map(\.id) })")
+        try? await Task.sleep(for: .milliseconds(100))
+        check(!ids().contains("stale") && model.listHasMore, "a page that arrived for a list that was left does not land in the list read again: \(ids())")
+        PagingDaemon.firstAll = ["live", "older"]
+        model.sessionFilter = .recent
 
         var published: [[SpotlightEntry]] = []
         model.indexSpotlight { published.append($0) }

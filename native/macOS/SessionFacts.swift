@@ -11,9 +11,9 @@ enum SessionFacts {
         }
     }
 
-    static func presenceLabel(_ session: SessionState) -> String {
-        let kind = SessionDisplayKind.of(session)
-        guard kind == .idle || kind == .queued else { return SessionDisplayKind.label(session) }
+    static func presenceLabel(_ session: SessionState, now: Date = Date()) -> String {
+        let kind = SessionDisplayKind.of(session, now: now)
+        guard kind == .idle || kind == .queued else { return SessionDisplayKind.label(session, now: now) }
         switch session.currentReason {
         case "working": return "Working"
         case "queued": return "Queued"

@@ -49,7 +49,7 @@ extension AgenthailModel {
 
     func listChanged() {
         guard let request = listRequest else { return }
-        pages.listings.keys.filter { $0 != request && $0.projectID == nil }.forEach(reader.drop)
+        reader.requests.filter { $0 != request && $0.projectID == nil }.forEach(reader.drop)
         if pages.listings[request] == nil { Task { await reader.readMore(request) } }
         scheduleListReread()
     }

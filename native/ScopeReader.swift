@@ -27,6 +27,8 @@ final class ScopeReader {
         reads = [:]
     }
 
+    var requests: Set<ScopeRequest> { Set(pages.listings.keys).union(reads.keys) }
+
     func drop(_ request: ScopeRequest) {
         reads.removeValue(forKey: request)?.cancel()
         pages.drop(request)
@@ -49,7 +51,7 @@ final class ScopeReader {
     private func fetch(_ request: ScopeRequest, read: ScopePages.Read, api: AgenthailAPI) async {
         do {
             let page = try await api.scopePage(request, cursor: read.cursor, timeout: source.timeout())
-            guard source.active() else { return }
+            guard source.active(), !Task.isCancelled else { return }
             pageError = nil
             if let view = page.view { views[request] = view }
             if pages.append(page, to: request, after: read) { adoptCurrent() }

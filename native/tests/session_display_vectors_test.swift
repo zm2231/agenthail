@@ -36,8 +36,8 @@ struct SessionDisplayVectorsTest {
             case .idle: header == "Idle" || header == "Closed"
             }
             if !agrees { failures.append("\(name): the header says \(header), not \(want)") }
-            if kind != .idle && kind != .queued && SessionFacts.presenceLabel(session) != SessionDisplayKind.label(session) {
-                failures.append("\(name): the row detail says \(SessionFacts.presenceLabel(session)), not \(want)")
+            if kind != .idle && kind != .queued && SessionFacts.presenceLabel(session, now: now) != SessionDisplayKind.label(session, now: now) {
+                failures.append("\(name): the row detail says \(SessionFacts.presenceLabel(session, now: now)), not \(want)")
             }
             let patch = vector["patch"] as! [String: Any]
             if patch["host"] == nil, patch["queueCount"] == nil {
