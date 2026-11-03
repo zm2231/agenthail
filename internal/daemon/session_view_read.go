@@ -116,9 +116,6 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		if request.Revision != "" && request.Revision != plan.view.Revision {
 			return nil, errPresentationChanged
 		}
-		if request.Offset > len(plan.view.Families) {
-			return nil, errPresentationCursor
-		}
 		result.TotalSessions = plan.view.Counts[request.Scope].Sessions
 		for scope, count := range plan.view.Counts {
 			result.Counts[scope] = count.Families
@@ -138,11 +135,12 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			}
 			plan.view.Families = []SessionViewFamily{}
 		} else {
-			end := min(request.Offset+request.Limit, len(plan.view.Families))
-			if end < len(plan.view.Families) {
-				result.NextCursor = encodeSessionViewCursor(request, plan.view.Revision, end)
+			rest := familiesAfter(plan.view.Families, request.After)
+			end := min(request.Limit, len(rest))
+			if end < len(rest) {
+				result.NextCursor = encodeSessionViewCursor(request, rest[end-1].key)
 			}
-			plan.view.Families = plan.view.Families[request.Offset:end]
+			plan.view.Families = rest[:end]
 			for _, family := range plan.view.Families {
 				selected = append(selected, family.RootID)
 			}

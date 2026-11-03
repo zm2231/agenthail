@@ -32,6 +32,7 @@ type SessionViewFamily struct {
 	Pinned           bool                `json:"pinned"`
 	WorkingSubagents int                 `json:"workingSubagents"`
 	activity         time.Time
+	key              sessionViewKey
 }
 
 type SessionViewProject struct {
