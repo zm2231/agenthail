@@ -12,7 +12,7 @@ for (const v of vectors.calls) {
   const label = `${v.name} ${JSON.stringify(v.text).slice(0, 60)}`;
   assert.deepEqual({ ...toolLine(call) }, { verb: v.verb, object: v.object, code: v.code }, `line of ${label}`);
   assert.equal(toolSummary(v.name, v.text), v.summary, `summary of ${label}`);
-  assert.equal(readableInput(v.text), v.input, `input of ${label}`);
+  assert.equal(readableInput(v.text, v.name), v.input, `input of ${label}`);
   assert.deepEqual(toolChanges(call).map(({ path, added, removed }) => ({ path, added, removed })), v.changes, `changes of ${label}`);
   assert.deepEqual(toolDiffs(call).map((diff) => ({ path: diff.path, rows: diffEntries(diff.hunks) })), v.diffs, `diffs of ${label}`);
 }

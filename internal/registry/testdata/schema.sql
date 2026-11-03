@@ -1,4 +1,4 @@
--- schemaVersion 42
+-- schemaVersion 43
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -47,6 +47,9 @@ CREATE UNIQUE INDEX message_queue_delivery_key
 
 -- index paired_devices_active
 CREATE INDEX paired_devices_active ON paired_devices(revoked_at, created_at DESC);
+
+-- index push_sends_device
+CREATE INDEX push_sends_device ON push_sends(device_id, sent_at DESC);
 
 -- index relay_events_source
 CREATE INDEX relay_events_source ON relay_events(source_key,id);
@@ -415,6 +418,28 @@ CREATE TABLE projects (
 	repository BLOB NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL DEFAULT 0,
 	archived_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table push_outcomes
+CREATE TABLE push_outcomes (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL DEFAULT '',
+	attempted_at TEXT NOT NULL DEFAULT '',
+	succeeded_at TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	failed_at TEXT NOT NULL DEFAULT '',
+	received_at TEXT NOT NULL DEFAULT '',
+	alerts TEXT NOT NULL DEFAULT ''
+);
+
+-- table push_sends
+CREATE TABLE push_sends (
+	push_id TEXT PRIMARY KEY,
+	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL DEFAULT '',
+	sent_at TEXT NOT NULL,
+	confirmed INTEGER NOT NULL DEFAULT 0,
+	received_at TEXT NOT NULL DEFAULT ''
 );
 
 -- table relay_deliveries

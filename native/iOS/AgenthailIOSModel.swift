@@ -1537,6 +1537,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if wasAppearanceHost, let next = hostOrder.first.flatMap({ connections[$0] }), next.reachable { appearance.load(from: next.api) }
         KeychainStore.remove(PairedCredential.account(for: hostID))
         KeychainStore.remove(HostConnection.relayAccount(hostID))
+        PushReceipts.forget(host: hostID)
         clearStoredPush(hostID)
         pushStatus.removeValue(forKey: hostID)
         let prefix = hostID + HostCatalog.separator

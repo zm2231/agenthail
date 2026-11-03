@@ -32,7 +32,7 @@ export function renderToolRun(items, session, states = new Map()) {
     const diffs = cachedToolDiffs(item, session);
     const input = diffs.length
       ? diffs.map((diff) => `${diffs.length > 1 ? `<div class="diff-file">${escape(tools.baseName(diff.path))}</div>` : ""}${renderDiff(toolRowKey(session, `diff:${item.id}:${diff.path}`), diff.hunks)}`).join("")
-      : item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
+      : item.text ? `<pre class="tool-input">${escape(tools.readableInput(item.text, item.title))}</pre>` : '<p class="timeline-empty">No recorded input.</p>';
     const outputs = results.length ? results.map((result) => renderToolOutput(result, session)).join("") : `<p class="timeline-empty">${escape(tools.callStateLabels[states.get(item.id) || "unrecorded"])}</p>`;
     return renderToolLine(tools.toolLine(item, diffs), failed, attributes, (failed ? "" : input + renderTimelineMetadata(item)) + outputs, toolRowKey(session, item.id), failed, "Collapse tool");
   });

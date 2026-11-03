@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -36,11 +37,11 @@ func (p promptHookProblem) String() string {
 func promptHookProblems(roots []string) []promptHookProblem {
 	var problems []promptHookProblem
 	for _, root := range roots {
-		state, err := claudeHookState(filepath.Join(root, "settings.json"), claudePromptSubmit)
+		state, err := claudehooks.StateAt(filepath.Join(root, "settings.json"), claudehooks.PromptSubmit)
 		if err != nil {
-			state = claudeHookMissing
+			state = claudehooks.Missing
 		}
-		if state != claudeHookInstalled {
+		if state != claudehooks.Installed {
 			problems = append(problems, promptHookProblem{Root: root, State: state})
 		}
 	}

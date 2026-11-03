@@ -109,6 +109,21 @@ struct SessionPreview: View {
     nonisolated static var previewQuestions: [String: Any] { ["kind": "question", "id": "preview-questions", "answerable": true] }
     nonisolated static let previewQuestionsJSON = #"{"permissionMode":"","requests":[{"id":"preview-questions","kind":"question","tool":"AskUserQuestion","alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z","questions":[{"question":"The reconnect fix touches the session store and the stream reader. Which part should land first so the other can build on it?","header":"Landing order for the reconnect fix","multiSelect":false,"options":[{"label":"Session store first","description":"Keeps the saved identity stable before the reader changes"},{"label":"Stream reader first","description":"Smaller change that unblocks the failing regression test today"},{"label":"Both together","description":"One pull request, one review, one risk window"},{"label":"Neither yet","description":"Write the failing test first and decide after"}]},{"question":"Where should the regression check run?","header":"Checks","multiSelect":true,"options":[{"label":"Mac","description":"Run the suite on the desktop build"},{"label":"iPhone","description":"Run it on the shared simulator"},{"label":"Dashboard","description":"Run it in the browser harness"}]}]}]}"#
     nonisolated static let previewHostedLifecycle: [String: Bool] = ["status": true, "logs": true, "stop": true, "resume": true]
+
+    nonisolated static var previewTerminalQuestion: [String: Any] { ["kind": "question", "id": "demo:question:held:preview-1", "answerable": true] }
+    nonisolated static let previewTerminalQuestionInput = #"{"questions":[{"question":"Which build should the regression check run against?","header":"Build","multiSelect":false,"options":[{"label":"Debug","description":"Fast to build, matches local runs"},{"label":"Release","description":"Matches what ships"}]}]}"#
+    nonisolated static var previewTerminalQuestionJSON: String {
+        var request = try! JSONSerialization.jsonObject(with: Data(previewTerminalQuestionInput.utf8)) as! [String: Any]
+        request.merge(["id": "demo:question:held:preview-1", "kind": "question", "tool": "AskUserQuestion", "alwaysAllow": false, "createdAt": "2026-09-12T04:03:00Z"]) { $1 }
+        return String(data: try! JSONSerialization.data(withJSONObject: ["permissionMode": "", "requests": [request]]), encoding: .utf8)!
+    }
+    nonisolated static func terminalQuestion(_ session: inout [String: Any], capabilities: inout [String: Any]) {
+        session["waitingOn"] = previewTerminalQuestion
+        session["runtimeKind"] = "claude-cli"
+        session["runtime"] = ["launcher": "external", "focusable": false]
+        capabilities["respond"] = true
+        capabilities["lifecycle"] = ["status": false, "logs": false, "stop": false, "resume": false, "adopt": true]
+    }
     nonisolated static let previewUsageLimit: [String: String] = ["resetsAt": "2026-09-12T18:20:00Z"]
 
     /// With --preview-waiting the detail reports the question too; with
@@ -117,8 +132,20 @@ struct SessionPreview: View {
     /// clears but cannot pause or budget.
     nonisolated static var previewDetailJSON: String {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-waiting") || arguments.contains("--preview-claude-goal") || arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        if arguments.contains("--preview-terminal-question") {
+            var session = detail["session"] as! [String: Any]
+            var capabilities = detail["capabilities"] as! [String: Any]
+            terminalQuestion(&session, capabilities: &capabilities)
+            detail["session"] = session
+            detail["capabilities"] = capabilities
+            var timeline = detail["timeline"] as! [String: Any]
+            var items = timeline["items"] as! [[String: Any]]
+            items.append(["id": "ask-1", "kind": "toolCall", "title": "AskUserQuestion", "text": previewTerminalQuestionInput, "callId": "ask-1", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
+            timeline["items"] = items
+            detail["timeline"] = timeline
+        }
         if arguments.contains("--preview-limit-move") {
             detail["limitResume"] = ["state": "waiting", "resetsAt": "2026-09-12T18:20:00Z", "moveTo": ["root": "team", "account": "team@example.com", "reason": "most headroom, session 18%, week 40%"]]
         }
@@ -222,6 +249,13 @@ struct SessionPreview: View {
             askingCapabilities["respond"] = true
             asking[0]["capabilities"] = askingCapabilities
             snapshot["sessions"] = asking
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-terminal-question") {
+            var terminal = snapshot["sessions"] as! [[String: Any]]
+            var terminalCapabilities: [String: Any] = capabilities
+            terminalQuestion(&terminal[0], capabilities: &terminalCapabilities)
+            terminal[0]["capabilities"] = terminalCapabilities
+            snapshot["sessions"] = terminal
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]
@@ -354,6 +388,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
+        case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON
         case "/api/v1/usage": body = UsagePreview.json()
         case "/api/v1/proxies/prefer" where request.httpMethod == "GET":
             body = UsagePreview.preferPlan(only: URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "set" })?.value == "only")

@@ -24,8 +24,9 @@ export const permissionModes = [
 export async function syncRequests() {
   const session = app.selected;
   const panel = $("#request-panel");
-  const capabilities = app.history?.capabilities || {};
-  if (!session || !capabilities.respond || app.history?.readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
+  const capabilities = session?.capabilities || app.history?.capabilities || {};
+  const readOnly = session?.readOnly ?? app.history?.readOnly;
+  if (!session || !capabilities.respond || readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
     app.requests = null;
     app.requestsKey = "";
     panel.innerHTML = session?.waitingOn ? renderElsewhereWait(session) : "";

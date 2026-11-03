@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -69,8 +70,22 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredThroughAgenthail(t *testing.T) 
 		mu.Unlock()
 	})
 	session := terminalSession(t)
+	session.RuntimeKind = surface.RuntimeClaudeCLI
+	session.Transcript = filepath.Join(home, ".claude", "projects", "fixture", "conversation.jsonl")
+	if err := os.MkdirAll(filepath.Dir(session.Transcript), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(session.Transcript, []byte(`{"type":"user","uuid":"prompt","timestamp":"2026-10-18T23:00:27Z","message":{"content":"Ask me which color I prefer"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if claude.SessionCapabilities(session).Respond {
-		t.Fatal("a session with no held prompt offered answers")
+		t.Fatal("a session whose config root has no prompt hook offered answers")
+	}
+	if _, err := claudehooks.InstallAt(filepath.Join(home, ".claude", "settings.json"), "/opt/agenthail/bin/agenthail"); err != nil {
+		t.Fatal(err)
+	}
+	if !claude.SessionCapabilities(session).Respond {
+		t.Fatal("a session whose root holds its prompts did not offer answers before its first prompt, so a client that read it then hides the card")
 	}
 	done, cancel := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "AskUserQuestion", ToolInput: json.RawMessage(pickAColor), PID: os.Getpid()})
 	defer cancel()
@@ -106,6 +121,9 @@ func TestATerminalQuestionHeldByTheHookIsAnsweredThroughAgenthail(t *testing.T) 
 	}
 	if observation.WaitingOn != nil {
 		t.Fatalf("the record still showing the answered question made it wait again: %+v", observation.WaitingOn)
+	}
+	if !claude.SessionCapabilities(session).Respond {
+		t.Fatal("answering the prompt took away the session's answers")
 	}
 	if _, err := claude.Respond(context.Background(), session, request.ID, surface.Decision{Behavior: "deny"}); !errors.Is(err, surface.ErrRequestStale) {
 		t.Fatalf("a second answer err=%v", err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
+	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -134,8 +135,8 @@ func claudePromptsHeld(session surface.Session) bool {
 		}
 	}
 	for _, root := range roots {
-		state, err := claudeHookState(filepath.Join(root, "settings.json"), claudePromptHook)
-		if err != nil || state != claudeHookInstalled {
+		state, err := claudehooks.StateAt(filepath.Join(root, "settings.json"), claudehooks.Prompt)
+		if err != nil || state != claudehooks.Installed {
 			return false
 		}
 	}
