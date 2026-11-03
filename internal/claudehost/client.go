@@ -371,6 +371,11 @@ func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session,
 	return out, c.sessionCall(ctx, "setModel", map[string]string{"sessionId": sessionID, "model": model}, &out)
 }
 
+func (c Client) ReplaceMCP(ctx context.Context, sessionID string, server MCPServer) (Session, error) {
+	var out Session
+	return out, c.sessionCall(ctx, "replaceMcp", map[string]any{"sessionId": sessionID, "mcp": server}, &out)
+}
+
 func (c Client) SetPermissionMode(ctx context.Context, sessionID, mode string) (Session, error) {
 	var out Session
 	return out, c.sessionCall(ctx, "setPermissionMode", map[string]string{"sessionId": sessionID, "permissionMode": mode}, &out)

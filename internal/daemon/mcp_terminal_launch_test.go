@@ -109,7 +109,7 @@ func TestAnUnclaimedTerminalLaunchCredentialIsDeletedOnceThePendingLaunchExpires
 
 func TestOnlyTerminalCodexLaunchesCarryALaunchCredential(t *testing.T) {
 	f := newTerminalLaunchFixture(t, surface.LauncherTMUX)
-	credentials := f.daemon.mcpCodex.Load()
+	credentials := f.daemon.mcpCredentials.Load()
 	for _, tc := range []struct {
 		launcher string
 		agent    surface.SurfaceKind

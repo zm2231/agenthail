@@ -27,6 +27,11 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 	return c.host.client.Open(ctx, request)
 }
 
+func (c *Claude) ReplaceMCPCredential(ctx context.Context, sessionID, url, token string) error {
+	_, err := c.host.client.ReplaceMCP(ctx, sessionID, claudehost.MCPServer{URL: url, Token: token})
+	return err
+}
+
 func claudeHostToken(credentials MCPCredentials, id string, resume bool) (string, error) {
 	if id == "" {
 		return "", errors.New("the conversation has no id before it opens")

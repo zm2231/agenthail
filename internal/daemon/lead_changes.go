@@ -3,8 +3,9 @@ package daemon
 import "sync"
 
 type leadWatch struct {
-	mu   sync.Mutex
-	last string
+	mu       sync.Mutex
+	last     string
+	sessions map[string]bool
 }
 
 func (d *Daemon) syncLeads() {
@@ -14,11 +15,16 @@ func (d *Daemon) syncLeads() {
 		return
 	}
 	d.leads.mu.Lock()
-	changed := fingerprint != d.leads.last
-	d.leads.last = fingerprint
-	d.leads.mu.Unlock()
-	if !changed {
+	defer d.leads.mu.Unlock()
+	if fingerprint == d.leads.last {
 		return
+	}
+	d.leads.last = fingerprint
+	if current, err := d.Registry.LocalLeadSessions(); err != nil {
+		d.log.Printf("catalog leads: %s", err)
+	} else {
+		d.reconcileLeadCredentials(d.leads.sessions, current)
+		d.leads.sessions = current
 	}
 	if d.dashboard != nil {
 		d.dashboard.invalidate()

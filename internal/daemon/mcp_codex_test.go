@@ -3,8 +3,10 @@ package daemon
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -126,6 +128,42 @@ func TestAResumedCodexThreadKeepsItsCredentialWhileTheDaemonHoldsIt(t *testing.T
 	}
 	if whoami, refused := fixture.whoami(t, started); refused || whoami["sessionId"] != id {
 		t.Fatalf("whoami=%v", whoami)
+	}
+}
+
+func TestACodexThreadWhosePermissionsChangeGetsItsNewCredentialOnItsNextResume(t *testing.T) {
+	fixture := newMCPCodexFixture(t)
+	cwd := t.TempDir()
+	root, err := canonicalCatalogPath(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First", "cwd": cwd})
+	id := created["session"].(map[string]any)["id"].(string)
+	started := codexBearer(fixture.lifecycle.Daemon().Calls("thread/start")[0])
+	if code, body := fixture.action(t, map[string]any{"action": "coordinator-set", "sessionId": id, "name": "captain"}); code != http.StatusOK {
+		t.Fatalf("coordinator-set status=%d body=%v", code, body)
+	}
+	if status, body := postMCP(t, fixture.server, map[string]string{"Authorization": "Bearer " + started}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
+		t.Fatalf("old credential status=%d body=%v", status, body)
+	}
+	fixture.lifecycle.Daemon().CompleteTurn(id, "done")
+	fixture.lifecycle.Daemon().Unload(id)
+	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": id, "message": "Again"}); code != http.StatusOK {
+		t.Fatalf("send status=%d body=%v", code, body)
+	}
+	resumes := fixture.lifecycle.Daemon().Calls("thread/resume")
+	rotated := codexBearer(resumes[len(resumes)-1])
+	if rotated == "" || rotated == started {
+		t.Fatalf("resume carried %q", rotated)
+	}
+	whoami, refused := fixture.whoami(t, rotated)
+	capabilities, _ := whoami["capabilities"].([]any)
+	if refused || !slices.Contains(capabilities, any("control.project")) {
+		t.Fatalf("whoami=%v refused=%v", whoami, refused)
 	}
 }
 

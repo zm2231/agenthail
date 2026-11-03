@@ -105,7 +105,7 @@ func (d *Daemon) sessionCapabilities(session surface.Session) []string {
 
 func (d *Daemon) attachMCPCredentials(listen string) {
 	credentials := newDaemonMCPCredentials(d, listen)
-	d.mcpCodex.Store(credentials)
+	d.mcpCredentials.Store(credentials)
 	for _, adapter := range d.Surfaces {
 		if attachable, ok := adapter.(interface {
 			SetMCPCredentials(surfaces.MCPCredentials)
