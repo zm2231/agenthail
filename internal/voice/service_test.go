@@ -536,7 +536,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 			return f.clockTicks, func() { f.provider.waiting.Add(-1) }
 		},
 	}
-	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
+	f.service = newService(f.path, f.provider, options.register, resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
 	f.cycles = make(chan time.Time, 16)
 	f.service.cycled = func() {
 		if at := f.provider.cycleTick(); !at.IsZero() {
@@ -679,10 +679,10 @@ func TestPersistentOperatorLoadsLiteralSkillWithoutStartingTurn(t *testing.T) {
 	if first.Session.ID != second.Session.ID || creates != 1 || len(requests) != 0 {
 		t.Fatalf("duplicate operator or startup turn: creates=%d requests=%v", creates, requests)
 	}
-	if p.instructions != OperatorInstructions("/fixture/agenthail") || first.SkillDigest == "" {
-		t.Fatal("operator did not receive the packaged skill contract")
+	if p.instructions != Instructions || first.SkillDigest == "" {
+		t.Fatal("operator did not receive its instructions")
 	}
-	reopened := New(f.path, p, nil, "/fixture/agenthail")
+	reopened := New(f.path, p, nil)
 	if v, err := reopened.Apply(context.Background(), "phone", Action{Action: "prepare"}); err != nil || v.Session.ID != "operator" || p.creates != 1 {
 		t.Fatalf("resume v=%+v err=%v creates=%d", v, err, p.creates)
 	}
@@ -714,7 +714,7 @@ func TestNewOperatorCreatesDistinctPersistentThreadAndRetainsOldThread(t *testin
 	if !reflect.DeepEqual(registered, []string{"operator", "operator-2"}) {
 		t.Fatalf("old and new operators were not both registered: %v", registered)
 	}
-	reopened := New(f.path, f.provider, nil, "/fixture/agenthail")
+	reopened := New(f.path, f.provider, nil)
 	if got := reopened.View("phone"); got.Session == nil || got.Session.ID != "operator-2" || len(got.Events) != 0 {
 		t.Fatalf("new operator identity was not durable: %+v", got)
 	}
@@ -786,7 +786,7 @@ func TestUnknownStartupIsNotReplayed(t *testing.T) {
 	if f.View().Phase != "negotiating" {
 		t.Fatal("late acceptance did not reconcile")
 	}
-	reopened := New(f.path, p, nil, "/fixture/agenthail")
+	reopened := New(f.path, p, nil)
 	if reopened.View("phone").Phase != "unknown" || reopened.View("phone").SDP != "" {
 		t.Fatal("restart pretended to retain a physical audio connection")
 	}
@@ -1145,7 +1145,7 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	if err := os.WriteFile(f.path, []byte("broken"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	broken := New(f.path, p, nil, "/fixture/agenthail")
+	broken := New(f.path, p, nil)
 	if broken.View("phone").Phase != "blocked" {
 		t.Fatal("corrupt identity was silently replaced")
 	}
@@ -1445,43 +1445,19 @@ func TestAnOperatorCreatedWithOtherToolsSaysOnceThatANewConversationGetsTheCurre
 	}
 }
 
-type heldLeads struct{ sent, release chan string }
-
-func (l heldLeads) List(context.Context) ([]Project, error) { return nil, nil }
-func (l heldLeads) LeadSession(context.Context, string) (string, error) {
-	return "", errors.New("unused")
-}
-func (l heldLeads) SendToLead(_ context.Context, project, message, _ string) (LeadReceipt, error) {
-	l.sent <- message
-	<-l.release
-	return LeadReceipt{Ref: "@" + project + "-lead"}, nil
-}
-
-func TestALeadSendAnsweredAfterTheCallEndedReportsCodexsRefusalToItsOwnOperator(t *testing.T) {
-	for _, replaced := range []bool{false, true} {
-		t.Run(map[bool]string{false: "kept across a restart", true: "not on a newer operator"}[replaced], func(t *testing.T) {
-			f, p := fixture(t)
-			leads := heldLeads{sent: make(chan string, 1), release: make(chan string)}
-			f.service.SetProjects(leads)
-			connectFixture(t, f)
-			p.mu.Lock()
-			p.respondErr = errors.New("renderer gone")
-			p.mu.Unlock()
-			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_send_to_lead", "arguments": map[string]any{"project": "widget", "message": "ship it"}}})
-			if got := <-leads.sent; got != "ship it" {
-				t.Fatalf("sent=%q", got)
-			}
-			hangUp(t, f)
-			if replaced {
-				apply(t, f, Action{Action: "new"})
-			}
-			close(leads.release)
-			f.service.Close()
-			const refusal = "Voice tool response could not be returned to Codex: renderer gone"
-			if got := New(f.path, p, nil, "/fixture/agenthail").View("phone").Message; strings.Contains(got, refusal) == replaced {
-				t.Fatalf("after restart message=%q", got)
-			}
-		})
+func TestCodexsRefusalOfAToolAnswerIsKeptOnItsOperatorAcrossARestart(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	p.mu.Lock()
+	p.respondErr = errors.New("renderer gone")
+	p.mu.Unlock()
+	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
+	const refusal = "Voice tool response could not be returned to Codex: renderer gone"
+	testkit.Eventually(t, "the refusal", 5*time.Second, func() bool { return strings.Contains(f.View().Message, refusal) })
+	hangUp(t, f)
+	f.service.Close()
+	if got := New(f.path, p, nil).View("phone").Message; !strings.Contains(got, refusal) {
+		t.Fatalf("after restart message=%q", got)
 	}
 }
 

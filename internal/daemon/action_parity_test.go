@@ -151,6 +151,7 @@ func parityCases() []parityCase {
 		{name: "queue-retry", action: "queue-retry", body: `{"action":"queue-retry","queueId":1}`, setup: withQueued},
 		{name: "queue-retry missing", action: "queue-retry", body: `{"action":"queue-retry","queueId":999}`},
 		{name: "queue-cancel", action: "queue-cancel", body: `{"action":"queue-cancel","queueId":1}`, setup: withQueued},
+		{name: "queue-clear", action: "queue-clear", body: `{"action":"queue-clear","sessionId":"to"}`, setup: withQueued},
 		{name: "delivery-dismiss", action: "delivery-dismiss", body: `{"action":"delivery-dismiss","deliveryId":999}`},
 		{name: "channel-create", action: "channel-create", body: `{"action":"channel-create","channel":"team"}`},
 		{name: "channel-create taken", action: "channel-create", body: `{"action":"channel-create","channel":"team"}`, setup: withChannel},

@@ -178,6 +178,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,'hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(pending_ref,claimed_session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES('ref',?,'pending-hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)
+	exec(`INSERT INTO session_ceilings(session_id,ceiling) VALUES(?,'{"permission":"edits"}')`, rekeyedBridge)
 	exec(`INSERT INTO session_context(session_id,fingerprint,delivered_at_ms) VALUES(?,'f',1)`, rekeyedBridge)
 	exec(`INSERT INTO limit_resumes(session_id,turn_id,refused_at_ms) VALUES(?,'refused',1)`, rekeyedBridge)
 	now := time.Now().UTC().Format(time.RFC3339Nano)

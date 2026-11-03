@@ -51,9 +51,8 @@ type Service struct {
 	boundAttempt            string
 	eventGap                bool
 	disconnectedAt          time.Time
-	commandPath             string
 	target                  TargetResolver
-	projects                Projects
+	leads                   Leads
 	dispatcher              Deliverer
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	stream                  SessionStreamProvider
@@ -76,17 +75,17 @@ type Service struct {
 	connected  chan struct{}
 }
 
-func New(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string) *Service {
-	return newService(path, provider, register, commandPath, nil, delivery.Dispatcher{}, nil, nil, systemClock)
+func New(path string, provider Provider, register func(context.Context, surface.Session) error) *Service {
+	return newService(path, provider, register, nil, delivery.Dispatcher{}, nil, nil, systemClock)
 }
 
 // A session-bound call follows its session's journal, so targets come with a stream.
-func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
-	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
+func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(context.Context, surface.Session) error, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
+	return newService(path, provider, register, target, dispatcher, setOperatorSourceActive, stream, systemClock)
 }
 
-func newService(path string, provider Provider, register func(context.Context, surface.Session) error, commandPath string, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout, saving: make(chan struct{}, 1)}
+func newService(path string, provider Provider, register func(context.Context, surface.Session) error, target TargetResolver, dispatcher Deliverer, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
+	s := &Service{path: path, provider: provider, register: register, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout, saving: make(chan struct{}, 1)}
 	s.background, s.stop = context.WithCancel(context.Background())
 	s.effectsWake, s.effectsDone = sync.NewCond(&s.mu), make(chan struct{})
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}

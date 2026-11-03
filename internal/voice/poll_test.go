@@ -11,15 +11,14 @@ import (
 func TestAToolCallReachesItsHandlerWithoutWaitingOutThePoll(t *testing.T) {
 	f, p := fixture(t)
 	p.arrived = make(chan struct{}, 1)
-	f.service.SetProjects(gatedProjects{})
 	connectFixture(t, f)
 	p.mu.Lock()
 	p.pending = append(p.pending, Batch{Cursor: Cursor{Source: "fixture", Position: 20}, Events: []Event{
-		{Method: "item/tool/call", Params: map[string]any{"requestId": "read", "threadId": "operator", "namespace": "agenthail", "tool": "voice_projects", "arguments": map[string]any{}}},
+		{Method: "item/tool/call", Params: map[string]any{"requestId": "back", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}},
 	}})
 	p.mu.Unlock()
 	p.arrived <- struct{}{}
-	testkit.Eventually(t, "the projects answer without a tick ending the poll", 5*time.Second, func() bool { return len(p.answers()) == 1 })
+	testkit.Eventually(t, "the tool answers without a tick ending the poll", 5*time.Second, func() bool { return len(p.answers()) == 1 })
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.lastWait != pollWait || pollWait != 5*time.Second {

@@ -120,7 +120,7 @@ func (ownerFixtureProvider) Release(string, voice.Cursor)                      {
 // route and the v1 route derive different owners from it, so neither can take
 // over the other's call.
 func TestVoiceDashboardAndMacAppAreSeparateCallers(t *testing.T) {
-	s := voice.New(filepath.Join(t.TempDir(), "voice", "operator.json"), ownerFixtureProvider{}, nil, "agenthail")
+	s := voice.New(filepath.Join(t.TempDir(), "voice", "operator.json"), ownerFixtureProvider{}, nil)
 	t.Cleanup(s.Close)
 	web := dashboardVoiceHandler(s, "fixture-token")
 	mac := voiceHandler(s)

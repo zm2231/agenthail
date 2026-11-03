@@ -68,7 +68,7 @@ type actionKeyContextKey struct{}
 // host that owns its target, decoding and dispatch.
 func (d *Daemon) performAction(ctx context.Context, p principal, format actionFormat, body []byte, idempotencyKey string) actionReply {
 	ctx = p.context(ctx)
-	return d.idempotentReply(p.ID, idempotencyKey, body, func(body []byte) actionReply {
+	return d.idempotentReply(p.ID, idempotencyKey, body, mcpRequestHash(ctx), func(body []byte) actionReply {
 		reply := d.routeHostAction(ctx, p, body, idempotencyKey)
 		if format == actionFormatAPIv1 {
 			reply = apiV1Reply(reply)

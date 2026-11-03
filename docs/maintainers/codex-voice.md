@@ -2,8 +2,8 @@
 
 The iPhone companion has a conversational Codex Voice operator backed by one
 persistent Codex thread on Codex's app-server on the host. Codex Desktop does not
-need to be running. It receives the packaged Agenthail
-Operations skill before its first turn. You can discuss a plan, ask about live
+need to be running. It works through Agenthail's MCP tools, which its thread
+receives when it starts. You can discuss a plan, ask about live
 agents, create a new agent, or ask it to send work and read back the result.
 There is no on-device speech recognition, command grammar, separate TTS service,
 or separate OpenAI API key.
@@ -180,8 +180,8 @@ compaction count rose since the brief voice holds, voice is told the session
 compacted its context and given the fresh brief, which replaces the call state's
 `brief`.
 
-The persistent audio operator retains the packaged Operations skill for ordinary
-voice lifecycle support, but it is not the coding provider for a selected target.
+The persistent audio operator keeps its Agenthail tools for ordinary voice
+lifecycle support, but it is not the coding provider for a selected target.
 The host appends correlated target stream text to that existing realtime session;
 it remains Codex's native voice, not a separate TTS service.
 
@@ -195,16 +195,16 @@ existing transport; the voice layer does not emulate them.
 | Surface | Behavior |
 | --- | --- |
 | Conversation | Native Codex realtime audio transcribes speech. Each completed user transcript is delivered to the selected existing session, except filler: an utterance of at most four words made only of the filler um, umm, uh, uhm, er, hmm, mm, mhm, thanks, thank you, cool, nice or got it stays with voice, is recorded in the call as `voice/utterance/voice-only` with its text and target, and is written to the daemon log. Words that can answer a question, such as yes, no, okay or sure, are never on the list, so they always reach the session; and only its correlated stream is appended back to audio. No dictation-only replacement. |
-| Agent operations | The complete packaged `agenthail-operations` skill is embedded in the host binary and passed as literal developer instructions when creating the operator. Availability still depends on configured runtimes and their capabilities. |
+| Agent operations | The operator works through the `agenthail_*` MCP tools (see [MCP server](mcp.md)), never the `agenthail` command line. Its thread gets the server and a session credential when it starts, like any Codex thread Agenthail starts, and as the person's operator it holds `control.all` and `read.all`. Its developer instructions name the tools; they are written when the operator is created. Availability still depends on configured runtimes and their capabilities. |
 | Identity | One saved operator per Agenthail registry at a time. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. The explicit **New conversation** action deliberately creates a distinct new operator thread and makes it the saved operator; the previous operator stays discoverable in the normal Sessions timeline. It is refused while a call is active or while a creation outcome is still unknown. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
 | Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. Typing in the session itself during a call is noted to voice, and its reply is spoken at the next pause. |
-| Mute | Stops sending microphone content without stopping the call or agent work. The phone reports mute and system hold to the host in order. While input is muted, the host refuses `voice_transfer`, `voice_return_to_orchestrator` and `voice_send_to_lead` and does not deliver spoken requests; read-only tools still answer. Each of those actions checks the mute again just before it sends anything, so a mute that arrives while one is being prepared stops it; one already sending is not recalled. If the host cannot record a mute, the phone ends the call. |
+| Mute | Stops sending microphone content without stopping the call or agent work. The phone reports mute and system hold to the host in order. While input is muted, the host refuses `voice_transfer` and `voice_return_to_orchestrator` and does not deliver spoken requests. Each of those actions checks the mute again just before it sends anything, so a mute that arrives while one is being prepared stops it; one already sending is not recalled. If the host cannot record a mute, the phone ends the call. |
 | Hang up / leave app | Hang up, in the app or with the system call controls, stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Closing the Voice screen, switching apps or locking the phone does not hang up; **Return to call** reopens it. Force-quitting the app or OS termination ends the call. |
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
 | Multiple phones | One paired token owns an active call. Other devices see occupancy and cannot take over or read its negotiation SDP. |
-| Project coordinators | The operator's `voice_projects` tool lists every project this host knows, from sessions on this host and paired hosts, added projects, and coordinators, with each project's coordinators by host. `voice_send_to_lead` sends to a project's coordinator by project name or id, on this host or a paired host, and starts the coordinator's conversation when it has none. `voice_transfer` takes `project` instead of `targetId` to move the call to a coordinator on this host that already has a conversation. A project is found by the same rules as `@lead` and `@<project>-lead`: a name several projects share, a project with no coordinator, and a project with coordinators on two hosts are refused with the reason, never picked. |
+| Project coordinators | `agenthail_projects` lists every project this host knows, from sessions on this host and paired hosts, added projects, and coordinators, with each project's coordinators by host. `agenthail_send` with `project` sends to a project's coordinator by project name or id, on this host or a paired host, and starts the coordinator's conversation when it has none. `voice_transfer` takes `project` instead of `targetId` to move the call to a coordinator on this host that already has a conversation. A project is found by the same rules as `@lead` and `@<project>-lead`: a name several projects share, a project with no coordinator, and a project with coordinators on two hosts are refused with the reason, never picked. |
 | Reconnect | No automatic redial or inference replay. Hang up an uncertain call, then call again. A missing phone heartbeat requests audio stop after about 40 seconds; worker turns remain. |
 
 On iPhone the call is an outgoing CallKit call with the `audio` and `voip`
@@ -216,7 +216,7 @@ usage remain subject to the signed-in Codex account.
 ## Lifecycle, failures, and storage
 
 `prepare` records creation intent, creates the operator thread on Codex's
-app-server with the full skill and Agenthail's voice tools, names it, saves its
+app-server with its instructions, Agenthail's MCP server and the voice call tools, names it, saves its
 returned identity, and registers it for normal session discovery under the
 `@voice` alias. A saved operator is registered with the route and runtime Codex
 reports for it now, not the ones saved with it. `@voice` moves to each new
@@ -309,14 +309,14 @@ the native close event, and `start` clears it.
 
 State lives beside `registry.db` at `voice/operator.json`, with a private operator
 workspace at `voice/operator/`. The state file is atomically replaced with mode
-0600. It retains the operator ID, skill and tool digests, call attempt, hashed device owner,
+0600. It retains the operator ID, instruction and tool digests, call attempt, hashed device owner,
 bounded recent events, text deduplication IDs, and the latest text receipt. SDP is
 never persisted. A host
 restart cannot restore a physical media connection; an active saved call becomes
 unknown and requires hangup. Corrupt state blocks creation rather than discarding
 identity. Do not delete it as a generic retry strategy.
 
-The skill is pinned to the binary that created the operator. Updating a binary
+The instructions are pinned to the binary that created the operator. Updating a binary
 does not rewrite developer instructions of an already-running Codex thread. The
 details sheet shows the digest so this is inspectable. Reprovisioning a different
 operator or recovering an ambiguous creation is a manual operator decision, not an
@@ -327,7 +327,10 @@ tools only in `thread/start`; `thread/resume` and the thread settings update tak
 none, and a resumed thread keeps the tools persisted at its start. The state file
 records a digest of the tool set. When the saved operator was created with a
 different set, the voice screen says so, naming **New conversation** as the way to
-get the current tools, until the first call with that operator ends.
+get the current tools, until the first call with that operator ends. An operator
+created with the command-line tool set gets this notice: it still has the MCP
+server, which Agenthail gives every thread it resumes, but its instructions
+send it to the command line.
 
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
@@ -352,7 +355,6 @@ Read these units in order:
    coding session. `poll.go` applies provider events, `spoken.go` delivers spoken
    requests, and `tool_calls.go` answers dynamic tools. `operator.go` creates the
    persistent operator and builds its instructions and native request parameters.
-   `skills/operations.go` embeds the distributed Operations skill.
 3. `internal/surface/surfaces/codex_voice.go`: operator creation and the route
    choice: Desktop only while Desktop has the operator open, otherwise Codex's
    app-server. No approval-policy override.
@@ -470,7 +472,6 @@ program receives a known WAV file instead of recording the tester's microphone:
 
 ```bash
 AGENTHAIL_LIVE_VOICE=1 \
-AGENTHAIL_VOICE_SMOKE_CLI=/absolute/path/to/matching/agenthail \
 AGENTHAIL_VOICE_SMOKE_AUDIO=/absolute/path/to/list-existing-tasks.wav \
 AGENTHAIL_VOICE_SMOKE_FOLLOWUP_AUDIO=/absolute/path/to/select-and-message.wav \
 AGENTHAIL_VOICE_SMOKE_WORKER=existing-test-owned-worker-uuid \

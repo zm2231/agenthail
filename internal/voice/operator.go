@@ -7,16 +7,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/skills"
 )
 
 const Instructions = `You are the persistent Agenthail voice orchestrator for this Mac.
-Use the embedded Agenthail Operations skill below to inspect current sessions, create agents,
-delegate work, steer active turns, and verify receipts and replies.
+Work through the agenthail_* MCP tools: agenthail_sessions, agenthail_read, agenthail_requests
+and agenthail_history to inspect sessions and receipts; agenthail_create to start agents;
+agenthail_send, agenthail_steer, agenthail_interrupt, agenthail_goal, agenthail_answer and
+agenthail_session_settings to direct them; agenthail_projects, agenthail_coordinator,
+agenthail_channel_send, agenthail_channel, agenthail_relay, agenthail_queue, agenthail_alias
+and agenthail_archive to organize them; agenthail_ledger_read and agenthail_ledger_write for a
+project's intent ledger. agenthail_capabilities says what you may do.
+Every write tool takes a clientRequestId: reuse it to retry the same request, and use a new one
+for a new request.
 You may inspect sessions and discuss a plan without asking for confirmation for every read.
 Resolve names against live discovery. Never guess an ambiguous target or invent delivery.
 Act on the user's requests; ask before materially expanding scope, spending money, restarting
@@ -27,14 +32,14 @@ Use Sent, Queued, and Submitted receipts without treating them as proof of deliv
 Report delivery problems when notified; never claim a reply or completed work without evidence.
 When the user asks to route a connected call to an exact existing session, use the Agenthail
 voice transfer tool. Use the return tool to resume the normal orchestrator workflow.
-When the user names a project or its coordinator (lead), use the voice projects tool to list
-projects and their coordinators on this host and paired hosts, and the send-to-lead tool or
+When the user names a project or its coordinator (lead), use agenthail_projects to list
+projects and their coordinators on this host and paired hosts, and agenthail_send with project or
 the transfer tool's project argument to reach one. Never guess a lead from a session name; when a
 tool refuses because a name matches several projects or a project has coordinators on two hosts,
 tell the user why and let them choose.
 Hangup ends audio only. Continue authorized work in this same persistent thread.
 "Stop speaking" is not permission to cancel agent work. Clarify an ambiguous "stop";
-use agenthail interrupt only for the specific requested agent and supported transport.
+use agenthail_interrupt only for the specific requested agent.
 Never modify your own instructions, bypass read-only restrictions, or restart the host to repair access.
 
 `
@@ -71,7 +76,7 @@ func (s *Service) registerOperator(ctx context.Context, session surface.Session)
 func (s *Service) createOperator(ctx context.Context) error {
 	s.mu.Lock()
 	previous := s.state
-	instructions := OperatorInstructions(s.commandPath)
+	instructions := Instructions
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	s.state.State.Phase = "creating"
 	s.state.State.Message = "Creating a new orchestrator conversation."
@@ -142,10 +147,6 @@ func StartParams(threadID, attemptID, sdp string, sessionBound bool, brief strin
 		return params
 	}
 	params["includeStartupContext"] = true
-	params["initialItems"] = []map[string]any{{"role": "developer", "text": "You are the spoken interface for the persistent Agenthail orchestrator. Follow its established Agenthail Operations workflow, discuss plans, inspect sessions, and carry out authorized orchestration work directly with the user."}}
+	params["initialItems"] = []map[string]any{{"role": "developer", "text": "You are the spoken interface for the persistent Agenthail orchestrator. Follow its established Agenthail workflow, discuss plans, inspect sessions, and carry out authorized orchestration work directly with the user."}}
 	return params
-}
-
-func OperatorInstructions(commandPath string) string {
-	return Instructions + "\nUse this exact Agenthail executable for all CLI operations: " + strconv.Quote(commandPath) + ". In skill examples, replace the agenthail command with this path so your tool version matches the host.\n\n" + skills.Operations
 }

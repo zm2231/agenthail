@@ -1259,6 +1259,18 @@
     },
     "body": "{\"ok\":true}\n"
   },
+  "api/action queue-clear": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"canceled\":1,\"ok\":true}\n"
+  },
   "api/action queue-retry": {
     "status": 400,
     "header": {
@@ -3610,6 +3622,18 @@
       ]
     },
     "body": "{\"ok\":true}\n"
+  },
+  "api/v1/actions queue-clear": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"canceled\":1,\"ok\":true}\n"
   },
   "api/v1/actions queue-retry": {
     "status": 400,

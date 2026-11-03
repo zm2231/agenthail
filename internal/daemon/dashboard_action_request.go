@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -54,4 +55,5 @@ type dashboardActionRequest struct {
 	Replace         bool                       `json:"replace"`
 	ChangedAt       time.Time                  `json:"changedAt"`
 	ChangedBy       string                     `json:"changedBy"`
+	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 }

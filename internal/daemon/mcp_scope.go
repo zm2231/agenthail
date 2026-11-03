@@ -37,6 +37,7 @@ func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visible
 		}
 	}
 	withProject := caller.has("read.project") && caller.project != nil && filter != mcpFilterMine
+	everything := caller.has("read.all") && filter == mcpFilterAllVisible
 	refs, err := d.Registry.LiveLocalSessions()
 	if err != nil {
 		return nil, err
@@ -44,14 +45,14 @@ func (d *Daemon) mcpVisibleSessions(caller *mcpCaller, filter string) ([]visible
 	visible := []visibleSession{}
 	for _, ref := range refs {
 		self := ref.ID == caller.session.ID && caller.has("read.self") && filter == mcpFilterAllVisible
-		if !self && !descendants[ref.ID] && !withProject {
+		if !self && !everything && !descendants[ref.ID] && !withProject {
 			continue
 		}
 		session, err := d.Registry.Session(ref.ID)
 		if err != nil {
 			continue
 		}
-		if self || descendants[ref.ID] || d.sameProject(caller, *session) {
+		if self || everything || descendants[ref.ID] || d.sameProject(caller, *session) {
 			visible = append(visible, visibleSession{Session: *session, order: ref.Order})
 		}
 	}

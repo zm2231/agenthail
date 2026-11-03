@@ -72,7 +72,12 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
 			return
 		}
-		caller := &mcpCaller{credential: credential, session: *session, capabilities: capabilities, ceiling: json.RawMessage(`{}`)}
+		ceiling, err := d.Registry.SessionCeiling(session.ID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
+			return
+		}
+		caller := &mcpCaller{credential: credential, session: *session, capabilities: capabilities, ceiling: ceiling}
 		caller.project, _ = d.sessionProject(*session)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 	})

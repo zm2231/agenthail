@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -34,12 +35,12 @@ func (c *daemonMCPCredentials) remember(token string) {
 
 func (c *daemonMCPCredentials) URL() string { return c.url }
 
-func (c *daemonMCPCredentials) Pending(context.Context) (string, string, error) {
-	return c.issuePending(pendingCredentialLifetime)
+func (c *daemonMCPCredentials) Pending(ctx context.Context) (string, string, error) {
+	return c.issuePending(surface.StartCeiling(ctx), pendingCredentialLifetime)
 }
 
-func (c *daemonMCPCredentials) issuePending(lifetime time.Duration) (string, string, error) {
-	pending, err := c.d.Registry.IssuePendingCredential(time.Now(), lifetime)
+func (c *daemonMCPCredentials) issuePending(ceiling json.RawMessage, lifetime time.Duration) (string, string, error) {
+	pending, err := c.d.Registry.IssuePendingCredential(ceiling, time.Now(), lifetime)
 	if err != nil {
 		return "", "", err
 	}
@@ -52,7 +53,7 @@ func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.Sur
 		return nil, nil
 	}
 	c.d.pruneLaunchCredentials()
-	token, ref, err := c.issuePending(pendingLaunchLifetime)
+	token, ref, err := c.issuePending(nil, pendingLaunchLifetime)
 	if err != nil {
 		return nil, err
 	}

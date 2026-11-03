@@ -259,7 +259,7 @@ func TestTheVoiceOperatorThreadStartsWithEveryAgenthailVoiceTool(t *testing.T) {
 	for _, tool := range request.DynamicTools[0].Tools {
 		names = append(names, tool.Name)
 	}
-	if strings.Join(names, " ") != "voice_transfer voice_return_to_orchestrator voice_projects voice_send_to_lead" {
+	if strings.Join(names, " ") != "voice_transfer voice_return_to_orchestrator" {
 		t.Fatalf("tools=%v", names)
 	}
 }
