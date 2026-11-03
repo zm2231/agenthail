@@ -716,7 +716,7 @@ func TestOpenAddsCoordinatorsToARegistryAtTheVersionBefore(t *testing.T) {
 	if _, err := r.SetCoordinator(spec, CoordinatorChange{SessionID: "first", ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.HandOverCoordinator(spec, "first", "second"); err != nil {
+	if _, err := r.HandOverCoordinator(spec, "first", "second", CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	coordinators, err := r.LocalCoordinators()

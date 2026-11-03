@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS coordinator_history (
 	previous_name TEXT NOT NULL DEFAULT '',
 	previous_session_id TEXT NOT NULL DEFAULT '',
 	changed_by TEXT NOT NULL DEFAULT '',
-	at_ms INTEGER NOT NULL
+	at_ms INTEGER NOT NULL,
+	reason TEXT NOT NULL DEFAULT '',
+	acknowledged_at_ms INTEGER NOT NULL DEFAULT 0,
+	announced_at_ms INTEGER NOT NULL DEFAULT 0,
+	notify_sender INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS coordinator_replaced (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,

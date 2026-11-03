@@ -25,11 +25,16 @@ type Service struct {
 	Dispatcher   delivery.Dispatcher
 	ClaudeRoot   func(context.Context) string
 	LeadsChanged func()
-	Now          func() time.Time
+	// Replaced runs after a handover is recorded, so its notices go out.
+	Replaced func()
+	Now      func() time.Time
 }
 
 // GoneGrace covers a conversation started moments ago that has not yet written its transcript or process record.
 const GoneGrace = 2 * time.Minute
+
+// RestartedByDaemon is who replaced a coordinator for a queued message with no sender.
+const RestartedByDaemon = "daemon"
 
 func (s Service) now() time.Time {
 	if s.Now != nil {
@@ -43,8 +48,11 @@ type Outcome struct {
 	Session *surface.Session  `json:"session"`
 	Started bool              `json:"started"`
 	// Previous is the conversation a start replaced, "" when none existed.
-	Previous string `json:"previous,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	Previous  string `json:"previous,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	ChangedBy string `json:"changedBy,omitempty"`
+	// HistoryID is the coordinator_history row of the handover; it keys its notices.
+	HistoryID int64 `json:"historyId,omitempty"`
 }
 
 // Of returns the spec of the project sessionID coordinates, as its current
@@ -199,7 +207,11 @@ func (s Service) Restart(ctx context.Context, session *surface.Session, message 
 	if reason == "" || current == nil || current.ID != session.ID {
 		return nil, false, nil
 	}
-	outcome, err := s.start(ctx, spec, current.ID, reason, surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx)}.Sender(), message, true)
+	changedBy := surface.SourceSessionID(ctx)
+	if changedBy == "" {
+		changedBy = RestartedByDaemon
+	}
+	outcome, err := s.start(ctx, spec, current.ID, reason, changedBy, message, true)
 	return outcome, true, err
 }
 
@@ -223,10 +235,10 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 		return nil, nil, "", err
 	}
 	if keeper, ok := adapter.(surface.ConversationKeeper); ok {
-		state, err := s.conversationState(ctx, keeper, session)
+		state, since, err := s.conversationState(ctx, keeper, session)
 		switch state {
 		case surface.ConversationGone:
-			return session, adapter, fmt.Sprintf("conversation %s no longer exists", id), nil
+			return session, adapter, fmt.Sprintf("conversation %s no longer exists (nothing holds it and it was last seen %s ago)", id, since.Round(time.Second)), nil
 		case surface.ConversationUnknown:
 			return session, adapter, "", surface.DeliveryUnavailable(fmt.Errorf("check coordinator conversation %s: %w", id, err))
 		}
@@ -234,22 +246,23 @@ func (s Service) current(ctx context.Context, spec registry.CoordinatorSpec) (*s
 	return session, adapter, "", nil
 }
 
-func (s Service) conversationState(ctx context.Context, keeper surface.ConversationKeeper, session *surface.Session) (surface.ConversationState, error) {
+func (s Service) conversationState(ctx context.Context, keeper surface.ConversationKeeper, session *surface.Session) (surface.ConversationState, time.Duration, error) {
 	state, err := keeper.ConversationState(ctx, session)
 	if state == surface.ConversationUnknown && err == nil {
 		err = errors.New("its state could not be read")
 	}
 	if state != surface.ConversationGone {
-		return state, err
+		return state, 0, err
 	}
 	seen, err := s.Registry.SessionLastSeen(session.ID)
 	if err != nil {
-		return surface.ConversationUnknown, fmt.Errorf("read when it was last seen: %w", err)
+		return surface.ConversationUnknown, 0, fmt.Errorf("read when it was last seen: %w", err)
 	}
-	if since := s.now().Sub(seen); since < GoneGrace {
-		return surface.ConversationUnknown, fmt.Errorf("nothing of it was found, but it was seen %s ago, too recently to count as gone", since.Round(time.Second))
+	since := s.now().Sub(seen)
+	if since < GoneGrace {
+		return surface.ConversationUnknown, since, fmt.Errorf("nothing of it was found, but it was seen %s ago, too recently to count as gone", since.Round(time.Second))
 	}
-	return surface.ConversationGone, nil
+	return surface.ConversationGone, since, nil
 }
 
 // deliverTo steers a busy coordinator unless the sender chose otherwise.
@@ -347,10 +360,14 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 			return nil, startErr
 		}
 	}
-	if err := s.Registry.HandOverCoordinator(spec, previous, session.ID); err != nil {
+	historyID, err := s.Registry.HandOverCoordinator(spec, previous, session.ID, registry.CoordinatorHandover{ChangedBy: sender, Reason: "gone: " + reason, NotifySender: queued})
+	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but @%s could not point at it: %w", session.ID, spec.Name, err))
 	}
-	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason}
+	if previous != "" && s.Replaced != nil {
+		defer s.Replaced()
+	}
+	outcome := &Outcome{Session: session, Started: true, Previous: previous, Reason: reason, ChangedBy: sender, HistoryID: historyID}
 	if startErr != nil {
 		_ = s.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
 		outcome.Receipt = &delivery.Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Started: true, Detail: startedDetail(spec, previous, reason)}

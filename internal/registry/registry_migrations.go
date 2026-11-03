@@ -83,6 +83,16 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	for _, column := range []struct{ name, decl string }{
+		{"reason", `TEXT NOT NULL DEFAULT ''`},
+		{"acknowledged_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"announced_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"notify_sender", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := ensureColumn(tx, "coordinator_history", column.name, column.decl); err != nil {
+			return err
+		}
+	}
 	for _, column := range []struct {
 		name string
 		decl string
@@ -336,6 +346,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 34 {
 		if err := splitOperator(tx); err != nil {
+			return err
+		}
+	}
+	if version < 48 {
+		if _, err := tx.Exec(`UPDATE coordinator_history SET announced_at_ms=at_ms, acknowledged_at_ms=at_ms WHERE action='replaced'`); err != nil {
 			return err
 		}
 	}

@@ -436,28 +436,48 @@ func (r *Registry) ClearCoordinator(projectID, changedBy string, expected time.T
 
 // CoordinatorHistoryEntry is one set, replace or clear of a coordinator.
 type CoordinatorHistoryEntry struct {
-	ProjectID         string    `json:"projectId"`
-	Action            string    `json:"action"`
-	Name              string    `json:"name"`
-	SessionID         string    `json:"sessionId,omitempty"`
-	PreviousName      string    `json:"previousName,omitempty"`
-	PreviousSessionID string    `json:"previousSessionId,omitempty"`
-	ChangedBy         string    `json:"changedBy,omitempty"`
-	At                time.Time `json:"at"`
+	ID                int64      `json:"id"`
+	ProjectID         string     `json:"projectId"`
+	Action            string     `json:"action"`
+	Name              string     `json:"name"`
+	SessionID         string     `json:"sessionId,omitempty"`
+	PreviousName      string     `json:"previousName,omitempty"`
+	PreviousSessionID string     `json:"previousSessionId,omitempty"`
+	ChangedBy         string     `json:"changedBy,omitempty"`
+	Reason            string     `json:"reason,omitempty"`
+	At                time.Time  `json:"at"`
+	AcknowledgedAt    *time.Time `json:"acknowledgedAt,omitempty"`
+	NotifySender      bool       `json:"-"`
+}
+
+// CoordinatorHandover says who replaced a coordinator's conversation and why.
+// NotifySender asks for a queued notice to a sender that did not wait for the send.
+type CoordinatorHandover struct {
+	ChangedBy    string
+	Reason       string
+	NotifySender bool
+}
+
+const coordinatorHistoryColumns = `id,project_id,action,name,session_id,previous_name,previous_session_id,changed_by,reason,at_ms,acknowledged_at_ms,notify_sender`
+
+func scanCoordinatorHistory(row rowScanner) (CoordinatorHistoryEntry, error) {
+	var entry CoordinatorHistoryEntry
+	var at, acknowledged int64
+	err := row.Scan(&entry.ID, &entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &entry.Reason, &at, &acknowledged, &entry.NotifySender)
+	entry.At = time.UnixMilli(at).UTC()
+	if acknowledged != 0 {
+		when := time.UnixMilli(acknowledged).UTC()
+		entry.AcknowledgedAt = &when
+	}
+	return entry, err
 }
 
 func (r *Registry) CoordinatorHistory(projectID string) ([]CoordinatorHistoryEntry, error) {
-	rows, err := r.read.Query(`SELECT project_id,action,name,session_id,previous_name,previous_session_id,changed_by,at_ms FROM coordinator_history WHERE project_id=? ORDER BY id`, projectID)
+	rows, err := r.read.Query(`SELECT `+coordinatorHistoryColumns+` FROM coordinator_history WHERE project_id=? ORDER BY id`, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return appendRows([]CoordinatorHistoryEntry{}, rows, func(row rowScanner) (CoordinatorHistoryEntry, error) {
-		var entry CoordinatorHistoryEntry
-		var at int64
-		err := row.Scan(&entry.ProjectID, &entry.Action, &entry.Name, &entry.SessionID, &entry.PreviousName, &entry.PreviousSessionID, &entry.ChangedBy, &at)
-		entry.At = time.UnixMilli(at).UTC()
-		return entry, err
-	})
+	return appendRows([]CoordinatorHistoryEntry{}, rows, scanCoordinatorHistory)
 }
 
 // CoordinatorSince is when sessionID last became projectID's coordinator; false if it is not the coordinator now.
@@ -604,28 +624,29 @@ var ErrCoordinatorMoved = errors.New("the coordinator was moved to another conve
 // what the previous conversation can no longer use: messages still pending
 // for it, its channel memberships and its relay routes, and remembers it was
 // replaced.
-func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next string) error {
+// The returned history id keys the notices of this handover.
+func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next string, handover CoordinatorHandover) (int64, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 	var owner string
 	err = tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, spec.Name).Scan(&owner)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return 0, err
 	}
 	if owner != previous {
-		return ErrCoordinatorMoved
+		return 0, ErrCoordinatorMoved
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE name=? OR session_id=?`, spec.Name, next); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM coordinator_replaced WHERE session_id=?`, next); err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, spec.Name, next); err != nil {
-		return err
+		return 0, err
 	}
 	if previous != "" {
 		for _, statement := range append([]string{
@@ -635,20 +656,26 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 			`DELETE FROM channel_members WHERE session_id=?1`,
 		}, routeMoves...) {
 			if _, err := tx.Exec(statement, previous, next); err != nil {
-				return err
+				return 0, err
 			}
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id,project_id) VALUES (?,?)`, previous, spec.ProjectID); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	if err := recordCoordinatorHistoryTx(tx, spec.ProjectID, "replaced", spec.Name, next, spec.Name, previous, "", time.Now().UTC()); err != nil {
-		return err
+	result, err := tx.Exec(`INSERT INTO coordinator_history (project_id,action,name,session_id,previous_name,previous_session_id,changed_by,reason,notify_sender,at_ms) VALUES (?,'replaced',?,?,?,?,?,?,?,?)`,
+		spec.ProjectID, spec.Name, next, spec.Name, previous, handover.ChangedBy, handover.Reason, handover.NotifySender, time.Now().UTC().UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
 	}
 	if _, err := publishCoordinatorTx(tx, spec.ProjectID); err != nil && !errors.Is(err, ErrNoCoordinator) {
-		return err
+		return 0, err
 	}
-	return tx.Commit()
+	return id, tx.Commit()
 }
 
 // MoveClaimedMessage returns a claimed queue item to the queue for sessionID,

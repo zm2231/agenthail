@@ -35,7 +35,7 @@ func TestAConversationACoordinatorReplacedCanCoordinateAnotherProject(t *testing
 	if _, err := r.SetCoordinator(alpha, CoordinatorChange{SessionID: "old"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.HandOverCoordinator(alpha, "old", "new"); err != nil {
+	if _, err := r.HandOverCoordinator(alpha, "old", "new", CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SetCoordinator(beta, CoordinatorChange{SessionID: "old", Replace: true}); err != nil {
@@ -63,7 +63,7 @@ func TestHandOverLeavesNoSelfOrDuplicateRelayRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := r.HandOverCoordinator(spec, "previous", "next"); err != nil {
+	if _, err := r.HandOverCoordinator(spec, "previous", "next", CoordinatorHandover{}); err != nil {
 		t.Fatal(err)
 	}
 	routes, err := r.ListRoutes()
