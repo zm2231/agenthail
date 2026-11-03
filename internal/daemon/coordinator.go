@@ -313,6 +313,13 @@ func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coo
 	if len(existing) > 0 && !request.Replace {
 		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_exists", fmt.Sprintf("%s already has coordinator %s; replace it to take over", spec.ProjectRoot, d.coordinatorRefs(ctx, existing)))
 	}
+	for _, current := range existing {
+		if host, found := d.pairedHost(current.HostID); current.HostID != "" && found {
+			if err := d.hostTransit(ctx, host); err != nil {
+				return actionResult{}, err
+			}
+		}
+	}
 	change := registry.CoordinatorChange{SessionID: sessionID, Replace: request.Replace, OverPeers: true, ChangedBy: changedBy}
 	stored, undo, err := d.Registry.ReplaceCoordinator(spec, change)
 	if err != nil {
