@@ -15,6 +15,7 @@ type dashboardActionRequest struct {
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`
 	StopTerminal    bool                       `json:"stopTerminal"`
+	NoQueue         bool                       `json:"noQueue"`
 	Fork            surface.ForkOptions        `json:"fork"`
 	NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
 	Action          string                     `json:"action"`

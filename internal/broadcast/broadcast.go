@@ -222,7 +222,9 @@ func (r Result) Count(outcome string) int {
 
 type Delivery interface {
 	Session(ctx context.Context, sessionID, message, sourceSessionID string) (*delivery.Receipt, error)
-	PeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message, sourceSessionID string) (*delivery.Receipt, error)
+	// Coordinator delivers to a coordinator on this host or a paired one and
+	// reports the conversation that took it, which may be one it started.
+	Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, sourceSessionID string) (*delivery.Receipt, string, error)
 }
 
 type Broadcaster struct {
@@ -322,25 +324,20 @@ func archived(record registry.CatalogSessionState, item Project, archive registr
 
 func (b Broadcaster) toCoordinator(ctx context.Context, target Target, spec registry.CoordinatorSpec, payload, source string) Recipient {
 	recipient := Recipient{Coordinator: "@" + spec.Name, HostID: spec.HostID, SessionID: spec.SessionID}
-	if spec.HostID == "" {
-		outcome, err := b.Coordinators.Deliver(ctx, spec, payload, surface.SendOptions{SourceSessionID: source})
-		if err != nil {
-			return failed(recipient, err)
-		}
-		if outcome.Session != nil {
-			recipient.SessionID = outcome.Session.ID
-		}
-		return received(recipient, outcome.Receipt)
-	}
-	recipient.Coordinator = spec.HostID + "::@" + spec.Name
-	if _, rawID, qualified := hosts.Split(spec.SessionID); qualified {
-		if owner, err := b.Registry.SessionHost(rawID); err == nil && owner == spec.HostID {
-			return b.queueForHost(target, recipient, rawID, payload, source)
+	if spec.HostID != "" {
+		recipient.Coordinator = spec.HostID + "::@" + spec.Name
+		if _, rawID, qualified := hosts.Split(spec.SessionID); qualified {
+			if owner, err := b.Registry.SessionHost(rawID); err == nil && owner == spec.HostID {
+				return b.queueForHost(target, recipient, rawID, payload, source)
+			}
 		}
 	}
-	receipt, err := b.Delivery.PeerCoordinator(ctx, spec, payload, source)
+	receipt, sessionID, err := b.Delivery.Coordinator(ctx, spec, payload, source)
 	if err != nil {
 		return failed(recipient, err)
+	}
+	if spec.HostID == "" && sessionID != "" {
+		recipient.SessionID = sessionID
 	}
 	return received(recipient, receipt)
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -59,7 +58,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 	if peerLead != nil && !hasFlag(args, "--stream") && !hasFlag(args, "--reply") {
-		return a.sendToPeerCoordinator(ctx, *peerLead, message, args)
+		return a.sendToNamedCoordinator(ctx, *peerLead, message, args)
 	}
 	if target, err = a.expandLead(target); err != nil {
 		return err
@@ -67,7 +66,7 @@ func (a *App) cmdSend(args []string) error {
 	coord := a.coordinator()
 	_, byName := coord.Named(target)
 	if spec, named := coord.Named(target); named && !coord.Started(spec) {
-		return a.startCoordinator(ctx, coord, spec, message, args)
+		return a.sendToNamedCoordinator(ctx, spec, message, args)
 	}
 	sess, surf, remote, err := a.resolveDeliveryTarget(ctx, target)
 	if err != nil {
@@ -140,25 +139,25 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 	if coordinated {
-		deliver := coord.Deliver
-		if hasFlag(args, "--no-queue") {
-			deliver = coord.DeliverWithoutQueue
-		}
-		var outcome *coordinator.Outcome
-		if outcome, err = deliver(ctx, spec, message, options); err == nil {
-			if outcome.Started {
+		var answer coordinatorSendAnswer
+		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
+			if answer.Started {
 				if !byName {
-					return printCoordinatorStart(outcome, outcome.Session.ID, jsonOut)
+					return printCoordinatorAnswer(answer, answer.Result.SessionID, jsonOut)
 				}
-				return printCoordinatorStart(outcome, target, jsonOut)
+				return printCoordinatorAnswer(answer, target, jsonOut)
 			}
-			receipt = outcome.Receipt
-			if outcome.Session != nil && outcome.Session.ID != addressed.ID {
+			receipt = &answer.Result
+			if answer.Result.SessionID != "" && answer.Result.SessionID != addressed.ID {
 				if wantStream || wantReply {
-					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", outcome.Session.ID, outcome.Session.ID)
+					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", answer.Result.SessionID, answer.Result.SessionID)
 					wantStream, wantReply = false, false
 				}
-				sess = outcome.Session
+				moved := surface.Session{ID: answer.Result.SessionID}
+				if stored, err := a.registry().Session(answer.Result.SessionID); err == nil {
+					moved = *stored
+				}
+				sess = &moved
 			}
 		}
 	} else if hasFlag(args, "--no-queue") || syntheticNotion {
