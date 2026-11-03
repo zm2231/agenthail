@@ -60,7 +60,8 @@ func requestingHostName(ctx context.Context) string {
 }
 
 const (
-	apiProtocolVersion  = 1
+	apiProtocolVersion  = 2
+	apiProtocolMinimum  = 1
 	pairingLifetime     = 5 * time.Minute
 	apiRequestBodyLimit = 140 << 10
 	apiErrorBodyLimit   = 8 << 10
@@ -162,7 +163,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Identity: d.build})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ type sessionViewRequest struct {
 	After    *sessionViewKey
 	Revision string
 	IDs      []string
+	Members  bool
 }
 
 func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
@@ -33,6 +34,10 @@ func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
 	if len(request.Filters.Query) > 1000 || len(request.IDs) > 200 {
 		return request, fmt.Errorf("view request is too large")
 	}
+	if q.Has("members") && q.Get("members") != "1" {
+		return request, fmt.Errorf("members must be 1")
+	}
+	request.Members = q.Get("members") == "1"
 	if q.Has("attention") && q.Get("attention") != "1" {
 		return request, fmt.Errorf("attention must be 1")
 	}
@@ -95,7 +100,7 @@ func (d *Daemon) sessionViewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	tag := fmt.Sprintf(`"%s-%d"`, state.View.Revision, request.Limit)
+	tag := fmt.Sprintf(`"%s-%d-%t"`, state.View.Revision, request.Limit, request.Members)
 	if request.After == nil && len(request.IDs) == 0 {
 		w.Header().Set("ETag", tag)
 		if r.Header.Get("If-None-Match") == tag {
