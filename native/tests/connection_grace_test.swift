@@ -95,7 +95,18 @@ struct ConnectionGraceTest {
         check(wait(within: 6) { !model.isConnected }, "a daemon down past the window shows disconnected")
 
         DaemonDropProtocol.set()
-        check(wait(within: 25) { model.isConnected }, "the Mac app reconnects")
+        check(wait(within: 25) { model.isConnected && DaemonDropProtocol.streaming }, "the Mac app reconnects")
+        DaemonDropProtocol.set(down: true)
+        DaemonDropProtocol.dropStreams()
+        let deadline = Date().addingTimeInterval(6)
+        while model.isConnected, Date() < deadline {
+            model.connect()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        }
+        check(!model.isConnected, "reconnecting again and again does not extend the grace")
+
+        DaemonDropProtocol.set()
+        check(wait(within: 25) { model.isConnected }, "the Mac app reconnects again")
         model.grace.window = 15
         DaemonDropProtocol.set(refused: true)
         DaemonDropProtocol.dropStreams()

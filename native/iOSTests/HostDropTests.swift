@@ -69,6 +69,65 @@ final class HostDropTests: XCTestCase {
         XCTAssertEqual(seen, ["connected", "unreachable"], "a 401 is not a network blip")
     }
 
+    func testRepeatedResumesDoNotKeepADownComputerShownConnected() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        model.connection("hdrop")!.grace.window = 1
+        HostDropProtocol.state.setDown(true)
+        let clock = ContinuousClock()
+        let end = clock.now + .seconds(3)
+        while clock.now < end, model.snapshot?.sessions.first?.host?.state != "unreachable" {
+            model.resumeConnection()
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "unreachable", "resuming again and again must not extend the grace")
+    }
+
+    func testARecoveredStreamRestoresRealReachabilityEvenIfItsRefreshFails() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        HostDropProtocol.state.setDown(true)
+        HostDropProtocol.state.dropStreams()
+        for _ in 0..<100 where !connection.holding { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(connection.holding)
+        XCTAssertFalse(connection.reachable)
+        HostDropProtocol.state.setSnapshotFails(true)
+        HostDropProtocol.state.setDown(false)
+        for _ in 0..<300 where !HostDropProtocol.state.streaming { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<100 where connection.holding { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(connection.reachable, "an open event stream is real contact")
+        XCTAssertFalse(connection.holding)
+    }
+
+    func testSubagentsThatFailedWhileHeldReloadOnceAndDoNotLoop() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        var parent = try XCTUnwrap(model.snapshot?.sessions.first)
+        parent.hiddenSubagents = SubagentRollup(count: 1, working: 0)
+        await model.loadSubagents(of: parent)
+        XCTAssertNil(model.fetchedSubagents.errors[parent.id])
+
+        HostDropProtocol.state.setDown(true)
+        HostDropProtocol.state.dropStreams()
+        for _ in 0..<100 where !connection.holding { try await Task.sleep(for: .milliseconds(10)) }
+        await model.loadSubagents(of: parent)
+        XCTAssertNotNil(model.fetchedSubagents.errors[parent.id])
+
+        HostDropProtocol.state.setSubagentsFail(true)
+        let failed = model.fetchedSubagents.revision(parent.id)
+        HostDropProtocol.state.setDown(false)
+        for _ in 0..<300 where model.fetchedSubagents.revision(parent.id) == failed { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), failed, "recovery reloads the failed list")
+
+        await model.loadSubagents(of: parent)
+        XCTAssertNotNil(model.fetchedSubagents.errors[parent.id])
+        let settled = model.fetchedSubagents.revision(parent.id)
+        for _ in 0..<3 { _ = await model.refresh(); try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(model.fetchedSubagents.revision(parent.id), settled, "a list failing on a reachable computer is not refetched in a loop")
+    }
+
     func testASendDuringTheGraceReportsItsOwnError() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
@@ -95,7 +154,14 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         private var failing = 0
         private var downNow = false
         private var refused = false
-        func reset() { lock.withLock { open = []; failing = 0; downNow = false; refused = false } }
+        private var snapshotsFail = false
+        private var subagentsFail = false
+        func reset() { lock.withLock { open = []; failing = 0; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false } }
+        func setSnapshotFails(_ value: Bool) { lock.withLock { snapshotsFail = value } }
+        func setSubagentsFail(_ value: Bool) { lock.withLock { subagentsFail = value } }
+        func fails(snapshotFor query: String?) -> Bool {
+            lock.withLock { (query?.contains("parentId") == true) ? subagentsFail : snapshotsFail }
+        }
         func setDown(_ value: Bool) { lock.withLock { downNow = value } }
         func setUnauthorized(_ value: Bool) { lock.withLock { refused = value } }
         var down: Bool { lock.withLock { downNow } }
@@ -129,6 +195,12 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
             Self.state.opened(self)
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
+            return
+        }
+        if path == "/api/v1/snapshot", Self.state.fails(snapshotFor: request.url!.query) {
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(#"{"error":{"message":"busy"}}"#.utf8))
+            client?.urlProtocolDidFinishLoading(self)
             return
         }
         if path == "/api/v1/version", Self.state.takeProbeFailure() {

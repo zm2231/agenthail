@@ -78,7 +78,7 @@ final class HostConnection {
         lastEventID = 0
         reconnecting = true
         streamOpen = false
-        if reachable || holding { grace.contact() }
+        if reachable { grace.contact() }
         delegate?.hostDidChange(self)
         connectionTask = Task {
             let backoff = EventRetryBackoff()
@@ -151,10 +151,7 @@ final class HostConnection {
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
             snapshotSeq = seq
-            if !reachable { Self.log.notice("\(self.id, privacy: .public) reachable after snapshot") }
-            reachable = true
-            holding = false
-            grace.contact()
+            recovered(by: "snapshot")
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -215,7 +212,7 @@ final class HostConnection {
         guard !stopped else { return }
         reconnecting = false
         streamOpen = true
-        grace.contact()
+        recovered(by: "event stream")
         if !snapshotCoversEventStream { _ = await refresh(fresh: true) } else {
             snapshotCoversEventStream = false
             delegate?.hostDidChange(self)
@@ -228,15 +225,20 @@ final class HostConnection {
 
     func recordStreamInterruption(probeError: Error?) {
         guard let probeError else {
-            grace.contact()
+            recovered(by: "stream probe")
             reconnecting = true
-            reachable = true
-            holding = false
             connectionError = nil
             delegate?.hostDidChange(self)
             return
         }
         recordFailure(probeError, during: "stream probe")
+    }
+
+    private func recovered(by step: String) {
+        if !reachable || holding { Self.log.notice("\(self.id, privacy: .public) reachable again after \(step, privacy: .public)") }
+        grace.contact()
+        reachable = true
+        holding = false
     }
 
     private func recordFailure(_ error: Error, during step: String) {
