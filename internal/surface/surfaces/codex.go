@@ -32,6 +32,8 @@ type Codex struct {
 	backgroundMu    sync.Mutex
 	backgroundState map[string]*codexBackgroundState
 	loadedThreads   map[string]map[string]bool
+	mcpMu           sync.Mutex
+	mcp             MCPCredentials
 }
 
 // codexDesktopRunsHere is whether Codex Desktop can run on this machine;

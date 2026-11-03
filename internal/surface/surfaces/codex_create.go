@@ -40,10 +40,10 @@ func (c *Codex) PrepareManagedTerminalSession(ctx context.Context, cwd, model st
 		return nil, err
 	}
 	defer client.Close()
-	return prepareManagedTerminalSession(ctx, client, cwd, model)
+	return c.prepareManagedTerminalSession(ctx, client, cwd, model)
 }
 
-func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd, model string) (*surface.Session, error) {
+func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd, model string) (*surface.Session, error) {
 	params := map[string]any{"threadSource": "agenthail-terminal", "serviceName": "agenthail"}
 	if cwd != "" {
 		params["cwd"] = cwd
@@ -51,7 +51,7 @@ func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd,
 	if model != "" {
 		params["model"] = model
 	}
-	response, err := client.Request(ctx, "thread/start", params, 10*time.Second)
+	response, credentialRef, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/start managed terminal: %w", err)
 	}
@@ -63,6 +63,7 @@ func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd,
 	}
 	session := codexSession(thread)
 	session.ID = threadID
+	session.CredentialRef = credentialRef
 	session.Surface = surface.KindCodex
 	setCodexTransport(&session, codexTransportManaged)
 	session.Source = "agenthail"
@@ -99,7 +100,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if options.ApprovalPolicy != "" {
 		params["approvalPolicy"] = options.ApprovalPolicy
 	}
-	response, err := client.Request(ctx, "thread/start", params, 10*time.Second)
+	response, credentialRef, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
 	if err != nil {
 		return nil, nil, fmt.Errorf("thread/start: %w", err)
 	}
@@ -110,14 +111,15 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		return nil, nil, fmt.Errorf("thread/start returned no thread id")
 	}
 	session := &surface.Session{
-		ID:         threadID,
-		Surface:    surface.KindCodex,
-		Name:       surface.DeriveName(str(thread, "name"), message, 80),
-		Cwd:        str(result, "cwd"),
-		Status:     surface.StatusBusy,
-		HasLocal:   true,
-		Source:     "agenthail",
-		LastActive: time.Now(),
+		ID:            threadID,
+		CredentialRef: credentialRef,
+		Surface:       surface.KindCodex,
+		Name:          surface.DeriveName(str(thread, "name"), message, 80),
+		Cwd:           str(result, "cwd"),
+		Status:        surface.StatusBusy,
+		HasLocal:      true,
+		Source:        "agenthail",
+		LastActive:    time.Now(),
 	}
 	setCodexTransport(session, transport)
 	if session.Cwd == "" {

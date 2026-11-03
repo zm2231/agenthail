@@ -42,7 +42,7 @@ func (c *Codex) subscribeManagedThread(ctx context.Context, client codexClient, 
 	if err != nil || !slices.Contains(loaded, threadID) {
 		return false
 	}
-	_, err = client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
+	_, _, err = c.codexThreadRequest(ctx, client, codexThreadResume, &surface.Session{ID: threadID}, map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
 	return err == nil
 }
 
