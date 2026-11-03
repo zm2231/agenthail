@@ -12,23 +12,23 @@ import (
 )
 
 type Codex struct {
-	desktopURL   string
-	managed      bool
-	bridgeMu     sync.Mutex
-	bridgeTarget string
-	bridgeErr    error
-	bridgeRetry  time.Time
-	runtimeMu    sync.Mutex
-	contextMu    sync.Mutex
-	contextState map[string]*codexContextState
-	sweepMu      sync.Mutex
-	lastSweep    time.Time
-	usageMu      sync.Mutex
-	usageReads   map[string]*codexUsageRead
-	planMu       sync.Mutex
-	planState    map[string]*codexPlanState
-	turnMu       sync.Mutex
-	turnState    map[string]*codexLiveTurnState
+	desktopURL      string
+	managed         bool
+	bridgeMu        sync.Mutex
+	bridgeTarget    string
+	bridgeErr       error
+	bridgeRetry     time.Time
+	runtimeMu       sync.Mutex
+	contextMu       sync.Mutex
+	contextState    map[string]*codexContextState
+	sweepMu         sync.Mutex
+	lastSweep       time.Time
+	usageMu         sync.Mutex
+	usageReads      map[string]*codexUsageRead
+	planMu          sync.Mutex
+	planState       map[string]*codexPlanState
+	turnMu          sync.Mutex
+	turnState       map[string]*codexLiveTurnState
 	backgroundMu    sync.Mutex
 	backgroundState map[string]*codexBackgroundState
 	loadedThreads   map[string]map[string]bool

@@ -51,7 +51,7 @@ func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexC
 	if model != "" {
 		params["model"] = model
 	}
-	response, credentialRef, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/start managed terminal: %w", err)
 	}
@@ -63,7 +63,6 @@ func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexC
 	}
 	session := codexSession(thread)
 	session.ID = threadID
-	session.CredentialRef = credentialRef
 	session.Surface = surface.KindCodex
 	setCodexTransport(&session, codexTransportManaged)
 	session.Source = "agenthail"
@@ -100,7 +99,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if options.ApprovalPolicy != "" {
 		params["approvalPolicy"] = options.ApprovalPolicy
 	}
-	response, credentialRef, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
 	if err != nil {
 		return nil, nil, fmt.Errorf("thread/start: %w", err)
 	}
@@ -111,15 +110,14 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		return nil, nil, fmt.Errorf("thread/start returned no thread id")
 	}
 	session := &surface.Session{
-		ID:            threadID,
-		CredentialRef: credentialRef,
-		Surface:       surface.KindCodex,
-		Name:          surface.DeriveName(str(thread, "name"), message, 80),
-		Cwd:           str(result, "cwd"),
-		Status:        surface.StatusBusy,
-		HasLocal:      true,
-		Source:        "agenthail",
-		LastActive:    time.Now(),
+		ID:         threadID,
+		Surface:    surface.KindCodex,
+		Name:       surface.DeriveName(str(thread, "name"), message, 80),
+		Cwd:        str(result, "cwd"),
+		Status:     surface.StatusBusy,
+		HasLocal:   true,
+		Source:     "agenthail",
+		LastActive: time.Now(),
 	}
 	setCodexTransport(session, transport)
 	if session.Cwd == "" {

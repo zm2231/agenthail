@@ -26,8 +26,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	if err := registerSessionRowTx(tx, s); err != nil {
 		return err
 	}
-	_, err := bindPendingCredentialTx(tx, s.CredentialRef, s.ID, time.Now())
-	return err
+	return bindClaimedCredentialTx(tx, s.ID, time.Now())
 }
 
 func registerSessionRowTx(tx *sql.Tx, s surface.Session) error {

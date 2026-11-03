@@ -42,6 +42,14 @@ func (c *daemonMCPCredentials) Pending() (string, string, error) {
 	return pending.Token, pending.Ref, nil
 }
 
+func (c *daemonMCPCredentials) Claim(ref, threadID string) error {
+	claimed, err := c.d.Registry.ClaimPendingCredential(ref, threadID, time.Now())
+	if err == nil && !claimed {
+		err = fmt.Errorf("pending credential %s expired or was already claimed", ref)
+	}
+	return err
+}
+
 func (c *daemonMCPCredentials) Live(sessionID string) (string, bool) {
 	hash, ok, err := c.d.Registry.LiveCredentialHash(sessionID)
 	if err != nil || !ok {

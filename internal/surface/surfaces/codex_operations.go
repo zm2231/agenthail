@@ -57,11 +57,8 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 			params[k] = v
 		}
 	}
-	var credentialRef string
 	response, err := c.requestSessionWith(ctx, session, true, func(client codexClient) (map[string]any, error) {
-		response, ref, err := c.codexThreadRequest(ctx, client, codexThreadFork, session, params, 15*time.Second)
-		credentialRef = ref
-		return response, err
+		return c.codexThreadRequest(ctx, client, codexThreadFork, session, params, 15*time.Second)
 	})
 	if err != nil {
 		return nil, codexOperationOutcome(err)
@@ -74,7 +71,6 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	}
 	fork := *session
 	fork.ID = id
-	fork.CredentialRef = credentialRef
 	fork.PID = 0
 	fork.Transcript = ""
 	fork.Status = surface.StatusIdle

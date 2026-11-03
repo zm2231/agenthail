@@ -20,6 +20,7 @@ const (
 type MCPCredentials interface {
 	URL() string
 	Pending() (token, ref string, err error)
+	Claim(ref, threadID string) error
 	Live(sessionID string) (token string, ok bool)
 	Rotate(sessionID string) (token string, err error)
 	Unattached(sessionID string, err error)
@@ -49,51 +50,59 @@ func withMCPConfig(params map[string]any, url, token string) map[string]any {
 	return merged
 }
 
-// The only sender of thread/start|resume|fork; start and fork return the pending credential ref the new session registers with.
-func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, method string, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, string, error) {
+// The only sender of thread/start|resume|fork; a new thread's token is minted unbound and claimed once Codex returns its id.
+func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, method string, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	credentials := c.mcpCredentials()
 	if credentials == nil {
-		response, err := client.Request(ctx, method, params, wait)
-		return response, "", err
+		return client.Request(ctx, method, params, wait)
 	}
 	switch method {
 	case codexThreadStart, codexThreadFork:
 		token, ref, err := credentials.Pending()
 		if err != nil {
-			return nil, "", fmt.Errorf("issue the new thread's credential: %w", err)
+			return nil, fmt.Errorf("issue the new thread's credential: %w", err)
 		}
 		response, err := client.Request(ctx, method, withMCPConfig(params, credentials.URL(), token), wait)
-		return response, ref, err
+		if err != nil {
+			return response, err
+		}
+		result, _ := response["result"].(map[string]any)
+		thread, _ := result["thread"].(map[string]any)
+		if id := str(thread, "id"); id != "" {
+			if err := credentials.Claim(ref, id); err != nil {
+				credentials.Unattached(id, fmt.Errorf("claim the new thread's credential: %w", err))
+			}
+		}
+		return response, nil
 	case codexThreadResume:
 		return c.resumeWithCredential(ctx, client, credentials, session, params, wait)
 	}
-	return nil, "", fmt.Errorf("codexThreadRequest does not send %s", method)
+	return nil, fmt.Errorf("codexThreadRequest does not send %s", method)
 }
 
 // A loaded thread ignores a resume's config, so a held token rides every resume; without one, the thread's MCP status shows whether it loaded bare.
-func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, string, error) {
+func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
-		response, err := client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
-		return response, "", err
+		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
 	}
 	response, err := client.Request(ctx, codexThreadResume, params, wait)
 	if err != nil {
-		return response, "", err
+		return response, err
 	}
 	connected, err := codexMCPConnected(ctx, client, session.ID)
 	if err != nil {
 		credentials.Unattached(session.ID, fmt.Errorf("read the thread's MCP status: %w", err))
-		return response, "", nil
+		return response, nil
 	}
 	if connected {
-		return response, "", nil
+		return response, nil
 	}
 	if reattached, err := c.reattachMCP(ctx, client, credentials, session.ID, params, wait); err != nil {
 		credentials.Unattached(session.ID, err)
 	} else {
 		response = reattached
 	}
-	return response, "", nil
+	return response, nil
 }
 
 func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials MCPCredentials, threadID string, params map[string]any, wait time.Duration) (map[string]any, error) {

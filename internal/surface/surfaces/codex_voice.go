@@ -41,7 +41,7 @@ func (v *CodexVoice) Create(ctx context.Context, cwd, instructions string) (*sur
 }
 
 func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd, instructions string) (*surface.Session, error) {
-	response, credentialRef, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{
 		"cwd": cwd, "developerInstructions": instructions, "ephemeral": false,
 		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
 	}, 15*time.Second)
@@ -54,7 +54,7 @@ func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd
 	if id == "" {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Codex did not return an operator thread ID"))
 	}
-	session := &surface.Session{ID: id, CredentialRef: credentialRef, Name: voiceOperatorName, Cwd: cwd,
+	session := &surface.Session{ID: id, Name: voiceOperatorName, Cwd: cwd,
 		Surface: surface.KindCodex, Source: "agenthail",
 		HasLocal: true, Status: surface.StatusIdle, Transcript: str(thread, "path"), LastActive: time.Now()}
 	setCodexTransport(session, codexTransportDesktop)

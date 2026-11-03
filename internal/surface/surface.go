@@ -222,7 +222,6 @@ type Session struct {
 	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
 	Holders               []Holder          `json:"holders,omitempty"`
 	HolderPID             int               `json:"-"`
-	CredentialRef         string            `json:"-"`
 	HolderStart           string            `json:"-"`
 	StreamCursor          uint64            `json:"-"`
 	StreamCursorSet       bool              `json:"-"`

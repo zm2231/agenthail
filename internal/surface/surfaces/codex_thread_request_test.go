@@ -59,11 +59,16 @@ type fakeCredentials struct {
 	live       map[string]string
 	rotations  int
 	unattached []error
+	claims     []string
 }
 
 func (f *fakeCredentials) URL() string { return "http://127.0.0.1:7412/mcp" }
 func (f *fakeCredentials) Pending() (string, string, error) {
 	return "ahs_pending", "ref-1", nil
+}
+func (f *fakeCredentials) Claim(ref, id string) error {
+	f.claims = append(f.claims, ref+"="+id)
+	return nil
 }
 func (f *fakeCredentials) Live(id string) (string, bool) {
 	token, ok := f.live[id]
@@ -81,9 +86,12 @@ func TestStartAndForkCarryAPendingCredential(t *testing.T) {
 		c := &Codex{}
 		c.SetMCPCredentials(credentials)
 		client := &scriptedThreadClient{}
-		_, ref, err := c.codexThreadRequest(context.Background(), client, method, nil, map[string]any{"cwd": "/w"}, time.Second)
-		if err != nil || ref != "ref-1" || bearerOf(client.calls[0].params) != "Bearer ahs_pending" || client.calls[0].params["cwd"] != "/w" {
-			t.Fatalf("%s: ref=%q err=%v params=%v", method, ref, err, client.calls[0].params)
+		_, err := c.codexThreadRequest(context.Background(), client, method, nil, map[string]any{"cwd": "/w"}, time.Second)
+		if err != nil || bearerOf(client.calls[0].params) != "Bearer ahs_pending" || client.calls[0].params["cwd"] != "/w" {
+			t.Fatalf("%s: err=%v params=%v", method, err, client.calls[0].params)
+		}
+		if len(credentials.claims) != 1 || credentials.claims[0] != "ref-1=new-thread" {
+			t.Fatalf("%s: claims=%v", method, credentials.claims)
 		}
 	}
 }
@@ -93,7 +101,7 @@ func TestResumeCarriesTheLiveTokenTheDaemonHolds(t *testing.T) {
 	c := &Codex{}
 	c.SetMCPCredentials(credentials)
 	client := &scriptedThreadClient{}
-	if _, _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if got := client.methods(); len(got) != 1 || bearerOf(client.calls[0].params) != "Bearer ahs_live" {
@@ -106,7 +114,7 @@ func TestResumeWithoutATokenLeavesAConnectedThreadAlone(t *testing.T) {
 	c := &Codex{}
 	c.SetMCPCredentials(credentials)
 	client := &scriptedThreadClient{connected: []bool{true}}
-	if _, _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if credentials.rotations != 0 || bearerOf(client.calls[0].params) != "" {
@@ -119,7 +127,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	c := &Codex{}
 	c.SetMCPCredentials(credentials)
 	client := &scriptedThreadClient{connected: []bool{false, true}}
-	if _, _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{codexThreadResume, "mcpServerStatus/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
@@ -142,7 +150,7 @@ func TestAReattachThatCannotTakeIsReported(t *testing.T) {
 	c := &Codex{}
 	c.SetMCPCredentials(credentials)
 	client := &scriptedThreadClient{connected: []bool{false, false}}
-	if _, _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if len(credentials.unattached) != 1 || credentials.rotations != 1 {
@@ -152,11 +160,11 @@ func TestAReattachThatCannotTakeIsReported(t *testing.T) {
 
 func TestWithoutCredentialsThreadRequestsPassThrough(t *testing.T) {
 	client := &scriptedThreadClient{}
-	_, ref, err := (&Codex{}).codexThreadRequest(context.Background(), client, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second)
-	if err != nil || ref != "" || bearerOf(client.calls[0].params) != "" {
-		t.Fatalf("ref=%q err=%v params=%v", ref, err, client.calls[0].params)
+	_, err := (&Codex{}).codexThreadRequest(context.Background(), client, codexThreadStart, nil, map[string]any{"cwd": "/w"}, time.Second)
+	if err != nil || bearerOf(client.calls[0].params) != "" {
+		t.Fatalf("err=%v params=%v", err, client.calls[0].params)
 	}
-	if _, _, err := (&Codex{}).codexThreadRequest(context.Background(), client, "thread/read", nil, nil, time.Second); err != nil {
+	if _, err := (&Codex{}).codexThreadRequest(context.Background(), client, "thread/read", nil, nil, time.Second); err != nil {
 		t.Fatalf("pass-through refused: %v", err)
 	}
 }

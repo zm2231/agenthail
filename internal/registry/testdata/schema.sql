@@ -512,6 +512,7 @@ CREATE TABLE session_credentials (
 	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
 	pending_ref TEXT UNIQUE,
 	pending_expires_at_ms INTEGER NOT NULL DEFAULT 0,
+	claimed_session_id TEXT UNIQUE,
 	token_hash TEXT NOT NULL UNIQUE,
 	capabilities TEXT NOT NULL DEFAULT '[]',
 	ceiling TEXT NOT NULL DEFAULT '{}',

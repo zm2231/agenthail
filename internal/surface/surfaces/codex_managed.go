@@ -336,7 +336,7 @@ func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess
 	if model != "" {
 		params["model"] = model
 	}
-	if _, _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, params, 10*time.Second); err != nil {
+	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, params, 10*time.Second); err != nil {
 		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
