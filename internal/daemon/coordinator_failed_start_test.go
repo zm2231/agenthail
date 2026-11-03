@@ -35,8 +35,10 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 		startErr error
 		status   registry.DeliveryIntentStatus
 		turn     string
+		held     bool
 	}{
 		{name: "accepted", status: registry.DeliveryIntentSent, turn: "started-turn"},
+		{name: "held before the restart", status: registry.DeliveryIntentSent, turn: "started-turn", held: true},
 		{name: "outcome unknown", startErr: surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out")), status: registry.DeliveryIntentSubmitted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,6 +59,14 @@ func TestAQueuedRestartMovesItsDeliveryRecordToTheNewConversation(t *testing.T) 
 			queued, err := r.DeliveryIntent(intentID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if tc.held {
+				if changed, err := r.HoldPeerMessage(registry.PeerMessage{MsgID: queued.UUID, TargetSessionID: "from", SenderSessionID: "to"}, "parked by Claude"); err != nil || !changed {
+					t.Fatalf("hold changed=%v err=%v", changed, err)
+				}
+				if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 1 {
+					t.Fatalf("held problems=%+v err=%v", problems, err)
+				}
 			}
 			previous, err := r.Session("from")
 			if err != nil {
