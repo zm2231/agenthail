@@ -13,6 +13,7 @@ const (
 	OriginAgent       OriginVia = "agent"
 	OriginCoordinator OriginVia = "coordinator"
 	OriginDaemon      OriginVia = "daemon"
+	OriginVoice       OriginVia = "voice"
 )
 
 type SessionOrigin struct {
@@ -46,7 +47,7 @@ func (origin SessionOrigin) valid() error {
 		if origin.CreatorID == "" {
 			return errors.New("a session started by an agent names its creator")
 		}
-	case OriginPerson, OriginCoordinator, OriginDaemon:
+	case OriginPerson, OriginCoordinator, OriginDaemon, OriginVoice:
 		if origin.CreatorID != "" {
 			return fmt.Errorf("a session started by %s names no creator session", origin.Via)
 		}

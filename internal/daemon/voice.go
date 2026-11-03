@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -84,10 +85,13 @@ func (d *Daemon) registerVoiceOperator(ctx context.Context, operator surface.Ses
 	if err := d.Registry.RegisterSession(operator); err != nil {
 		return err
 	}
+	if err := d.Registry.RecordSessionOrigin(registry.SessionOrigin{SessionID: operator.ID, Via: registry.OriginVoice}); err != nil {
+		return err
+	}
 	return d.claimVoiceAlias(operator)
 }
 
-const voiceAlias = "voice"
+const voiceAlias = registry.VoiceOperatorAlias
 
 // claimVoiceAlias names the current operator @voice. It takes the name from
 // an earlier operator, never from a session someone else named.
@@ -101,7 +105,11 @@ func (d *Daemon) claimVoiceAlias(operator surface.Session) error {
 		return nil
 	default:
 		previous, err := d.Registry.Session(owner)
-		if err != nil || previous.Cwd != operator.Cwd {
+		if err != nil {
+			return nil
+		}
+		origin, _, err := d.Registry.SessionOrigin(owner)
+		if err != nil || origin.Via != registry.OriginVoice && previous.Cwd != operator.Cwd {
 			return nil
 		}
 		if err := d.Registry.RemoveAlias(voiceAlias); err != nil {

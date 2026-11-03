@@ -9,6 +9,22 @@ import (
 
 const localLeadSessions = `SELECT a.session_id FROM coordinators c JOIN aliases a ON a.name=c.name WHERE c.host_id=''`
 
+// VoiceOperatorAlias names the current voice operator; only a session voice started may hold it as the operator.
+const VoiceOperatorAlias = "voice"
+
+const voiceOperatorSessions = `SELECT o.session_id FROM session_origins o JOIN aliases a ON a.session_id=o.session_id WHERE o.via='voice' AND a.name='` + VoiceOperatorAlias + `'`
+
+type SessionRoles struct {
+	Lead     bool
+	Operator bool
+}
+
+func (r *Registry) LocalSessionRoles(sessionID string) (SessionRoles, error) {
+	var roles SessionRoles
+	err := r.read.QueryRow(`SELECT ? IN (`+localLeadSessions+`), ? IN (`+voiceOperatorSessions+`)`, sessionID, sessionID).Scan(&roles.Lead, &roles.Operator)
+	return roles, err
+}
+
 // LocalLeadSessions are the sessions leading this host's projects, which stay current however long they are idle.
 func (r *Registry) LocalLeadSessions() (map[string]bool, error) {
 	rows, err := r.read.Query(localLeadSessions)
@@ -25,12 +41,6 @@ func (r *Registry) LocalLeadSessions() (map[string]bool, error) {
 		leads[id] = true
 	}
 	return leads, rows.Err()
-}
-
-func (r *Registry) IsLocalLead(sessionID string) (bool, error) {
-	var lead bool
-	err := r.read.QueryRow(`SELECT EXISTS(`+localLeadSessions+` AND a.session_id=?)`, sessionID).Scan(&lead)
-	return lead, err
 }
 
 // LeadsFingerprint changes whenever any process changes a coordinator or the alias that names its session.

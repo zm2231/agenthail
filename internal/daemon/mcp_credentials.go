@@ -12,17 +12,22 @@ var defaultSessionCapabilities = []string{"read.self", "read.project", "spawn", 
 
 const leadCapability = "control.project"
 
-func sessionCapabilities(lead bool) []string {
+var operatorCapabilities = []string{"control.all", "read.all"}
+
+func sessionCapabilities(roles registry.SessionRoles) []string {
 	capabilities := slices.Clone(defaultSessionCapabilities)
-	if lead {
+	if roles.Lead {
 		capabilities = append(capabilities, leadCapability)
+	}
+	if roles.Operator {
+		capabilities = append(capabilities, operatorCapabilities...)
 	}
 	return capabilities
 }
 
 func (d *Daemon) capabilitiesOf(sessionID string) ([]string, error) {
-	lead, err := d.Registry.IsLocalLead(sessionID)
-	return sessionCapabilities(lead), err
+	roles, err := d.Registry.LocalSessionRoles(sessionID)
+	return sessionCapabilities(roles), err
 }
 
 func (d *Daemon) issueSessionCredential(session surface.Session) (registry.IssuedCredential, error) {
