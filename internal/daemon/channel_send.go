@@ -34,38 +34,49 @@ func (b daemonBroadcastDelivery) Session(ctx context.Context, sessionID, message
 }
 
 func (b daemonBroadcastDelivery) PeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, error) {
-	host, ok := b.d.pairedHost(spec.HostID)
+	receipt, _, err := b.d.sendToPeerCoordinator(ctx, spec, message, surface.SendOptions{SourceSessionID: source})
+	return receipt, err
+}
+
+func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.CoordinatorSpec, message string, options surface.SendOptions) (*delivery.Receipt, bool, error) {
+	host, ok := d.pairedHost(spec.HostID)
 	if !ok {
-		return nil, fmt.Errorf("host %s is not paired", spec.HostID)
+		return nil, false, fmt.Errorf("host %s is not paired", spec.HostID)
 	}
 	request := map[string]any{"action": "coordinator-send", "name": spec.Name, "message": message}
-	own, err := b.d.Registry.ForwardSender(request, source)
-	if err != nil {
-		return nil, err
+	if options.Model != "" {
+		request["model"] = options.Model
 	}
-	if !own && source != "" {
-		if owner, err := b.d.Registry.SessionHost(source); err == nil && owner == "" {
-			request["sourceSessionId"] = hosts.Qualify(b.d.hostIdentity().ID, source)
-			request["sourceName"] = b.d.senderName(source)
-		}
+	if options.Author != "" {
+		request["author"] = string(options.Author)
+	}
+	if options.PersonName != "" {
+		request["personName"] = options.PersonName
+	}
+	if options.SourceSessionID != "" {
+		request["sourceSessionId"] = options.SourceSessionID
+	}
+	if _, err := d.routeSource(ctx, request, host); err != nil {
+		return nil, false, err
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	payload, err := hosts.ReadResponse(response)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var answer struct {
-		Result delivery.Receipt `json:"result"`
+		Result  delivery.Receipt `json:"result"`
+		Started bool             `json:"started"`
 	}
 	if err := json.Unmarshal(payload, &answer); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &answer.Result, nil
+	return &answer.Result, answer.Started, nil
 }

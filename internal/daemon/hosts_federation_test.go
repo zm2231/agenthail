@@ -37,6 +37,7 @@ type federatedSurface struct {
 	messages  []string
 	sources   []string
 	persons   []string
+	options   []surface.SendOptions
 	usage     *surface.Usage
 	subagents []surface.ClaudeSubagentLink
 }
@@ -99,9 +100,11 @@ func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
 
-func (f *federatedSurface) SendWithOptions(ctx context.Context, _ *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+func (f *federatedSurface) SendWithOptions(ctx context.Context, _ *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	f.mu.Lock()
 	f.sources = append(f.sources, surface.SourceSessionID(ctx))
+	f.persons = append(f.persons, surface.PersonName(ctx))
+	f.options = append(f.options, options)
 	f.mu.Unlock()
 	f.record(message)
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil

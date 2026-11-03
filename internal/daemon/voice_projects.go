@@ -33,9 +33,10 @@ func (p voiceProjects) LeadSession(_ context.Context, name string) (string, erro
 }
 
 func (p voiceProjects) SendToLead(ctx context.Context, name, message, sourceSessionID string) (voice.LeadReceipt, error) {
-	result, err := p.d.doLeadSend(ctx, principal{ID: localDashboardPrincipal, Kind: principalPerson}, name, message, sourceSessionID)
+	result, err := p.d.sendToCoordinator(ctx, coordinatorRequest{Action: "coordinator-send", Project: name, Message: message, SourceSessionID: sourceSessionID})
 	if err != nil {
 		return voice.LeadReceipt{}, err
 	}
-	return result.Body.(voice.LeadReceipt), nil
+	reply := result.Body.(coordinatorSendReply)
+	return voice.LeadReceipt{Ref: reply.Ref, Started: reply.Started, Receipt: reply.Result}, nil
 }

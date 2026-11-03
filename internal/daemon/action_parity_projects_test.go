@@ -105,6 +105,11 @@ func parityProjectCases() []parityCase {
 		action("coordinator-send from an unknown session", "coordinator-send", `"name":"parity-lead","message":"status?","sourceSessionId":"ghost"`, withCoordinator),
 		action("coordinator-send as a person naming a session", "coordinator-send", `"name":"parity-lead","message":"status?","author":"person","sourceSessionId":"from"`, withCoordinator),
 		action("coordinator-send without a message", "coordinator-send", `"name":"parity-lead"`, withCoordinator),
+		action("coordinator-send to a project's lead", "coordinator-send", `"project":"Parity","message":"status?","sourceSessionId":"from"`, withCoordinator),
+		action("coordinator-send to a project's lead by id", "coordinator-send", `"project":"p-parity","message":"status?"`, withCoordinator),
+		action("coordinator-send to a project without a lead", "coordinator-send", `"project":"Parity","message":"status?"`, withAddedProject),
+		action("coordinator-send to an unknown project", "coordinator-send", `"project":"nothing","message":"status?"`, withCoordinator),
+		action("coordinator-send naming a coordinator and a project", "coordinator-send", `"name":"parity-lead","project":"Parity","message":"status?"`, withCoordinator),
 		action("coordinator action unknown", "coordinator-frob", ``, nil),
 	}
 }

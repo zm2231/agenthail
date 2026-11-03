@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -66,6 +67,7 @@ type coordinatorRequest struct {
 	SessionID       string
 	SourceSessionID string
 	ProjectID       string
+	Project         string
 	Name            string
 	Surface         string
 	Cwd             string
@@ -143,17 +145,33 @@ func (d *Daemon) doCoordinatorAction(ctx context.Context, p principal, request c
 	}
 }
 
-// sendToCoordinator delivers to this host's coordinator by name, starting
-// its conversation when it has none, for a sender that cannot name a session
-// because the coordinator may not have one yet.
+type coordinatorSendReply struct {
+	OK      bool              `json:"ok"`
+	Ref     string            `json:"ref"`
+	Result  *delivery.Receipt `json:"result"`
+	Started bool              `json:"started"`
+}
+
+// sendToCoordinator delivers to a coordinator named directly on this host, or
+// to a project's lead on this host or a paired one, starting its
+// conversation when it has none.
 func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorRequest) (actionResult, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(request.Name), "@")
-	if name == "" || strings.TrimSpace(request.Message) == "" {
-		return actionResult{}, invalidRequest("a coordinator name and a message are required")
+	project := strings.TrimSpace(request.Project)
+	if name != "" && project != "" {
+		return actionResult{}, invalidRequest("name a coordinator or a project, not both")
 	}
-	spec, err := d.Registry.CoordinatorNamed(name)
-	if err != nil {
-		return actionResult{}, actionFailed(http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
+	if name == "" && project == "" || strings.TrimSpace(request.Message) == "" {
+		return actionResult{}, invalidRequest("a coordinator name or a project, and a message, are required")
+	}
+	var spec registry.CoordinatorSpec
+	var err error
+	if name != "" {
+		if spec, err = d.Registry.CoordinatorNamed(name); err != nil {
+			return actionResult{}, actionFailed(http.StatusNotFound, "no_coordinator", fmt.Sprintf("%s has no coordinator @%s", d.hostIdentity().Name, name))
+		}
+	} else if spec, err = d.projectLead(project); err != nil {
+		return actionResult{}, actionFailed(http.StatusConflict, "no_lead", err.Error())
 	}
 	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
 		return actionResult{}, invalidRequest("author must be \"person\" and name no source session when set")
@@ -165,11 +183,20 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	}
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	outcome, err := d.coordinator().Deliver(ctx, spec, request.Message, surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName})
+	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName}
+	reply := coordinatorSendReply{OK: true, Ref: d.coordinator().Ref(spec)}
+	if spec.HostID != "" {
+		reply.Result, reply.Started, err = d.sendToPeerCoordinator(ctx, spec, request.Message, options)
+	} else {
+		var outcome *coordinator.Outcome
+		if outcome, err = d.coordinator().Deliver(ctx, spec, request.Message, options); err == nil {
+			reply.Result, reply.Started = outcome.Receipt, outcome.Started
+		}
+	}
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())
 	}
-	return actionOK(map[string]any{"ok": true, "result": outcome.Receipt, "started": outcome.Started}), nil
+	return actionOK(reply), nil
 }
 
 func (d *Daemon) coordinatorProject(ctx context.Context, folder string) (*CatalogProject, error) {

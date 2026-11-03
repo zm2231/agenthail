@@ -2,11 +2,9 @@ package daemon
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -43,26 +41,4 @@ func (d *Daemon) projectLead(name string) (registry.CoordinatorSpec, error) {
 		return registry.CoordinatorSpec{}, err
 	}
 	return d.coordinator().ProjectLead(project.ID, project.DisplayName)
-}
-
-func (d *Daemon) doLeadSend(ctx context.Context, _ principal, project, message, sourceSessionID string) (actionResult, error) {
-	spec, err := d.projectLead(project)
-	if err != nil {
-		return actionResult{}, actionFailed(http.StatusConflict, "no_lead", err.Error())
-	}
-	service := d.coordinator()
-	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-	defer cancel()
-	if spec.HostID != "" {
-		receipt, err := daemonBroadcastDelivery{d: d}.PeerCoordinator(ctx, spec, message, sourceSessionID)
-		if err != nil {
-			return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())
-		}
-		return actionOK(voice.LeadReceipt{Ref: service.Ref(spec), Receipt: receipt}), nil
-	}
-	outcome, err := service.Deliver(ctx, spec, message, surface.SendOptions{SourceSessionID: sourceSessionID})
-	if err != nil {
-		return actionResult{}, actionFailed(http.StatusBadGateway, "delivery_failed", err.Error())
-	}
-	return actionOK(voice.LeadReceipt{Ref: service.Ref(spec), Started: outcome.Started, Receipt: outcome.Receipt}), nil
 }

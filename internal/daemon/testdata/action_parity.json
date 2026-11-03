@@ -453,7 +453,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
   },
   "api/action coordinator-send from an unknown session": {
     "status": 400,
@@ -467,6 +467,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
+  "api/action coordinator-send naming a coordinator and a project": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name a coordinator or a project, not both\"}}\n"
+  },
   "api/action coordinator-send to a coordinator": {
     "status": 200,
     "header": {
@@ -477,7 +489,55 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/action coordinator-send to a project without a lead": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_lead\",\"message\":\"Parity has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'\"}}\n"
+  },
+  "api/action coordinator-send to a project's lead": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/action coordinator-send to a project's lead by id": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/action coordinator-send to an unknown project": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_lead\",\"message\":\"no project is named \\\"nothing\\\"\"}}\n"
   },
   "api/action coordinator-send without a message": {
     "status": 400,
@@ -489,7 +549,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name and a message are required\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name or a project, and a message, are required\"}}\n"
   },
   "api/action coordinator-set": {
     "status": 400,
@@ -2457,7 +2517,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
   },
   "api/v1/actions coordinator-send from an unknown session": {
     "status": 400,
@@ -2471,6 +2531,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
+  "api/v1/actions coordinator-send naming a coordinator and a project": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"name a coordinator or a project, not both\"}}\n"
+  },
   "api/v1/actions coordinator-send to a coordinator": {
     "status": 200,
     "header": {
@@ -2481,7 +2553,55 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/v1/actions coordinator-send to a project without a lead": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_lead\",\"message\":\"Parity has no coordinator; use 'agenthail coordinator new' or 'agenthail coordinator set'\"}}\n"
+  },
+  "api/v1/actions coordinator-send to a project's lead": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/v1/actions coordinator-send to a project's lead by id": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"ref\":\"@parity-lead\",\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"started\",\"turnId\":\"started-turn\",\"detail\":\"Started coordinator @parity-lead (no conversation was named @parity-lead).\"},\"started\":true}\n"
+  },
+  "api/v1/actions coordinator-send to an unknown project": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"no_lead\",\"message\":\"no project is named \\\"nothing\\\"\"}}\n"
   },
   "api/v1/actions coordinator-send without a message": {
     "status": 400,
@@ -2493,7 +2613,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name and a message are required\"}}\n"
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a coordinator name or a project, and a message, are required\"}}\n"
   },
   "api/v1/actions coordinator-set": {
     "status": 400,
