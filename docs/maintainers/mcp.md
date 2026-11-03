@@ -1,4 +1,4 @@
-# MCP server: session credentials, read tools, scope and limits
+# MCP server: session credentials, injection, read tools, scope and limits
 
 The daemon serves an MCP server named `agenthail` at `/mcp` on its own listener (`127.0.0.1:7412` by default). It uses the official Go SDK (`github.com/modelcontextprotocol/go-sdk`) over streamable HTTP in stateless mode with JSON responses: every request carries its own bearer, and no `Mcp-Session-Id` state is kept.
 
@@ -28,6 +28,30 @@ The registry table `session_credentials` holds at most one live credential per s
 - **Idle expiry, 24 hours:** every authenticated call refreshes it. An expired credential is suspended, not revoked: the next turn the observer sees (a new active turn or a new completion) refreshes it.
 - **Maximum expiry, 30 days from issue:** nothing extends it, and a turn does not revive it. Issuing again after it mints a fresh credential.
 - **Revocation:** archiving a session revokes its credential in the same transaction. Authentication also revokes a credential whose session is archived or now belongs to another host. Deleting a session deletes its credentials.
+
+## How a session gets the server
+
+Every Claude conversation the host runs and every Codex thread Agenthail starts, resumes or forks is given the `agenthail` server with its own bearer. Only the daemon that minted a token holds it raw, in memory.
+
+**Pending credentials.** A new session has no row to bind a credential to when its token must already be in the start call, and a Codex thread has no id until `thread/start` returns. So the daemon mints the credential unbound, with a `pending_ref` and a short lifetime:
+
+- an unbound credential never authenticates;
+- the ref is claimed once for one session id (`claimed_session_id`); a second claim, or one after the lifetime, is refused;
+- the claimed credential binds when that session registers, in the registration transaction, and replaces any live credential the session had;
+- an unbound credential past its lifetime is deleted when the daemon next issues one and when the MCP server starts.
+
+The lifetime is the start timeout plus its naming margin (50 s) for starts the daemon runs itself, and the pending-launch lifetime (5 min) for terminal launches.
+
+**Codex.** Every `thread/start`, `thread/resume` and `thread/fork` goes through `codexThreadRequest`, which adds `config.mcp_servers.agenthail` (`url`, `http_headers.Authorization`, `tool_timeout_sec: 3700`). `TestOnlyCodexThreadRequestSendsThreadStartResumeOrFork` fails if any other code sends those methods.
+
+- Start and fork carry a pending credential and claim it for the returned thread id.
+- Codex connects a thread's MCP servers from the config of the call that loads the thread and ignores the config of a resume that finds it loaded. A resume therefore carries the session's token when the daemon holds it. When it does not (after the daemon restarts), the resume goes out bare and `mcpServerStatus/list` for that thread shows whether the server is connected. If not, the credential is rotated and the thread is unsubscribed and resumed with the new token, then checked again; a thread another client keeps loaded is logged and gets the server at its next load.
+
+**Terminal launches.** A tmux or cmux Codex launch runs `agenthail codex` in the terminal, which starts the thread itself. The daemon mints a pending credential for the launch; the launcher writes it to `~/.agenthail/launches/<launch id>.mcp` (mode 0600) before the terminal starts, and removes it if the launch never starts. The CLI reads the file once, removes it, starts its thread with the token, and claims the ref through `POST /api/v1/mcp/claim` (`{ref, threadId}`, dashboard token). The claimed credential binds when the daemon registers the located session.
+
+**Claude host.** Every host `open` goes through `hostOpen`, which passes `mcp: {url, token}`; `TestOnlyHostOpenOpensAClaudeHostConversation` keeps it the only caller. The host gives Claude an http MCP server named `agenthail` whose tools run without asking (`allowedTools: ["mcp__agenthail"]`). A new conversation claims a pending credential for the id chosen before `open`; a resume sends the held token, or rotates the session's credential, or, for a conversation not yet registered here, claims a pending one. Opening a conversation the host already runs with a different token replaces the server on the live query (`setMcpServers`). A narrowing checker opens without the server.
+
+**Permission changes.** A session's capabilities change when it becomes or stops being its project's coordinator. When the lead set changes, the daemon compares each affected session's live credential with the capabilities it should have and rotates it on a difference, so the old token is refused as `credential_revoked`. A hosted Claude conversation gets the new token at once through the host's `replaceMcp` call; a Codex thread keeps its old token, refused, until its next resume carries the new one.
 
 ## Read scope
 
