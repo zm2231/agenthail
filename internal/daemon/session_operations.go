@@ -104,7 +104,7 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 
 const sessionAdoptTimeout = 2 * time.Minute
 
-// dashboardSessionAdopt opens a session that runs elsewhere on this computer
+// doSessionAdopt opens a session that runs elsewhere on this computer
 // in the host. A busy session, or a terminal one without consent to stop it,
 // is refused with 409.
 func (d *Daemon) doSessionAdopt(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.AdoptRequest) (actionResult, error) {

@@ -372,7 +372,7 @@ func (d *Daemon) limitResumeRows() (map[string]*dashboardLimitResume, error) {
 	return rows, nil
 }
 
-// limitResumeAction resumes a stopped session now, whatever its reset, or
+// doLimitResume resumes a stopped session now, whatever its reset, or
 // keeps it from being resumed for its current stop.
 func (d *Daemon) doLimitResume(sessionID string, resume bool) (actionResult, error) {
 	stop, found, err := d.Registry.LimitResumeFor(sessionID)
