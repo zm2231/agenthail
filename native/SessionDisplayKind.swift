@@ -19,6 +19,31 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         }
     }
 
+    var symbol: String {
+        switch self {
+        case .unavailable: "exclamationmark.triangle"
+        case .waiting: "questionmark.bubble"
+        case .working: "waveform"
+        case .limited: "gauge.with.dots.needle.100percent"
+        case .finishing: "hourglass"
+        case .queued: "tray.and.arrow.down"
+        case .offline, .idle: "circle"
+        }
+    }
+
+    static func label(_ session: SessionState, now: Date = Date(), waitingPlace: WaitingPlace? = nil, limit: String? = nil) -> String {
+        switch of(session, now: now) {
+        case .unavailable: "Unavailable"
+        case .waiting: (waitingPlace ?? session.waitingPlace)?.label ?? "Waiting on you"
+        case .working: session.workingLabel(now: now)
+        case .limited: limit ?? session.limitLabel ?? "Usage limit"
+        case .finishing: "Waiting on background work"
+        case .queued: "Queued"
+        case .offline: "Offline"
+        case .idle: session.open ? "Idle" : "Closed"
+        }
+    }
+
     static func of(_ session: SessionState, now: Date = Date()) -> SessionDisplayKind {
         if ["unreachable", "unauthorized", "incompatible"].contains(session.host?.state ?? "") || ["unknown", "notLoaded"].contains(session.status) {
             return .unavailable

@@ -12,9 +12,8 @@ enum SessionFacts {
     }
 
     static func presenceLabel(_ session: SessionState) -> String {
-        if let place = session.waitingPlace { return place.label }
-        if let limit = session.limitLabel { return limit }
-        if session.isWaitingOnBackground { return "Waiting on background work" }
+        let kind = SessionDisplayKind.of(session)
+        guard kind == .idle || kind == .queued else { return SessionDisplayKind.label(session) }
         switch session.currentReason {
         case "working": return "Working"
         case "queued": return "Queued"
@@ -40,7 +39,7 @@ enum SessionFacts {
     static func rowDetail(_ session: SessionState) -> String {
         var parts = [SessionRefinement.surfaceLabel(session.surface), presenceLabel(session)]
         if let host = session.remoteHostName {
-            parts[1] = session.isUnavailable ? "Unavailable on \(host)" : "\(parts[1]) on \(host)"
+            parts[1] = "\(parts[1]) on \(host)"
         }
         if let plan = session.livePlan { parts.append(plan.detail) }
         if session.queueCount > 0 { parts.append(queuedLabel(session.queueCount)) }

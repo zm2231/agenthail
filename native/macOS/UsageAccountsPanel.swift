@@ -145,13 +145,13 @@ private struct UsageSessionList: View {
                     Button { select(session.id) } label: {
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(session.isWorking ? DesktopPalette.working : DesktopPalette.muted)
+                                .fill(SessionDisplayKind.of(session) == .working ? DesktopPalette.working : DesktopPalette.muted)
                                 .frame(width: 6, height: 6)
                             Text(session.displayName).lineLimit(1).truncationMode(.tail)
                         }
                     }
                     .buttonStyle(ReadableButtonStyle())
-                    .accessibilityLabel("\(session.displayName), \(session.isWorking ? "working" : "open")")
+                    .accessibilityLabel("\(session.displayName), \(SessionDisplayKind.label(session).lowercased())")
                 }
                 if sessions.count > 5 {
                     Text("and \(sessions.count - 5) more").foregroundStyle(DesktopPalette.muted)

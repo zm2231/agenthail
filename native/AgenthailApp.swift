@@ -503,14 +503,18 @@ private struct SessionMenuSection: Identifiable {
         let others = SessionTree.newestFirst(model.sessionFamilies.filter { attention[$0.root.id] == nil }, by: SessionTree.activity)
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(needsYou.prefix(limit)), reasons: attention.mapValues(\.reason)),
-            SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).map(\.root).prefix(limit))),
-            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.map(\.root).prefix(limit)))
+            SessionMenuSection(title: "Working", sessions: Array(others.filter(working).map(\.root).prefix(limit))),
+            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !working($0) }.map(\.root).prefix(limit)))
         ].filter { !$0.sessions.isEmpty }
     }
 
     static func label(_ session: SessionState, in sessions: [SessionState], reason: String? = nil) -> String {
         if let reason { return "\(SessionFamilies.title(session, in: sessions))  ·  \(reason)" }
-        return "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
+        return "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(SessionDisplayKind.of(session) == .working ? "" : "  ·  " + relativeAge(session.lastActive))"
+    }
+
+    private static func working(_ family: SessionFamily) -> Bool {
+        family.isWorking && SessionDisplayKind.of(family.root) != .unavailable
     }
 }
 

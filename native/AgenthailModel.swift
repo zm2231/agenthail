@@ -495,7 +495,7 @@ final class AgenthailModel: ObservableObject {
         pane.select(session.id)
     }
 
-    private func pin(_ session: SessionState) {
+    func pin(_ session: SessionState) {
         if !(snapshot?.sessions.contains { $0.id == session.id } ?? false), !pinnedSessions.contains(where: { $0.id == session.id }) {
             pinnedSessions.append(session)
         }

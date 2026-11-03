@@ -22,8 +22,22 @@ struct SessionDisplayVectorsTest {
             if !SessionStatusFilter.allCases.filter({ $0.matches(session, now: now) }).elementsEqual([got]) {
                 failures.append("\(name): the status filter does not pick exactly its kind")
             }
-            if !SessionRowTime.status(session, now: now).hasPrefix(SessionDisplayKind(rawValue: want)!.label) {
+            let kind = SessionDisplayKind(rawValue: want)!
+            if !SessionRowTime.status(session, now: now).hasPrefix(kind.label) {
                 failures.append("\(name): the row says \(SessionRowTime.status(session, now: now)), not \(want)")
+            }
+            let header = SessionDisplayKind.label(session, now: now)
+            let agrees = switch kind {
+            case .unavailable, .queued, .offline: header == kind.label
+            case .working: header.hasPrefix("Working")
+            case .waiting: header == (session.waitingPlace?.label ?? "Waiting on you")
+            case .limited: header == (session.limitLabel ?? "Usage limit")
+            case .finishing: header == "Waiting on background work"
+            case .idle: header == "Idle" || header == "Closed"
+            }
+            if !agrees { failures.append("\(name): the header says \(header), not \(want)") }
+            if kind != .idle && kind != .queued && SessionFacts.presenceLabel(session) != SessionDisplayKind.label(session) {
+                failures.append("\(name): the row detail says \(SessionFacts.presenceLabel(session)), not \(want)")
             }
         }
         guard failures.isEmpty else {

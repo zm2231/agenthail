@@ -37,6 +37,8 @@ struct SessionFactsTest {
         remote.host = SessionHost(id: "h0123456789ab", name: "vps", state: "connected")
         expect(SessionFacts.rowDetail(remote) == "Claude · Open on vps", "row detail names a paired host")
         remote.unavailableReason = "host vps is unreachable"
+        expect(SessionFacts.rowDetail(remote) == "Claude · Open on vps", "a connected host's leftover reason does not mark the session unavailable")
+        remote.host = SessionHost(id: "h0123456789ab", name: "vps", state: "unreachable")
         expect(SessionFacts.rowDetail(remote) == "Claude · Unavailable on vps", "row detail marks an unreachable host's session")
         var local = session(reason: "open")
         local.host = SessionHost(id: "h00000000000a", name: "laptop", state: "local")

@@ -30,7 +30,7 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         case ("/api/v1/history", _, _, _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
         case ("/api/v1/snapshot", nil, _, _): body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(Self.epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", "current", _, _): body = Self.page(["live", "lead"], next: nil, current: true)
-        case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" ? ["zeta"] : [], next: nil)
+        case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : [], next: nil)
         case ("/api/v1/snapshot", "all", nil, _): body = Self.page(["live", "older"], next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")
         case ("/api/v1/snapshot", "all", "p2", _): body = Self.page(["oldest", "zeta"], next: nil)
         case ("/api/v1/snapshot", "archived", _, _): body = Self.page(Self.archived, next: nil)
@@ -67,7 +67,8 @@ struct MacPagingTest {
         check(await model.refresh(), "the Mac reads base, current, activity and history")
         check(ids() == ["live", "lead"], "only the current sessions are held at first: \(ids())")
         check(!PagingDaemon.requests.contains { $0 == "/api/v1/snapshot?" }, "the Mac never asks for the unpaged snapshot: \(PagingDaemon.requests)")
-        check(model.filterCounts?[.all] == 5 && model.filterCounts?[.recent] == 3, "tab counts come from the daemon's view: \(String(describing: model.filterCounts))")
+        check(model.filterCounts[.all] == 5 && model.filterCounts[.archived] == 1, "paged tabs count by the daemon's view: \(model.filterCounts)")
+        check(model.filterCounts[.recent] == model.sessionTree.counts[.recent], "Recent counts the list it shows: \(model.filterCounts)")
 
         model.sessionFilter = .all
         check(await settle { ids().contains("older") }, "All reads its first page")
@@ -79,6 +80,7 @@ struct MacPagingTest {
         check(await settle { PagingDaemon.requests.contains { $0.contains("scope=all") && $0.contains("status=working") && $0.contains("surface=claude") } }, "a refinement goes to the daemon: \(PagingDaemon.requests.suffix(3))")
         check(await settle { model.sessionTree.projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id).sorted() == ["live", "older"] }, "a refined list shows the daemon's rows, not a local filter")
         check(model.refinementSurfaces.contains("codex"), "surface choices come from the daemon's view")
+        check(model.filterCounts[.recent] == 2 && model.filterCounts[.running] == 1, "a refined list counts every tab by the daemon: \(model.filterCounts)")
         check(model.pages.listings.keys.filter { $0.projectID == nil }.count == 1, "only the shown list is kept")
         model.sessionRefinement = SessionRefinement()
         model.sessionFilter = .recent
@@ -86,8 +88,13 @@ struct MacPagingTest {
         model.findSessions("zet")
         check(await settle { model.pages.found.map(\.id) == ["zeta"] }, "search asks the daemon")
         check(await model.mentionSessions("zet").map(\.id) == ["zeta"], "mentions ask the daemon")
+        model.findSessions("gps")
+        check(await settle { model.pages.found.map(\.id) == ["zeta"] }, "the palette's query goes to the daemon")
+        check(model.paletteSessions("gps").map(\.id) == ["zeta"], "a daemon match the title does not show stays in the palette")
+        model.mainPane.select("zeta")
         model.findSessions("")
         check(await settle { model.pages.found.isEmpty }, "clearing the search drops what it found")
+        check(model.knownSessions.contains { $0.id == "zeta" }, "a session opened from search stays open after the search clears")
 
         var published: [[SpotlightEntry]] = []
         model.indexSpotlight { published.append($0) }

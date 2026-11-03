@@ -11,7 +11,7 @@ enum SessionFilter: String, CaseIterable, Identifiable {
     var viewScope: String {
         switch self {
         case .running: "running"
-        case .recent: "recent"
+        case .recent: "current"
         case .all: "all"
         case .archived: "archived"
         }

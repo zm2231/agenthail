@@ -171,7 +171,7 @@ struct SessionSidebar: View {
             }
             SessionSidebarHeader(
                 model: model,
-                counts: model.filterCounts ?? tree.counts,
+                counts: model.filterCounts,
                 help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
                 newSessionHelp: shortcuts.help("New session", .newSession),
                 findShortcut: shortcuts.keyboardShortcut(.findSession),
@@ -639,7 +639,7 @@ struct SessionRowView: View {
                 .accessibilityLabel(SessionFacts.holdersLabel(session.sharedHolders.count))
             }
             TimelineView(.everyMinute) { _ in
-                Text(session.isWorking ? session.activity?.busySince.map { relativeAge($0) } ?? "now" : relativeAge(session.lastActive))
+                Text(SessionDisplayKind.of(session) == .working ? session.activity?.busySince.map { relativeAge($0) } ?? "now" : relativeAge(session.lastActive))
                     .font(.system(size: DesktopType.caption))
                     .foregroundStyle(DesktopPalette.text2)
             }
@@ -842,7 +842,7 @@ struct ConversationHeader: View {
             HStack(spacing: 6) {
                 StatusIndicator(session: session, needsYou: false)
                 TimelineView(.everyMinute) { context in
-                    Text(session.waitingPlace?.label ?? (session.isWorking ? session.workingLabel(now: context.date) : session.limitLabel ?? (session.isWaitingOnBackground ? "Waiting on background work" : session.open ? "Idle" : "Closed")))
+                    Text(SessionDisplayKind.label(session, now: context.date))
                 }
             }
             .font(.system(size: DesktopType.secondary))

@@ -675,7 +675,7 @@ struct SessionScreen: View {
             if !atLatest && detail != nil { jumpToLatest.padding(.bottom, 8) }
         }
         .edgeBar(.top, spacing: 0) {
-            if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+            if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
         .edgeBar(.bottom) {
             VStack(spacing: 0) {
@@ -1324,6 +1324,7 @@ struct AttachmentRow: View {
 
 struct SessionSummary: View {
     let detail: SessionDetail
+    let session: SessionState
     let openDetails: () -> Void
 
     var body: some View {
@@ -1352,17 +1353,16 @@ struct SessionSummary: View {
         .buttonStyle(.plain)
         .accessibilityHint("Open session details, context, model and controls")
     }
-    private var backgroundWaiting: Bool { detail.session.status != "busy" && detail.session.backgroundTasks?.running == true }
     private var status: some View {
         TimelineView(.everyMinute) { context in
             statusLabel(now: context.date)
         }
     }
     private func statusLabel(now: Date) -> some View {
-        Label(detail.waitingPlace?.label ?? (detail.session.status == "busy" ? detail.session.workingLabel(now: now) : detail.limitLabel ?? (backgroundWaiting ? "Waiting on background work" : detail.session.status.capitalized)),
-              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : detail.limitLabel != nil ? "gauge.with.dots.needle.100percent" : backgroundWaiting ? "hourglass" : "circle")
-        .font(.subheadline)
-        .foregroundStyle(detail.session.status == "busy" ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
+        let kind = SessionDisplayKind.of(session, now: now)
+        return Label(SessionDisplayKind.label(session, now: now, waitingPlace: detail.waitingPlace, limit: detail.limitLabel), systemImage: kind.symbol)
+            .font(.subheadline)
+            .foregroundStyle(kind == .working ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
@@ -1399,7 +1399,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.waitingPlace?.label ?? detail.limitLabel ?? (liveSession.isWaitingOnBackground ? "Waiting on background work" : detail.session.status.capitalized))
+                    LabeledContent("Status", value: SessionDisplayKind.label(liveSession, waitingPlace: detail.waitingPlace, limit: detail.limitLabel))
                     if let value = detail.modelLabel { LabeledContent("Model", value: value) }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }

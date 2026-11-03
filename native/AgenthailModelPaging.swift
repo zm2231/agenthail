@@ -9,10 +9,25 @@ extension AgenthailModel {
 
     var listHasMore: Bool { listRequest.map { pages.hasMore($0) } ?? false }
 
-    var filterCounts: [SessionFilter: Int]? {
-        let view = listRequest.flatMap { reader.views[$0] } ?? (sessionRefinement.isActive ? nil : currentView)
-        guard let view else { return nil }
-        return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.compactMap { filter in view.counts[filter.viewScope].map { (filter, $0.families) } })
+    var filterCounts: [SessionFilter: Int] {
+        let local = sessionTree.counts
+        if sessionRefinement.isActive {
+            guard let view = listRequest.flatMap({ reader.views[$0] }) else { return [:] }
+            return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.compactMap { filter in view.counts[filter.viewScope].map { (filter, $0.families) } })
+        }
+        return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { filter in
+            (filter, filter.pagedScope.flatMap { currentView?.counts[$0]?.families } ?? local[filter] ?? 0)
+        })
+    }
+
+    func paletteSessions(_ query: String) -> [SessionState] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let found = Set(pages.found.map(\.id))
+        return knownSessions.filter { session in
+            trimmed.isEmpty || found.contains(session.id) || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
+                .compactMap { $0 }
+                .contains { $0.localizedCaseInsensitiveContains(trimmed) }
+        }
     }
 
     var refinementSurfaces: [String] {

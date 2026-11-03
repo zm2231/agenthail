@@ -24,12 +24,7 @@ struct CommandPalette: View {
     private var entries: [Entry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let attention = Set(model.sessionAttention.keys)
-        let sessions = model.knownSessions
-            .filter { session in
-                trimmed.isEmpty || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
-                    .compactMap { $0 }
-                    .contains { $0.localizedCaseInsensitiveContains(trimmed) }
-            }
+        let sessions = model.paletteSessions(trimmed)
             .map { (session: $0, activity: SessionTree.activity($0)) }
             .sorted { lhs, rhs in
                 let left = (titleMatch(lhs.session, trimmed), attention.contains(lhs.session.id), lhs.session.isWorking)
