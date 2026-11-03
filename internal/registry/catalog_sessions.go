@@ -613,7 +613,11 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	current, reason := surface.UnobservedPresence(queueCount)
+	lead, err := leadSessionTx(tx, sessionID)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	current, reason := surface.UnobservedPresence(queueCount, lead)
 	session["status"] = surface.StatusOffline
 	session["open"] = false
 	session["queueCount"] = queueCount

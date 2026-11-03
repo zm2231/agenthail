@@ -32,6 +32,10 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
+	leads, err := d.Registry.LocalLeadSessions()
+	if err != nil {
+		return SessionViewSnapshot{}, err
+	}
 	now := time.Now().UTC()
 	result := SessionViewSnapshot{PresentationPosition: PresentationPosition{HostID: d.hostIdentity().ID, Epoch: d.presentation.epoch, Sequence: d.presentation.sequence}, Sessions: []dashboardSession{}, Counts: map[string]int{}}
 	var plan sessionViewPlan
@@ -61,7 +65,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 				session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}
 				adapter, adapterErr := d.adapters().For(&session)
 				if adapterErr == nil {
-					row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours})
+					row.Current, row.CurrentReason = surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: row.QueueCount, Open: row.Open, Now: now, CodexRecentHours: config.CodexRecentHours, Lead: leads[record.ID]})
 				}
 			}
 			if limit, ok := read.Limits[record.ID]; ok {

@@ -13,6 +13,7 @@ type PresenceInput struct {
 	Open             bool
 	Now              time.Time
 	CodexRecentHours int
+	Lead             bool
 }
 
 // PresenceRule is implemented by an adapter whose sessions are current by a
@@ -29,21 +30,32 @@ type OpenSessionSource interface {
 
 func PresenceFor(adapter Surface, session Session, input PresenceInput) (bool, string) {
 	if session.Status == StatusOffline {
-		return UnobservedPresence(input.QueueCount)
+		return UnobservedPresence(input.QueueCount, input.Lead)
 	}
+	var current bool
+	var reason string
 	if rule, ok := adapter.(PresenceRule); ok {
-		return rule.Presence(session, input)
+		current, reason = rule.Presence(session, input)
+	} else {
+		current, reason = DefaultPresence(session, input)
 	}
-	return DefaultPresence(session, input)
+	return leadPresence(current, reason, input.Lead)
 }
 
 // UnobservedPresence is the presence of a session its runtime no longer
-// reports: it stays current only while messages wait for it.
-func UnobservedPresence(queueCount int) (bool, string) {
+// reports: it stays current while messages wait for it or while it leads a project.
+func UnobservedPresence(queueCount int, lead bool) (bool, string) {
 	if queueCount > 0 {
 		return true, "queued"
 	}
-	return false, ""
+	return leadPresence(false, "", lead)
+}
+
+func leadPresence(current bool, reason string, lead bool) (bool, string) {
+	if !current && lead {
+		return true, "lead"
+	}
+	return current, reason
 }
 
 func OpenSessions(ctx context.Context, adapter Surface, sessions []Session) map[string]bool {

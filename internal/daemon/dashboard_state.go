@@ -185,6 +185,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
 		}
 	}
+	leads, err := d.Registry.LocalLeadSessions()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read project leads: %w", err)
+	}
 	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
@@ -214,7 +218,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if observedAt.IsZero() {
 			observedAt = now.UTC()
 		}
-		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config)
+		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness = &record.Freshness
 		}
