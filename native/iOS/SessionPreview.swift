@@ -28,11 +28,7 @@ struct SessionPreview: View {
         model.setHostSnapshot(snapshot)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
         self.detail = detail
-        session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
-            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
-            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
-            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
-            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
+        session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? detail.sessionState(open: false)
         model.selectedSessionID = session.id
         model.selectedDetail = detail
         if capture == nil { model.composer = "Keep the regression check with the fix." }

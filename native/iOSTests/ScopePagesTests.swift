@@ -52,6 +52,19 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertEqual(model.snapshot?.sessions.filter { $0.id == "one::live" }.count, 1)
     }
 
+    func testAPageKeepsLoadingWhenTheRowThatAskedForItGoesAway() async throws {
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        let model = try await connect(["one"])
+        await model.listMore(.all)
+        ScopeServer.state.slowPages("one", seconds: 0.3)
+        let shown = Task { await model.listMore(.all) }
+        try await Task.sleep(for: .milliseconds(50))
+        shown.cancel()
+        await model.listMore(.all)
+        XCTAssertEqual(listed(.all), ["one::a", "one::b"], "a page asked for by a row that went away was dropped and never read again")
+        XCTAssertFalse(model.canListMore(.all))
+    }
+
     func testAnArchivedSessionLeavesTheLoadedPages() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("old"), ScopeServer.row("kept")]]])
         let model = try await connect(["one"])
@@ -173,6 +186,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             var epoch: String
             var requests: [String] = []
             var projects: [[String: Any]] = []
+            var pageDelay: Double = 0
         }
 
         private let lock = NSLock()
@@ -187,6 +201,7 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
         }
         func requests(_ host: String) -> [String] { lock.withLock { hosts[host]?.requests ?? [] } }
         func list(_ host: String, projects: [[String: Any]]) { lock.withLock { hosts[host]?.projects = projects } }
+        func slowPages(_ host: String, seconds: Double) { lock.withLock { hosts[host]?.pageDelay = seconds } }
         func record(_ host: String, _ path: String) -> Host? {
             lock.withLock {
                 hosts[host]?.requests.append(path)
@@ -240,7 +255,8 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             let project = query["projectId"]
             var page: [String: Any] = ["sessions": rows.filter { project == nil || ($0["project"] as? [String: Any])?["id"] as? String == project }]
             if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
-            respond(200, Self.json(page))
+            if host.pageDelay == 0 { return respond(200, Self.json(page)) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, Self.json(page)) }
         default:
             respond(200, "{}")
         }

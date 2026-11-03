@@ -41,6 +41,7 @@ SOURCES=(
   ScopePages.swift
   ScopeReader.swift
   SessionDisplayKind.swift
+  SessionDetailState.swift
   SnapshotParts.swift
   SessionRowTime.swift
   HostNames.swift

@@ -14,16 +14,21 @@ final class ScopeReader {
     private(set) var pages = ScopePages()
     private(set) var pageError: String?
     private(set) var views: [ScopeRequest: ScopePage.View] = [:]
-    private var reading: Set<ScopeRequest> = []
+    private var reads: [ScopeRequest: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
     private var rereadTask: Task<Void, Never>?
     private let source: Source
 
     init(_ source: Source) { self.source = source }
 
-    func cancel() { rereadTask?.cancel() }
+    func cancel() {
+        rereadTask?.cancel()
+        reads.values.forEach { $0.cancel() }
+        reads = [:]
+    }
 
     func drop(_ request: ScopeRequest) {
+        reads.removeValue(forKey: request)?.cancel()
         pages.drop(request)
         views.removeValue(forKey: request)
     }
@@ -33,9 +38,15 @@ final class ScopeReader {
     func joined(_ sessions: [SessionState]) -> [SessionState] { pages.joined(sessions) }
 
     func readMore(_ request: ScopeRequest) async {
-        guard source.active(), source.reachable(), !reading.contains(request), let read = pages.next(request), let api = source.api() else { return }
-        reading.insert(request)
-        defer { reading.remove(request) }
+        if let running = reads[request] { return await running.value }
+        guard source.active(), source.reachable(), let read = pages.next(request), let api = source.api() else { return }
+        let task = Task { await fetch(request, read: read, api: api) }
+        reads[request] = task
+        await task.value
+        if reads[request] == task { reads[request] = nil }
+    }
+
+    private func fetch(_ request: ScopeRequest, read: ScopePages.Read, api: AgenthailAPI) async {
         do {
             let page = try await api.scopePage(request, cursor: read.cursor, timeout: source.timeout())
             guard source.active() else { return }

@@ -5,6 +5,7 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [String] = []
     nonisolated(unsafe) static var epoch = "e1"
     nonisolated(unsafe) static var archived: [String] = ["shelved"]
+    nonisolated(unsafe) static var slowNextPage = false
     static let lock = NSLock()
 
     static func row(_ id: String, status: String = "idle", current: Bool = false, name: String? = nil) -> String {
@@ -36,6 +37,12 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         case ("/api/v1/snapshot", "archived", _, _): body = Self.page(Self.archived, next: nil)
         default: body = "{}"
         }
+        guard query["cursor"] == "p2" && Self.slowNextPage else { return finish(url, body) }
+        Thread.sleep(forTimeInterval: 0.3)
+        finish(url, body)
+    }
+
+    private func finish(_ url: URL, _ body: String) {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -73,8 +80,13 @@ struct MacPagingTest {
         model.sessionFilter = .all
         check(await settle { ids().contains("older") }, "All reads its first page")
         check(model.listHasMore, "All knows another page waits")
+        PagingDaemon.slowNextPage = true
+        let shown = Task { await model.listMore() }
+        try? await Task.sleep(for: .milliseconds(50))
+        shown.cancel()
         await model.listMore()
-        check(ids().isSuperset(of: ["oldest", "zeta"]) && !model.listHasMore, "the next page joins and All is complete: \(ids())")
+        PagingDaemon.slowNextPage = false
+        check(ids().isSuperset(of: ["oldest", "zeta"]) && !model.listHasMore, "a page keeps loading when the row that asked for it goes away: \(ids())")
 
         model.sessionRefinement = SessionRefinement(status: .working, surface: "claude")
         check(await settle { PagingDaemon.requests.contains { $0.contains("scope=all") && $0.contains("status=working") && $0.contains("surface=claude") } }, "a refinement goes to the daemon: \(PagingDaemon.requests.suffix(3))")

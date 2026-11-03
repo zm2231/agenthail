@@ -39,7 +39,7 @@ struct VoiceCallView: View {
                     transcript
                     if let session = call.state?.session {
                         HStack {
-                            Label(call.detail?.session.status == "busy" ? "Orchestrator is working" : "Orchestrator", systemImage: "terminal")
+                            Label(call.detail?.orchestratorState.map { "Orchestrator · \($0)" } ?? "Orchestrator", systemImage: "terminal")
                                 .foregroundStyle(DesktopPalette.text2)
                             Spacer()
                             Button("Open timeline") {

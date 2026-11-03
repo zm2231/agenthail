@@ -144,6 +144,7 @@
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B9095BA5C340541D61065976 /* ScopePages.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF3653B6C760F438BBB19E08 /* ScopePages.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
+		B9C8F96E65376C2BC0ACD091 /* SessionDetailState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */; };
 		B9CD23CD91B154E5235B3813 /* ComposerPasteUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE0C4EA53BE662D64BEE9AEE /* ComposerPasteUITests.swift */; };
 		BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */; };
 		C0D50EB864E2776D060E60CA /* GlassSolve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 290B1B61AD1E0FE02DBE0269 /* GlassSolve.swift */; };
@@ -262,6 +263,7 @@
 		13A8A96B32E00B2D74B7D7DE /* TurnNoticeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticeCard.swift; sourceTree = "<group>"; };
 		13D1E5984938119C1E3E0EA0 /* QuestionPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionPagerView.swift; sourceTree = "<group>"; };
 		155647F24D35A824AC154886 /* PhoneComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneComponents.swift; sourceTree = "<group>"; };
+		1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDetailState.swift; sourceTree = "<group>"; };
 		18E781B530EDAA7A0C57BBB6 /* ProxyPreferSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPreferSheet.swift; sourceTree = "<group>"; };
 		1902C9B6F57108C641D1188C /* QuestionPager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionPager.swift; sourceTree = "<group>"; };
 		19F96C9ACCABF40E4E15D13D /* ListedProjectContents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListedProjectContents.swift; sourceTree = "<group>"; };
@@ -612,6 +614,7 @@
 				FF3653B6C760F438BBB19E08 /* ScopePages.swift */,
 				C23917663303D1F0107FDCCA /* ScopeReader.swift */,
 				AB597912B0447C43772021FB /* ScrimField.swift */,
+				1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */,
 				D65997FC6F2FDC05350DC086 /* SessionDisplayKind.swift */,
 				F1B6B0035445CBC2ABCA5BB2 /* SessionRowTime.swift */,
 				5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */,
@@ -913,6 +916,7 @@
 				F14C7562E0F31FB88DEA0961 /* SessionCapture.swift in Sources */,
 				07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */,
 				4E9AF5C076B702CBD5DABDE9 /* SessionCreation.swift in Sources */,
+				B9C8F96E65376C2BC0ACD091 /* SessionDetailState.swift in Sources */,
 				301ACB310F833ACD38519EBD /* SessionDisplayKind.swift in Sources */,
 				D4B4B613E7DC1D43939370FC /* SessionListChrome.swift in Sources */,
 				2F869372B2CD32797E8B80B3 /* SessionPreview.swift in Sources */,

@@ -39,6 +39,13 @@ struct SessionDisplayVectorsTest {
             if kind != .idle && kind != .queued && SessionFacts.presenceLabel(session) != SessionDisplayKind.label(session) {
                 failures.append("\(name): the row detail says \(SessionFacts.presenceLabel(session)), not \(want)")
             }
+            let patch = vector["patch"] as! [String: Any]
+            if patch["host"] == nil, patch["queueCount"] == nil {
+                let detailFields: [String: Any] = ["session": fields, "exchanges": [], "capabilities": fields["capabilities"]!, "readOnly": false, "readOnlyReason": "", "limitResume": fields["limitResume"] ?? NSNull()]
+                let detail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: detailFields))
+                let fromDetail = SessionDisplayKind.of(detail.sessionState(open: true), now: now)
+                if fromDetail.rawValue != want { failures.append("\(name): a session known only by its detail says \(fromDetail.rawValue), not \(want)") }
+            }
         }
         guard failures.isEmpty else {
             failures.forEach { print($0) }

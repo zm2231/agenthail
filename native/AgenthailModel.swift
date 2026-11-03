@@ -413,9 +413,7 @@ final class AgenthailModel: ObservableObject {
     func openCreatedSession(_ id: String, in pane: SessionPane? = nil, started: Bool = false) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
-            var created = SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
-            created.host = snapshot?.daemon.pairedHost(owning: detail.session.id)
-            pin(created)
+            pin(detail.sessionState(open: true, host: snapshot?.daemon.pairedHost(owning: detail.session.id)))
         }
         guard let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) else { return }
         if started {

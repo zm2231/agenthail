@@ -50,6 +50,7 @@ targets:
       - path: ScopePages.swift
       - path: ScopeReader.swift
       - path: SessionDisplayKind.swift
+      - path: SessionDetailState.swift
       - path: SnapshotParts.swift
       - path: SessionRowTime.swift
       - path: HostNames.swift
