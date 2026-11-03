@@ -41,6 +41,33 @@ func TestMCPLedgerReadIsTheCallersProjectBoard(t *testing.T) {
 	}
 }
 
+func TestMCPLedgerWritesAsTheCallerInItsOwnProject(t *testing.T) {
+	d, r, handler, _, _, widget := questionDaemon(t)
+	ledgerWrite(t, handler, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widget.key, SessionID: "s1", Name: "Search"}, nil)
+	other := addLedgerProject(t, r, "proj-other", "repo:github.com/acme/other")
+	other.session(t, r, "outsider")
+	server := mcpServer(t, d)
+	worker, _ := d.Registry.Session("s1")
+	session := mcpSession(t, server, issueMCPToken(t, d, *worker))
+	question := map[string]any{"op": "question", "clientRequestId": "q1", "request": map[string]any{"to": "widget-G1", "text": "which index?", "recommendation": "full-text", "defaultAnswer": "full-text", "kind": "scope", "deadlineMs": time.Now().Add(time.Hour).UnixMilli(), "sessionId": "outsider", "projectKey": other.key}}
+	for range 2 {
+		if out, refused := callMCP(t, session, "agenthail_ledger_write", question); refused {
+			t.Fatalf("question: %v", out)
+		}
+	}
+	board, err := d.ledgerStore().Board(widget.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions := board.Questions()
+	if len(questions) != 1 || questions[0].OwnerSessionID != "s1" {
+		t.Fatalf("questions=%+v, want one, asked as s1 in the caller's project", questions)
+	}
+	if out, refused := callMCP(t, session, "agenthail_ledger_write", map[string]any{"op": "clause", "clientRequestId": "c1", "request": map[string]any{"action": "own", "clauseId": "x", "owner": "outsider"}}); !refused || out["code"] != "invalid" {
+		t.Fatalf("owner over MCP: %v", out)
+	}
+}
+
 func TestMCPRequestsListsOnlyVisibleWaitingSessions(t *testing.T) {
 	d, r, _, _, _, widget := questionDaemon(t)
 	mate := widget.session(t, r, "mate")
