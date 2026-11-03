@@ -131,7 +131,8 @@ stored on that host, and the upload id the client sends with the message is
 resolved there. An action names sessions on at most one other host. A request
 a paired host sent crosses no further: one that would be forwarded to any host
 but its sender (an action, a session read, a coordinator replace that would
-clear a third host's coordinator, a lead send) is refused with `host_transit`,
+clear a third host's coordinator, a lead send, a session move, a ledger owner
+assignment) is refused with `host_transit` before anything changes,
 `resolve` with `scope=remote` is refused, and `usage` answers with this host's
 own sets. Queue and
 delivery records and voice are refused for remote sessions with a reason, and

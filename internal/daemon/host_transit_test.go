@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -120,5 +122,48 @@ func TestAPairedHostCannotReplaceAThirdHostsCoordinator(t *testing.T) {
 	}
 	if _, err := h.middle.reg.Coordinator(project); err == nil {
 		t.Fatal("the middle host took the coordinator anyway")
+	}
+}
+
+type movableSurface struct{ *federatedSurface }
+
+func (movableSurface) PrepareMove(_ context.Context, session *surface.Session, _ surface.AdoptRequest) (*surface.MoveOut, error) {
+	return &surface.MoveOut{Conversation: session.ID, Cwd: session.Cwd, Release: func() {}}, nil
+}
+func (movableSurface) ArchiveMove(string, string) error                 { return nil }
+func (movableSurface) RestoreMove(string, string) error                 { return nil }
+func (movableSurface) WriteMoveArchive(io.Writer, string, string) error { return nil }
+func (movableSurface) CheckMoveIn(surface.MoveIn) error                 { return nil }
+func (movableSurface) ReceiveMove(context.Context, surface.MoveIn, io.Reader, func() error) (*surface.Session, error) {
+	return nil, nil
+}
+func (movableSurface) DropMoveIn(context.Context, string, string, func() error, func() error) error {
+	return nil
+}
+
+func TestAPairedHostCannotMoveASessionToAThirdHost(t *testing.T) {
+	h := pairThreeHosts(t)
+	moveSession(t, h.middle, "local-a", cloneAt(t, catalogTestRepo(t), filepath.Join(t.TempDir(), "widget")), time.Now())
+	h.middle.daemon.Surfaces = []surface.Surface{movableSurface{h.middle.fake}}
+	status, body := h.ask(t, http.MethodPost, "/api/v1/session-moves", nil, map[string]any{"sessionId": "local-a", "host": "vps"})
+	refusedInTransit(t, "a move to the third host", status, body)
+	if moves, err := h.middle.reg.SessionMoves(false); err != nil || len(moves) != 0 {
+		t.Fatalf("the middle host started moves %+v (err %v)", moves, err)
+	}
+}
+
+func TestAPairedHostCannotGiveALedgerToAThirdHost(t *testing.T) {
+	h := pairThreeHosts(t)
+	moveSession(t, h.middle, "local-a", widgetRepo(t, "https://github.com/example/widget.git"), time.Now())
+	moveSession(t, h.far, "remote-a", widgetRepo(t, "https://github.com/example/widget.git"), time.Now())
+	if err := ledger.NewStore(h.middle.reg.WriteDB(), h.middle.reg.ReadDB()).Enable(widgetKey); err != nil {
+		t.Fatal(err)
+	}
+	status, body := h.ask(t, http.MethodPost, "/api/v1/ledger/owner", nil, ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"})
+	refusedInTransit(t, "a ledger owner change", status, body)
+	for name, node := range map[string]*federationNode{"middle": h.middle, "third": h.far} {
+		if owner, _, err := ledger.NewStore(node.reg.WriteDB(), node.reg.ReadDB()).Owner(widgetKey); err != nil || owner != "" {
+			t.Fatalf("the %s host's ledger owner=%q err=%v", name, owner, err)
+		}
 	}
 }
