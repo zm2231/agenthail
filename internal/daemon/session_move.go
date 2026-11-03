@@ -498,6 +498,12 @@ func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) 
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "sessionId and a host or root are required")
 			return
 		}
+		if target, found := d.pairedHost(request.Host); request.Host != "" && found {
+			if err := d.hostTransit(r.Context(), target); err != nil {
+				writeActionResult(w, actionResult{}, err)
+				return
+			}
+		}
 		move := d.moveSession
 		if request.Host == "" {
 			move = d.moveSessionToRoot
