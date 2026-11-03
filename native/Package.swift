@@ -45,6 +45,8 @@ let package = Package(
                 "ComposerCompletion.swift",
                 "SessionSelection.swift",
                 "ProjectActions.swift",
+                "ProjectContents.swift",
+                "SessionRowTime.swift",
                 "HostNames.swift",
                 "ClaudeRootLabels.swift",
                 "UsageMeterText.swift",

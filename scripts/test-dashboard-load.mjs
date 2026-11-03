@@ -19,6 +19,7 @@ const context = {
   renderSurfaceFilter: () => {},
   renderStartSurfaceOptions: () => {},
   renderOperations: () => {},
+  refreshShownProject: () => {},
   mobileConversationView: () => false,
   scopedSessions: () => context.app.state.sessions,
   selectSession: async (id) => selected.push(id),

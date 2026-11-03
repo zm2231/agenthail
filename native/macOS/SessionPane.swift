@@ -23,6 +23,7 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
     @Published private(set) var newSession: NewSessionDraft?
+    @Published private(set) var shownProjectID: String?
     @Published var archivedTab: SessionState? {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
@@ -178,7 +179,13 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     var selectedSession: SessionState? { model.knownSessions.first { $0.id == selectedSessionID } }
-    var displayedSession: SessionState? { selectedSession ?? removedSession }
+    var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
+
+    func showProject(_ id: String) {
+        guard !closed else { return }
+        clearSelection()
+        shownProjectID = id
+    }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
     /// Shows a session. With tabs, it opens in the preview tab unless kept,
@@ -196,6 +203,7 @@ final class SessionPane: ObservableObject, Identifiable {
     /// Shows New Session: with tabs, in its own tab, opened once.
     func openNewSession(message: String? = nil) {
         guard !closed else { return }
+        shownProjectID = nil
         if newSession == nil { newSession = NewSessionDraft(model: model, selected: selectedSession) }
         if tabsEnabled { tabs.open(SessionTabs.newSession, keep: true) }
         if let message { newSession?.take(message) }
@@ -260,7 +268,7 @@ final class SessionPane: ObservableObject, Identifiable {
     func closeTab(_ id: String) {
         let wasActive = tabs.active == id
         tabs.close(id)
-        if wasActive { showActiveTab() }
+        if wasActive && shownProjectID == nil { showActiveTab() }
     }
 
     /// Unarchives a session whose tab closed when it was archived, and opens
@@ -280,7 +288,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func closeOtherTabs(_ id: String) {
         tabs.closeOthers(id)
-        showActiveTab()
+        if shownProjectID == nil { showActiveTab() }
     }
 
     func stepTab(_ offset: Int) {
@@ -340,11 +348,14 @@ final class SessionPane: ObservableObject, Identifiable {
             archivedTab = archived
         }
         let shown = tabs.active == SessionTabs.newSession ? nil : tabs.active
+        guard shownProjectID == nil else { return }
         if shown != selectedSessionID || shown == nil && newSession == nil { showActiveTab() }
     }
 
     private func show(_ id: String) {
-        guard !closed, id != selectedSessionID || detail == nil else { return }
+        guard !closed else { return }
+        shownProjectID = nil
+        guard id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
         frozenOlderCursor = nil
@@ -510,6 +521,7 @@ final class SessionPane: ObservableObject, Identifiable {
         if tabsEnabled {
             reconcileTabs(sessions)
         }
+        guard shownProjectID == nil else { return }
         if let selected = selectedSessionID, model.resolveSessionID(selected) != selected {
             show(model.resolveSessionID(selected))
             return

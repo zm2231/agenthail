@@ -45,7 +45,7 @@ final class HostConnection {
     private static let log = Logger(subsystem: "com.agenthail.app", category: "connection")
     private(set) var pages = ScopePages()
     private(set) var pageError: String?
-    private var readingScopes: Set<String> = []
+    private var readingScopes: Set<ScopeRequest> = []
     private var searchGeneration: UInt64 = 0
     private var rereadTask: Task<Void, Never>?
     lazy var catalogFeed = makeCatalogFeed()
@@ -196,15 +196,15 @@ final class HostConnection {
         }
     }
 
-    func readMore(_ scope: String) async {
-        guard !stopped, reachable, !readingScopes.contains(scope), let read = pages.next(scope) else { return }
-        readingScopes.insert(scope)
-        defer { readingScopes.remove(scope) }
+    func readMore(_ request: ScopeRequest) async {
+        guard !stopped, reachable, !readingScopes.contains(request), let read = pages.next(request) else { return }
+        readingScopes.insert(request)
+        defer { readingScopes.remove(request) }
         do {
-            let page = try await api.scopePage(scope, cursor: read.cursor, timeout: refreshTimeout)
+            let page = try await api.scopePage(request.scope, projectID: request.projectID, cursor: read.cursor, timeout: refreshTimeout)
             guard !stopped else { return }
             pageError = nil
-            if pages.append(page, scope: scope, after: read) { pages.adopt(snapshot?.sessions ?? []) }
+            if pages.append(page, to: request, after: read) { pages.adopt(snapshot?.sessions ?? []) }
         } catch {
             guard !stopped, !Task.isCancelled else { return }
             pageError = error.localizedDescription
@@ -237,24 +237,24 @@ final class HostConnection {
         rereadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !Task.isCancelled else { return }
-            for scope in pages.listings.keys.sorted() { await reread(scope) }
+            for request in pages.listings.keys.sorted() { await reread(request) }
         }
     }
 
-    private func reread(_ scope: String) async {
-        guard !stopped, let start = pages.restart(scope) else { return }
+    private func reread(_ request: ScopeRequest) async {
+        guard !stopped, let start = pages.restart(request) else { return }
         var rows: [SessionState] = []
         var cursor: String?
         do {
             repeat {
-                let page = try await api.scopePage(scope, cursor: cursor, limit: 200, timeout: refreshTimeout)
+                let page = try await api.scopePage(request.scope, projectID: request.projectID, cursor: cursor, limit: 200, timeout: refreshTimeout)
                 rows += page.sessions
                 cursor = page.nextCursor
             } while cursor != nil && rows.count < start.rows
         } catch {
             return
         }
-        guard !stopped, !Task.isCancelled, pages.replace(scope, rows: rows, cursor: cursor, generation: start.generation) else { return }
+        guard !stopped, !Task.isCancelled, pages.replace(request, rows: rows, cursor: cursor, generation: start.generation) else { return }
         pages.adopt(snapshot?.sessions ?? [])
         delegate?.hostDidChange(self)
     }

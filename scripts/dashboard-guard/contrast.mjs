@@ -4,7 +4,7 @@ import { luminance, ratio } from "../../internal/daemon/dashboard/js/ui-contrast
 export const QUANTIZATION = 0.05;
 
 export function decode(buffer) {
-  const png = PNG.sync.read(buffer);
+  const png = PNG.sync.read(Buffer.from(buffer));
   return { width: png.width, height: png.height, data: png.data };
 }
 

@@ -34,7 +34,7 @@ assert(ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "Sh
 const { html, count } = vm.runInContext('renderProjects("")', context);
 assert.equal(count, 2);
 const widgetSection = html.slice(0, html.indexOf("</section>"));
-assert.match(widgetSection, /<span class="project-name">widget<\/span><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header counts its sessions");
+assert.match(widgetSection, /<button class="project-name" type="button" data-project-open="project-widget"[^>]*>widget<\/button><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header opens the project and counts its sessions");
 for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
 assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");
 assert.match(widgetSection, /Show 2 more/);

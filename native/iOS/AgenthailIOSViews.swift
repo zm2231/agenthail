@@ -156,14 +156,20 @@ struct ConversationFlow: View {
                 NavigationSplitView {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
-                    if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
+                    if let wideSelection, let projectID = ConversationRoute.projectID(wideSelection) {
+                        NavigationStack { ProjectScreen(model: model, projectID: projectID) { self.wideSelection = $0; path = [$0] } }
+                    } else if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
                     else { ContentUnavailableView("Choose a session", systemImage: "desktopcomputer", description: Text("Follow work on your computers, review results, or give the next instruction.")).phoneBackdrop(.pane) }
                 }
             } else {
                 NavigationStack(path: $path) {
                     ConversationListView(model: model) { path.append($0); wideSelection = $0 }
-                        .navigationDestination(for: String.self) { sessionID in
-                            SessionRouteView(model: model, sessionID: sessionID)
+                        .navigationDestination(for: String.self) { route in
+                            if let projectID = ConversationRoute.projectID(route) {
+                                ProjectScreen(model: model, projectID: projectID) { path.append($0); wideSelection = $0 }
+                            } else {
+                                SessionRouteView(model: model, sessionID: route)
+                            }
                         }
                 }
             }
@@ -267,44 +273,49 @@ struct ConversationListView: View {
                 Section {
                     ForEach(project.checkouts.flatMap(\.families).filter { !collapsed || project.pinned.contains($0.id) }) { family in familyRows(family) }
                 } header: {
-                    Button {
-                        if !collapsedProjects.insert(project.id).inserted { collapsedProjects.remove(project.id) }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
-                            Text(project.name)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                            if let host = project.hostLabel, model.showsHostNames {
-                                IOSHostBadge(name: host)
+                    HStack(spacing: 10) {
+                        Button {
+                            if !collapsedProjects.insert(project.id).inserted { collapsedProjects.remove(project.id) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
+                                Text(project.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                if let host = project.hostLabel, model.showsHostNames {
+                                    IOSHostBadge(name: host)
+                                }
+                                Spacer(minLength: 0)
+                                Text("\(project.listedSessionCount)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(PhonePalette.muted)
+                                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                                    .font(.caption.weight(.semibold))
                             }
-                            Spacer(minLength: 0)
-                            Text("\(project.listedSessionCount)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(PhonePalette.muted)
-                            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                                .font(.caption.weight(.semibold))
+                            .glassLabel()
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .glassLabel()
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.primary)
-                    .textCase(nil)
-                    .contextMenu {
-                        if let identity = project.identity {
-                            Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
-                                Task { await model.setProjectArchived(identity.id, !project.archived) }
-                            }
-                            if let listed = model.projects[identity.id] {
-                                IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
+                        .contextMenu {
+                            if let identity = project.identity {
+                                Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
+                                    Task { await model.setProjectArchived(identity.id, !project.archived) }
+                                }
+                                if let listed = model.projects[identity.id] {
+                                    IOSProjectMenuItems(model: model, project: listed, sheet: $projectSheet, confirmation: $projectConfirmation, place: $newSessionPlace)
+                                }
                             }
                         }
+                        .accessibilityLabel(project.hostLabel.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
+                        .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
+                        .accessibilityIdentifier("project-" + project.id)
+                        if let identity = project.identity, model.projects[identity.id] != nil {
+                            openProjectButton(identity.id, name: project.name)
+                        }
                     }
-                    .accessibilityLabel(project.hostLabel.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
-                    .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
-                    .accessibilityIdentifier("project-" + project.id)
                 }
             }
             let empty = projectsWithoutSessions(tree)
@@ -392,6 +403,23 @@ struct ConversationListView: View {
             Button("Cancel", role: .cancel) {}
         }
         .refreshable { await model.refresh(fresh: true) }
+    }
+
+    private func openProjectButton(_ projectID: String, name: String) -> some View {
+        Button { openSession(ConversationRoute.project(projectID)) } label: {
+            HStack(spacing: 2) {
+                Text("Project")
+                Image(systemName: "chevron.right")
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(PhonePalette.accentText)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .textCase(nil)
+        .accessibilityLabel("Open project \(name)")
+        .accessibilityIdentifier("open-project-" + projectID)
     }
 
     @ViewBuilder
@@ -1595,6 +1623,7 @@ struct IOSSessionRow: View {
     var title: String? = nil
     var family: SessionFamily? = nil
     var showsHost = true
+    var showsTime = true
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var displayTitle: String {
         title ?? SessionStyle.title(session)
@@ -1673,7 +1702,14 @@ struct IOSSessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(displayTitle).font(.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let value = session.lastActive, let date = TimestampParser.date(value) {
+                if !showsTime {
+                    EmptyView()
+                } else if session.isWorking {
+                    TimelineView(.everyMinute) { context in
+                        Text(SessionRowTime.working(session, now: context.date)).font(.caption).foregroundStyle(PhonePalette.muted)
+                            .lineLimit(1).fixedSize()
+                    }
+                } else if let value = session.lastActive, let date = TimestampParser.date(value) {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                         .lineLimit(1).fixedSize()
                 }

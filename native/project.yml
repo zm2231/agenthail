@@ -46,6 +46,8 @@ targets:
       - path: ComposerCompletion.swift
       - path: SessionSelection.swift
       - path: ProjectActions.swift
+      - path: ProjectContents.swift
+      - path: SessionRowTime.swift
       - path: HostNames.swift
       - path: ClaudeRootLabels.swift
       - path: SessionTree.swift

@@ -72,15 +72,17 @@ enum WindowSnapshot {
             if live != .failure(.empty) { return live }
         }
         let session = request.session ?? model.mainPane.selectedSessionID
-        return await offscreen(session: session, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
+        let project = request.session == nil ? model.mainPane.shownProjectID : nil
+        return await offscreen(session: session, project: project, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
     }
 
-    static func offscreen(session: String?, size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
+    static func offscreen(session: String?, project: String? = nil, size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         guard WindowImage.system != nil else { return .failure(.unavailable) }
         let pane = model.openPane()
         defer { model.closePane(pane) }
         let resolved = session.map(model.resolveSessionID)
         if let resolved { pane.select(resolved) }
+        if let project { pane.showProject(project) }
         let probe = SnapshotProbe(pane: pane)
         let window = SnapshotWindow(contentRect: CGRect(origin: SnapshotWindow.hidden, size: size), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true

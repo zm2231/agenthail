@@ -69,10 +69,11 @@ extension AgenthailAPI {
         return result
     }
 
-    func scopePage(_ scope: String, query: String? = nil, cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 25) async throws -> ScopePage {
+    func scopePage(_ scope: String, projectID: String? = nil, query: String? = nil, cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 25) async throws -> ScopePage {
         var components = URLComponents()
         components.path = "/api/v1/snapshot"
         components.queryItems = [URLQueryItem(name: "scope", value: scope), URLQueryItem(name: "members", value: "1"), URLQueryItem(name: "limit", value: String(limit))]
+        if let projectID { components.queryItems?.append(URLQueryItem(name: "projectId", value: projectID)) }
         if let query, !query.isEmpty { components.queryItems?.append(URLQueryItem(name: "q", value: query)) }
         if let cursor { components.queryItems?.append(URLQueryItem(name: "cursor", value: cursor)) }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }

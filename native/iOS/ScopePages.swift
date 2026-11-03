@@ -1,5 +1,14 @@
 import Foundation
 
+struct ScopeRequest: Hashable, Comparable {
+    let scope: String
+    var projectID: String? = nil
+
+    static func < (lhs: ScopeRequest, rhs: ScopeRequest) -> Bool {
+        (lhs.scope, lhs.projectID ?? "") < (rhs.scope, rhs.projectID ?? "")
+    }
+}
+
 struct ScopePages {
     struct Listing {
         var rows: [SessionState] = []
@@ -13,41 +22,41 @@ struct ScopePages {
         let generation: UInt64
     }
 
-    private(set) var listings: [String: Listing] = [:]
+    private(set) var listings: [ScopeRequest: Listing] = [:]
     private(set) var found: [SessionState] = []
 
     var isEmpty: Bool { listings.isEmpty && found.isEmpty }
 
-    func hasMore(_ scope: String) -> Bool { listings[scope]?.finished != true }
+    func hasMore(_ request: ScopeRequest) -> Bool { listings[request]?.finished != true }
 
-    func next(_ scope: String) -> Read? {
-        let listing = listings[scope] ?? Listing()
+    func next(_ request: ScopeRequest) -> Read? {
+        let listing = listings[request] ?? Listing()
         return listing.finished ? nil : Read(cursor: listing.cursor, generation: listing.generation)
     }
 
-    mutating func append(_ page: ScopePage, scope: String, after read: Read) -> Bool {
-        var listing = listings[scope] ?? Listing()
+    mutating func append(_ page: ScopePage, to request: ScopeRequest, after read: Read) -> Bool {
+        var listing = listings[request] ?? Listing()
         guard listing.generation == read.generation, listing.cursor == read.cursor, !listing.finished else { return false }
         listing.rows = Self.merged(listing.rows, page.sessions)
         listing.cursor = page.nextCursor
         listing.finished = page.nextCursor == nil
-        listings[scope] = listing
+        listings[request] = listing
         return true
     }
 
-    mutating func restart(_ scope: String) -> (rows: Int, generation: UInt64)? {
-        guard var listing = listings[scope] else { return nil }
+    mutating func restart(_ request: ScopeRequest) -> (rows: Int, generation: UInt64)? {
+        guard var listing = listings[request] else { return nil }
         listing.generation += 1
-        listings[scope] = listing
+        listings[request] = listing
         return (listing.rows.count, listing.generation)
     }
 
-    mutating func replace(_ scope: String, rows: [SessionState], cursor: String?, generation: UInt64) -> Bool {
-        guard var listing = listings[scope], listing.generation == generation else { return false }
+    mutating func replace(_ request: ScopeRequest, rows: [SessionState], cursor: String?, generation: UInt64) -> Bool {
+        guard var listing = listings[request], listing.generation == generation else { return false }
         listing.rows = Self.merged([], rows)
         listing.cursor = cursor
         listing.finished = cursor == nil
-        listings[scope] = listing
+        listings[request] = listing
         return true
     }
 

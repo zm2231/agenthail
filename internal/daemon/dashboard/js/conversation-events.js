@@ -21,6 +21,7 @@ import { expandAgentsPreference, holdAgentRow, setExpandAgentsPreference } from 
 import { renderChat } from "./chat.js";
 import { renderContextUsage } from "./context-usage.js";
 import { limitMoveQuestion } from "./limit-move.js";
+import { openProject, syncProjectPane } from "./project-pane.js";
 
 export function bindConversationEvents() {
   document.addEventListener("click", async (event) => {
@@ -112,6 +113,26 @@ export function bindConversationEvents() {
       app.openArchivedProjects = !app.openArchivedProjects;
       renderSessions();
       return;
+    }
+    const projectOpen = event.target.closest("[data-project-open]");
+    if (projectOpen) return openProject(projectOpen.dataset.projectOpen);
+    const projectEarlier = event.target.closest("[data-project-earlier]");
+    if (projectEarlier) {
+      app.projectEarlier = projectEarlier.dataset.projectEarlier;
+      return syncProjectPane();
+    }
+    const projectResume = event.target.closest("[data-project-resume]");
+    if (projectResume) {
+      const id = projectResume.dataset.projectResume;
+      const opened = selectSession(id, true);
+      if (projectResume.dataset.lifecycle === "true") {
+        try {
+          await action("session-lifecycle-resume", {}, crypto.randomUUID(), id);
+        } catch (error) {
+          toast(friendlyError(error));
+        }
+      }
+      return opened;
     }
     const sessionTarget = event.target.closest("[data-session]");
     if (sessionTarget) return selectSession(sessionTarget.dataset.session, true);

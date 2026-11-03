@@ -22,7 +22,8 @@ struct SessionPreview: View {
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
-            paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
+            paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry"),
+            hostName: "studio-mac"
         )
         model.setHostSnapshot(snapshot)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
@@ -77,6 +78,8 @@ struct SessionPreview: View {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
             SessionInspector(model: model, session: session, initialDetail: detail)
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-project") {
+            ConversationFlow(model: model, initialSessionID: ConversationRoute.project(HostCatalog.qualify("computer", "project-fieldnotes")))
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: session.id)
         } else {
@@ -234,7 +237,8 @@ struct SessionPreview: View {
             ["id": "h0123456789ab::remote-demo", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"], "name": "Prove the history is true", "surface": "codex", "cwd": "/home/demo/work/agenthail/.worktrees/history-truth", "status": "busy", "lastActive": "2026-09-12T04:01:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
             ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities, "claudeConfigRoot": ["name": "work", "root": "/home/dev/.work/.claude"]]
         ]
-        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24]
+        let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
+        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-waiting") }) {
             snapshot["busyDelivery"] = "steer"
             var waitingSessions = sessions
@@ -256,6 +260,22 @@ struct SessionPreview: View {
             terminalQuestion(&terminal[0], capabilities: &terminalCapabilities)
             terminal[0]["capabilities"] = terminalCapabilities
             snapshot["sessions"] = terminal
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-project") {
+            let stamp = ISO8601DateFormatter()
+            func ago(_ minutes: Double) -> String { stamp.string(from: Date().addingTimeInterval(-minutes * 60)) }
+            var timed = snapshot["sessions"] as! [[String: Any]]
+            timed[0]["lastActive"] = ago(1)
+            timed[0]["activity"] = ["busySince": ago(25), "lastProgressAt": ago(12)]
+            timed[1]["lastActive"] = ago(3 * 24 * 60)
+            timed[1]["current"] = true
+            var recent = timed[1]
+            recent["id"] = "notes-recent"
+            recent["name"] = "Sort the field photos"
+            recent["surface"] = "claude"
+            recent["lastActive"] = ago(5 * 60)
+            timed.append(recent)
+            snapshot["sessions"] = timed
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]
