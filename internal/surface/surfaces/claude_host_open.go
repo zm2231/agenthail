@@ -25,26 +25,10 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 	}
 	request.MCP = &claudehost.MCPServer{URL: credentials.URL(), Token: token}
 	opened, err := c.host.client.Open(ctx, request)
-	switch {
-	case err != nil:
-	case opened.MCPError != "":
+	if err == nil && opened.MCPError != "" {
 		credentials.Unattached(id, errors.New(opened.MCPError))
-	case request.Resume != "":
-		if err := credentials.Deliver(id, token, func(live string) error {
-			return c.ReplaceMCPCredential(ctx, id, credentials.URL(), live)
-		}); err != nil {
-			credentials.Unattached(id, err)
-		}
 	}
 	return opened, err
-}
-
-func (c *Claude) ReplaceMCPCredential(ctx context.Context, sessionID, url, token string) error {
-	_, err := c.host.client.ReplaceMCP(ctx, sessionID, claudehost.MCPServer{URL: url, Token: token})
-	if claudehost.IsCode(err, "not_open") || errors.Is(err, claudehost.ErrNotRunning) {
-		return nil
-	}
-	return err
 }
 
 func claudeHostToken(ctx context.Context, credentials MCPCredentials, id string, resume bool) (string, error) {

@@ -23,8 +23,9 @@ The server negotiates only protocol revisions `2026-07-28`, `2025-11-25` and `20
 The registry table `session_credentials` holds at most one live credential per session (a partial unique index on `session_id` where `revoked_at_ms=0`).
 
 - **Token:** `ahs_` plus 32 random bytes in base64url. Only its SHA-256 is stored; the raw token is returned once, when it is minted, and is never logged.
-- **Issue:** `issueSessionCredential` reuses the live credential when its capabilities and ceiling still match, and otherwise revokes it (`rotated`) and mints a new one. A reused credential's token cannot be recovered, so the caller keeps the token it was first given.
-- **Default capabilities:** `read.self`, `read.project`, `spawn`, `control.descendants`, `requests.answer`, `ledger.read` and `ledger.write`. A project's coordinator also gets `control.project`. The ceiling of a person-started session is unbounded (`{}`).
+- **Identity only:** a credential names a session and its expiry, nothing else. It carries no capabilities, so a change in what a session may do never touches its token.
+- **Issue:** `issueSessionCredential` reuses the live credential until its maximum expiry and otherwise mints a new one. A reused credential's token cannot be recovered, so the caller keeps the token it was first given.
+- **Rotation:** a credential is replaced only when a runtime must be given a token this daemon process does not hold (after a restart, since the registry stores hashes) or when it reached its maximum expiry. `Rotate` returns the held live token when there is one; concurrent resumes of one session share a per-session lock and one token.
 - **Idle expiry, 24 hours:** every authenticated call refreshes it. An expired credential is suspended, not revoked: the next turn the observer sees (a new active turn or a new completion) refreshes it.
 - **Maximum expiry, 30 days from issue:** nothing extends it, and a turn does not revive it. Issuing again after it mints a fresh credential.
 - **Revocation:** archiving a session revokes its credential in the same transaction. Authentication also revokes a credential whose session is archived or now belongs to another host. Deleting a session deletes its credentials.
@@ -59,22 +60,17 @@ The lifetime is the start timeout plus its naming margin (50 s) for starts the d
 
 **Claude host.** Every host `open` goes through `hostOpen`, which passes `mcp: {url, token}`; `TestOnlyHostOpenOpensAClaudeHostConversation` keeps it the only caller. The host gives Claude an http MCP server named `agenthail` whose tools run without asking (`allowedTools: ["mcp__agenthail"]`). A new conversation claims a pending credential for the id chosen before `open`; a resume sends the held token, or rotates the session's credential, or, for a conversation not yet registered here, claims a pending one. Opening a conversation the host already runs with a different token replaces the server on the live query (`setMcpServers`). When a retiring host still holds the conversation, `open` hands that host the new token through `replaceMcp`. A swap the server refuses is returned as `mcpError` on the opened session and logged; the host records a new token only after its swap succeeds, so the next open retries a failed one. A narrowing checker opens without the server.
 
-**Permission changes.** A session's capabilities change when it becomes or stops being its project's coordinator: a session in the registry's local lead set (`LocalLeadSessions`) holds `control.project`, every other session does not. Reconciliation is level-triggered. On every pass the daemon reads every live credential and the lead set from the registry and rotates each credential whose capabilities differ from what its session should hold, so the old token is refused as `credential_revoked`. It remembers nothing between passes, so a restart, a failed rotation, a coordinator start that fails part-way, and a lead change made while the daemon was stopped are all corrected the same way.
+## Permissions are computed at each call
 
-- The status loop runs a pass every second, and the first pass after the daemon starts fixes whatever it finds. The daemon also runs a pass at once after its own coordinator changes (set, clear, replace, and any outcome of starting a coordinator's conversation).
-- A rotation that fails is logged and tried again on the next pass.
-- A coordinator's new conversation is minted with `control.project` before it is registered, so its first turn already has project control; if the start fails before the handover, the next pass takes that capability away.
-- A pass is one indexed query (`session_credentials_live`, with the lead set as a subquery) and makes no runtime call when every credential matches and is delivered; about 0.4 ms at 200 live credentials.
+`mcpAuth` resolves the bearer to its session, then reads what that session may do from durable state on every request:
 
-**Delivery.** A rotated credential is stored with `delivered=0`, and it becomes `1` only once a runtime confirms it holds that exact token while it is still live. That covers a Claude host's `replaceMcp` or `open` on resume, a conversation no host has open (its next open carries the live token), and a Codex thread reattached with it. Every pass delivers each `delivered=0` credential after releasing the lead lock, through `Deliver`:
+- **Default capabilities:** `read.self`, `read.project`, `spawn`, `control.descendants`, `requests.answer`, `ledger.read` and `ledger.write`.
+- **Project lead:** a session in the registry's local lead set (`LocalLeadSessions`) also holds `control.project`.
+- **Ceiling:** unbounded (`{}`) for every local session.
 
-- One delivery runs at a time per session, under a per-session lock that is dropped once no one holds or awaits it.
-- A pass starts its deliveries in the background and skips a session whose delivery is still in flight, so a slow or hung runtime never holds up the status loop. A coordinator action waits for the deliveries its own pass started.
-- It pushes the live token read at push time, never a token captured earlier, and re-reads the live token after the push. If a rotation landed meanwhile, it pushes again, so the last token a runtime receives is the live one.
-- It mints a new token only when this process does not hold the raw token of the live credential, which happens only after the daemon restarts, since the registry stores hashes. A runtime that keeps refusing is sent the same token on every pass and never causes another rotation.
-- A loaded Codex thread takes its token at the next input or resume, which reattaches it and confirms delivery.
-- A hosted Claude conversation gets the new token at once through the host's `replaceMcp` call.
-- A Codex thread is marked for re-attach. Its next input or resume unsubscribes and resumes it with the new token, even when Codex still has it loaded, and checks the server connected. Until then its old token is refused.
+A lead change, made by the daemon, by another process writing the registry, or while the daemon was stopped, applies to the session's next call with the same token. No token is minted or pushed, so a runtime the daemon cannot reach (a Codex thread another client keeps loaded, a conversation no host has open) is never left holding a refused token. A coordinator whose start fails before the handover never enters the lead set, so its token never gains `control.project`.
+
+`tools/list` returns every tool. A call the caller's capabilities do not cover is refused with `capability_missing`, so a session that gains or loses a role needs no new tool list.
 
 ## Read scope
 

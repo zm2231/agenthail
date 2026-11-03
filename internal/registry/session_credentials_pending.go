@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
-	"slices"
 	"time"
 )
 
@@ -15,16 +13,7 @@ type PendingCredential struct {
 }
 
 // A Codex thread has no id until thread/start returns, yet its token must be in that call; the id is claimed after and binds at registration.
-func (r *Registry) IssuePendingCredential(capabilities []string, ceiling json.RawMessage, now time.Time, lifetime time.Duration) (PendingCredential, error) {
-	capabilities = slices.Compact(slices.Sorted(slices.Values(capabilities)))
-	encodedCaps, err := json.Marshal(capabilities)
-	if err != nil {
-		return PendingCredential{}, err
-	}
-	encodedCeiling, err := canonicalCeiling(ceiling)
-	if err != nil {
-		return PendingCredential{}, err
-	}
+func (r *Registry) IssuePendingCredential(now time.Time, lifetime time.Duration) (PendingCredential, error) {
 	token, err := newSessionToken()
 	if err != nil {
 		return PendingCredential{}, err
@@ -43,8 +32,8 @@ func (r *Registry) IssuePendingCredential(capabilities []string, ceiling json.Ra
 		return PendingCredential{}, err
 	}
 	idle, max := now.Add(CredentialIdleLifetime), now.Add(CredentialMaxLifetime)
-	if _, err := tx.Exec(`INSERT INTO session_credentials(pending_ref,pending_expires_at_ms,token_hash,capabilities,ceiling,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?,?,?,?)`,
-		ref, now.Add(lifetime).UnixMilli(), HashSessionToken(token), string(encodedCaps), string(encodedCeiling), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_credentials(pending_ref,pending_expires_at_ms,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,?,?,?,?,?)`,
+		ref, now.Add(lifetime).UnixMilli(), HashSessionToken(token), now.UnixMilli(), idle.UnixMilli(), max.UnixMilli()); err != nil {
 		return PendingCredential{}, err
 	}
 	return PendingCredential{Token: token, Ref: ref}, tx.Commit()

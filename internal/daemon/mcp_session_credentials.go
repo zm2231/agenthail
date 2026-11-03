@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -16,53 +15,11 @@ const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
 
 // Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
 type daemonMCPCredentials struct {
-	d          *Daemon
-	url        string
-	mu         sync.Mutex
-	tokens     map[string]string
-	deliveries keyedLocks
-}
-
-const deliveryAttempts = 3
-
-// Deliver confirms sent if it is still the live token; otherwise it pushes the live token read now (minting one only when this process does not hold it) until a pushed token is still live once the push returns.
-func (c *daemonMCPCredentials) Deliver(sessionID, sent string, push func(token string) error) error {
-	_, err := c.deliver(sessionID, sent, push, true)
-	return err
-}
-
-func (c *daemonMCPCredentials) deliver(sessionID, sent string, push func(token string) error, wait bool) (bool, error) {
-	release, ok := c.deliveries.acquire(sessionID, wait)
-	if !ok {
-		return false, nil
-	}
-	defer release()
-	return true, c.deliverLocked(sessionID, sent, push)
-}
-
-func (c *daemonMCPCredentials) deliverLocked(sessionID, sent string, push func(token string) error) error {
-	token := sent
-	for range deliveryAttempts {
-		if token != "" {
-			live, err := c.d.Registry.MarkCredentialDelivered(sessionID, registry.HashSessionToken(token))
-			if err != nil || live {
-				return err
-			}
-		}
-		held, ok := c.Live(sessionID)
-		if !ok {
-			rotated, err := c.Rotate(sessionID)
-			if err != nil {
-				return err
-			}
-			held = rotated
-		}
-		if err := push(held); err != nil {
-			return err
-		}
-		token = held
-	}
-	return fmt.Errorf("%s's credential kept changing while it was delivered", sessionID)
+	d         *Daemon
+	url       string
+	mu        sync.Mutex
+	tokens    map[string]string
+	rotations keyedLocks
 }
 
 func newDaemonMCPCredentials(d *Daemon, listen string) *daemonMCPCredentials {
@@ -77,12 +34,12 @@ func (c *daemonMCPCredentials) remember(token string) {
 
 func (c *daemonMCPCredentials) URL() string { return c.url }
 
-func (c *daemonMCPCredentials) Pending(ctx context.Context) (string, string, error) {
-	return c.issuePending(sessionCapabilities(surface.IsLeadStart(ctx)), pendingCredentialLifetime)
+func (c *daemonMCPCredentials) Pending(context.Context) (string, string, error) {
+	return c.issuePending(pendingCredentialLifetime)
 }
 
-func (c *daemonMCPCredentials) issuePending(capabilities []string, lifetime time.Duration) (string, string, error) {
-	pending, err := c.d.Registry.IssuePendingCredential(capabilities, json.RawMessage(`{}`), time.Now(), lifetime)
+func (c *daemonMCPCredentials) issuePending(lifetime time.Duration) (string, string, error) {
+	pending, err := c.d.Registry.IssuePendingCredential(time.Now(), lifetime)
 	if err != nil {
 		return "", "", err
 	}
@@ -95,7 +52,7 @@ func (c *daemonMCPCredentials) terminalLaunch(launcher string, agent surface.Sur
 		return nil, nil
 	}
 	c.d.pruneLaunchCredentials()
-	token, ref, err := c.issuePending(defaultSessionCapabilities, pendingLaunchLifetime)
+	token, ref, err := c.issuePending(pendingLaunchLifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -121,12 +78,14 @@ func (c *daemonMCPCredentials) Live(sessionID string) (string, bool) {
 	return token, held
 }
 
+// Rotate returns a live token this process holds, minting a new one only when it holds none; concurrent resumes share one.
 func (c *daemonMCPCredentials) Rotate(sessionID string) (string, error) {
-	capabilities, err := c.d.capabilitiesOf(sessionID)
-	if err != nil {
-		return "", fmt.Errorf("permissions of %s: %w", sessionID, err)
+	release, _ := c.rotations.acquire(sessionID, true)
+	defer release()
+	if token, ok := c.Live(sessionID); ok {
+		return token, nil
 	}
-	issued, err := c.d.Registry.RotateSessionCredential(sessionID, capabilities, json.RawMessage(`{}`), time.Now())
+	issued, err := c.d.Registry.RotateSessionCredential(sessionID, time.Now())
 	if err != nil {
 		return "", err
 	}

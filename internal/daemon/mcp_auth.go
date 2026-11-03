@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -15,13 +16,15 @@ import (
 type mcpCallerKey struct{}
 
 type mcpCaller struct {
-	credential registry.SessionCredential
-	session    surface.Session
-	project    *CatalogProject
+	credential   registry.SessionCredential
+	session      surface.Session
+	project      *CatalogProject
+	capabilities []string
+	ceiling      json.RawMessage
 }
 
 func (c *mcpCaller) has(capability string) bool {
-	return slices.Contains(c.credential.Capabilities, capability)
+	return slices.Contains(c.capabilities, capability)
 }
 
 func mcpCallerFrom(ctx context.Context) *mcpCaller {
@@ -64,7 +67,12 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			writeMCPAuthError(w, err)
 			return
 		}
-		caller := &mcpCaller{credential: credential, session: *session}
+		capabilities, err := d.capabilitiesOf(session.ID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Reading this session's permissions failed; retry.")
+			return
+		}
+		caller := &mcpCaller{credential: credential, session: *session, capabilities: capabilities, ceiling: json.RawMessage(`{}`)}
 		caller.project, _ = d.sessionProject(*session)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpCallerKey{}, caller)))
 	})

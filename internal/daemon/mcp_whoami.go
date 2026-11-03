@@ -37,8 +37,8 @@ func (d *Daemon) mcpWhoami(_ context.Context, caller *mcpCaller, _ struct{}) (an
 		Host:         map[string]string{"id": host.ID, "name": host.Name},
 		Project:      projectView(caller.project),
 		Coordinator:  d.coordinates(caller),
-		Capabilities: caller.credential.Capabilities,
-		Ceiling:      caller.credential.Ceiling,
+		Capabilities: caller.capabilities,
+		Ceiling:      caller.ceiling,
 		Credential: map[string]string{
 			"idleExpiresAt": caller.credential.IdleExpiresAt.UTC().Format(time.RFC3339),
 			"maxExpiresAt":  caller.credential.MaxExpiresAt.UTC().Format(time.RFC3339),

@@ -62,6 +62,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := upgradeReleasedProjectsTable(tx); err != nil {
 		return err
 	}
+	if err := dropCredentialPolicyColumns(tx); err != nil {
+		return err
+	}
 	if err := upgradeBoundOnlyCredentials(tx); err != nil {
 		return err
 	}

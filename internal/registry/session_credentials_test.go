@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -20,12 +19,10 @@ func credentialFixture(t *testing.T) (*Registry, string) {
 	return r, "worker"
 }
 
-var readCaps = []string{"read.self", "read.project"}
-
 func TestSessionCredentialStoresOnlyTheHash(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	issued, err := r.IssueSessionCredential(session, readCaps, json.RawMessage(`{"mode":"default"}`), now)
+	issued, err := r.IssueSessionCredential(session, now)
 	if err != nil || !strings.HasPrefix(issued.Token, SessionTokenPrefix) || len(issued.Token) < 40 {
 		t.Fatalf("issued=%+v err=%v", issued, err)
 	}
@@ -53,7 +50,7 @@ func TestSessionCredentialStoresOnlyTheHash(t *testing.T) {
 func TestSessionCredentialAuthenticatesAndRefreshesIdle(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	issued, err := r.IssueSessionCredential(session, readCaps, nil, now)
+	issued, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,18 +69,18 @@ func TestSessionCredentialAuthenticatesAndRefreshesIdle(t *testing.T) {
 func TestSessionCredentialReuseAndRotation(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	first, err := r.IssueSessionCredential(session, []string{"read.project", "read.self", "read.self"}, json.RawMessage(`{"mode": "default"}`), now)
+	first, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := r.IssueSessionCredential(session, readCaps, json.RawMessage(`{"mode":"default"}`), now.Add(time.Hour))
+	again, err := r.IssueSessionCredential(session, now.Add(time.Hour))
 	if err != nil || again.Token != "" || again.Credential.ID != first.Credential.ID {
 		t.Fatalf("reuse=%+v err=%v", again, err)
 	}
 	if _, err := r.AuthenticateSessionToken(first.Token, now.Add(time.Hour)); err != nil {
 		t.Fatalf("reused token refused: %v", err)
 	}
-	raised, err := r.IssueSessionCredential(session, append(readCaps, "spawn"), json.RawMessage(`{"mode":"default"}`), now.Add(2*time.Hour))
+	raised, err := r.RotateSessionCredential(session, now.Add(2*time.Hour))
 	if err != nil || raised.Token == "" || raised.Credential.ID == first.Credential.ID {
 		t.Fatalf("rotation=%+v err=%v", raised, err)
 	}
@@ -99,7 +96,7 @@ func TestSessionCredentialReuseAndRotation(t *testing.T) {
 func TestSessionCredentialIdleExpirySuspendsUntilATurn(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	issued, err := r.IssueSessionCredential(session, readCaps, nil, now)
+	issued, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +115,7 @@ func TestSessionCredentialIdleExpirySuspendsUntilATurn(t *testing.T) {
 func TestSessionCredentialMaxExpiryNeedsANewCredential(t *testing.T) {
 	r, session := credentialFixture(t)
 	now := time.Now()
-	issued, err := r.IssueSessionCredential(session, readCaps, nil, now)
+	issued, err := r.IssueSessionCredential(session, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +126,7 @@ func TestSessionCredentialMaxExpiryNeedsANewCredential(t *testing.T) {
 	if _, err := r.AuthenticateSessionToken(issued.Token, past); !errors.Is(err, ErrCredentialMaxExpired) {
 		t.Fatalf("max err=%v", err)
 	}
-	fresh, err := r.IssueSessionCredential(session, readCaps, nil, past)
+	fresh, err := r.IssueSessionCredential(session, past)
 	if err != nil || fresh.Token == "" || fresh.Credential.ID == issued.Credential.ID {
 		t.Fatalf("fresh=%+v err=%v", fresh, err)
 	}
@@ -155,7 +152,7 @@ func TestSessionCredentialRevokedWhenTheSessionEnds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r, session := credentialFixture(t)
-			issued, err := r.IssueSessionCredential(session, readCaps, nil, now)
+			issued, err := r.IssueSessionCredential(session, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +166,7 @@ func TestSessionCredentialRevokedWhenTheSessionEnds(t *testing.T) {
 			if _, err := r.AuthenticateSessionToken(issued.Token, now.Add(2*time.Minute)); !errors.As(err, &revoked) || revoked.Reason != tc.reason {
 				t.Fatalf("second err=%v", err)
 			}
-			if _, err := r.IssueSessionCredential(session, readCaps, nil, now.Add(time.Minute)); tc.reason != RevokedByPerson && err == nil {
+			if _, err := r.IssueSessionCredential(session, now.Add(time.Minute)); tc.reason != RevokedByPerson && err == nil {
 				t.Fatal("issued a credential for an ended session")
 			}
 		})
@@ -178,7 +175,7 @@ func TestSessionCredentialRevokedWhenTheSessionEnds(t *testing.T) {
 
 func TestSessionCredentialGoneWithItsSession(t *testing.T) {
 	r, session := credentialFixture(t)
-	issued, err := r.IssueSessionCredential(session, readCaps, nil, time.Now())
+	issued, err := r.IssueSessionCredential(session, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -349,15 +349,12 @@ CREATE TABLE IF NOT EXISTS session_credentials (
 	pending_expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	claimed_session_id TEXT UNIQUE,
 	token_hash TEXT NOT NULL UNIQUE,
-	capabilities TEXT NOT NULL DEFAULT '[]',
-	ceiling TEXT NOT NULL DEFAULT '{}',
 	created_at_ms INTEGER NOT NULL,
 	last_used_at_ms INTEGER NOT NULL DEFAULT 0,
 	idle_expires_at_ms INTEGER NOT NULL,
 	max_expires_at_ms INTEGER NOT NULL,
 	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
 	revoked_reason TEXT NOT NULL DEFAULT '',
-	delivered INTEGER NOT NULL DEFAULT 1,
 	CHECK ((session_id IS NULL) <> (pending_ref IS NULL))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_credentials_live ON session_credentials(session_id) WHERE revoked_at_ms=0;

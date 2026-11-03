@@ -16,8 +16,8 @@ func (d *Daemon) mcpCapabilities(_ context.Context, caller *mcpCaller, _ struct{
 		}
 	}
 	return map[string]any{
-		"capabilities": caller.credential.Capabilities,
-		"ceiling":      caller.credential.Ceiling,
+		"capabilities": caller.capabilities,
+		"ceiling":      caller.ceiling,
 		"reads":        reach,
 		"surfaces":     surfaces,
 		"limits":       mcpLimits,
