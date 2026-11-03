@@ -22,7 +22,8 @@ struct SessionPreview: View {
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
-            paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
+            paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry"),
+            hostName: "studio-mac"
         )
         model.setHostSnapshot(snapshot)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
@@ -259,6 +260,22 @@ struct SessionPreview: View {
             terminalQuestion(&terminal[0], capabilities: &terminalCapabilities)
             terminal[0]["capabilities"] = terminalCapabilities
             snapshot["sessions"] = terminal
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-project") {
+            let stamp = ISO8601DateFormatter()
+            func ago(_ minutes: Double) -> String { stamp.string(from: Date().addingTimeInterval(-minutes * 60)) }
+            var timed = snapshot["sessions"] as! [[String: Any]]
+            timed[0]["lastActive"] = ago(1)
+            timed[0]["activity"] = ["busySince": ago(12), "lastProgressAt": ago(1)]
+            timed[1]["lastActive"] = ago(3 * 24 * 60)
+            timed[1]["current"] = true
+            var recent = timed[1]
+            recent["id"] = "notes-recent"
+            recent["name"] = "Sort the field photos"
+            recent["surface"] = "claude"
+            recent["lastActive"] = ago(5 * 60)
+            timed.append(recent)
+            snapshot["sessions"] = timed
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]

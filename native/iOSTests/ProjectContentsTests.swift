@@ -80,8 +80,68 @@ final class ProjectContentsTests: XCTestCase {
         XCTAssertFalse(model.hasEarlier(listed))
         let reads = ScopeServer.state.requests("one").filter { $0.contains("scope=all") }
         XCTAssertEqual(reads.count, 2)
-        XCTAssertTrue(reads.allSatisfy { $0.contains("projectId=p-widget") }, "Earlier was not read for the project: \(reads)")
+        XCTAssertTrue(reads.allSatisfy { $0.contains("projectId=\(Self.projectID)") }, "Earlier was not read by the project's id: \(reads)")
         XCTAssertTrue(reads.last?.contains("cursor=1") == true)
+    }
+
+    func testEarlierReachesACheckoutMirroredByThePairedComputerAndEachDirectlyPairedOne() async throws {
+        ScopeServer.state.reset()
+        KeychainStore.removeAll()
+        defer { KeychainStore.removeAll() }
+        var project = Self.project(lead: nil)
+        project["checkouts"] = [
+            ["host": ["id": "hpeer", "name": "peer", "state": "connected"], "projectId": "hpeer::p-widget", "rootPath": "/srv/widget"],
+            ["host": ["id": "two", "name": "two", "state": "connected"], "projectId": "two::p-widget", "rootPath": "/work/widget"],
+        ]
+        var mirrored = Self.row("hpeer::far")
+        mirrored["host"] = ["id": "hpeer", "name": "peer", "state": "connected"]
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[mirrored, Self.row("unrelated", project: "repo:github.com/demo/other")]]])
+        ScopeServer.state.list("one", projects: [project])
+        ScopeServer.state.set("two", current: [], scopes: ["all": [[Self.row("near")]]])
+        try AgenthailIOSTests.pair("one", "https://one.tailnet.ts.net")
+        try AgenthailIOSTests.pair("two", "https://two.tailnet.ts.net")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScopeServer.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        defer { model.forgetHost("one"); model.forgetHost("two") }
+        _ = await model.refresh(fresh: true)
+        let listed = try XCTUnwrap(model.projects[Self.projectID])
+        XCTAssertEqual(listed.hostID, "one")
+        XCTAssertTrue(model.hasEarlier(listed))
+
+        await model.listEarlier(listed)
+
+        XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? []).earlier.map(\.id)), ["hpeer::far", "two::near"])
+        for host in ["one", "two"] {
+            XCTAssertTrue(ScopeServer.state.requests(host).contains { $0.contains("scope=all") && $0.contains("projectId=\(Self.projectID)") }, "\(host) was not asked for the project: \(ScopeServer.state.requests(host))")
+        }
+    }
+
+    func testOnlyAnIdleLeadOnAReachableComputerCanBeResumed() throws {
+        var offline = Self.row("offline")
+        offline["host"] = ["id": "hpeer", "name": "peer", "state": "unreachable"]
+        offline["unavailableReason"] = "peer can't be reached"
+        let rows = try Self.sessions([Self.row("idle"), Self.row("busy", status: "busy"), offline])
+        XCTAssertTrue(ProjectContents.resumable(rows[0]))
+        XCTAssertFalse(ProjectContents.resumable(rows[1]))
+        XCTAssertFalse(ProjectContents.resumable(rows[2]), "a lead whose computer is offline was offered Resume")
+    }
+
+    func testAWorkingRowShowsHowLongItHasWorkedNeverItsLastActiveTime() throws {
+        let now = Date()
+        let stamp = ISO8601DateFormatter()
+        var busy = Self.row("busy", status: "busy", lastActive: "2026-09-01T00:00:00Z")
+        busy["activity"] = ["busySince": stamp.string(from: now.addingTimeInterval(-12 * 60))]
+        var started = Self.row("started", status: "busy", lastActive: "2026-09-01T00:00:00Z")
+        started["activity"] = ["busySince": stamp.string(from: now.addingTimeInterval(-20))]
+        let idle = Self.row("idle", lastActive: stamp.string(from: now.addingTimeInterval(-5 * 3600 - 60)))
+        let rows = try Self.sessions([busy, started, Self.row("unknown", status: "busy"), idle])
+
+        XCTAssertEqual(SessionRowTime.working(rows[0], now: now), "12 min")
+        XCTAssertEqual(SessionRowTime.working(rows[1], now: now), "now")
+        XCTAssertEqual(SessionRowTime.working(rows[2], now: now), "now")
+        XCTAssertEqual(SessionRowTime.status(rows[0], now: now), "Working 12 min")
+        XCTAssertTrue(SessionRowTime.status(rows[3], now: now).hasPrefix("Idle · 5"), SessionRowTime.status(rows[3], now: now))
     }
 
     func testAProjectRouteNeverReadsAsASession() {

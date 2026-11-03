@@ -111,12 +111,24 @@ struct ProjectScreen: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("project-lead")
+                    Text(SessionRowTime.status(session, now: Date()))
+                        .font(.subheadline).foregroundStyle(PhonePalette.muted)
+                        .accessibilityIdentifier("project-lead-status")
                     HStack(spacing: 10) {
-                        if !session.isWorking && session.capabilities.lifecycle.resume {
-                            Button("Resume") { Task { await model.resume(session.id) } }.buttonStyle(.borderedProminent)
+                        if session.isWorking {
+                            Button("Open") { openSession(session.id) }.buttonStyle(.borderedProminent)
+                            Button("Message") { openSession(session.id) }.buttonStyle(.bordered)
+                        } else {
+                            Button("Resume") { resume(session) }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!ProjectContents.resumable(session))
+                                .accessibilityIdentifier("project-lead-resume")
+                            Button("Open") { openSession(session.id) }.buttonStyle(.bordered)
                         }
-                        Button("Open") { openSession(session.id) }.buttonStyle(.bordered)
-                        Button("Message") { openSession(session.id) }.buttonStyle(.bordered)
+                    }
+                    if !session.isWorking && session.isUnavailable {
+                        Text("Resume needs \(session.host?.name ?? "its computer") to be reachable.")
+                            .font(.caption).foregroundStyle(PhonePalette.muted)
                     }
                 } else {
                     Text("@" + lead.name).font(.headline)
@@ -145,6 +157,12 @@ struct ProjectScreen: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("project-session-" + session.id)
+    }
+
+    private func resume(_ session: SessionState) {
+        guard ProjectContents.resumable(session) else { return }
+        if session.capabilities.lifecycle.resume { Task { await model.resume(session.id) } }
+        openSession(session.id)
     }
 
     private func newSession(_ project: ListedProject) {

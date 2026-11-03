@@ -15,6 +15,8 @@ struct ProjectContents: Equatable {
         return HostCatalog.qualify(owner, sessionID)
     }
 
+    static func resumable(_ session: SessionState) -> Bool { !session.isWorking && !session.isUnavailable }
+
     static func running(_ session: SessionState) -> Bool {
         session.isWorking || session.waitingOn != nil || session.queueCount > 0
     }

@@ -936,11 +936,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func canListMore(_ filter: SessionFilter) -> Bool { SessionScopes.hasMore(SessionScopes.targets(filter, on: listedHosts)) }
 
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
-        var seen: Set<ScopeRequest> = []
-        return project.state.checkouts.compactMap { checkout in
-            let hostID = checkout.host.state == "local" ? project.hostID : checkout.host.id
-            let request = ScopeRequest(scope: "all", projectID: checkout.projectId)
-            guard let host = connections[hostID], seen.insert(ScopeRequest(scope: hostID, projectID: checkout.projectId)).inserted else { return nil }
+        let request = ScopeRequest(scope: "all", projectID: project.state.id)
+        let shared = project.state.id.hasPrefix(HostCatalog.repositoryPrefix)
+        let direct = shared ? project.state.checkouts.map(\.host.id).filter { $0 != project.hostID } : []
+        var seen: Set<String> = []
+        return ([project.hostID] + direct).compactMap { hostID in
+            guard seen.insert(hostID).inserted, let host = connections[hostID] else { return nil }
             return ScopeTarget(host: host, request: request)
         }
     }

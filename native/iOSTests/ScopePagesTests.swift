@@ -236,7 +236,9 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
         case "/api/v1/snapshot" where query["scope"] != nil:
             let pages = host.scopes[query["scope"]!] ?? [[]]
             let index = query["cursor"].flatMap(Int.init) ?? 0
-            var page: [String: Any] = ["sessions": index < pages.count ? pages[index] : []]
+            let rows = index < pages.count ? pages[index] : []
+            let project = query["projectId"]
+            var page: [String: Any] = ["sessions": rows.filter { project == nil || ($0["project"] as? [String: Any])?["id"] as? String == project }]
             if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
             respond(200, Self.json(page))
         default:
