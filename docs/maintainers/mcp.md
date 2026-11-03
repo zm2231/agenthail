@@ -116,7 +116,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_coordinator` | Set or clear a project's coordinator | `control.all` |
 | `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set | `ledger.write` |
 
-Every write runs the same shared operation as the dashboard and CLI (`performAction` with the session's principal), so it is validated, refused and recorded the same way. A write never carries a person author: a message from a session is attributed to that session (`sourceSessionId`), as the CLI's `agenthail send` from a session is.
+Every write runs the same shared operation as the dashboard and CLI (`performAction` with the session's principal), so it is validated, refused and recorded the same way. Every write acts as the calling session (its principal, and the source of its audit entry) and never carries a person author. The message tools (`agenthail_send`, `agenthail_steer`, `agenthail_channel_send`) also set `sourceSessionId` to the caller, so the message is attributed to that session, as the CLI's `agenthail send` from a session is, and `agenthail_create` sets it for a Claude or Codex start so the new session's spawner is the caller. Other writes leave it empty, since on those actions it means something else (a fork's source, a coordinator start's creator).
 
 ### Control scope
 
