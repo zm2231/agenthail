@@ -15,6 +15,7 @@ struct PushReceipt: Codable, Equatable, Sendable {
 enum PushReceipts {
     static let accountPrefix = "push-receipt:"
     static let kept = 50
+    static let maxAge: TimeInterval = 7 * 24 * 60 * 60
     static let path = "/api/v1/device/push-receipts"
 
     static func alerts(authorization: UNAuthorizationStatus, alert: UNNotificationSetting) -> String {
@@ -54,18 +55,14 @@ enum PushReceipts {
         }
     }
 
-    static func flush(credential: (String) -> PairedCredential.Lookup = PairedCredential.lookup(host:), session: URLSession = RequestNotifications.fetchSession) async {
-        let waiting = pending()
+    // Age, not a missing credential, retires a receipt: a credential read can miss while it is being rewritten.
+    static func flush(credential: (String) -> PairedHostCredential? = PairedCredential.read(host:), session: URLSession = RequestNotifications.fetchSession, now: Date = Date()) async {
+        let queued = pending()
+        queued.filter { now.timeIntervalSince($0.receivedAt) > maxAge }.forEach(remove)
+        let waiting = queued.filter { now.timeIntervalSince($0.receivedAt) <= maxAge }
         for host in Set(waiting.map(\.host)).sorted() {
             let receipts = waiting.filter { $0.host == host }
-            let paired: PairedHostCredential
-            switch credential(host) {
-            case .found(let found): paired = found
-            case .absent:
-                receipts.forEach(remove)
-                continue
-            case .unavailable: continue
-            }
+            guard let paired = credential(host) else { continue }
             if await post(receipts, endpoint: paired.endpoint, token: paired.token, session: session) {
                 receipts.forEach(remove)
             }
