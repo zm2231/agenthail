@@ -174,7 +174,8 @@ func parityCases() []parityCase {
 		{name: "coordinator-clear", action: "coordinator-clear", body: `{"action":"coordinator-clear","path":"relative/path"}`},
 		{name: "coordinator-send", action: "coordinator-send", body: `{"action":"coordinator-send","name":"nobody","message":"hi"}`},
 	}
-	return append(append(cases, parityFailureCases()...), parityProjectCases()...)
+	cases = append(append(cases, parityFailureCases()...), parityProjectCases()...)
+	return append(cases, parityLaunchCases()...)
 }
 
 type paritySurface struct {
@@ -235,6 +236,13 @@ func (s paritySurface) Respond(_ context.Context, _ *surface.Session, requestID 
 
 func (s paritySurface) Control(_ context.Context, session *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
 	return &surface.ControlResult{SessionID: session.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "parity", Output: control.Value}, s.fail["control"]
+}
+
+func (s paritySurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	if err := s.fail["start"]; err != nil {
+		return nil, nil, err
+	}
+	return s.daemonSurface.StartSession(ctx, options)
 }
 
 func (s paritySurface) List(ctx context.Context) ([]surface.Session, error) {
