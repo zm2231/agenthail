@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type failingBody struct {
@@ -19,6 +21,30 @@ func (b failingBody) Read(p []byte) (int, error) {
 		return n, errors.New("connection reset")
 	}
 	return n, err
+}
+
+type untouchedBody struct{ read *bool }
+
+func (b untouchedBody) Read([]byte) (int, error) {
+	*b.read = true
+	select {}
+}
+
+func TestAnOverLongIdempotencyKeyIsRefusedBeforeTheBodyIsRead(t *testing.T) {
+	for _, front := range parityFormats {
+		t.Run(front.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			d, _, _, _, _ := daemonFixture(t)
+			read := false
+			request := httptest.NewRequest(http.MethodPost, front.path, untouchedBody{&read})
+			request.Header.Set(actionIdempotencyHeader, strings.Repeat("k", registry.ActionReceiptKeyLimit+1))
+			recorder := httptest.NewRecorder()
+			d.actionsHTTPHandler(front.format)(recorder, request)
+			if read || recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_idempotency_key") {
+				t.Fatalf("read=%v status=%d body=%s", read, recorder.Code, recorder.Body)
+			}
+		})
+	}
 }
 
 func TestAnActionWhoseBodyFailsToArriveIsRefusedWithoutRunning(t *testing.T) {
