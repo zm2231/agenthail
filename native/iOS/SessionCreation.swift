@@ -93,14 +93,18 @@ struct NewSessionSheet: View {
                             let titles = ClaudeRootLabels.titles(roots, host: hostName)
                             Section {
                                 Picker("Account", selection: $claude.configRoot) {
-                                    Text(ClaudeRootLabels.automatic(hosts.claudePick, roots: roots, titles: titles)).tag("")
+                                    Text(ClaudeRootLabels.byDefault(hosts.claudePick, roots: roots, titles: titles)).tag("")
                                     ForEach(Array(zip(roots, titles)), id: \.0.id) { root, title in
-                                        Text(ClaudeRootLabels.option(root, title: title, pick: hosts.claudePick)).tag(root.root).selectionDisabled(!root.selectable)
+                                        Text(ClaudeRootLabels.option(root, title: title)).tag(root.root).selectionDisabled(!root.selectable)
                                     }
                                 }
                             } footer: {
                                 if claude.configRoot.isEmpty, let pick = hosts.claudePick {
                                     Text(ClaudeRootLabels.reason(pick, roots: roots, titles: titles))
+                                } else if let index = roots.firstIndex(where: { $0.root == claude.configRoot }), hosts.claudePick?.name != roots[index].name {
+                                    Button("Use \(titles[index]) for every session you start") { setDefault(roots[index].name) }
+                                        .font(.footnote)
+                                        .accessibilityIdentifier("creation-default-root")
                                 }
                             }
                         }
@@ -239,5 +243,17 @@ struct NewSessionSheet: View {
             }
         } catch is CancellationError {
         } catch { hosts.fail(error.localizedDescription, for: generation) }
+    }
+    private func setDefault(_ name: String) {
+        let generation = hosts.generation
+        Task {
+            do {
+                hosts.receive(pick: try await model.setCreationDefaultRoot(name, host: hosts.hostQuery), for: generation)
+                claude.configRoot = ""
+                error = nil
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }

@@ -719,6 +719,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let (api, target) = try reach(host)
         return try await api.claudeRootPick(host: target.remote)
     }
+    func setCreationDefaultRoot(_ name: String, host: String?) async throws -> ClaudeRootPick {
+        let (api, target) = try reach(host)
+        guard target.remote == nil else {
+            throw AgenthailAPIError.unavailable("Set the default on that computer, or from one paired with it directly.")
+        }
+        try await api.setClaudeDefaultRoot(name)
+        return try await api.claudeRootPick()
+    }
     func creationModels(surface: String, host: String?) async throws -> [ModelOption] {
         let (api, target) = try reach(host)
         return try await api.creationModels(surface: surface, host: target.remote)

@@ -64,7 +64,7 @@ struct UsageProxiesTest {
         var viaProxy = roots[1]
         viaProxy.best = "team@example.com"
         viaProxy.usage = try JSONDecoder().decode(ProviderUsage.self, from: Data(#"{"limits":[{"kind":"session","percent":18},{"kind":"weekly_all","percent":41}]}"#.utf8))
-        check(viaProxy.readsUsage && ClaudeRootLabels.option(viaProxy, title: "shared via proxy", pick: nil) == "shared via proxy · next: team · session 18%, week 41%", "a proxy root reads as the account the proxy would use next: \(ClaudeRootLabels.option(viaProxy, title: "shared via proxy", pick: nil))")
+        check(viaProxy.readsUsage && ClaudeRootLabels.option(viaProxy, title: "shared via proxy") == "shared via proxy · next: team · session 18%, week 41%", "a proxy root reads as the account the proxy would use next: \(ClaudeRootLabels.option(viaProxy, title: "shared via proxy"))")
         print("ok")
     }
 
