@@ -882,6 +882,9 @@ func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
 	if read.Code != http.StatusServiceUnavailable || !strings.Contains(read.Body.String(), "host_unreachable") || !strings.Contains(read.Body.String(), "no Agenthail daemon answered") {
 		t.Fatalf("read status=%d body=%s", read.Code, read.Body.String())
 	}
+	if !strings.Contains(read.Body.String(), `"host":"`+record.ID+`"`) {
+		t.Fatalf("a relayed failure does not name the computer it could not reach: %s", read.Body.String())
+	}
 	if got := remote.fake.delivered(); len(got) != 0 {
 		t.Fatalf("remote delivered while down: %v", got)
 	}

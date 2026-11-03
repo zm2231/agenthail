@@ -16,14 +16,14 @@ import (
 func writeHostError(w http.ResponseWriter, host *pairedHost, err error) {
 	var notSent hosts.NotSentError
 	if errors.As(err, &notSent) {
-		writeAPIError(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err))
+		writeHostReadError(w, host, err)
 		return
 	}
-	writeAPIError(w, http.StatusGatewayTimeout, "host_outcome_unknown", fmt.Sprintf("Host %s did not answer; the outcome is unknown: %s", host.record.Name, err))
+	writeAPIErrorWith(w, http.StatusGatewayTimeout, "host_outcome_unknown", fmt.Sprintf("Host %s did not answer; the outcome is unknown: %s", host.record.Name, err), map[string]any{"host": host.record.ID})
 }
 
 func writeHostReadError(w http.ResponseWriter, host *pairedHost, err error) {
-	writeAPIError(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err))
+	writeAPIErrorWith(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err), map[string]any{"host": host.record.ID})
 }
 
 const maxForwardedBodyBytes = uploads.MaxFileBytes + 1

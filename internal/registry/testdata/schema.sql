@@ -1,4 +1,4 @@
--- schemaVersion 44
+-- schemaVersion 45
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -25,6 +25,9 @@ CREATE INDEX delivery_intents_sender_status
 
 -- index delivery_intents_uuid
 CREATE UNIQUE INDEX delivery_intents_uuid ON delivery_intents(uuid);
+
+-- index device_connection_drops_recent
+CREATE INDEX device_connection_drops_recent ON device_connection_drops(device_id, started_at DESC);
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
@@ -264,6 +267,30 @@ CREATE TABLE delivery_intents (
 	retries INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table device_connection_drops
+CREATE TABLE device_connection_drops (
+	device_id TEXT NOT NULL REFERENCES paired_devices(id) ON DELETE CASCADE,
+	drop_id TEXT NOT NULL,
+	host TEXT NOT NULL,
+	via TEXT NOT NULL DEFAULT '',
+	path TEXT NOT NULL,
+	started_at TEXT NOT NULL,
+	recovered_at TEXT NOT NULL,
+	recovered_by TEXT NOT NULL DEFAULT '',
+	first_error TEXT NOT NULL,
+	last_error TEXT NOT NULL,
+	elapsed_ms INTEGER,
+	attempts INTEGER NOT NULL,
+	shown TEXT NOT NULL,
+	since_foreground_ms INTEGER,
+	went_background INTEGER NOT NULL DEFAULT 0,
+	network TEXT NOT NULL DEFAULT '',
+	vpn INTEGER NOT NULL DEFAULT 0,
+	expensive INTEGER NOT NULL DEFAULT 0,
+	constrained INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (device_id, drop_id)
 );
 
 -- table device_pairings
