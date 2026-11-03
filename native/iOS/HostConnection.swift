@@ -105,13 +105,8 @@ final class HostConnection {
                     }
                 } catch {
                     guard !stopped else { return }
+                    if stopIfIncompatible(error) { return }
                     recordFailure(error, during: "connect")
-                    if let apiError = error as? AgenthailAPIError, case .incompatible(let hostProtocol) = apiError {
-                        if hostProtocol < AgenthailAPI.snapshotProtocol { connectionError = "Update Agenthail on \(name) to connect." }
-                        reconnecting = false
-                        delegate?.hostDidChange(self)
-                        return
-                    }
                 }
                 reconnecting = true
                 delegate?.hostDidChange(self)
@@ -211,6 +206,7 @@ final class HostConnection {
                         recordStreamInterruption(probeError: nil)
                     } catch {
                         guard !stopped else { return }
+                        if stopIfIncompatible(error) { return }
                         recordStreamInterruption(probeError: error)
                     }
                     let delay = backoff.nextDelay()
@@ -233,6 +229,16 @@ final class HostConnection {
         await delegate?.hostEventStreamConnected(self)
         guard !stopped else { return }
         catalogFeed.start()
+    }
+
+    private func stopIfIncompatible(_ error: Error) -> Bool {
+        guard let apiError = error as? AgenthailAPIError, case .incompatible(let hostProtocol) = apiError else { return false }
+        reachable = false
+        holding = false
+        reconnecting = false
+        connectionError = hostProtocol < AgenthailAPI.snapshotProtocol ? "Update Agenthail on \(name) to connect." : apiError.localizedDescription
+        delegate?.hostDidChange(self)
+        return true
     }
 
     func recordStreamInterruption(probeError: Error?) {

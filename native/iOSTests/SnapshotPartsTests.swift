@@ -52,6 +52,37 @@ final class SnapshotPartsTests: XCTestCase {
         XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["newer"], "a slower, older refresh replaced the newer state")
     }
 
+    func testAComputerRolledBackToAnOlderAgenthailStopsRetryingItsStream() async throws {
+        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("root")]], baseSeq: 1, scopeSeq: 1)
+        let host = connection()
+        defer { host.stop() }
+        host.connect()
+        for _ in 0..<200 where host.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNotNil(host.snapshot)
+        PartsServer.state.speak("parts", protocol: 1)
+        for _ in 0..<300 where host.connectionError == nil || host.reconnecting { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(host.connectionError, "Update Agenthail on parts to connect.")
+        XCTAssertFalse(host.reconnecting)
+        let probes = PartsServer.state.requests(for: "parts").filter { $0 == "/api/v1/version" }.count
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertEqual(PartsServer.state.requests(for: "parts").filter { $0 == "/api/v1/version" }.count, probes, "the phone kept probing a computer it cannot use")
+    }
+
+    func testASessionOutsideTheCurrentScopeOpensFromItsOwnerByItsID() async throws {
+        KeychainStore.removeAll()
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("parts", "https://parts.tailnet.ts.net")
+        PartsServer.state.set(host: "parts", scopes: [[PartsServer.row("root")]], baseSeq: 1, scopeSeq: 1)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PartsServer.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        defer { model.forgetHost("parts") }
+        _ = await model.refresh(fresh: true)
+        XCTAssertEqual(model.snapshot?.sessions.map(\.id), ["parts::root"])
+        await model.loadSession("parts::elsewhere")
+        XCTAssertTrue(PartsServer.state.requests(for: "parts").contains { $0.hasPrefix("/api/v1/session?") && $0.contains("id=elsewhere") }, "a notification's session was not asked of its owner: \(PartsServer.state.requests(for: "parts"))")
+    }
+
     func testASlowComputerDoesNotHoldTheOthers() async throws {
         KeychainStore.removeAll()
         defer { KeychainStore.removeAll() }
@@ -69,8 +100,19 @@ final class SnapshotPartsTests: XCTestCase {
         XCTAssertLessThan(clock.now - started, .seconds(2), "the refresh waited for the slow computer")
         XCTAssertEqual(model.connection("fast")?.snapshot?.sessions.map(\.id), ["fast-session"])
         XCTAssertNil(model.connection("slow")?.snapshot, "the slow computer answered early")
+        for _ in 0..<300 where model.connection("slow")?.snapshot == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.connection("slow")?.snapshot?.sessions.map(\.id), ["slow-session"], "the slow computer's refresh never landed")
         model.forgetHost("fast")
         model.forgetHost("slow")
+    }
+
+    func testTheCurrentScopeIsWalkedAcrossPagesKeepingEachSessionOnce() async throws {
+        PartsServer.state.set(host: "parts", scopes: [[]], baseSeq: 4, scopeSeq: 4)
+        PartsServer.state.page("parts", [[PartsServer.row("a"), PartsServer.row("b")], [PartsServer.row("b"), PartsServer.row("c")]])
+        let host = connection()
+        _ = await host.refresh(fresh: true)
+        XCTAssertEqual(host.snapshot?.sessions.map(\.id), ["a", "b", "c"])
+        XCTAssertTrue(PartsServer.state.requests(for: "parts").contains { $0.contains("scope=current") && $0.contains("cursor=1") })
     }
 }
 
@@ -84,6 +126,8 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
             var scopeReads = 0
             var requests: [String] = []
             var notModified = false
+            var protocolVersion = 2
+            var pages: [[[String: Any]]]? = nil
         }
 
         private let lock = NSLock()
@@ -97,6 +141,8 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
         func sentNotModified(for host: String) -> Bool { lock.withLock { hosts[host]?.notModified ?? false } }
         func record(_ host: String, _ path: String) { lock.withLock { hosts[host]?.requests.append(path) } }
         func markNotModified(_ host: String) { lock.withLock { hosts[host]?.notModified = true } }
+        func speak(_ host: String, protocol version: Int) { lock.withLock { hosts[host]?.protocolVersion = version } }
+        func page(_ host: String, _ pages: [[[String: Any]]]) { lock.withLock { hosts[host]?.pages = pages } }
         func host(_ name: String) -> Host? { lock.withLock { hosts[name] } }
         func nextScope(_ name: String) -> (rows: [[String: Any]], delay: Duration, seq: UInt64)? {
             lock.withLock {
@@ -132,7 +178,12 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
         guard let host = Self.state.host(name) else { return respond(503, #"{"error":"unknown host"}"#) }
         switch url.path {
         case "/api/v1/version":
-            respond(200, #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#)
+            let version = host.protocolVersion
+            respond(200, #"{"protocol":\#(version),"minimumProtocol":1,"maximumProtocol":\#(version)}"#)
+        case "/api/v1/events":
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(": connected\n\n".utf8))
+            client?.urlProtocolDidFinishLoading(self)
         case "/api/v1/projects/activity":
             respond(200, #"{"projects":[]}"#)
         case "/api/v1/snapshot" where url.query?.contains("sessions=none") == true:
@@ -147,6 +198,13 @@ final class PartsServer: URLProtocol, @unchecked Sendable {
             base["hostEpoch"] = "epoch"
             base["catalogSeq"] = host.baseSeq
             respond(200, String(data: try! JSONSerialization.data(withJSONObject: base), encoding: .utf8)!, tag: "\"base\"")
+        case "/api/v1/snapshot" where url.query?.contains("scope=current") == true && host.pages != nil:
+            let pages = host.pages!
+            let cursor = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cursor" }?.value
+            let index = cursor.flatMap(Int.init) ?? 0
+            var page: [String: Any] = ["sessions": pages[index], "hostEpoch": "epoch", "catalogSeq": host.scopeSeq, "totalSessions": 3]
+            if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
+            respond(200, String(data: try! JSONSerialization.data(withJSONObject: page), encoding: .utf8)!)
         case "/api/v1/snapshot" where url.query?.contains("scope=current") == true:
             guard let scope = Self.state.nextScope(name) else { return respond(503, "{}") }
             let body = String(data: try! JSONSerialization.data(withJSONObject: ["sessions": scope.rows, "hostEpoch": "epoch", "catalogSeq": scope.seq, "totalSessions": scope.rows.count]), encoding: .utf8)!
