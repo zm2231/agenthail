@@ -41,6 +41,7 @@ const (
 
 type Daemon struct {
 	presentation         presentationClock
+	coordinatorNow       func() time.Time
 	Registry             *registry.Registry
 	sessionFiles         sessionFileLists
 	claudeConfigRootsMu  sync.Mutex
@@ -295,6 +296,11 @@ func (d *Daemon) logRuntimeError(key string, err error) {
 func (d *Daemon) Run(ctx context.Context) error {
 	defer d.sources.shutdown()
 	d.log.Printf("started; %d surfaces", len(d.Surfaces))
+	if home, err := os.UserHomeDir(); err != nil {
+		d.log.Printf("warn: record the daemon's Claude config root: %s", err)
+	} else if err := surface.RecordDaemonClaudeRoot(home); err != nil {
+		d.log.Printf("warn: record the daemon's Claude config root: %s", err)
+	}
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)
 	} else if recovered > 0 {

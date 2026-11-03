@@ -710,7 +710,29 @@ type Waker interface {
 // ConversationKeeper is a surface that can tell a conversation it would
 // resume from one whose history is gone.
 type ConversationKeeper interface {
-	ConversationExists(ctx context.Context, sess *Session) (bool, error)
+	ConversationState(ctx context.Context, sess *Session) (ConversationState, error)
+}
+
+// Gone needs positive evidence; anything short of it is Unknown.
+type ConversationState int
+
+const (
+	ConversationUnknown ConversationState = iota
+	ConversationLive
+	ConversationResumable
+	ConversationGone
+)
+
+func (s ConversationState) String() string {
+	switch s {
+	case ConversationLive:
+		return "live"
+	case ConversationResumable:
+		return "resumable"
+	case ConversationGone:
+		return "gone"
+	}
+	return "unknown"
 }
 
 type SessionAccessChecker interface {
