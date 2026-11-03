@@ -20,6 +20,7 @@ enum SessionFacts {
         case "queued": return "Queued"
         case "open": return "Open"
         case "recent": return "Recent"
+        case "lead": return "Lead"
         default: return statusLabel(session.status)
         }
     }

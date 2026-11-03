@@ -13,6 +13,7 @@ struct SessionFactsTest {
         }
 
         expect(SessionFacts.presenceLabel(session(reason: "queued")) == "Queued", "current reason wins")
+        expect(SessionFacts.presenceLabel(session(reason: "lead")) == "Lead", "a project lead idle past the window reads as the lead")
         expect(SessionFacts.presenceLabel(session(status: "busy")) == "Working", "status label without a reason")
         expect(SessionFacts.presenceLabel(session(status: "notLoaded")) == "Unavailable", "not loaded reads as unavailable")
         var waiting = session(status: "busy", reason: "working")
