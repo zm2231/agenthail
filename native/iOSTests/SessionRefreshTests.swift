@@ -171,7 +171,7 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
-    func testACachedSessionItsComputerNoLongerListsIsDropped() async throws {
+    func testACachedSessionIsDroppedOnlyWhenItsComputerRemovesIt() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         SessionRefreshProtocol.state.set(journalSeq: 10)
         let model = makeModel()
@@ -182,6 +182,12 @@ final class SessionRefreshTests: XCTestCase {
         XCTAssertNotNil(model.store.peek("computer::other"))
 
         await model.refresh()
+        XCTAssertNotNil(model.store.peek("computer::other"), "a session outside the current ones lost its cache")
+        let unlisted = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":900,"type":"session.removed","data":{"sessionId":"other","reason":"unlisted"}}"#.utf8))
+        await model.connection("computer")!.receiveCatalog([unlisted])
+        XCTAssertNotNil(model.store.peek("computer::other"), "leaving the current list dropped the cache")
+        let removed = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":901,"type":"session.removed","data":{"sessionId":"other"}}"#.utf8))
+        await model.connection("computer")!.receiveCatalog([removed])
 
         XCTAssertNil(model.store.peek("computer::other"))
         XCTAssertNil(model.store.commands["computer::other"])
@@ -541,6 +547,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if answeredProjectActivity() { return }
         var status = 200
         var body = #"{"items":[]}"#
         switch request.url?.path {

@@ -255,6 +255,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if answeredProjectActivity() { return }
         Self.state.recordAction(request)
         let olderPage = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "timelineBefore" } == true
         if request.url?.path == "/api/v1/snapshot",

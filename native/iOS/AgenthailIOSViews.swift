@@ -319,7 +319,18 @@ struct ConversationListView: View {
                     }
                 }
             }
-            if families.isEmpty && empty.isEmpty && !model.searching {
+            let listingMore = search.isEmpty && model.canListMore(scope)
+            if let error = model.listingError, scope.pagedScope != nil {
+                Button { Task { await model.listMore(scope) } } label: {
+                    Label(error, systemImage: "arrow.clockwise").font(.footnote).foregroundStyle(PhonePalette.muted)
+                }
+                .accessibilityIdentifier("list-more-retry")
+            } else if listingMore {
+                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                    .task(id: "\(scope.rawValue)|\(model.snapshot?.sessions.count ?? 0)") { await model.listMore(scope) }
+                    .accessibilityIdentifier("list-more")
+            }
+            if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
@@ -346,6 +357,10 @@ struct ConversationListView: View {
         .navigationTitle("Sessions")
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
+        .task(id: "\(scope.rawValue)\u{0}\(search)") {
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            await model.searchScope(search, filter: scope)
+        }
         .task(id: model.usageReaders.map(ObjectIdentifier.init)) { await usage.run(model.usageReaders) }
         .toolbar {
             if model.isPaired {
@@ -961,7 +976,7 @@ struct IOSComposer: View {
         let runtime = model.store.commands[session.id]
         let mentioning = token.trigger == .mention
         let files = scopedCompletion.files
-        let items = ComposerCompletion.items(for: token, appCommands: [], runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(model.snapshot?.sessions ?? [], from: session) : [], files: mentioning && files?.query == token.query ? files?.files ?? [] : [])
+        let items = ComposerCompletion.items(for: token, appCommands: [], runtime: runtime, sessions: mentioning ? ComposerCompletion.sessions(mentionable(token.query), from: session) : [], files: mentioning && files?.query == token.query ? files?.files ?? [] : [])
         return (items, ComposerCompletion.notice(for: token, runtime: runtime))
     }
 
@@ -969,9 +984,21 @@ struct IOSComposer: View {
         guard let request else { return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled else { return }
+        async let sessions = model.mentionSessions(for: request.session, query: request.query)
         let found = await model.sessionFiles(request.session, query: request.query)
+        let listed = await sessions
         guard !Task.isCancelled else { return }
-        updateCompletion { $0.files = (request.query, found ?? []) }
+        updateCompletion {
+            $0.files = (request.query, found ?? [])
+            $0.sessions = listed.map { (request.query, $0) }
+        }
+    }
+
+    private func mentionable(_ query: String) -> [SessionState] {
+        let listed = model.snapshot?.sessions ?? []
+        guard let found = scopedCompletion.sessions, found.query == query else { return listed }
+        let held = Set(listed.map(\.id))
+        return listed + found.sessions.filter { !held.contains($0.id) }
     }
 
     private func accept(_ item: CompletionItem) {

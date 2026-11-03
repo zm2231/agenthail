@@ -142,7 +142,13 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 			}
 			plan.view.Families = rest[:end]
 			for _, family := range plan.view.Families {
-				selected = append(selected, family.RootID)
+				if !request.Members {
+					selected = append(selected, family.RootID)
+					continue
+				}
+				for _, member := range family.Members {
+					selected = append(selected, member.ID)
+				}
 			}
 		}
 		ids := make([]string, 0, len(selected))

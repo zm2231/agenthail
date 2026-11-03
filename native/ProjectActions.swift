@@ -22,8 +22,21 @@ struct ProjectState: Decodable, Hashable, Identifiable {
     var checkouts: [Checkout] = []
     var coordinators: [Lead]? = nil
     var archived: Bool? = nil
+    var activity: ProjectActivity? = nil
 
     var leads: [Lead] { coordinators ?? [] }
+}
+
+struct ProjectActivity: Decodable, Hashable {
+    struct Checkout: Decodable, Hashable {
+        let projectId: String
+        let sessionCount: Int
+    }
+
+    let id: String
+    var lastActive: String? = nil
+    let sessionCount: Int
+    let checkouts: [Checkout]
 }
 
 struct ProjectLead: Decodable, Hashable {

@@ -29,6 +29,7 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: TaggedResponses.swift
       - path: UIConfig.swift
       - path: SurfaceMode.swift
       - path: PaletteTokens.swift

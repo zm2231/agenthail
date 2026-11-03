@@ -30,6 +30,9 @@ final class HostConnection {
     private(set) var build: AgenthailBuild?
     private(set) var catalogStreamCursor: UInt64 = 0
     private(set) var snapshotSeq: UInt64 = 0
+    private var refreshGeneration: UInt64 = 0
+    private var appliedGeneration: UInt64 = 0
+    var refreshTimeout: TimeInterval = 25
     private var snapshotCoversEventStream = false
     private var stopped = false
     private var catalogHostEpoch: String?
@@ -40,6 +43,11 @@ final class HostConnection {
     var grace = ConnectionGrace()
     private var streamOpen = false
     private static let log = Logger(subsystem: "com.agenthail.app", category: "connection")
+    private(set) var pages = ScopePages()
+    private(set) var pageError: String?
+    private var readingScopes: Set<String> = []
+    private var searchGeneration: UInt64 = 0
+    private var rereadTask: Task<Void, Never>?
     lazy var catalogFeed = makeCatalogFeed()
     weak var delegate: HostConnectionDelegate?
 
@@ -63,11 +71,18 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        rereadTask?.cancel()
     }
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
 
-    var view: PairedHostView { PairedHostView(id: id, name: name, reachable: reachable, holding: holding, snapshot: snapshot) }
+    var view: PairedHostView {
+        PairedHostView(id: id, name: name, reachable: reachable, holding: holding, snapshot: snapshot.map { snapshot in
+            var listed = snapshot
+            listed.sessions = pages.joined(snapshot.sessions)
+            return listed
+        })
+    }
 
     static func relayAccount(_ hostID: String) -> String { "pushRelayURL:\(hostID)" }
 
@@ -85,7 +100,7 @@ final class HostConnection {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, !stopped {
                 do {
-                    let version = try await api.version()
+                    let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                     guard !Task.isCancelled, !stopped else { return }
                     grace.contact()
                     build = version.build
@@ -102,12 +117,8 @@ final class HostConnection {
                     }
                 } catch {
                     guard !stopped else { return }
+                    if stopIfIncompatible(error) { return }
                     recordFailure(error, during: "connect")
-                    if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
-                        reconnecting = false
-                        delegate?.hostDidChange(self)
-                        return
-                    }
                 }
                 reconnecting = true
                 delegate?.hostDidChange(self)
@@ -122,6 +133,7 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        rereadTask?.cancel()
         catalogFeed.stop()
         reachable = false
         holding = false
@@ -146,15 +158,26 @@ final class HostConnection {
     @discardableResult
     func refresh(fresh: Bool = false) async -> Bool {
         let seq = delegate?.nextStateRequest() ?? 0
+        refreshGeneration += 1
+        let generation = refreshGeneration
         do {
-            let loaded = try await api.snapshot(fresh: fresh)
+            async let base = api.snapshotBase(fresh: fresh, timeout: refreshTimeout)
+            async let current = api.scopeSessions("current", timeout: refreshTimeout)
+            async let activity = api.projectActivity(fresh: fresh, timeout: refreshTimeout)
+            let loaded = try await DashboardSnapshot(base: base, current: current, activity: activity)
             guard !stopped else { return false }
+            guard generation > appliedGeneration else { return true }
+            appliedGeneration = generation
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
+            let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
+            pages.adopt(snapshot?.sessions ?? [])
+            if !pages.listings.isEmpty, !before.subtracting(snapshot?.sessions.map(\.id) ?? []).isEmpty { rereadPages() }
             snapshotSeq = seq
             recovered(by: "snapshot")
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
+                if catalogHostEpoch != nil { rereadPages() }
                 catalogHostEpoch = loaded.hostEpoch
                 catalogStreamCursor = loaded.catalogSeq ?? 0
                 if catalogFeed.isRunning { catalogFeed.start() }
@@ -171,6 +194,69 @@ final class HostConnection {
             delegate?.hostDidChange(self)
             return false
         }
+    }
+
+    func readMore(_ scope: String) async {
+        guard !stopped, reachable, !readingScopes.contains(scope), let read = pages.next(scope) else { return }
+        readingScopes.insert(scope)
+        defer { readingScopes.remove(scope) }
+        do {
+            let page = try await api.scopePage(scope, cursor: read.cursor, timeout: refreshTimeout)
+            guard !stopped else { return }
+            pageError = nil
+            if pages.append(page, scope: scope, after: read) { pages.adopt(snapshot?.sessions ?? []) }
+        } catch {
+            guard !stopped, !Task.isCancelled else { return }
+            pageError = error.localizedDescription
+        }
+        delegate?.hostDidChange(self)
+    }
+
+    func search(_ query: String, scope: String) async {
+        searchGeneration += 1
+        let generation = searchGeneration
+        guard !query.isEmpty, reachable else {
+            if !pages.found.isEmpty {
+                pages.setFound([])
+                delegate?.hostDidChange(self)
+            }
+            return
+        }
+        let page = try? await api.scopePage(scope, query: query, timeout: refreshTimeout)
+        guard !stopped, !Task.isCancelled, generation == searchGeneration else { return }
+        pages.setFound(page?.sessions ?? [])
+        delegate?.hostDidChange(self)
+    }
+
+    func mentions(_ query: String) async throws -> [SessionState] {
+        try await api.scopePage("all", query: query, limit: 20, timeout: refreshTimeout).sessions
+    }
+
+    private func rereadPages() {
+        rereadTask?.cancel()
+        rereadTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            for scope in pages.listings.keys.sorted() { await reread(scope) }
+        }
+    }
+
+    private func reread(_ scope: String) async {
+        guard !stopped, let start = pages.restart(scope) else { return }
+        var rows: [SessionState] = []
+        var cursor: String?
+        do {
+            repeat {
+                let page = try await api.scopePage(scope, cursor: cursor, limit: 200, timeout: refreshTimeout)
+                rows += page.sessions
+                cursor = page.nextCursor
+            } while cursor != nil && rows.count < start.rows
+        } catch {
+            return
+        }
+        guard !stopped, !Task.isCancelled, pages.replace(scope, rows: rows, cursor: cursor, generation: start.generation) else { return }
+        pages.adopt(snapshot?.sessions ?? [])
+        delegate?.hostDidChange(self)
     }
 
     private func startEvents() {
@@ -194,12 +280,13 @@ final class HostConnection {
                     Self.log.notice("\(self.id, privacy: .public) event stream ended: \(error.localizedDescription, privacy: .public)")
                     reconnecting = true
                     do {
-                        let version = try await api.version()
+                        let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
                         guard !stopped else { return }
                         build = version.build
                         recordStreamInterruption(probeError: nil)
                     } catch {
                         guard !stopped else { return }
+                        if stopIfIncompatible(error) { return }
                         recordStreamInterruption(probeError: error)
                     }
                     let delay = backoff.nextDelay()
@@ -222,6 +309,16 @@ final class HostConnection {
         await delegate?.hostEventStreamConnected(self)
         guard !stopped else { return }
         catalogFeed.start()
+    }
+
+    private func stopIfIncompatible(_ error: Error) -> Bool {
+        guard let apiError = error as? AgenthailAPIError, case .incompatible(let hostProtocol) = apiError else { return false }
+        reachable = false
+        holding = false
+        reconnecting = false
+        connectionError = hostProtocol < AgenthailAPI.snapshotProtocol ? "Update Agenthail on \(name) to connect." : apiError.localizedDescription
+        delegate?.hostDidChange(self)
+        return true
     }
 
     func recordStreamInterruption(probeError: Error?) {
@@ -295,10 +392,14 @@ final class HostConnection {
         if batch.changed {
             if batch.sessionsChanged { snapshotSeq = delegate?.nextStateRequest() ?? snapshotSeq }
             snapshot = batch.snapshot
+            pages.adopt(batch.snapshot.sessions)
+            var reread = false
             for removal in batch.removals {
+                if pages.remove(removal.id) || removal.unlisted && !pages.listings.isEmpty { reread = true }
                 delegate?.host(self, removedSession: removal.id, unlisted: removal.unlisted)
                 if let next = removal.rekeyedTo { delegate?.host(self, rekeyed: [removal.id: next]) }
             }
+            if reread { rereadPages() }
             delegate?.hostDidChange(self)
         }
         return batch.needsSnapshot

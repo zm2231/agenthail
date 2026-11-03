@@ -222,6 +222,7 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
+        if answeredProjectActivity() { return }
         if path == "/api/v1/events" {
             Self.state.opened(self)
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
@@ -240,7 +241,7 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         }
         let body: String
         switch path {
-        case "/api/v1/version": body = #"{"protocol":1,"minimumProtocol":1,"maximumProtocol":1}"#
+        case "/api/v1/version": body = #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/session": body = SessionPreview.detailJSON
         default: body = "{}"

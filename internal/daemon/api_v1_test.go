@@ -103,7 +103,7 @@ func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
 	versionRequest.Header.Set("Authorization", "Bearer "+completed.Token)
 	versionResponse := httptest.NewRecorder()
 	handler.ServeHTTP(versionResponse, versionRequest)
-	if versionResponse.Code != http.StatusOK || !strings.Contains(versionResponse.Body.String(), `"protocol":1`) {
+	if versionResponse.Code != http.StatusOK || !strings.Contains(versionResponse.Body.String(), `"protocol":2,"minimumProtocol":1,"maximumProtocol":2`) {
 		t.Fatalf("version status=%d body=%s", versionResponse.Code, versionResponse.Body.String())
 	}
 	pushBody, _ := json.Marshal(map[string]string{"installationId": "installation", "credential": "credential"})
