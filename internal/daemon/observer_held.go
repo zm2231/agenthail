@@ -36,7 +36,7 @@ func (d *Daemon) readUnobservedBackground(ctx context.Context, adapter surface.S
 	return true
 }
 
-func (d *Daemon) releaseUnobservedHold(session *surface.Session) {
+func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	previous, found, err := d.Registry.RuntimeState(session.ID)
 	if err != nil || !found || previous.HeldCompletionTurnID == "" || surface.BackgroundRunning(session.BackgroundTasks) {
 		return
