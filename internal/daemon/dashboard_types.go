@@ -136,6 +136,7 @@ type dashboardQueue struct {
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       registry.QueueOperation  `json:"operation"`
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
+	Attachments     []map[string]any         `json:"attachments,omitempty"`
 }
 
 type dashboardChannel struct {

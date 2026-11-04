@@ -68,8 +68,13 @@ func (d *Daemon) doQueueCancel(_ context.Context, _ principal, request dashboard
 	if request.QueueID <= 0 {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "queueId is required")
 	}
-	if err := d.Registry.CancelMessage(request.QueueID); err != nil {
+	canceled, err := d.Registry.CancelMessage(request.QueueID)
+	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	return actionOK(map[string]any{"ok": true}), nil
+	result := map[string]any{"message": canceled.Message}
+	if attachments := d.handBack(canceled.Uploads); attachments != nil {
+		result["attachments"] = attachments
+	}
+	return actionOK(map[string]any{"ok": true, "result": result}), nil
 }
