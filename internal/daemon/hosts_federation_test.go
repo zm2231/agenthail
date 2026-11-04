@@ -159,6 +159,7 @@ type actionGate struct {
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
 	older     atomic.Bool
+	streams   atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
 	rootlessPrepare atomic.Bool
 	// legacyMetadata, when set, is the session metadata body a host from
@@ -234,6 +235,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	}
 	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true, Compact: true, Model: true, Goal: true, GoalSet: true}}}
 	d := newTestDaemon(t, reg, []surface.Surface{fake})
+	d.federation.downGrace = 200 * time.Millisecond
 	node := &federationNode{daemon: d, reg: reg, fake: fake, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
 	d.discoverCatalog(context.Background())
@@ -249,6 +251,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path != "/api/v1/version" {
 			n.gate.beyondVersion.Add(1)
+		}
+		if r.URL.Path == "/api/v1/catalog-events" {
+			n.gate.streams.Add(1)
 		}
 		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
 			hold.waiting.Add(1)
@@ -464,10 +469,16 @@ func sessionsOf(state dashboardState, hostID string) []dashboardSession {
 
 func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
+	return pairedFederationWithGrace(t, 200*time.Millisecond)
+}
+
+func pairedFederationWithGrace(t *testing.T, grace time.Duration) (*federationNode, *federationNode, registry.PairedHost) {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	remote := newFederationNode(t, "remote-a", "remote-b")
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
+	local.daemon.federation.downGrace = grace
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
 	testkit.Eventually(t, "remote sessions mirrored", 10*time.Second, func() bool {

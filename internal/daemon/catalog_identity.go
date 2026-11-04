@@ -52,9 +52,9 @@ type catalogCheckout struct {
 }
 
 type catalogIdentity struct {
-	Project           *CatalogProject `json:"project,omitempty"`
-	Checkout          catalogCheckout `json:"checkout"`
-	UnavailableReason string          `json:"unavailableReason,omitempty"`
+	Project  *CatalogProject
+	Checkout catalogCheckout
+	Problem  string
 }
 
 // catalogIdentityTTL bounds how long a resolved workspace identity is reused.
@@ -170,7 +170,7 @@ func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, 
 func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *CatalogProject) catalogIdentity {
 	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
-		return catalogIdentity{Project: prior(), UnavailableReason: "workspace path is unavailable"}
+		return catalogIdentity{Project: prior(), Problem: "workspace path is unavailable"}
 	}
 	c.mu.Lock()
 	entry, found := c.entries[path]
@@ -311,7 +311,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, projects []registr
 	existing := nearestExistingDirectory(path)
 	repository, notRepository, err := resolveCatalogRepository(ctx, existing, repositories)
 	if err != nil && !notRepository {
-		identity.UnavailableReason = "repository identity is unavailable"
+		identity.Problem = "repository identity is unavailable"
 		return identity, catalogGitDirs{}, true
 	}
 	inRepository := err == nil
@@ -335,7 +335,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, projects []registr
 	checkoutCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
 	defer cancel()
 	if reason := resolveCatalogCheckout(checkoutCtx, &identity.Checkout); reason != "" {
-		identity.UnavailableReason = reason
+		identity.Problem = reason
 	}
 	return identity, catalogGitDirs{checkout: repository.gitDir, common: repository.commonDir}, false
 }

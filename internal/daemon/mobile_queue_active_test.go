@@ -29,7 +29,7 @@ func getMobileQueue(t *testing.T, handler http.Handler, query string) mobileQueu
 	return page
 }
 
-func TestMobileQueueRetainsActiveItemsAndPagesTerminalHistory(t *testing.T) {
+func TestMobileQueueListsOnlyActiveItems(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	if err := registry.RegisterSession(surface.Session{ID: "history", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 		t.Fatal(err)
@@ -40,30 +40,18 @@ func TestMobileQueueRetainsActiveItemsAndPagesTerminalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal := map[int64]bool{}
-	for i := 0; i < 60; i++ {
-		terminal[queueDeliveredForMobileTest(t, registry, "history", "delivered "+strconv.Itoa(i))] = true
-	}
+	delivered := queueDeliveredForMobileTest(t, registry, "history", "delivered")
 	handler := dashboardRouter(d)
 
 	first := getMobileQueue(t, handler, "")
-	for i := 1; i < len(first.Items); i++ {
-		if first.Items[i-1].ID <= first.Items[i].ID {
-			t.Fatalf("items are not newest first at %d: %d then %d", i, first.Items[i-1].ID, first.Items[i].ID)
-		}
-	}
-	if newest := first.Items[0]; newest.ID < pendingID || !terminal[newest.ID] {
-		t.Fatalf("the newest delivered row %d does not lead older active rows", newest.ID)
-	}
 	seen := map[int64]dashboardQueue{}
-	terminalSeen := 0
 	for _, item := range first.Items {
 		if _, exists := seen[item.ID]; exists {
 			t.Fatalf("queue item %d returned more than once", item.ID)
 		}
 		seen[item.ID] = item
-		if terminal[item.ID] {
-			terminalSeen++
+		if item.ID == delivered {
+			t.Fatalf("delivered row %d is listed as active", item.ID)
 		}
 		if item.ID == deadID && (item.Historical || item.Evidence != surface.EvidenceUnknown) {
 			t.Fatalf("active unknown row=%+v", item)
@@ -74,49 +62,38 @@ func TestMobileQueueRetainsActiveItemsAndPagesTerminalHistory(t *testing.T) {
 			t.Fatalf("active item %d was omitted", id)
 		}
 	}
-	if terminalSeen != registryQueuePageLimit() || first.NextBefore == 0 {
-		t.Fatalf("first page terminal=%d next=%d", terminalSeen, first.NextBefore)
-	}
-
-	older := getMobileQueue(t, handler, "?before="+strconv.FormatInt(first.NextBefore, 10))
-	for _, item := range older.Items {
-		if _, exists := seen[item.ID]; exists || !terminal[item.ID] {
-			t.Fatalf("older page returned %d again or a non-terminal row", item.ID)
-		}
-		terminalSeen++
-	}
-	if terminalSeen != 60 || older.NextBefore != 0 {
-		t.Fatalf("terminal across pages=%d next=%d", terminalSeen, older.NextBefore)
-	}
 
 	scoped := getMobileQueue(t, handler, "?sessionId=to")
-	if len(scoped.Items) != 1 || scoped.Items[0].ID != pendingID || scoped.NextBefore != 0 {
+	if len(scoped.Items) != 1 || scoped.Items[0].ID != pendingID {
 		t.Fatalf("session page=%+v", scoped)
 	}
 
-	if qualified := getMobileQueue(t, handler, "?sessionId=hpeer::to"); len(qualified.Items) != 1 || qualified.Items[0].ID != pendingID {
-		t.Fatalf("qualified session page=%+v", qualified)
+	unknownHost := httptest.NewRequest(http.MethodGet, "/api/v1/queue?sessionId=hpeer::to", nil)
+	unknownHost.Header.Set("Authorization", "Bearer secret")
+	refused := httptest.NewRecorder()
+	handler.ServeHTTP(refused, unknownHost)
+	if refused.Code != http.StatusNotFound {
+		t.Fatalf("a session on an unknown host status=%d", refused.Code)
 	}
 
 	single := getMobileQueue(t, handler, "?id="+strconv.FormatInt(pendingID, 10))
 	if len(single.Items) != 1 || single.Items[0].ID != pendingID {
 		t.Fatalf("item page=%+v", single)
 	}
+	if finished := getMobileQueue(t, handler, "?id="+strconv.FormatInt(delivered, 10)); len(finished.Items) != 1 || finished.Items[0].ID != delivered {
+		t.Fatalf("finished item page=%+v", finished)
+	}
 	if missing := getMobileQueue(t, handler, "?id=999999"); len(missing.Items) != 0 {
 		t.Fatalf("missing item page=%+v", missing)
 	}
-	for _, query := range []string{"?before=x", "?limit=0", "?id=-1"} {
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/queue"+query, nil)
-		request.Header.Set("Authorization", "Bearer secret")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		if response.Code != http.StatusBadRequest {
-			t.Fatalf("%s status=%d", query, response.Code)
-		}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue?id=-1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("id=-1 status=%d", response.Code)
 	}
 }
-
-func registryQueuePageLimit() int { return registry.QueueHistoryPageLimit }
 
 func queueDeliveredForMobileTest(t *testing.T, registry *registry.Registry, sessionID, message string) int64 {
 	t.Helper()

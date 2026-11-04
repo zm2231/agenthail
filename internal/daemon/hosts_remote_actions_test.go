@@ -162,6 +162,34 @@ func TestFederationCodexUsageComesFromTheNamedHost(t *testing.T) {
 	}
 }
 
+func TestFederationReadsAndCancelsTheNamedHostsQueue(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	id, err := remote.reg.QueueMessageWithKey("remote-a", "waiting on the remote", "remote-queue-row")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/api/v1/queue?host=" + record.ID, "/api/v1/queue?sessionId=" + hosts.Qualify(record.ID, "remote-a")} {
+		response := local.request(t, http.MethodGet, target, nil)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "waiting on the remote") {
+			t.Fatalf("%s status=%d body=%s", target, response.Code, response.Body.String())
+		}
+	}
+	if own := local.request(t, http.MethodGet, "/api/v1/queue", nil); strings.Contains(own.Body.String(), "waiting on the remote") {
+		t.Fatalf("this host listed the remote's row: %s", own.Body.String())
+	}
+	bySession := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-clear", "sessionId": hosts.Qualify(record.ID, "remote-a")})
+	if bySession.Code != http.StatusBadRequest {
+		t.Fatalf("clear by qualified session status=%d body=%s", bySession.Code, bySession.Body.String())
+	}
+	cancel := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-cancel", "queueId": id, "host": record.ID})
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", cancel.Code, cancel.Body.String())
+	}
+	if item, err := remote.reg.QueueItem(id, nil); err != nil || item.Status != "canceled" {
+		t.Fatalf("remote row=%+v err=%v", item, err)
+	}
+}
+
 func TestFederationRefusesActionsThatOnlyMeanSomethingOnOneHost(t *testing.T) {
 	local, _, record := pairedFederation(t)
 	qualified := hosts.Qualify(record.ID, "remote-a")

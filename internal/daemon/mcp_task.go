@@ -90,25 +90,31 @@ type mcpTaskResult struct {
 }
 
 func (d *Daemon) mcpResult(ctx context.Context, caller *mcpCaller, input mcpResultInput) (any, error) {
-	task, err := d.mcpResultTask(caller, input)
+	task, err := d.mcpReadableTask(caller, input)
 	if err != nil {
 		return nil, err
 	}
-	if task.Parent != caller.session.ID {
-		if _, err := d.mcpReadableSession(caller, task.Child); err != nil {
-			var refusal *mcpRefusal
-			if errors.As(err, &refusal) {
-				return nil, errNoSuchTask
-			}
-			return nil, err
-		}
-	}
 	if task.State != registry.TaskRunning && task.Parent == caller.session.ID {
-		if err := d.Registry.ClearTaskWake(task.ID); err != nil {
+		if err := d.clearTaskWake(task.ID); err != nil {
 			return nil, err
 		}
 	}
-	return clippedTaskResult(d.refreshTaskLatest(ctx, task)), nil
+	return clippedTaskResult(d.refreshTaskLatest(ctx, task), mcpOutputLimit), nil
+}
+
+func (d *Daemon) mcpReadableTask(caller *mcpCaller, input mcpResultInput) (registry.Task, error) {
+	task, err := d.mcpResultTask(caller, input)
+	if err != nil || task.Parent == caller.session.ID {
+		return task, err
+	}
+	if _, err := d.mcpReadableSession(caller, task.Child); err != nil {
+		var refusal *mcpRefusal
+		if errors.As(err, &refusal) {
+			return task, errNoSuchTask
+		}
+		return task, err
+	}
+	return task, nil
 }
 
 func (d *Daemon) mcpResultTask(caller *mcpCaller, input mcpResultInput) (registry.Task, error) {
@@ -142,7 +148,7 @@ func (d *Daemon) mcpResultTask(caller *mcpCaller, input mcpResultInput) (registr
 // One answer for a missing task and a foreign one, so ids can't be probed.
 var errNoSuchTask = refuse("not_found", "No such task that you can read.")
 
-func clippedTaskResult(task registry.Task) mcpTaskResult {
+func clippedTaskResult(task registry.Task, budget int) mcpTaskResult {
 	out := mcpTaskResult{TaskID: task.ID, Child: task.Child, State: task.State, Kind: task.Kind}
 	if !task.SettledAt.IsZero() {
 		out.SettledAt = task.SettledAt.UTC().Format(time.RFC3339)
@@ -151,7 +157,7 @@ func clippedTaskResult(task registry.Task) mcpTaskResult {
 		out.LatestAt = task.LatestAt.UTC().Format(time.RFC3339)
 	}
 	// JSON escaping can more than double the text, so the fit is measured encoded.
-	for limit := mcpOutputLimit; ; limit = limit * 3 / 4 {
+	for limit := budget; ; limit = limit * 3 / 4 {
 		out.Result, out.Latest = clipUTF8(task.Result, limit*3/4), clipUTF8(task.Latest, limit/8)
 		out.Truncated = len(out.Result) < len(task.Result) || len(out.Latest) < len(task.Latest)
 		out.Next = ""
@@ -159,7 +165,7 @@ func clippedTaskResult(task registry.Task) mcpTaskResult {
 			out.Next = "The text is clipped; agenthail_read on the child has all of it."
 		}
 		encoded, err := json.Marshal(out)
-		if err != nil || len(encoded) <= mcpOutputLimit {
+		if err != nil || len(encoded) <= budget || limit == 0 {
 			return out
 		}
 	}
