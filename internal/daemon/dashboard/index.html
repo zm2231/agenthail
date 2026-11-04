@@ -11,7 +11,7 @@
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="manifest" href="/js/manifest.webmanifest" />
-    <link rel="stylesheet" href="/tokens.css?v=19" />
+    <link rel="stylesheet" href="/tokens.css?v=20" />
     <link rel="stylesheet" href="/css/panes.css" />
     <link rel="stylesheet" href="/css/agent-messages.css" />
     <link rel="stylesheet" href="/css/project-view.css" />
@@ -287,6 +287,11 @@
                 ><span id="holder-summary"></span
                 ><select id="holder-pid" aria-label="Terminal to send to"></select
               ></label>
+              <div id="send-status" role="status" hidden>
+                <span id="send-status-text"></span>
+                <button id="send-status-retry" type="button">Retry</button>
+                <button id="send-status-put-back" type="button">Put back</button>
+              </div>
               <form id="composer" data-pane="float">
                 <textarea
                   id="message"
