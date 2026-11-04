@@ -120,6 +120,8 @@ type Daemon struct {
 	goalSweep                *goalSweeper
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
+	taskNoticeMu             sync.Mutex
+	taskRequestsRead         map[string]taskRequestRead
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	spawnLocks               keyedLocks

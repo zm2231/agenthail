@@ -152,6 +152,10 @@ func decodeWaitCursor(cursor string) (map[string]bool, error) {
 	if cursor == "" {
 		return seen, nil
 	}
+	// A wait's cursor is part of its output, so it can't be longer than that.
+	if len(cursor) > mcpOutputLimit {
+		return nil, refuse("invalid", "That cursor isn't one a wait returned.")
+	}
 	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
 	var keys []string
 	if err == nil {
@@ -375,7 +379,7 @@ func (d *Daemon) noteWaitItemRead(caller *mcpCaller, item mcpWaitItem) {
 			return
 		}
 		if to, ok := d.noticeRecipient(*session); ok && to.sessionID == caller.session.ID {
-			d.withdrawWaitingNotice(item.Child, *item.waiting)
+			d.noteWaitReadRequest(item.Child, caller.session.ID, *item.waiting)
 		}
 	}
 }

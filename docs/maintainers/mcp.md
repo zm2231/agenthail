@@ -145,7 +145,7 @@ After settling, a report only updates `latest`, and `agenthail_result` records a
 
 The default is 600 seconds and the maximum 3600; `0` only looks. Hosted Claude and Codex sessions run the agenthail server with a 3700-second tool timeout. A Claude session Agenthail doesn't host keeps Claude's own limit, measured at 60 seconds on 2.1.318, so its waits return at 45 seconds with the cursor.
 
-A wait that times out sets `wake` on the running tasks the caller started. Each observer pass sends one queued notice, keyed `task-settled-<id>`, for a settled task with `wake` set, then clears it, so a settlement from any path or a restart in between still gets exactly one. Reading the result, by `agenthail_result` or a wait, clears `wake` and cancels a notice not yet delivered. A request a wait returned withdraws the waiter's own queued notice for it; the person is still notified.
+A wait that times out sets `wake` on the running tasks the caller started. Each observer pass sends one queued notice, keyed `task-settled-<id>`, for a settled task with `wake` set, then clears it, so a settlement from any path or a restart in between still gets exactly one. Reading the result, by `agenthail_result` or a wait, clears `wake` and cancels a notice not yet delivered. A request a wait returned withdraws the waiter's own notice for it, including one not yet queued; the person is still notified. A notice the queue has already started delivering can't be recalled and may arrive just after the read.
 
 ### Control scope
 
