@@ -57,7 +57,13 @@ final class TranscriptQueueTailUITests: XCTestCase {
     }
 
     func testARowArrivingWhileFollowingIsNotCoveredAndNoJump() {
-        let app = launch(extra: ["--preview-tail-late"])
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", "one", "--preview-theme", "dark", "--preview-reading", "--preview-follow", "--preview-tail-late", "--preview-tail-slow"]
+        app.launch()
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 15))
+        XCTAssertFalse(row(21, app).exists, "the row hasn't arrived yet")
+        assertAtLatest(app, "before the row arrived")
+        XCTAssertTrue(row(21, app).waitForExistence(timeout: 10), "the row arrived")
         settle()
         assertNotCovered(row(21, app), app, "after it arrived late")
         assertAtLatest(app, "after a row arrived late")
@@ -85,6 +91,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         let more = app.buttons["queue-tail-more"]
         XCTAssertTrue(more.exists)
         XCTAssertEqual(more.label, "2 more queued")
+        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
         XCTAssertFalse(row(21, app).exists)
         assertNotCovered(row(25, app), app, "with the rest collapsed")
         assertAtLatest(app, "with the rest collapsed")
@@ -95,8 +102,16 @@ final class TranscriptQueueTailUITests: XCTestCase {
         assertAtLatest(app, "with the rest open")
     }
 
+    func testTappingARowShowsTheWholeMessage() {
+        let app = launch()
+        app.buttons["queue-tail-read-21"].tapWhenReady()
+        XCTAssertTrue(app.navigationBars["Queued message"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["This is the failing screen, match the spacing."].exists)
+    }
+
     func testAPeerRowDoesNotPushOutThePersonsOwn() {
         let app = launch("peer")
+        XCTAssertTrue(app.staticTexts["Queued · From @helper"].exists, "a peer row names its sender briefly")
         XCTAssertTrue(row(21, app).exists, "the person's own row is one of the three")
         XCTAssertEqual(app.buttons["queue-tail-more"].label, "2 more queued")
         XCTAssertFalse(app.buttons["queue-tail-steer-25"].exists, "a peer row can't steer as the person")

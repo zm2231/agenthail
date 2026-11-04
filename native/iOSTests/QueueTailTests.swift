@@ -104,6 +104,23 @@ final class QueueTailTests: XCTestCase {
         XCTAssertTrue(tail.rows.isEmpty, "and doesn't come back as leaving")
     }
 
+    func testAnActionFailureFromTheLastSessionDoesNotShowOnTheNextOne() {
+        var tail = QueueTail()
+        let earlier = tail.generation
+        tail.report("failed", from: earlier)
+        XCTAssertEqual(tail.problem, "failed")
+        tail = QueueTail()
+        tail.report("late failure", from: earlier)
+        XCTAssertNil(tail.problem)
+    }
+
+    func testRowsReadOldestToNewestWhicheverRanksKeptThem() throws {
+        var tail = QueueTail()
+        try tail.update(active: [row(1, message: "mine"), row(2, message: envelope("a"), author: "agent"), row(3, status: "dead")], timeline: [], now: start)
+        XCTAssertEqual(tail.shown.map(\.item.id), [1, 2, 3], "the transcript stays in delivery order")
+        XCTAssertEqual(tail.lastShownID, tail.shown.last?.id)
+    }
+
     func testTheCapShowsThreeWithTheRestCounted() throws {
         var tail = QueueTail()
         try tail.update(active: (1...5).map { try row(Int64($0)) }, timeline: [], now: start)

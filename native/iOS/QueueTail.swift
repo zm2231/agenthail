@@ -14,8 +14,10 @@ struct QueueTail: Equatable {
     static let leavesAfter: TimeInterval = 8
     private static let clockSkew: TimeInterval = 5
 
+    let generation = UUID()
     private(set) var rows: [Row] = []
     private var dropped: Set<String> = []
+    private(set) var problem: String?
     var expanded = false
 
     var shown: [Row] {
@@ -63,6 +65,10 @@ struct QueueTail: Equatable {
     mutating func drop(_ row: Row) {
         dropped.insert(row.item.listID)
         rows.removeAll { $0.id == row.id }
+    }
+
+    mutating func report(_ problem: String?, from generation: UUID) {
+        if generation == self.generation { self.problem = problem }
     }
 
     static func delivered(_ queued: QueueState, as item: TimelineItem) -> Bool {

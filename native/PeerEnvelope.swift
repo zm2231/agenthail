@@ -4,6 +4,10 @@ struct PeerEnvelope: Equatable {
     let sender: String?
     let body: String
 
+    var senderName: String? {
+        sender.map { name in name.split(separator: " ").last { $0.hasPrefix("@") }.map(String.init) ?? name }
+    }
+
     var summary: String {
         guard let sender else { return body }
         return "From \(sender): \(body)"

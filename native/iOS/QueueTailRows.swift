@@ -4,22 +4,26 @@ struct QueueTailRows: View {
     @ObservedObject var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let readOnly: Bool
-    @State private var problem: String?
     @State private var retrying: QueueTail.Row?
+    @State private var reading: QueueTail.Row?
 
     var body: some View {
         if tail.hiddenCount > 0 {
             Button { tail.expanded = true } label: {
-                Text("\(tail.hiddenCount) more queued")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(PhonePalette.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                    Text("\(tail.hiddenCount) more queued").font(.footnote.weight(.semibold))
+                }
+                .foregroundStyle(PhonePalette.muted)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(tail.hiddenCount) more queued")
+            .accessibilityHint("Shows every queued message")
             .accessibilityIdentifier("queue-tail-more")
         }
-        if let problem {
+        if let problem = tail.problem {
             Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
                 .accessibilityIdentifier("queue-tail-problem")
         }
@@ -33,13 +37,16 @@ struct QueueTailRows: View {
                 } message: {
                     Text("It may already have reached the agent. Check the session first.")
                 }
+                .sheet(isPresented: Binding(get: { reading?.id == row.id }, set: { if !$0 { reading = nil } })) {
+                    TranscriptDocument(title: "Queued message", text: PeerEnvelope(row.item.message).body, markdown: false)
+                }
         }
     }
 
     private func label(_ row: QueueTail.Row) -> String {
         if row.leavingSince != nil { return "Delivering" }
         if row.isDead { return "Delivery needs review" }
-        if let sender = PeerEnvelope(row.item.message).sender { return "Queued · From \(sender)" }
+        if let sender = PeerEnvelope(row.item.message).senderName { return "Queued · From \(sender)" }
         return row.item.status == "inflight" ? "Delivering" : "Queued"
     }
 
@@ -51,14 +58,20 @@ struct QueueTailRows: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(row.isDead ? AnyShapeStyle(PhonePalette.attention) : AnyShapeStyle(PhonePalette.muted))
             HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(PeerEnvelope(item.message).body.split(separator: "\n").first.map(String.init) ?? "")
-                        .font(.subheadline).lineLimit(1).truncationMode(.tail)
-                    if !names.isEmpty {
-                        Label(names, systemImage: "paperclip").font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                Button { reading = row } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(PeerEnvelope(item.message).body.split(separator: "\n").first.map(String.init) ?? "")
+                            .font(.subheadline).lineLimit(1).truncationMode(.tail)
+                        if !names.isEmpty {
+                            Label(names, systemImage: "paperclip").font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1)
+                        }
                     }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows the whole message")
+                .accessibilityIdentifier("queue-tail-read-\(item.id)")
                 if row.leavingSince == nil { actions(row) }
             }
             if row.isDead {
@@ -124,13 +137,14 @@ struct QueueTailRows: View {
 
     private func run(_ row: QueueTail.Row, leaves: Bool, _ perform: @escaping () async throws -> Void) {
         retrying = nil
-        problem = nil
+        let generation = tail.generation
+        tail.report(nil, from: generation)
         Task {
             do {
                 try await perform()
-                if leaves { tail.drop(row) }
+                if leaves, tail.generation == generation { tail.drop(row) }
             } catch {
-                problem = AgenthailAPIError.userMessage(error)
+                tail.report(AgenthailAPIError.userMessage(error), from: generation)
             }
         }
     }
