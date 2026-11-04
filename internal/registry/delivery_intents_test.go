@@ -226,12 +226,16 @@ func TestQueuedRelayFailureRecordsOneProblemWithoutNotifyingTheRelaySourceAcross
 	}
 }
 
-func TestQueueDeliveryWithIntentSkipsUnregisteredSender(t *testing.T) {
+func TestQueueDeliveryFromAnUnregisteredSenderIsRecordedAsAgenthail(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "target")
 	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "unregistered"})
-	if err != nil || queueID == 0 || deliveryID != 0 {
+	if err != nil || queueID == 0 || deliveryID == 0 {
 		t.Fatalf("queueID=%d deliveryID=%d err=%v", queueID, deliveryID, err)
+	}
+	intent, err := r.DeliveryIntent(deliveryID)
+	if err != nil || intent.SenderSessionID != surface.SystemSessionID || intent.QueueID != queueID {
+		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 }
 

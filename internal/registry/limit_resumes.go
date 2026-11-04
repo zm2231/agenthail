@@ -107,7 +107,7 @@ func (r *Registry) ReleaseLimitStop(sessionID, turnID string, from []LimitResume
 			return false, err
 		}
 		if queued == 0 {
-			if queueID, _, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, false); err != nil {
+			if queueID, _, err = enqueueMessageTx(tx, r.now(), sessionID, notice, deliveryKey, surface.SendOptions{}, 0, QueueOperationMessage, queueIntent{}); err != nil {
 				return false, err
 			}
 		}
