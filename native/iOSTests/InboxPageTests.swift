@@ -233,6 +233,11 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(action["action"] as? String, "queue-retry")
         XCTAssertEqual(action["queueId"] as? Int, 9)
 
+        InboxHostProtocol.actions = []
+        try await model.takeBack(InboxPage.qualified(queueRow(id: 9), host: "hserver"))
+        XCTAssertEqual(InboxHostProtocol.actions.first?["host"] as? String, "hserver", "Edit cancels the row on the computer that holds it")
+        XCTAssertEqual(InboxHostProtocol.actions.first?["to"] as? String, "fast.invalid")
+
         InboxHostProtocol.requests = []
         let owned = await model.queuedDelivery(id: 9, sessionID: "hserver::s1")
         XCTAssertEqual(InboxHostProtocol.requests, ["fast.invalid/api/v1/queue?host=hserver&id=9"], "a receipt reads the owner's queue")
