@@ -365,4 +365,21 @@ async function takenBack(tab, queueId = 7) {
   assert.equal(watching.$("#message").value, "first, then more", "an untouched composer shows the draft another tab saved");
 }
 
+{
+  const values = new Map();
+  const watching = await loaded({ values });
+  const other = await loaded({ values });
+  other.$("#message").value = "older";
+  other.$("#message").listeners.input();
+  const key = [...values.keys()].find((name) => name.startsWith("agenthail.draft."));
+  const late = { key, newValue: values.get(key) };
+  watching.$("#message").value = "newer";
+  watching.$("#message").listeners.input();
+  for (const listener of watching.context.window.listeners.storage) listener(late);
+  assert.equal(watching.$("#message").value, "newer", "a late event from another tab does not replace newer typing");
+  assert.equal((await loaded({ values })).context.app.drafts.get("a"), "newer", "and the saved draft stays newer");
+  for (const listener of watching.context.window.listeners.storage) listener({ key, newValue: null });
+  assert.equal(watching.$("#message").value, "newer", "nor does a late clear");
+}
+
 console.log("queued attachments: ok");

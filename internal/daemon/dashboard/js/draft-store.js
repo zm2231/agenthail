@@ -70,8 +70,9 @@ export function persistentDrafts() {
       globalThis.window?.addEventListener?.("storage", (event) => {
         const sessionId = sessionOf(event.key);
         if (sessionId === undefined) return;
-        const text = textOf(event.newValue) || "";
-        if (adopt(sessionId, text, synced.get(sessionId) ?? "")) synced.set(sessionId, text);
+        const text = stored(sessionId) || "";
+        const previous = synced.get(sessionId) ?? "";
+        if (text !== previous && adopt(sessionId, text, previous)) synced.set(sessionId, text);
       });
     },
   };
