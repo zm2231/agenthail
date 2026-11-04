@@ -83,6 +83,8 @@ type dashboardState struct {
 	Daemon             map[string]any              `json:"daemon"`
 	Surfaces           []dashboardSurface          `json:"surfaces"`
 	Sessions           []dashboardSession          `json:"sessions"`
+	RetiredClock       *int64                      `json:"retiredClock,omitempty"`
+	RetiredIDs         []string                    `json:"retiredIds,omitempty"`
 	TotalSessions      int                         `json:"totalSessions"`
 	Counts             map[string]int              `json:"counts,omitempty"`
 	Projects           []dashboardProject          `json:"projects,omitempty"`

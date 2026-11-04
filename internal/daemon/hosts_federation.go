@@ -412,7 +412,7 @@ func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 	detail := cause.Error()
 	d.setHostState(host, state, detail, false)
 	reason := hostUnavailableReason(host.record.Name, state, detail)
-	rows, err := d.Registry.HostCatalogRows(host.record.ID)
+	rows, err := d.Registry.HostUnretiredCatalogRows(host.record.ID)
 	if err != nil {
 		d.log.Printf("host %s rows: %s", host.record.Name, err)
 		return
@@ -447,6 +447,8 @@ type remoteSnapshot struct {
 	HostEpoch    string                      `json:"hostEpoch"`
 	CatalogSeq   uint64                      `json:"catalogSeq"`
 	Sessions     []dashboardSession          `json:"sessions"`
+	RetiredClock *int64                      `json:"retiredClock"`
+	RetiredIDs   []string                    `json:"retiredIds"`
 	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
 }
 
@@ -474,34 +476,60 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, er
 
 func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, error) {
 	var snapshot remoteSnapshot
-	if err := host.client.GetJSON(ctx, "/api/v1/snapshot", url.Values{"fresh": []string{"1"}}, &snapshot); err != nil {
+	query, err := d.mirrorSnapshotQuery(host.record.ID)
+	if err != nil {
+		return 0, err
+	}
+	if err := host.client.GetJSON(ctx, "/api/v1/snapshot", query, &snapshot); err != nil {
 		return 0, err
 	}
 	host.mu.Lock()
 	host.hidden = nil
 	host.mu.Unlock()
 	keep := map[string]struct{}{}
+	complete := snapshot.RetiredClock != nil
 	for _, row := range snapshot.Sessions {
 		if !servedByHost(row, host.record.ID) {
 			continue
 		}
 		if err := d.mirrorOrHide(host, row); err != nil {
 			d.logRuntimeError("host "+host.record.Name+" mirror "+row.ID, err)
+			complete = false
 			continue
 		}
 		keep[row.ID] = struct{}{}
 	}
-	existing, err := d.Registry.HostCatalogRows(host.record.ID)
+	existing, err := d.Registry.HostCatalogRowIDs(host.record.ID)
 	if err != nil {
 		return 0, err
 	}
-	for _, row := range existing {
-		if _, found := keep[row.Session.ID]; found {
+	retired := heldRetired(snapshot)
+	present := make(map[string]struct{}, len(existing))
+	for _, id := range existing {
+		present[id] = struct{}{}
+		if _, found := keep[id]; found {
 			continue
 		}
-		if err := d.removeHostRow(host.record.ID, row.Session.ID, "omitted_by_host"); err != nil {
+		if _, found := retired[id]; found {
+			continue
+		}
+		if err := d.removeHostRow(host.record.ID, id, "omitted_by_host"); err != nil {
 			return 0, err
 		}
+	}
+	for id := range retired {
+		if _, found := present[id]; !found {
+			if _, hidden := host.hiddenRow(id); !hidden {
+				complete = false
+			}
+		}
+	}
+	retiredClock := int64(-1)
+	if complete {
+		retiredClock = *snapshot.RetiredClock
+	}
+	if err := d.Registry.RecordHostRetiredClock(host.record.ID, retiredClock); err != nil {
+		return 0, err
 	}
 	coordinators := make([]registry.CoordinatorEntry, 0, len(snapshot.Coordinators))
 	for _, entry := range snapshot.Coordinators {
@@ -642,7 +670,7 @@ func mirroredCoordinator(hostID string, entry registry.CoordinatorEntry) (regist
 }
 
 func (d *Daemon) updateMirroredQueueCount(host *pairedHost, sessionID string, count int) error {
-	rows, err := d.Registry.HostCatalogRows(host.record.ID)
+	rows, err := d.Registry.HostUnretiredCatalogRows(host.record.ID)
 	if err != nil {
 		return err
 	}

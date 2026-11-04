@@ -67,7 +67,12 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		}
 		seq = uint64(latest.Int64)
 	}
-	listing, err := catalogListingTx(tx)
+	var listing CatalogListing
+	if request.currentOnly() {
+		listing, err = catalogCurrentListingTx(tx)
+	} else {
+		listing, err = catalogListingTx(tx)
+	}
 	if err != nil {
 		return CatalogPage{}, err
 	}
@@ -105,6 +110,10 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	return CatalogPage{CatalogSnapshot: CatalogSnapshot{HostEpoch: epoch, CatalogSeq: seq, Sessions: sessions, Surfaces: surfaces, Listing: listing}, TotalMatching: total, HasMore: hasMore, Offset: request.Offset, Limit: request.Limit}, nil
 }
 
+func (request CatalogPageRequest) currentOnly() bool {
+	return request.ParentID == "" && (request.Scope == "current" || request.Scope == "recent" || request.Scope == "running")
+}
+
 func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string, string, []any) {
 	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN aliases a ON a.session_id=s.id
@@ -112,6 +121,9 @@ func catalogPageSQL(request CatalogPageRequest, listing CatalogListing) (string,
 		LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 	args := []any{}
 	conditions := []string{}
+	if request.currentOnly() {
+		conditions = append(conditions, "cs.retired=0")
+	}
 	if request.ParentID != "" {
 		conditions = append(conditions, "s.parent_session_id=?")
 		args = append(args, request.ParentID)

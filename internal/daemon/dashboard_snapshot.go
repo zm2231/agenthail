@@ -57,7 +57,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		d.writeDashboardSnapshot(w, r, state)
 		return
 	}
-	refreshCtx, cancel := context.WithTimeout(r.Context(), dashboardRefreshBudget)
+	refreshCtx, cancel := context.WithTimeout(d.withMirrorRetiredAfter(r), dashboardRefreshBudget)
 	defer cancel()
 	var state dashboardState
 	var err error

@@ -71,6 +71,12 @@ final class ProjectContentsTests: XCTestCase {
         XCTAssertEqual(contents.recent.map(\.id), ["forge::far", "one::photos", "one::queued"], "Recent is not newest first across computers")
     }
 
+    func testALeadWithAConversationNeverClaimsItHasNotStarted() {
+        XCTAssertEqual(ProjectContents.leadNote(ProjectState.Lead(name: "new", surface: "claude")), "starts with the first message sent to it")
+        XCTAssertEqual(ProjectContents.leadNote(ProjectState.Lead(name: "empty", surface: "claude", sessionId: "")), "starts with the first message sent to it")
+        XCTAssertEqual(ProjectContents.leadNote(ProjectState.Lead(name: "ended", surface: "claude", sessionId: "s1")), "not running · the next message picks it up")
+    }
+
     func testAProjectWithoutALeadOffersOne() throws {
         let state = try JSONDecoder().decode(ProjectState.self, from: JSONSerialization.data(withJSONObject: Self.project(lead: nil)))
         let contents = ProjectContents.build(ListedProject(state: state, hostID: "one"), sessions: [])

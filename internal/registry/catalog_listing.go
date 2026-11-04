@@ -37,32 +37,63 @@ type catalogListingRow struct {
 	retired  bool
 }
 
+const catalogListingSelect = `SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,cs.current FROM catalog_sessions cs `
+
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
-	rows, err := q.Query(`SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,cs.current
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id`)
-	if err != nil {
+	byID := map[string]catalogListingRow{}
+	if err := readCatalogListingRows(q, byID, catalogListingSelect+`JOIN sessions s ON s.id=cs.session_id`); err != nil {
 		return CatalogListing{}, err
 	}
+	return catalogListing(byID), nil
+}
+
+// Of retired rows, only those above an unretired row can change its answer.
+func catalogCurrentListingTx(q catalogQuerier) (CatalogListing, error) {
 	byID := map[string]catalogListingRow{}
+	if err := readCatalogListingRows(q, byID, catalogListingSelect+`INDEXED BY catalog_sessions_unretired JOIN sessions s ON s.id=cs.session_id WHERE cs.retired=0`); err != nil {
+		return CatalogListing{}, err
+	}
+	for {
+		missing := []string{}
+		for _, row := range byID {
+			if _, found := byID[row.parent]; row.parent != "" && !found {
+				missing = append(missing, row.parent)
+			}
+		}
+		if len(missing) == 0 {
+			return catalogListing(byID), nil
+		}
+		encoded, err := json.Marshal(missing)
+		if err != nil {
+			return CatalogListing{}, err
+		}
+		before := len(byID)
+		if err := readCatalogListingRows(q, byID, catalogListingSelect+`JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id IN (SELECT value FROM json_each(?))`, string(encoded)); err != nil {
+			return CatalogListing{}, err
+		}
+		if len(byID) == before {
+			return catalogListing(byID), nil
+		}
+	}
+}
+
+func readCatalogListingRows(q catalogQuerier, byID map[string]catalogListingRow, query string, args ...any) error {
+	rows, err := q.Query(query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 	for rows.Next() {
 		var id, hostID, parent, source, status string
 		var current bool
 		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &current); err != nil {
-			rows.Close()
-			return CatalogListing{}, err
+			return err
 		}
 		busy := status == string(surface.StatusBusy)
 		retired := status == string(surface.StatusOffline) && !current
 		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return CatalogListing{}, err
-	}
-	if err := rows.Close(); err != nil {
-		return CatalogListing{}, err
-	}
-	return catalogListing(byID), nil
+	return rows.Err()
 }
 
 func catalogListing(byID map[string]catalogListingRow) CatalogListing {
@@ -180,10 +211,6 @@ func (l CatalogListing) Current(id string) bool {
 // session list.
 func (l CatalogListing) CurrentEntity(entityID string) bool {
 	return !l.hiddenEntities[entityID] && !l.retiredEntities[entityID]
-}
-
-func (r *Registry) CatalogListing() (CatalogListing, error) {
-	return catalogListingTx(r.read)
 }
 
 func (l CatalogListing) hiddenJSON() string {

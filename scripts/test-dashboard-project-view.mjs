@@ -51,6 +51,9 @@ assert.equal(actions({ ...sessions[0], unavailableReason: "buildbox can't be rea
 assert.equal(run('leadSessionID({ name: "far", sessionId: "s1", host: { id: "buildbox", state: "connected" } })'), "buildbox::s1", "a remote lead's session is named by its computer");
 assert.equal(run('leadSessionID({ name: "near", sessionId: "s1", host: { id: "studio", state: "local" } })'), "s1");
 
+assert.equal(run('leadNote({ name: "fresh" })'), "starts with the first message sent to it");
+assert.equal(run('leadNote({ name: "ended", sessionId: "s1" })'), "not running · the next message picks it up", "a lead with a conversation never claims it has not started");
+
 let html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /<h1>fieldnotes<\/h1><span class="project-note">7 sessions on 2 computers<\/span>/);
 assert.match(html, /Running now · 1/);

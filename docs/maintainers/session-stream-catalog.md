@@ -209,6 +209,33 @@ initial device scope and rechecks it before writing events or keepalives; a
 revoked device stream closes. Each stream writes a `: connected` comment as soon as it opens, before any replay, because clients such as URLSession return a streaming response only once body bytes arrive. The implementation records uncertain provider
 effects for reconciliation but never blindly retries external actions.
 
+## Ended Claude sessions
+
+Claude's listing holds only running processes, so an omission means the process
+ended, not that the conversation is gone. A session that drops out of the
+listing goes offline on its first miss and stays in the catalog. It is removed
+only when its transcript is gone. A missing config root does not count, so an
+unmounted volume keeps its sessions. Codex's complete sweep lists every thread
+Codex holds, so an omission there still removes the row.
+
+- Each pass stats only rows reaching the miss threshold. Rows already kept are
+  checked once an hour.
+- A local lead with a resumable conversation always has a row, and that row is
+  current with the reason `lead`.
+- The hourly check also restores sessions with no row whose transcript changed in
+  the last 30 days, 25 per pass at most, newest first.
+
+A kept row more than a day old with nothing making it current gets
+`catalog_sessions.retired`. A retired row has no parent and adds to no rollup, so
+the current listing, the stream, the unpaged snapshot and the `current`, `recent`
+and `running` scopes read past it through a partial index, and their cost does
+not grow with history. Only `all`, `archived`, a search and a paired host's first
+sync read retired rows. The session view still counts them for the All tab,
+recounting only when a retired row or the archive changes. Presence reads a
+retired row that has a queued message, a lead's name, attention, a usage-limit
+stop or a failed send, and reads them all when the archive changes. A row leaves
+history when its session stops being offline or the row becomes current.
+
 ## Behavioral checks
 
 - Three viewers of one session cause one upstream reader.

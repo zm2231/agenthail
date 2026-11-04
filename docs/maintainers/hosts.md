@@ -76,7 +76,12 @@ Each paired host has one mirror loop:
 
 - On connect, after a stream gap, or when the remote's catalog epoch changes,
   it takes a full snapshot (`/api/v1/snapshot?fresh=1`) and reconciles: rows
-  the remote no longer serves are removed.
+  the remote no longer serves are removed. After the first one it names the
+  catalog epoch and clock it holds (`retiredEpoch`, `retiredAfter`), and the
+  remote leaves out retired rows written before that clock and lists only their
+  ids in `retiredIds`. Rows missing from both are removed. If a retired id isn't
+  held here, or a row failed to apply, the next snapshot asks for every row
+  again. A lost connection marks only unretired rows unavailable.
 - Otherwise it follows `/api/v1/catalog-events` and applies each
   `session.upserted`, `session.removed` and `session.queue` event as it
   arrives.

@@ -65,6 +65,9 @@ func (c *presentationFingerprints) adopt(read registry.CatalogPresentation) erro
 		decoded.generation = row.Freshness.Generation
 		c.rows[row.ID] = decoded
 	}
+	if !read.History {
+		return nil
+	}
 	for id := range c.rows {
 		if !live[id] {
 			delete(c.rows, id)

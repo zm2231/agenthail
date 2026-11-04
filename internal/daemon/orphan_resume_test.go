@@ -302,9 +302,8 @@ func TestQueuedMessageToAResumeClaudeRefusesIsHeldWithItsReasonAndAnnouncedOnce(
 	}
 }
 
-// retire records the session in the catalog and runs the discovery passes
-// that omit it, as the Claude adapter does once its process exits: the first
-// pass retires it offline and the second drops its catalog row.
+// retire records the session in the catalog and runs the passes that omit it:
+// the first takes it offline and the second removes its catalog row.
 func (f *orphanFixture) retire(t *testing.T) {
 	t.Helper()
 	if _, _, err := f.r.RecordCatalogSession(registry.CatalogSessionState{Session: f.session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:" + f.session.ID, Type: "session.upserted", EntityID: f.session.ID, Payload: []byte(`{}`)}); err != nil {

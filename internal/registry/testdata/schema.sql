@@ -1,4 +1,4 @@
--- schemaVersion 48
+-- schemaVersion 49
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -8,6 +8,12 @@ CREATE INDEX attention_items_open ON attention_items(resolved_at, created_at DES
 
 -- index catalog_events_created
 CREATE INDEX catalog_events_created ON catalog_events(created_at DESC, seq DESC);
+
+-- index catalog_sessions_retired
+CREATE INDEX catalog_sessions_retired ON catalog_sessions(projection_generation) WHERE retired=1;
+
+-- index catalog_sessions_unretired
+CREATE INDEX catalog_sessions_unretired ON catalog_sessions(session_id) WHERE retired=0;
 
 -- index daemon_events_created
 CREATE INDEX daemon_events_created ON daemon_events(created_at DESC, id DESC);
@@ -140,6 +146,12 @@ CREATE TABLE catalog_events (
 	created_at TEXT NOT NULL
 );
 
+-- table catalog_retired_version
+CREATE TABLE catalog_retired_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
+);
+
 -- table catalog_sessions
 CREATE TABLE catalog_sessions (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -156,7 +168,8 @@ CREATE TABLE catalog_sessions (
 	background_tasks BLOB NOT NULL DEFAULT '',
 	usage_limit BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
-	current_reason TEXT NOT NULL DEFAULT ''
+	current_reason TEXT NOT NULL DEFAULT '',
+	retired INTEGER NOT NULL DEFAULT 0
 );
 
 -- table catalog_state
@@ -338,7 +351,8 @@ CREATE TABLE hosts (
 	last_contact_at TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	catalog_epoch TEXT NOT NULL DEFAULT '',
-	catalog_seq INTEGER NOT NULL DEFAULT 0
+	catalog_seq INTEGER NOT NULL DEFAULT 0,
+	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
 
 -- table launcher_pending
@@ -693,6 +707,51 @@ CREATE TABLE signin_profiles (
 	UNIQUE(browser, profile)
 );
 
+-- trigger catalog_retired_version_archived
+CREATE TRIGGER catalog_retired_version_archived AFTER INSERT ON session_archive
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_project
+CREATE TRIGGER catalog_retired_version_project AFTER UPDATE OF archived_at_ms ON projects
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_project_added
+CREATE TRIGGER catalog_retired_version_project_added AFTER INSERT ON projects
+WHEN NEW.archived_at_ms>0
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_project_removed
+CREATE TRIGGER catalog_retired_version_project_removed AFTER DELETE ON projects
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_removed
+CREATE TRIGGER catalog_retired_version_removed AFTER DELETE ON catalog_sessions
+WHEN OLD.retired=1
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_row
+CREATE TRIGGER catalog_retired_version_row AFTER UPDATE OF retired,host_project,unavailable_reason ON catalog_sessions
+WHEN OLD.retired=1 OR NEW.retired=1
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
+-- trigger catalog_retired_version_unarchived
+CREATE TRIGGER catalog_retired_version_unarchived AFTER DELETE ON session_archive
+BEGIN
+	UPDATE catalog_retired_version SET version=version+1;
+END;
+
 -- trigger catalog_sessions_current_insert
 CREATE TRIGGER catalog_sessions_current_insert AFTER INSERT ON catalog_sessions
 BEGIN
@@ -705,6 +764,13 @@ CREATE TRIGGER catalog_sessions_current_update AFTER UPDATE OF projection_finger
 BEGIN
 	UPDATE catalog_sessions SET current=CASE WHEN json_valid(NEW.projection_fingerprint) THEN COALESCE(json_extract(NEW.projection_fingerprint,'$.current'),0) ELSE 0 END,
 		current_reason=CASE WHEN json_valid(NEW.projection_fingerprint) THEN COALESCE(json_extract(NEW.projection_fingerprint,'$.currentReason'),'') ELSE '' END WHERE session_id=NEW.session_id;
+END;
+
+-- trigger catalog_sessions_retired_current
+CREATE TRIGGER catalog_sessions_retired_current AFTER UPDATE OF current ON catalog_sessions
+WHEN NEW.current=1 AND NEW.retired=1
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.session_id;
 END;
 
 -- trigger message_queue_catalog_delete
@@ -740,5 +806,12 @@ BEGIN
 		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now')
 	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
+END;
+
+-- trigger sessions_unretire
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF status,parent_session_id ON sessions
+WHEN NEW.status<>'offline' OR NEW.parent_session_id<>''
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;
 

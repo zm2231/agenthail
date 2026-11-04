@@ -30,6 +30,14 @@ type CatalogPresenceRead struct {
 // was written after clock in hostEpoch, or when known does not hold the row at
 // its generation.
 func (r *Registry) CatalogPresenceRows(rows []CatalogPresenceRow, hostEpoch string, clock int64, known func(id string, generation int64) bool) (CatalogPresenceRead, error) {
+	return r.catalogPresenceRows(rows, hostEpoch, clock, known, false)
+}
+
+func (r *Registry) CatalogPresenceRowsWithRetired(rows []CatalogPresenceRow, hostEpoch string, clock int64, known func(id string, generation int64) bool) (CatalogPresenceRead, error) {
+	return r.catalogPresenceRows(rows, hostEpoch, clock, known, true)
+}
+
+func (r *Registry) catalogPresenceRows(rows []CatalogPresenceRow, hostEpoch string, clock int64, known func(id string, generation int64) bool, retired bool) (CatalogPresenceRead, error) {
 	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogPresenceRead{}, err
@@ -44,9 +52,12 @@ func (r *Registry) CatalogPresenceRows(rows []CatalogPresenceRow, hostEpoch stri
 	if err == sql.ErrNoRows || read.HostEpoch != hostEpoch {
 		after = -1
 	}
+	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=''`
+	if !retired {
+		from = `FROM (` + catalogUnretiredSessions + `) unretired JOIN catalog_sessions cs ON cs.session_id=unretired.session_id JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=''`
+	}
 	result, err := tx.Query(`SELECT s.id,s.name,s.surface,s.status,s.runtime_kind,s.last_active_ms,cs.projection_generation,
-		CASE WHEN cs.projection_generation>? THEN cs.projection_fingerprint END
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=''`, after)
+		CASE WHEN cs.projection_generation>? THEN cs.projection_fingerprint END `+from, after)
 	if err != nil {
 		return CatalogPresenceRead{}, err
 	}
@@ -84,7 +95,12 @@ func (r *Registry) CatalogPresenceRows(rows []CatalogPresenceRow, hostEpoch stri
 		}
 		row.FingerprintRead = true
 	}
-	if read.Listing, err = catalogListingTx(tx); err != nil {
+	if retired {
+		read.Listing, err = catalogListingTx(tx)
+	} else {
+		read.Listing, err = catalogCurrentListingTx(tx)
+	}
+	if err != nil {
 		return CatalogPresenceRead{}, err
 	}
 	return read, tx.Commit()
