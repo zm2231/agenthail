@@ -61,6 +61,26 @@ func TestASweepCompressesIdleSessionsLogsItAndChangesNoRead(t *testing.T) {
 	}
 }
 
+func TestASweepLogCountsOnlySessionsItChanged(t *testing.T) {
+	d, r, _, changed, unchanged := daemonFixture(t)
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	journalSweepRow(t, r, changed.ID, "big", old)
+	payload, err := json.Marshal(map[string]string{"a": "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := registry.SessionJournalEntry{SessionID: unchanged.ID, Kind: "toolCall", ProviderKey: "tiny", Payload: payload, ObservedAt: old}
+	if _, _, err := r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	d.log = log.New(&logged, "", 0)
+	d.sweepJournals(context.Background(), time.Now())
+	if !strings.Contains(logged.String(), "journal sweep: 1 rows in 1 sessions") {
+		t.Fatalf("log:\n%s", logged.String())
+	}
+}
+
 func TestACancelledSweepStops(t *testing.T) {
 	d, r, _, idle, other := daemonFixture(t)
 	old := time.Now().Add(-30 * 24 * time.Hour)

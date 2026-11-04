@@ -43,6 +43,7 @@ func (d *Daemon) sweepJournals(ctx context.Context, now time.Time) {
 		return
 	}
 	var total registry.JournalCompression
+	touched := 0
 	for _, session := range sessions {
 		if ctx.Err() != nil {
 			return
@@ -50,6 +51,9 @@ func (d *Daemon) sweepJournals(ctx context.Context, now time.Time) {
 		compressed, err := d.Registry.CompressJournalSession(session, now.Add(-journalIdleAfter))
 		if err != nil {
 			d.log.Printf("journal sweep: session %s: %s", session, err)
+		}
+		if compressed.Rows > 0 {
+			touched++
 		}
 		total.Rows += compressed.Rows
 		total.Plain += compressed.Plain
@@ -59,7 +63,7 @@ func (d *Daemon) sweepJournals(ctx context.Context, now time.Time) {
 		}
 	}
 	if total.Rows > 0 {
-		d.log.Printf("journal sweep: %d rows in %d sessions, %d -> %d bytes, took %s", total.Rows, len(sessions), total.Plain, total.Packed, time.Since(began).Round(time.Millisecond))
+		d.log.Printf("journal sweep: %d rows in %d sessions, %d -> %d bytes, took %s", total.Rows, touched, total.Plain, total.Packed, time.Since(began).Round(time.Millisecond))
 	}
 	d.reclaimJournalPages(ctx)
 }
