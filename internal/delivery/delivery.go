@@ -27,6 +27,9 @@ type Receipt struct {
 	Notice     string                   `json:"notice,omitempty"`
 	// Started marks a conversation started to take the message.
 	Started bool `json:"started,omitempty"`
+	// MovedTo names the session that took a message the addressed session
+	// could not, which SessionID identifies.
+	MovedTo string `json:"movedTo,omitempty"`
 	// WaitingOn is set on a queued receipt when the target is waiting on its
 	// user; the message is delivered after the user answers.
 	WaitingOn *surface.Waiting `json:"waitingOn,omitempty"`

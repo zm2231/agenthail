@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -97,6 +98,10 @@ func (c *coordinatorCLI) spec(t *testing.T) registry.CoordinatorSpec {
 func (c *coordinatorCLI) withGoneCoordinator(t *testing.T) *coordinatorCLI {
 	t.Helper()
 	c.register(t, surface.Session{ID: goneConversation, Bridge: "session_gone", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: c.cwd})
+	lastSeen := time.Now().UTC().Add(-coordinator.GoneGrace - time.Minute).Format(time.DateTime)
+	if _, err := c.r.WriteDB().Exec(`UPDATE sessions SET registered_at=?, last_active_ms=0 WHERE id=?`, lastSeen, goneConversation); err != nil {
+		t.Fatal(err)
+	}
 	c.define(t, registry.CoordinatorSpec{ProjectID: "project-fixture", Name: "fixture-lead", Cwd: c.cwd, Instructions: "You coordinate fixture workers."}, goneConversation)
 	return c
 }

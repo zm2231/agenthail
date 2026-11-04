@@ -20,7 +20,16 @@ struct LocalSend: Identifiable, Equatable {
         attachments.map { AttachedFile(name: $0.name, bytes: $0.byteCount) }
     }
 
-    static func label(for status: String?, waitingOnYou: Bool = false, steer: Bool = false) -> String {
+    // movedTo names the session that took a message this pane's session
+    // could not, so the bubble does not claim it arrived here.
+    static func label(for status: String?, waitingOnYou: Bool = false, steer: Bool = false, movedTo: String? = nil) -> String {
+        if let movedTo, !movedTo.isEmpty {
+            switch status {
+            case "queued": return "Queued for \(movedTo)"
+            case "submitted": return "Submitted to \(movedTo)"
+            default: return "Sent to \(movedTo)"
+            }
+        }
         switch status {
         case "queued": return waitingOnYou ? "Queued · Waiting on you" : "Queued"
         case "submitted": return "Submitted"

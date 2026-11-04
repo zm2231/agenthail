@@ -108,9 +108,9 @@ func (s Service) DeliverWithoutQueue(ctx context.Context, spec registry.Coordina
 }
 
 // Sender delivers to a session as delivery.Dispatcher does, except that a
-// message for a coordinator's conversation, current or replaced, goes through
-// the coordinator. A send then updates session to the conversation that took
-// the message.
+// message for the coordinator's current conversation, or one RouteOf moves
+// from a conversation a restart replaced, goes through the coordinator. A
+// send then updates session to the conversation that took the message.
 type Sender struct{ Service }
 
 func (s Sender) DeliverWithOptions(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions) (*delivery.Receipt, error) {
@@ -124,17 +124,32 @@ func (s Sender) DeliverWithoutQueue(ctx context.Context, adapter surface.Surface
 func (s Sender) send(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*delivery.Receipt, error) {
 	spec, coordinated := s.Of(session.ID)
 	if !coordinated {
-		if allowQueue {
-			return s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, deliveryKey, options)
+		return s.dispatch(ctx, adapter, session, message, deliveryKey, options, allowQueue)
+	}
+	route, err := s.RouteOf(ctx, session.ID, FromAgent(options.Author, options.SourceSessionID))
+	if err != nil {
+		if !allowQueue {
+			return nil, err
 		}
-		return s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, deliveryKey, options)
+		return s.Hold(session, message, options, err)
+	}
+	if route.Replaced && !route.Moved {
+		return s.dispatch(ctx, adapter, session, message, deliveryKey, options, allowQueue)
 	}
 	outcome, err := s.deliver(ctx, spec, message, deliveryKey, options, allowQueue)
 	if err != nil {
 		return nil, err
 	}
 	*session = *outcome.Session
+	route.Annotate(outcome.Receipt, spec.Name)
 	return outcome.Receipt, nil
+}
+
+func (s Sender) dispatch(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*delivery.Receipt, error) {
+	if allowQueue {
+		return s.Dispatcher.DeliverWithOptions(ctx, adapter, session, message, deliveryKey, options)
+	}
+	return s.Dispatcher.DeliverWithoutQueue(ctx, adapter, session, message, deliveryKey, options)
 }
 
 // Canonical returns the coordinator's current conversation when sessionID is
@@ -301,6 +316,16 @@ func (s Service) deliverTo(ctx context.Context, adapter surface.Surface, session
 		return s.queueUnavailable(session, message, options, allowQueue, err)
 	}
 	return &Outcome{Receipt: receipt, Session: session}, nil
+}
+
+// Hold queues only for a cause that is an unavailable delivery; any other
+// cause is returned.
+func (s Service) Hold(session *surface.Session, message string, options surface.SendOptions, cause error) (*delivery.Receipt, error) {
+	outcome, err := s.queueUnavailable(session, message, options, true, cause)
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Receipt, nil
 }
 
 // queueUnavailable queues a message for a coordinator that cannot take it for

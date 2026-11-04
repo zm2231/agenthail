@@ -32,9 +32,19 @@ func (d *Daemon) coordinator() coordinator.Service {
 // again when its conversation is gone. It reports whether it handled item.
 func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Session, item *registry.QueuedMessage, now time.Time) bool {
 	coord := d.coordinator()
-	if current, replaced := coord.ReplacedBy(session.ID); replaced {
-		if err := d.Registry.MoveClaimedMessage(item.ID, current); err != nil {
-			d.log.Printf("move queue item %d to coordinator %s: %s", item.ID, current, err)
+	route, err := coord.RouteOf(ctx, session.ID, coordinator.FromAgent(item.Author, item.SourceSessionID))
+	if err != nil {
+		if _, err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
+			d.log.Printf("defer queue item %d: %s", item.ID, err)
+		}
+		return true
+	}
+	if route.Replaced && !route.Moved {
+		return false
+	}
+	if route.Moved {
+		if err := d.Registry.MoveClaimedMessage(item.ID, route.Current); err != nil {
+			d.log.Printf("move queue item %d to coordinator %s: %s", item.ID, route.Current, err)
 			if _, err := d.Registry.DeferMessage(item.ID, err, now); err != nil {
 				d.log.Printf("defer queue item %d: %s", item.ID, err)
 			}

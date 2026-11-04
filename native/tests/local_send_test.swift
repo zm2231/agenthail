@@ -57,6 +57,8 @@ struct LocalSendTest {
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")
         expect(LocalSend.label(for: "queued", waitingOnYou: true) == "Queued · Waiting on you" && LocalSend.label(for: "sent", waitingOnYou: true) == "Sent", "a queued receipt to a session waiting on you says so")
         expect(LocalSend.label(for: "sent", steer: true) == "Steer sent" && LocalSend.label(for: "sent") == "Sent", "a steer reads as a steer and an ordinary send as sent")
+        expect(LocalSend.label(for: "sent", movedTo: "@sai-core-coordinator") == "Sent to @sai-core-coordinator" && LocalSend.label(for: "queued", waitingOnYou: true, movedTo: "@sai-core-coordinator") == "Queued for @sai-core-coordinator", "a send another session took names that session")
+        expect(LocalSend.label(for: "sent", movedTo: "") == "Sent", "an empty taker reads as an ordinary send")
         print("local send tests passed")
     }
 
