@@ -95,6 +95,20 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
     }
 
+    func testInboxHistoryShowsANewMessageWithinSeconds() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
+        app.launch()
+        app.tabBars.buttons["Inbox"].tapWhenReady()
+        XCTAssertTrue(app.buttons["inbox-session-1"].waitForExistence(timeout: 10), "Current lists what can still be acted on")
+        app.buttons["History"].tapWhenReady()
+        XCTAssertTrue(app.buttons["inbox-message-13"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["From @reviewer"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The signing step passes now."].exists, "a peer message reads as its body")
+        XCTAssertFalse(app.buttons["inbox-message-11"].exists, "a message waiting in the queue stays in Current")
+        XCTAssertTrue(app.buttons["inbox-message-14"].waitForExistence(timeout: 12), "History reloads while it is on screen")
+    }
+
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "hittable == true")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed

@@ -8,7 +8,7 @@ import (
 type mcpQueueInput struct {
 	mcpWrite
 	Action  string `json:"action" jsonschema:"retry or cancel one queued instruction, or clear every pending one for a session."`
-	QueueID int64  `json:"queueId,omitempty" jsonschema:"For retry and cancel: the entry's id, as agenthail_history's queue view lists it."`
+	QueueID int64  `json:"queueId,omitempty" jsonschema:"For retry and cancel: the entry's id, as agenthail_history lists it: its queue view for active entries, its history view for older ones."`
 	Target  string `json:"target,omitempty" jsonschema:"For clear: the session id or @alias."`
 }
 
