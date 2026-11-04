@@ -109,6 +109,8 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_alias` | Name a session | control scope, down only |
 | `agenthail_archive` | Archive or restore a session | control scope, down only |
 | `agenthail_create` | Start a Claude or Codex session with a first message, within the caller's ceiling, or a Notion thread | `spawn`; Notion needs `control.all` |
+| `agenthail_report` | A task's child reports `done` or `failed` with its result; the first report settles the task and later ones update `latest` | the child of a task |
+| `agenthail_result` | A task's state, result and `latest`, by `taskId` or child `target`, clipped to the output limit | the parent, or a reader of the child |
 | `agenthail_channel_send` | Post to a channel or project as the caller | any session |
 | `agenthail_channel` | Create, delete, rename or list channels and change their members | `control.all` |
 | `agenthail_relay` | Add, remove or list relays | `control.all` |
@@ -117,6 +119,26 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_ledger_write` | `attach`, `clause`, `question` or `work` in the caller's project ledger, recorded as the caller; ownership cannot be set | `ledger.write` |
 
 Every write runs the same shared code as the dashboard and CLI, with the session's principal, so it is validated, refused and recorded the same way: `agenthail_ledger_write` through the ledger's own write route (`ledgerWriteRoute`, the handler behind `/api/v1/ledger/<op>`), and every other write through `performAction`. Both take the same idempotency key and record the same audit entry. Every write acts as the calling session (its principal, and the source of its audit entry) and never carries a person author. The message tools (`agenthail_send`, `agenthail_steer`, `agenthail_channel_send`) also set `sourceSessionId` to the caller, so the message is attributed to that session, as the CLI's `agenthail send` from a session is, and `agenthail_create` sets it for a Claude or Codex start so the new session's spawner is the caller. Other writes leave it empty, since on those actions it means something else (a fork's source, a coordinator start's creator).
+
+### Tasks
+
+`agenthail_create` with `task: true` records a task for the new session, a row in `tasks`, and replies with its `taskId`. If the first turn's outcome is unknown, the reply is `{taskId, sessionId, state: "running", outcome: "unknown"}`, and the task still counts. A task belongs to one child on the same host; moving the child to another host or archiving it cancels the task.
+
+The first of these settles a running task, and only one can:
+
+1. The child calls `agenthail_report`.
+2. A turn has finished with no active goal: the child is idle, with no background work running. The task settles with that turn's text, as `failed` with its error, or as `done` with empty text if the turn wrote none. An interrupted turn settles as `failed`.
+3. The goal completes. A turn that finishes under a goal that isn't complete, or whose state can't be read, leaves the task running. A stopped goal does not settle the task.
+4. A first turn that definitely failed settles as `failed`.
+5. The child's session is gone for good: it is offline, off the catalog, and its surface can't resume it. The task settles with the last turn a goal held open, or as `failed` if there is none.
+
+The observer checks this on every pass. Running tasks' children are always watched, including an exited Claude child, whose transcript can still be read. So a turn settles however long ago it ended, and a daemon restart needs no reconciling: the first pass sees the same state. The goal is read at once for a newly finished turn and otherwise every 30 seconds. A goal read as complete is followed by a fresh observation, so the turn that completed it has finished before it settles. A failing observation backs off to at most a minute between tries, the same as any watched session, so it delays a task but can't starve it.
+
+The first terminal turn is the result, even if a follow-up was already on its way. That follow-up's turn goes to `latest`.
+
+A Codex process that hasn't loaded a thread reads its running turn as `interrupted`, so that status from such a reader settles nothing, and relays and completion notices don't treat it as the turn's end. The same read can't tell a running turn from one whose owner died, so such a child stays open until it is archived or its turn is seen to complete, and holds no spawn slot meanwhile. A child that exited but can still be resumed also stays open and holds no slot. A child's row is not pruned while it has a task, so a result stays readable.
+
+After settling, a report only updates `latest`, and `agenthail_result` records a turn that finished since. Settled children are not watched. Until a task settles, its idle child counts toward the caller's running-session limit. Rows are durable, so a result survives a daemon restart.
 
 ### Control scope
 
