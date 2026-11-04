@@ -26,14 +26,14 @@ export function syncComposerAction() {
   const input = $("#message");
   const sendButton = $("#send");
   const steerButton = $("#steer-message");
-  const capabilities = app.history?.capabilities || {};
+  const capabilities = app.history?.capabilities || app.selected?.capabilities || {};
   const busy = app.selected?.status === "busy";
   const held = app.selected ? heldAttachments(app.selected.id) : [];
   const attached = held.length > 0;
   const steerRefusal = attachmentSteerRefusal(held, capabilities);
   const hasMessage = Boolean(input.value.trim()) || Boolean(app.selected && sendableAttachments(app.selected.id).length);
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
-  const turnNotice = (app.history ? capabilities.turnNotice : app.selected?.capabilities?.turnNotice) || "";
+  const turnNotice = capabilities.turnNotice || "";
   const stopping = busy && capabilities.interrupt && !hasMessage && !attached && !readOnly;
   sendButton.dataset.mode = stopping ? "interrupt" : "send";
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
@@ -98,7 +98,7 @@ export async function send(requestedAction = "send") {
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
     const steering = composerAction === "steer" || command.toLowerCase() === "/steer";
-    const steerRefusal = steering ? attachmentSteerRefusal(heldAttachments(sessionId), app.history?.capabilities) : "";
+    const steerRefusal = steering ? attachmentSteerRefusal(heldAttachments(sessionId), app.history?.capabilities || app.selected?.capabilities) : "";
     if (steerRefusal) throw Error(steerRefusal);
     if (commandAction && !steering && holding) throw Error("Send the attached files as a message, or remove them before running a command.");
     if (steering || !commandAction) {

@@ -132,6 +132,30 @@ async function takenBack(tab, queueId = 7) {
   assert.equal(chips(tab).includes("shot.png"), false, "and the chip leaves the composer");
 }
 
+{
+  const tab = await loaded({ queue: [{ ...queuedImage, id: 9, attachments: [shot] }] });
+  tab.context.app.selected.capabilities = { steer: true, interrupt: true, steerImages: true };
+  tab.context.app.history = null;
+  tab.$("#message").value = "";
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#send").dataset.mode, "interrupt", "without history the session's own capabilities still offer Stop");
+  tab.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [shot] } }));
+  await tab.context.takeBackQueued(9);
+  tab.context.app.history = null;
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, false, "and Steer for a held image");
+  tab.$("#message").value = "/steer text";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(answered({ ok: true, result: { evidence: "delivered" } }));
+  await tab.context.send("send");
+  await settled();
+  const sent = tab.requests.at(-1);
+  assert.equal(sent.action, "send");
+  assert.equal(sent.busyDelivery, "steer");
+  assert.deepEqual(sent.attachments, [shot.id]);
+  assert.equal(sent.message, "text");
+}
+
 for (const [capabilities, note] of [
   [{ steerImages: false }, "Attached images can't join a running turn on this session. Send queues them for next."],
   [{}, "Update Agenthail on this computer to steer attachments. Send queues them for next."],
