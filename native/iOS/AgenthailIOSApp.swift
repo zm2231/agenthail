@@ -72,7 +72,7 @@ extension Notification.Name {
 @main
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
-    @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
+    @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled, composerStore: sessionPreviewEnabled ? nil : .standard)
     @State private var voiceCalls = VoiceCallCoordinator(makeModel: { Self.voiceModel() })
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false
@@ -117,6 +117,7 @@ struct AgenthailIOSApp: App {
                     Task.detached { await PushReceipts.flush() }
                 }
                 if phase == .background {
+                    model.saveComposerState()
                     ConnectionDrops.shared.backgrounded()
                     wasInBackground = true
                 } else if phase == .active, wasInBackground {

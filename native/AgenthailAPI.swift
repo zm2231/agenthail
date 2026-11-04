@@ -291,6 +291,25 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
+    /// Fixes an instruction's bytes and key, pin included, so that retrying it can only replay it.
+    func instructionWire(sessionID: String, message: String, turnSettings: TurnSettings, author: String?, attachments: [String], idempotencyKey: String) throws -> ActionWire {
+        let body = InstructionRequest(action: "send", sessionID: sessionID, message: message, turnSettings: turnSettings, author: author, attachments: attachments)
+        let pinned = holderPins.pinned(body: try JSONEncoder().encode(body), key: idempotencyKey)
+        return ActionWire(body: pinned.body, key: pinned.key)
+    }
+
+    func send(_ wire: ActionWire) async throws -> ActionReceipt {
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.timeoutInterval = 25
+        request.httpBody = wire.body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(wire.key, forHTTPHeaderField: "Idempotency-Key")
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(ActionReceipt.self, from: data)
+    }
+
     func upload(_ attachment: ComposerAttachment, sessionID: String) async throws -> UploadedAttachment {
         var components = URLComponents()
         components.path = "/api/v1/uploads"
@@ -912,6 +931,11 @@ struct ServerSentEventParser {
         data.append(String(value.first == " " ? value.dropFirst() : value))
         return nil
     }
+}
+
+struct ActionWire: Codable, Equatable, Sendable {
+    let body: Data
+    let key: String
 }
 
 private struct InstructionRequest: Encodable {

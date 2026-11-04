@@ -117,7 +117,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
         model.send(to: fixture.session)
         try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
-        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1])
+        XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1], "the daemon replays a refusal under its key, so a retry needs a new one")
         XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Couldn’t complete request. Draft kept.")
 
         model.composer = "Edited retry"

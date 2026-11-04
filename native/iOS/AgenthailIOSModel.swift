@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 import UIKit
@@ -81,6 +82,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
+    private static let composerLog = Logger(subsystem: "com.agenthail.ios", category: "Composer")
     private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
@@ -99,18 +101,32 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var searching = false
     private var searchQuery = ""
     private var sessionRequestID = UUID()
-    private var drafts: [String: String] = [:]
-    @Published private(set) var stashes: [String: ComposerStash] = [:]
-    @Published var composerAttachments: [ComposerAttachment] = []
-    @Published var attachmentProblem: String?
-    private var attachmentDrafts: [String: [ComposerAttachment]] = [:]
-    private var rekeys = SessionRekeys()
-    private struct PendingSendRequest {
-        let message: String
-        let attachments: [ComposerAttachment]
-        let turnSettings: TurnSettings
-        let idempotencyKey: String
+    private var drafts: [String: String] = [:] {
+        didSet { saveComposerStateSoon() }
     }
+    @Published private(set) var stashes: [String: ComposerStash] = [:] {
+        didSet { saveComposerStateSoon() }
+    }
+    private let sendQueue = SendQueue()
+    @Published private(set) var pendingSends: [String: [PendingSend]] = [:]
+    @Published var failedSends: [String: String] = [:]
+    private var lostAttachments: [String: [String]] = [:]
+    private var composerStore: ComposerStore?
+    private var waitingComposerStore: ComposerStore?
+    private var protectedDataObserver: NSObjectProtocol?
+    private static let composerFileKeptNotice = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
+    private static let composerUnreadNotice = "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes."
+    private var composerWaitAnnounced = false
+    private var composerSave: Task<Void, Never>?
+    private var draftChanges: AnyCancellable?
+    @Published var composerAttachments: [ComposerAttachment] = [] {
+        didSet { saveComposerStateSoon() }
+    }
+    @Published var attachmentProblem: String?
+    private var attachmentDrafts: [String: [ComposerAttachment]] = [:] {
+        didSet { saveComposerStateSoon() }
+    }
+    private var rekeys = SessionRekeys()
     private struct CreationRequestIdentity: Equatable {
         let surface: String
         let message: String
@@ -127,7 +143,6 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let environment: String
         let endpoint: String
     }
-    private var pendingSendRequests: [String: PendingSendRequest] = [:]
     private var creationRequestIdentity: CreationRequestIdentity?
     private var creationRequestKey: String?
     @Published var notificationStatus = "Not enabled"
@@ -195,25 +210,31 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     var showsHostNames: Bool { Set((snapshot?.sessions ?? []).compactMap(\.host?.id)).count > 1 || hostOrder.count > 1 }
     var usageReaders: [AgenthailAPI] { hostOrder.compactMap { connections[$0] }.filter(\.reachable).map(\.api) }
 
-    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared) {
+    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil) {
         networkSession = session
         connectionDrops = drops
         automaticallyConnect = autoConnect
         previewPaired = false
+        self.composerStore = composerStore
         voiceHostID = UserDefaults.standard.string(forKey: Self.voiceHostKey)
         for credential in PairedCredential.all() { add(HostConnection(credential: credential, session: session, drops: drops)) }
         rebuild()
+        connectSendQueue()
+        restoreComposerState()
         Task { await retireLegacyPairing() }
         if autoConnect { connect() }
     }
 
-    init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer") {
+    init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer", composerStore: ComposerStore? = nil) {
         networkSession = .shared
         connectionDrops = nil
         automaticallyConnect = false
         previewPaired = paired
+        self.composerStore = composerStore
         add(HostConnection(id: hostID, name: hostName, api: api))
         rebuild()
+        connectSendQueue()
+        restoreComposerState()
     }
 
     deinit {
@@ -944,12 +965,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func resumeConnection() {
+        retryComposerStore()
         guard isPaired else {
             refreshNotificationRegistration()
             return
         }
         showNotificationAuthorization()
         connect()
+        sendQueue.wake()
     }
 
     @discardableResult
@@ -1029,6 +1052,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
+            announceLostAttachments(for: id)
             let warm = store.open(id)
             sessionMetadata = MetadataOverlay(allClaudeSubagents: warm?.allClaudeSubagents ?? false)
             let live = snapshot?.sessions.first { $0.id == id }
@@ -1381,7 +1405,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         store.carry(rekeys)
         var held = stashes
         if rekeys.carry(&held) { stashes = held }
-        _ = rekeys.carry(&pendingSendRequests)
+        sendQueue.carry(rekeys)
+        var failures = failedSends
+        if rekeys.carry(&failures) { failedSends = failures }
+        _ = rekeys.carry(&lostAttachments)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
         if let requested = requestedSessionID, rekeys.resolve(requested) != requested {
@@ -1420,26 +1447,21 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = composerAttachments
-        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments),
-              let detail = selectedDetail, detail.session.id == session.id,
-              !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
-        let api: AgenthailAPI
-        let route: SessionRoute
-        do { (api, route) = try self.resolve(session.id) } catch {
-            operationError = AgenthailAPIError.userMessage(error)
+        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments) else { return }
+        guard let detail = selectedDetail, detail.session.id == session.id else {
+            failedSends[session.id] = "This session is still opening. Your draft is kept."
             return
         }
-        let action = "send"
-        guard detail.capabilities.send else { return }
-        let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
-        let idempotencyKey: String
-        if let pending = pendingSendRequests[session.id], pending.message == message, pending.attachments == attachments, pending.turnSettings == turnSettings {
-            idempotencyKey = pending.idempotencyKey
-        } else {
-            idempotencyKey = UUID().uuidString
-            pendingSendRequests[session.id] = PendingSendRequest(message: message, attachments: attachments, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+        guard !detail.readOnly, detail.capabilities.send else {
+            failedSends[session.id] = "This session can't take messages. Your draft is kept."
+            return
         }
-        sendingSessionIDs.insert(session.id)
+        do { _ = try self.resolve(session.id) } catch {
+            failedSends[session.id] = AgenthailAPIError.userMessage(error)
+            return
+        }
+        let turnSettings = session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
+        failedSends[session.id] = nil
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
         composer = ""
@@ -1456,35 +1478,199 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 attachmentDrafts[session.id] = held.attachments
             }
         }
-        Task {
-            defer { sendingSessionIDs.remove(session.id) }
-            do {
-                let uploaded = try await api.upload(attachments, sessionID: route.sessionID).map(\.id)
-                let response = try await api.sendInstruction(action: action, sessionID: route.sessionID, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
-                if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
-                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
+        sendQueue.add(PendingSend(sessionID: session.id, message: message, attachments: attachments, turnSettings: turnSettings))
+    }
+
+    private func deliver(_ send: PendingSend) async -> SendOutcome {
+        var background = UIBackgroundTaskIdentifier.invalid
+        background = UIApplication.shared.beginBackgroundTask(withName: "send") {
+            UIApplication.shared.endBackgroundTask(background)
+            background = .invalid
+        }
+        defer {
+            if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
+        }
+        do {
+            let (api, route) = try resolve(send.sessionID)
+            var uploaded = send.uploaded
+            if uploaded == nil {
+                let stored = try await api.upload(send.attachments, sessionID: route.sessionID).map(\.id)
+                sendQueue.setUploaded(stored, for: send)
+                uploaded = stored
+            }
+            let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, turnSettings: send.turnSettings, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
+            if send.wire == nil { sendQueue.setWire(wire, for: send) }
+            let response = try await api.send(wire)
+            if sendQueue.holds(send) {
+                if let deliveryID = response.result?.deliveryId { deliveryIDs[send.sessionID] = deliveryID }
+                deliveryStatus[send.sessionID] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
-                    deliveryQueueIDs[session.id] = queueID
-                }
-                await refreshSession(session.id)
-                if action == "send", turnSettingsDrafts[session.id] == turnSettings {
-                    clearTurnSettings(for: session.id)
-                }
-                pendingSendRequests.removeValue(forKey: session.id)
-            } catch {
-                deliveryIDs.removeValue(forKey: session.id)
-                deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
-                operationError = AgenthailAPIError.userMessage(error)
-                if selectedSessionID == session.id {
-                    composer = composer.isEmpty ? message : message + "\n\n" + composer
-                    composerAttachments = ComposerAttachments.adding(composerAttachments, to: attachments).attachments
-                } else {
-                    let newer = drafts[session.id] ?? ""
-                    drafts[session.id] = newer.isEmpty ? message : message + "\n\n" + newer
-                    attachmentDrafts[session.id] = ComposerAttachments.adding(attachmentDrafts[session.id] ?? [], to: attachments).attachments
+                    deliveryQueueIDs[send.sessionID] = queueID
                 }
             }
+            await refreshSession(send.sessionID)
+            if turnSettingsDrafts[send.sessionID] == send.turnSettings {
+                clearTurnSettings(for: send.sessionID)
+            }
+            return .answered
+        } catch {
+            return .of(error)
         }
+    }
+
+    private func returnToComposer(_ send: PendingSend) {
+        if selectedSessionID == send.sessionID {
+            composer = composer.isEmpty ? send.message : send.message + "\n\n" + composer
+            composerAttachments = ComposerAttachments.adding(composerAttachments, to: send.attachments).attachments
+        } else {
+            let newer = drafts[send.sessionID] ?? ""
+            drafts[send.sessionID] = newer.isEmpty ? send.message : send.message + "\n\n" + newer
+            attachmentDrafts[send.sessionID] = ComposerAttachments.adding(attachmentDrafts[send.sessionID] ?? [], to: send.attachments).attachments
+        }
+    }
+
+    private func sendWasRefused(_ send: PendingSend, reason: String) {
+        deliveryIDs.removeValue(forKey: send.sessionID)
+        deliveryStatus[send.sessionID] = "Couldn’t complete request. Draft kept."
+        failedSends[send.sessionID] = reason
+        if selectedSessionID != send.sessionID { operationError = reason }
+        returnToComposer(send)
+        saveComposerState()
+    }
+
+    func putBack(_ send: PendingSend) {
+        guard sendQueue.holds(send) else { return }
+        sendQueue.remove(send)
+        deliveryIDs.removeValue(forKey: send.sessionID)
+        deliveryStatus[send.sessionID] = "Put back. It may already have arrived."
+        returnToComposer(send)
+        saveComposerState()
+    }
+
+    private func connectSendQueue() {
+        sendQueue.deliver = { [weak self] send in await self?.deliver(send) ?? .unconfirmed }
+        sendQueue.changed = { [weak self] in
+            guard let self else { return }
+            pendingSends = sendQueue.pending
+            sendingSessionIDs = Set(sendQueue.pending.keys)
+            saveComposerState()
+        }
+        sendQueue.refused = { [weak self] send, reason in self?.sendWasRefused(send, reason: reason) }
+        sendQueue.unconfirmed = { [weak self] send in self?.deliveryStatus[send.sessionID] = "Not confirmed yet · retrying" }
+    }
+
+    private func restoreComposerState() {
+        guard let composerStore else { return }
+        openComposerStore(composerStore)
+        draftChanges = draft.$text.dropFirst().sink { [weak self] _ in self?.saveComposerStateSoon() }
+    }
+
+    private func openComposerStore(_ store: ComposerStore) {
+        let loaded = store.load()
+        if loaded.unreadable, loaded.setAside == nil {
+            Self.composerLog.error("composer file could not be read; left in place, not saving until it can be")
+            composerStore = nil
+            waitForComposerStore(store, announce: !loaded.locked)
+            return
+        }
+        if loaded.unreadable {
+            Self.composerLog.error("composer file unreadable; set aside as \(loaded.setAside?.lastPathComponent ?? "", privacy: .public)")
+            operationError = Self.composerFileKeptNotice
+        }
+        let waited = waitingComposerStore != nil
+        stopWaitingForComposerStore()
+        composerStore = store
+        mergeSavedComposerState(loaded.saved)
+        if waited { saveComposerState() }
+    }
+
+    private func waitForComposerStore(_ store: ComposerStore, announce: Bool) {
+        if announce, !composerWaitAnnounced {
+            composerWaitAnnounced = true
+            operationError = Self.composerUnreadNotice
+        }
+        waitingComposerStore = store
+        guard protectedDataObserver == nil else { return }
+        protectedDataObserver = NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.retryComposerStore() }
+        }
+    }
+
+    private func stopWaitingForComposerStore() {
+        waitingComposerStore = nil
+        if let protectedDataObserver { NotificationCenter.default.removeObserver(protectedDataObserver) }
+        protectedDataObserver = nil
+        if operationError == Self.composerUnreadNotice { operationError = nil }
+    }
+
+    private func retryComposerStore() {
+        guard let waitingComposerStore else { return }
+        openComposerStore(waitingComposerStore)
+    }
+
+    private func mergeSavedComposerState(_ saved: ComposerStore.Saved) {
+        func joined(_ earlier: String, _ later: String) -> String {
+            if later.isEmpty || later == earlier { return earlier }
+            return earlier.isEmpty ? later : earlier + "\n\n" + later
+        }
+        func addToDraft(_ text: String, for session: String) {
+            if session == selectedSessionID {
+                composer = joined(text, composer)
+            } else {
+                drafts[session] = joined(text, drafts[session] ?? "")
+            }
+        }
+        for (session, text) in saved.drafts { addToDraft(text, for: session) }
+        for (session, text) in saved.stashes {
+            if stashes[session] == nil {
+                stashes[session] = ComposerStash(text: text, attachments: [])
+            } else {
+                addToDraft(text, for: session)
+            }
+        }
+        lostAttachments.merge(saved.attachmentNames) { $0 + $1 }
+        sendQueue.restore(saved.sends.compactMap(\.resumable))
+        for record in saved.sends where record.resumable == nil {
+            addToDraft(record.message, for: record.sessionID)
+            failedSends[record.sessionID] = "Not sent: the app closed before its attachment uploaded. Add it again."
+        }
+    }
+
+    private func saveComposerStateSoon() {
+        guard composerStore != nil, composerSave == nil else { return }
+        composerSave = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveComposerState()
+        }
+    }
+
+    func saveComposerState() {
+        composerSave?.cancel()
+        composerSave = nil
+        guard let composerStore else { return }
+        var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map(ComposerStore.Saved.Send.init))
+        if let selectedSessionID { saved.drafts[selectedSessionID] = composer }
+        saved.drafts = saved.drafts.filter { !$0.value.isEmpty }
+        saved.attachmentNames = attachmentNamesToSave()
+        composerStore.save(saved)
+    }
+
+    private func attachmentNamesToSave() -> [String: [String]] {
+        var names = lostAttachments
+        func add(_ attachments: [ComposerAttachment], for session: String) {
+            if !attachments.isEmpty { names[session, default: []].append(contentsOf: attachments.map(\.name)) }
+        }
+        for (session, attachments) in attachmentDrafts where session != selectedSessionID { add(attachments, for: session) }
+        for (session, stash) in stashes { add(stash.attachments, for: session) }
+        if let selectedSessionID { add(composerAttachments, for: selectedSessionID) }
+        return names
+    }
+
+    private func announceLostAttachments(for sessionID: String) {
+        guard let names = lostAttachments.removeValue(forKey: sessionID) else { return }
+        attachmentProblem = "Not kept when the app closed: \(names.joined(separator: ", ")). Add again to send."
+        saveComposerStateSoon()
     }
 
     func action(_ action: String, session: SessionState, model: String? = nil, message: String? = nil) {
@@ -1632,9 +1818,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         drafts = drafts.filter { !owned($0.key) }
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
+        sendQueue.removeAll(where: owned)
+        failedSends = failedSends.filter { !owned($0.key) }
+        lostAttachments = lostAttachments.filter { !owned($0.key) }
         store.prune(removing: owned)
         stashes = stashes.filter { !owned($0.key) }
-        pendingSendRequests = pendingSendRequests.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }
         deliveryQueueIDs = deliveryQueueIDs.filter { !owned($0.key) }
         searchResults = searchResults.filter { !owned($0.id) }
