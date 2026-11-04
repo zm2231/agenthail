@@ -15,6 +15,10 @@ export function sessionRunning(session) {
 
 const sessionWorking = (session) => session.status === "busy";
 
+export function leadNote(lead) {
+  return lead?.sessionId ? "not running · the next message picks it up" : "starts with the first message sent to it";
+}
+
 export function leadSessionID(lead) {
   if (!lead?.sessionId) return "";
   if (!lead.host || lead.host.state === "local" || lead.sessionId.includes("::")) return lead.sessionId;
@@ -82,7 +86,7 @@ function leadCard(project, contents) {
     return card("Lead", `<p class="project-lead-name">No lead yet</p><p class="project-note">A lead keeps this project's work in one conversation you can return to. Messages to it always land.</p><div class="project-actions"><button class="primary-button" type="button" data-project-lead="${escape(project.id)}">Start a lead</button></div>`);
   }
   if (!leadSession) {
-    return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note">${escape(labels[lead.surface] || lead.surface)} · starts with the first message sent to it</p>`);
+    return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note">${escape(labels[lead.surface] || lead.surface)} · ${leadNote(lead)}</p>`);
   }
   const where = leadSession.host && leadSession.host.state !== "local" ? shortHostName(leadSession.host.name) : "";
   const working = sessionWorking(leadSession);

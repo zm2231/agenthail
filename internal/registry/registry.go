@@ -15,14 +15,15 @@ import (
 )
 
 type Registry struct {
-	db           *sql.DB
-	read         *sql.DB
-	path         string
-	now          func() time.Time
-	busyPolicy   func() (deliverypolicy.Mode, error)
-	seen         deviceSeen
-	retryBackoff time.Duration
-	migration    *MigrationTiming
+	db            *sql.DB
+	read          *sql.DB
+	path          string
+	now           func() time.Time
+	busyPolicy    func() (deliverypolicy.Mode, error)
+	retiredCounts catalogRetiredCache
+	seen          deviceSeen
+	retryBackoff  time.Duration
+	migration     *MigrationTiming
 }
 
 func (r *Registry) SetRetryBackoff(backoff time.Duration) {
@@ -51,7 +52,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 48
+	schemaVersion    = 49
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
@@ -180,7 +181,7 @@ func connect(path string) (*Registry, error) {
 	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
-func (r *Registry) Path() string    { return r.path }
+func (r *Registry) Path() string     { return r.path }
 func (r *Registry) WriteDB() *sql.DB { return r.db }
 func (r *Registry) ReadDB() *sql.DB  { return r.read }
 

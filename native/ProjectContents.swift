@@ -13,6 +13,10 @@ struct ProjectContents: Equatable {
         case message
     }
 
+    static func leadNote(_ lead: ProjectState.Lead) -> String {
+        (lead.sessionId ?? "").isEmpty ? "starts with the first message sent to it" : "not running · the next message picks it up"
+    }
+
     static func resumable(_ session: SessionState) -> Bool { !session.isWorking && !session.isUnavailable }
 
     static func leadActions(_ session: SessionState) -> [LeadAction] {

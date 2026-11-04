@@ -84,6 +84,7 @@ type Daemon struct {
 	background      *backgroundWork
 	events          *eventHub
 	catalog         *catalogHub
+	catalogEnded    catalogEnded
 	// catalogLiveMu guards catalogLive, which discovery replaces and the
 	// status pass reads from its own goroutine. It is held only for map
 	// reads and writes; a session's waiting lock orders its row and entry.

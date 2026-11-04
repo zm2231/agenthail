@@ -26,6 +26,7 @@ type CatalogPresentationRow struct {
 	Archived                                     bool
 	Freshness                                    CatalogFreshness
 	Attention                                    string
+	Retired                                      bool
 }
 
 type CatalogPresentation struct {
@@ -36,9 +37,19 @@ type CatalogPresentation struct {
 	Rows         []CatalogPresentationRow
 	Limits       map[string]LimitResume
 	Fingerprints map[string]json.RawMessage
+	History      bool
+	Retired      []CatalogRetiredCount
 }
 
 func (r *Registry) ReadCatalogPresentation(ctx context.Context, stale func(id string, generation uint64) bool) (CatalogPresentation, error) {
+	return r.readCatalogPresentation(ctx, true, stale)
+}
+
+func (r *Registry) ReadCurrentCatalogPresentation(ctx context.Context, stale func(id string, generation uint64) bool) (CatalogPresentation, error) {
+	return r.readCatalogPresentation(ctx, false, stale)
+}
+
+func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, stale func(id string, generation uint64) bool) (CatalogPresentation, error) {
 	tx, err := r.read.BeginTx(ctx, nil)
 	if err != nil {
 		return CatalogPresentation{}, err
@@ -53,8 +64,14 @@ func (r *Registry) ReadCatalogPresentation(ctx context.Context, stale func(id st
 		return CatalogPresentation{}, err
 	}
 	read := CatalogPresentation{HostEpoch: epoch, CatalogSeq: uint64(seq.Int64), Rows: []CatalogPresentationRow{}, Fingerprints: map[string]json.RawMessage{}}
-	if read.Rows, err = catalogPresentationRows(ctx, tx); err != nil {
+	if read.Rows, err = catalogPresentationRows(ctx, tx, history); err != nil {
 		return CatalogPresentation{}, err
+	}
+	read.History = history
+	if !history {
+		if read.Retired, err = r.catalogRetiredCounts(ctx, tx); err != nil {
+			return CatalogPresentation{}, err
+		}
 	}
 	if read.Limits, err = catalogPresentationLimits(ctx, tx); err != nil {
 		return CatalogPresentation{}, err
@@ -75,8 +92,12 @@ func (r *Registry) ReadCatalogPresentation(ctx context.Context, stale func(id st
 	return read, tx.Commit()
 }
 
-func catalogPresentationRows(ctx context.Context, tx *sql.Tx) ([]CatalogPresentationRow, error) {
-	rows, err := tx.QueryContext(ctx, catalogPresentationSQL)
+func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]CatalogPresentationRow, error) {
+	from := `FROM catalog_sessions cs`
+	if !history {
+		from = `FROM (` + catalogUnretiredSessions + `) unretired JOIN catalog_sessions cs ON cs.session_id=unretired.session_id`
+	}
+	rows, err := tx.QueryContext(ctx, catalogPresentationSelect+from+catalogPresentationJoins)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +111,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx) ([]CatalogPresenta
 		var waiting, background, limit string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit,
-			&row.Alias, &row.QueueCount, &row.Archived, &observed, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention); err != nil {
+			&row.Alias, &row.QueueCount, &row.Archived, &observed, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired); err != nil {
 			return nil, err
 		}
 		if lastActive > 0 {
@@ -166,14 +187,16 @@ func catalogFingerprints(ctx context.Context, tx *sql.Tx, ids []string) (map[str
 	return result, rows.Err()
 }
 
-const catalogPresentationSQL = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
+const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
  cs.unavailable_reason,s.parent_session_id,s.root_session_id,s.subagent_depth,s.agent_nickname,s.agent_role,
  CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.observed_at,cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
- COALESCE(at.reason,'')
- FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
+ COALESCE(at.reason,''),cs.retired
+ `
+
+const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
  LEFT JOIN aliases a ON a.session_id=s.id
  LEFT JOIN (SELECT session_id,COUNT(*) n FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) q ON q.session_id=s.id
  LEFT JOIN session_archive sa ON sa.session_id=s.id

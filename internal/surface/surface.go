@@ -713,6 +713,11 @@ type ConversationKeeper interface {
 	ConversationState(ctx context.Context, sess *Session) (ConversationState, error)
 }
 
+// A surface listing only running processes: an omission means the process ended.
+type EndedConversations interface {
+	EndedConversation(transcript string) (resumable bool, changed time.Time)
+}
+
 // Gone needs positive evidence; anything short of it is Unknown.
 type ConversationState int
 

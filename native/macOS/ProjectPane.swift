@@ -125,7 +125,7 @@ struct ProjectPane: View {
                             .font(.system(size: DesktopType.meta)).foregroundStyle(DesktopPalette.text2)
                     }
                 } else {
-                    Text("\(SessionRefinement.surfaceLabel(lead.surface)) · starts with the first message sent to it")
+                    Text("\(SessionRefinement.surfaceLabel(lead.surface)) · \(ProjectContents.leadNote(lead))")
                         .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
                 }
                 if let replaced = lead.replaced {

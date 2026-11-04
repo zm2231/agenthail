@@ -28,6 +28,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	var catalogSnapshot registry.CatalogSnapshot
 	var page *registry.CatalogPage
+	var mirrorRetired registry.CatalogMirrorRetired
 	if len(pageRequest) > 0 {
 		request := pageRequest[0]
 		loaded, err := d.Registry.CatalogSnapshotPage(request)
@@ -36,6 +37,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		catalogSnapshot = loaded.CatalogSnapshot
 		page = &loaded
+	} else if catalogMirror(ctx) {
+		catalogSnapshot, mirrorRetired, err = d.Registry.CatalogMirrorSnapshot(mirrorRetiredAfter(ctx))
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
+		}
 	} else {
 		catalogSnapshot, err = d.Registry.CatalogSnapshot()
 		if err != nil {
@@ -111,6 +117,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		return dashboardState{}, fmt.Errorf("read the person's name: %w", err)
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed, Person: person}
+	if catalogMirror(ctx) && page == nil {
+		state.RetiredClock, state.RetiredIDs = &mirrorRetired.Clock, mirrorRetired.IDs
+	}
 	for _, consumer := range signin.Consumers {
 		state.Signin = append(state.Signin, d.signinConsumer(consumer))
 	}

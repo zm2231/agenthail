@@ -458,7 +458,12 @@ CREATE TABLE IF NOT EXISTS hosts (
 	last_contact_at TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	catalog_epoch TEXT NOT NULL DEFAULT '',
-	catalog_seq INTEGER NOT NULL DEFAULT 0
+	catalog_seq INTEGER NOT NULL DEFAULT 0,
+	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
+);
+CREATE TABLE IF NOT EXISTS catalog_retired_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS catalog_sessions (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -475,7 +480,8 @@ CREATE TABLE IF NOT EXISTS catalog_sessions (
 	background_tasks BLOB NOT NULL DEFAULT '',
 	usage_limit BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
-	current_reason TEXT NOT NULL DEFAULT ''
+	current_reason TEXT NOT NULL DEFAULT '',
+	retired INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS catalog_surfaces (
 	surface TEXT PRIMARY KEY,

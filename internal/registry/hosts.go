@@ -261,6 +261,28 @@ func (r *Registry) RecordHostCatalogCursor(hostID, epoch string, seq uint64) err
 	return err
 }
 
+func (r *Registry) HostCatalogEpoch(hostID string) (string, error) {
+	var epoch string
+	err := r.read.QueryRow(`SELECT catalog_epoch FROM hosts WHERE host_id=?`, hostID).Scan(&epoch)
+	return epoch, err
+}
+
+func (r *Registry) HostRetiredClock(hostID string) (*int64, error) {
+	var clock int64
+	if err := r.read.QueryRow(`SELECT catalog_retired_clock FROM hosts WHERE host_id=?`, hostID).Scan(&clock); err != nil {
+		return nil, err
+	}
+	if clock < 0 {
+		return nil, nil
+	}
+	return &clock, nil
+}
+
+func (r *Registry) RecordHostRetiredClock(hostID string, clock int64) error {
+	_, err := r.db.Exec(`UPDATE hosts SET catalog_retired_clock=? WHERE host_id=?`, clock, hostID)
+	return err
+}
+
 func (r *Registry) SessionHost(sessionID string) (string, error) {
 	var hostID string
 	err := r.read.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, sessionID).Scan(&hostID)
@@ -396,7 +418,7 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	observedAt := row.ObservedAt.UTC()
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit)
 		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
-		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
+		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,retired=0,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit`,
 		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit); err != nil {
 		return CatalogEvent{}, false, err
@@ -556,8 +578,20 @@ func releaseUnservedHostRowTx(tx *sql.Tx, sessionID, hostID string) error {
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
+	return r.hostCatalogRows(hostID, "")
+}
+
+func (r *Registry) HostUnretiredCatalogRows(hostID string) ([]CatalogSessionState, error) {
+	return r.hostCatalogRows(hostID, " AND cs.retired=0")
+}
+
+func (r *Registry) HostCatalogRowIDs(hostID string) ([]string, error) {
+	return queryRows(r.read, []string{}, scanString, `SELECT cs.session_id FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=?`, hostID)
+}
+
+func (r *Registry) hostCatalogRows(hostID, filter string) ([]CatalogSessionState, error) {
 	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,s.source,s.transport,s.runtime_kind,s.configured_model,s.last_active_ms,`+sessionSubagentSelect+`,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)
+		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=?`+filter+` ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err
 	}

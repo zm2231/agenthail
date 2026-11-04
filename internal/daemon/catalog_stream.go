@@ -115,8 +115,17 @@ func (h *catalogHub) updateProjection(sessionID, priorFingerprint, nextFingerpri
 func (h *catalogHub) recordDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, err := h.registry.RecordCatalogDiscovery(kind, seen, observedAt, complete, 2)
+	_, err := h.registry.RecordCatalogDiscovery(kind, seen, observedAt, complete, catalogOmissionThreshold)
 	if err != nil {
+		return err
+	}
+	return h.flushCommittedLocked()
+}
+
+func (h *catalogHub) recordEndedDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, gone map[string]struct{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, err := h.registry.RecordEndedCatalogDiscovery(kind, seen, observedAt, catalogOmissionThreshold, gone); err != nil {
 		return err
 	}
 	return h.flushCommittedLocked()
@@ -272,7 +281,13 @@ const catalogStreamBatch = 256
 // each of those changes arrives as its own event. Without the listing the
 // stream ends rather than show a device rows it must not list.
 func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.CatalogEvent, error) {
-	listing, err := d.Registry.CatalogListing()
+	entities := make([]string, 0, len(batch))
+	for _, event := range batch {
+		if event.Type == "session.upserted" {
+			entities = append(entities, event.EntityID)
+		}
+	}
+	listing, err := d.Registry.CatalogListingForEntities(entities)
 	if err != nil {
 		d.log.Printf("catalog listing: %s", err)
 		return nil, err
@@ -449,8 +464,16 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
-		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
-			d.log.Printf("catalog discovery %s: %s", adapter.Name(), err)
+		var recordErr error
+		if keeper, keeps := adapter.(surface.EndedConversations); keeps && complete {
+			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, observedAt, func(session surface.Session, identity catalogIdentity) {
+				d.publishCatalogSession(ctx, adapter, session, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
+			})
+		} else {
+			recordErr = d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete)
+		}
+		if recordErr != nil {
+			d.log.Printf("catalog discovery %s: %s", adapter.Name(), recordErr)
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
@@ -616,7 +639,9 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
-	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
+	if session.Status != surface.StatusOffline {
+		session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
+	}
 	if d.catalogSelected != nil {
 		d.catalogSelected(session.ID)
 	}
@@ -703,6 +728,8 @@ type catalogPresence struct {
 	rows      map[string]*presenceRow
 	read      []registry.CatalogPresenceRow
 	pending   []presencePending
+
+	archiveStamp string
 }
 
 // presenceRow is a row's stored projection, decoded, at its generation. A row
@@ -781,7 +808,7 @@ func (d *Daemon) publishCatalogPresence() {
 		d.log.Printf("catalog usage-limit stops: %s", err)
 		return
 	}
-	read, err := d.Registry.CatalogPresenceRows(p.read, p.hostEpoch, p.clock, p.known)
+	read, err := d.readCatalogPresence(p, view.archive)
 	if err != nil {
 		d.log.Printf("catalog presence rows: %s", err)
 		return

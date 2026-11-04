@@ -299,6 +299,15 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(catalogCurrentTriggers); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "catalog_sessions", "retired", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "hosts", "catalog_retired_clock", `INTEGER NOT NULL DEFAULT -1`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(catalogRetiredSchema); err != nil {
+		return err
+	}
 	if version < 29 {
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET ` + catalogCurrentAssignment("catalog_sessions")); err != nil {
 			return err

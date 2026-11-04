@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,15 +22,19 @@ type presentationClock struct {
 	fingerprints presentationFingerprints
 }
 
-func (d *Daemon) readCatalogPresentation(ctx context.Context) (registry.CatalogPresentation, error) {
+func (d *Daemon) readCatalogPresentation(ctx context.Context, request sessionViewRequest) (registry.CatalogPresentation, error) {
 	cache := &d.presentation.fingerprints
-	read, err := d.Registry.ReadCatalogPresentation(ctx, cache.stale)
+	load := d.Registry.ReadCurrentCatalogPresentation
+	if request.Scope == "all" || request.Scope == "archived" || request.Filters.Query != "" {
+		load = d.Registry.ReadCatalogPresentation
+	}
+	read, err := load(ctx, cache.stale)
 	if err != nil {
 		return read, err
 	}
 	if !cache.valid(read) {
 		cache.reset(read.HostEpoch)
-		if read, err = d.Registry.ReadCatalogPresentation(ctx, cache.stale); err != nil {
+		if read, err = load(ctx, cache.stale); err != nil {
 			return read, err
 		}
 		cache.epoch = read.HostEpoch
@@ -56,7 +61,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
-	read, err := d.readCatalogPresentation(ctx)
+	read, err := d.readCatalogPresentation(ctx, request)
 	if err != nil {
 		return SessionViewSnapshot{}, err
 	}
@@ -103,8 +108,12 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		row.Attention = rowAttention(row, read.Outgoing[record.ID], record.Attention)
 		rows = append(rows, row)
 		revision = append(revision, newRevisionRow(record, row))
+		if record.Retired && !read.History {
+			read.Retired = append(slices.Clip(read.Retired), retiredCountOf(row, record))
+		}
 	}
 	plan := newSessionViewPlan(rows, request.Scope, request.Filters, now)
+	plan.countRetired(read.Retired, request.Filters, now)
 	plan.deadline(read.RefreshAt)
 	plan.view.CatalogHostID = result.PresentationPosition.HostID
 	for _, row := range rows {

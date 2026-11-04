@@ -234,7 +234,7 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	}
 	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on,background_tasks,usage_limit)
 		VALUES(?,?,?,?,?,?,?,0,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
-		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
+		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0, retired=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on, background_tasks=excluded.background_tasks, usage_limit=excluded.usage_limit`,
 		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, formatTimestamp(state.ObservedAt), state.ProjectionFingerprint, priorGeneration, waitingOn, background, usageLimit); err != nil {
 		return CatalogEvent{}, false, err
@@ -378,10 +378,10 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=0,discovery_failures=discovery_failures+1 WHERE (misses>0 OR discovery_failures>0) AND session_id IN (SELECT id FROM sessions WHERE surface=? AND host_id='')`, string(kind)); err != nil {
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=0,discovery_failures=discovery_failures+1 WHERE retired=0 AND (misses>0 OR discovery_failures>0) AND session_id IN (SELECT id FROM sessions WHERE surface=? AND host_id='')`, string(kind)); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id='' AND cs.misses=0 AND cs.discovery_failures=0`, string(kind))
+	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.retired=0 AND s.surface=? AND s.host_id='' AND cs.misses=0 AND cs.discovery_failures=0`, string(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -502,6 +502,15 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 // row's projection. When the listing is complete, rows it omitted count a miss
 // and are removed once they reach the threshold.
 func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool, threshold int) ([]CatalogEvent, error) {
+	return r.recordCatalogDiscovery(kind, seen, observedAt, complete, threshold, false, nil)
+}
+
+// An omitted row stays until gone says its conversation can't be resumed.
+func (r *Registry) RecordEndedCatalogDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, threshold int, gone map[string]struct{}) ([]CatalogEvent, error) {
+	return r.recordCatalogDiscovery(kind, seen, observedAt, true, threshold, true, gone)
+}
+
+func (r *Registry) recordCatalogDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool, threshold int, keeping bool, gone map[string]struct{}) ([]CatalogEvent, error) {
 	if threshold < 1 {
 		return nil, fmt.Errorf("catalog omission threshold must be positive")
 	}
@@ -527,7 +536,16 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	if !complete {
 		return nil, tx.Commit()
 	}
-	rows, err := tx.Query(`SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=? AND s.host_id=''`, string(kind))
+	goneIDs := make([]string, 0, len(gone))
+	for id := range gone {
+		goneIDs = append(goneIDs, id)
+	}
+	encodedGone, err := json.Marshal(goneIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(`SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs INDEXED BY catalog_sessions_unretired JOIN sessions s ON s.id=cs.session_id WHERE cs.retired=0 AND s.surface=?1 AND s.host_id=''
+		UNION ALL SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.retired=1 AND s.surface=?1 AND s.host_id='' AND cs.session_id IN (SELECT value FROM json_each(?2))`, string(kind), string(encodedGone))
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +572,11 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	events := []CatalogEvent{}
 	for _, item := range deferred {
 		misses := item.misses + 1
-		if misses < threshold {
+		_, isGone := gone[item.id]
+		if misses < threshold || keeping && !isGone {
+			if item.misses >= threshold {
+				continue
+			}
 			if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=? WHERE session_id=?`, misses, item.id); err != nil {
 				return nil, err
 			}
@@ -585,6 +607,11 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 		}
 		if created {
 			events = append(events, event)
+		}
+	}
+	if keeping {
+		if err := retireCatalogRowsTx(tx, threshold, observedAt); err != nil {
+			return nil, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -709,15 +736,41 @@ const catalogSessionSelect = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid
 		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 
-const catalogSnapshotQuery = catalogSessionSelect + `
+const catalogSnapshotOrder = `
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`
 
+const catalogSnapshotQuery = catalogSessionSelect + ` WHERE +s.id IN (SELECT session_id FROM catalog_sessions INDEXED BY catalog_sessions_unretired WHERE retired=0)` + catalogSnapshotOrder
+
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
+	return r.catalogSnapshot(catalogSnapshotQuery, nil, catalogCurrentListingTx, nil)
+}
+
+// A nil retiredAfter asks for every retired row, as a peer's first sync does.
+func (r *Registry) CatalogMirrorSnapshot(retiredAfter *int64) (CatalogSnapshot, CatalogMirrorRetired, error) {
+	var retired CatalogMirrorRetired
+	readRetired := func(tx catalogQuerier) (err error) {
+		retired, err = catalogMirrorRetiredTx(tx)
+		return err
+	}
+	if retiredAfter == nil {
+		snapshot, err := r.catalogSnapshot(catalogSessionSelect+catalogSnapshotOrder, nil, catalogListingTx, readRetired)
+		return snapshot, retired, err
+	}
+	snapshot, err := r.catalogSnapshot(catalogSessionSelect+` WHERE cs.retired=0 OR cs.projection_generation>?`+catalogSnapshotOrder, []any{*retiredAfter}, catalogCurrentListingTx, readRetired)
+	return snapshot, retired, err
+}
+
+func (r *Registry) catalogSnapshot(query string, args []any, listing func(catalogQuerier) (CatalogListing, error), also func(catalogQuerier) error) (CatalogSnapshot, error) {
 	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}
 	defer tx.Rollback()
+	if also != nil {
+		if err := also(tx); err != nil {
+			return CatalogSnapshot{}, err
+		}
+	}
 	epoch, err := catalogHostEpochTx(tx, false)
 	if err != nil {
 		return CatalogSnapshot{}, err
@@ -726,7 +779,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := tx.QueryRow(`SELECT MAX(seq) FROM catalog_events`).Scan(&latest); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	rows, err := tx.Query(catalogSnapshotQuery)
+	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}
@@ -746,7 +799,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	snapshot.Surfaces = surfaces
-	if snapshot.Listing, err = catalogListingTx(tx); err != nil {
+	if snapshot.Listing, err = listing(tx); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {
