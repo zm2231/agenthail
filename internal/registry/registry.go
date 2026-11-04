@@ -53,7 +53,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 49
+	schemaVersion    = 50
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
