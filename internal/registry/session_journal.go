@@ -204,7 +204,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 				}
 			}
 			input.Position = existing.Position
-			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
+			if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
 			if err := storeSessionJournalBody(tx, input); err != nil {
@@ -287,7 +287,7 @@ func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey strin
 }
 
 func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID, providerKey string) (SessionJournalEntry, bool, error) {
-	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
+	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`, sessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return SessionJournalEntry{}, false, nil
 	}
@@ -298,7 +298,9 @@ func scanSessionJournalEntry(row rowScanner) (SessionJournalEntry, error) {
 	var entry SessionJournalEntry
 	var seq, position int64
 	var observedAt string
-	if err := row.Scan(&entry.SessionID, &seq, &position, &entry.Kind, &entry.ProviderKey, &entry.Payload, &observedAt, &entry.Bytes, &entry.BodyRef); err != nil {
+	var codec int
+	var stored []byte
+	if err := row.Scan(&entry.SessionID, &seq, &position, &entry.Kind, &entry.ProviderKey, &stored, &observedAt, &entry.Bytes, &entry.BodyRef, &codec); err != nil {
 		return SessionJournalEntry{}, err
 	}
 	if seq < 1 || position < 1 {
@@ -310,7 +312,10 @@ func scanSessionJournalEntry(row rowScanner) (SessionJournalEntry, error) {
 	}
 	entry.Seq, entry.Position = uint64(seq), uint64(position)
 	entry.ObservedAt = parsed
-	entry.Payload = append([]byte(nil), entry.Payload...)
+	entry.Payload, err = readJournalPayload(codec, stored)
+	if err != nil {
+		return SessionJournalEntry{}, err
+	}
 	return entry, nil
 }
 

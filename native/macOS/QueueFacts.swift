@@ -1,6 +1,13 @@
 import Foundation
 
 enum QueueFacts {
+    static let noSteerWithAttachments = "Steer takes text only. This message stays queued with its attachments; use Edit to change it."
+
+    static func attachmentNames(_ item: QueueState) -> String? {
+        guard item.hasAttachments else { return nil }
+        return (item.attachments ?? []).map(\.name).joined(separator: ", ")
+    }
+
     static func statusLabel(_ status: String) -> String {
         switch status {
         case "pending": return "Waiting"

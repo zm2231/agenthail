@@ -30,7 +30,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if window.Gap {
 		return window, nil
 	}
-	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
+	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}

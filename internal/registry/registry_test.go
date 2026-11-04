@@ -879,7 +879,7 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].Reason == "" || items[0].RequestedAction == "" {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
-	if err := r.CancelMessage(item.ID); err != nil {
+	if _, err := r.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
 	all, err := r.ListAttentionItems(true)
@@ -993,7 +993,7 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
-	if err := r.CancelMessage(rows[0].ID); err != nil {
+	if _, err := r.CancelMessage(rows[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if visible, err := r.ListQueue(false, nil); err != nil || len(visible) != 0 {
@@ -1628,7 +1628,7 @@ func TestEveryAttemptThatIsNotRefusedEndsTheRefusal(t *testing.T) {
 		if _, err := r.DeferMessage(id, refusal, tick()); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.CancelMessage(id); err != nil {
+		if _, err := r.CancelMessage(id); err != nil {
 			t.Fatal(err)
 		}
 		cleared(t, r, id)

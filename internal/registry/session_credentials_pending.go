@@ -50,6 +50,12 @@ func (r *Registry) IssuePendingCredential(ceiling json.RawMessage, now time.Time
 	return PendingCredential{Token: token, Ref: ref}, tx.Commit()
 }
 
+func (r *Registry) PendingCredentialLive(token string, now time.Time) (bool, error) {
+	var live bool
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_credentials WHERE token_hash=? AND session_id IS NULL AND revoked_at_ms=0 AND pending_expires_at_ms>?)`, HashSessionToken(token), now.UnixMilli()).Scan(&live)
+	return live, err
+}
+
 func (r *Registry) ClaimPendingCredential(ref, sessionID string, now time.Time) (bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
