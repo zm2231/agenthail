@@ -25,6 +25,7 @@ type TimelineItem struct {
 	MessageID string `json:"messageId,omitempty"`
 	PromptID  string `json:"promptId,omitempty"`
 	Status    string `json:"status,omitempty"`
+	Phase     string `json:"phase,omitempty"`
 	// ResetsAt is when a usage limit a notice reports lifts, in RFC 3339.
 	ResetsAt         string         `json:"resetsAt,omitempty"`
 	Truncated        bool           `json:"truncated"`

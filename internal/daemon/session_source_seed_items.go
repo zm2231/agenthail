@@ -40,6 +40,7 @@ func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.Stre
 		Sender:           item.Sender,
 		Title:            item.Title,
 		Status:           item.Status,
+		Phase:            item.Phase,
 		ResetsAt:         item.ResetsAt,
 		Truncated:        item.Truncated,
 		TruncationReason: item.TruncationReason,
