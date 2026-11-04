@@ -118,6 +118,7 @@ type Daemon struct {
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
+	taskGoals                taskGoalReads
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	spawnLocks               keyedLocks

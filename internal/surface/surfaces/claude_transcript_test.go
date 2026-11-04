@@ -174,6 +174,27 @@ func TestClaudeInterruptedTurnIsNotReportedBusyOrComplete(t *testing.T) {
 	}
 }
 
+func TestClaudeReportsAnInterruptedTurnAsTerminalWithItsError(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"stop_sequence","content":[{"type":"text","text":"partial"}]}}`)
+	observation, err := NewClaude(nil, t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
+	if err != nil || observation.TerminalTurnID != "u1" || observation.TerminalError != "turn interrupted" || observation.CompletedTurnID != "" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeFinishedTurnWithNoTextStillCompletes(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"nothing to say"}]}}
+{"type":"system","subtype":"turn_duration"}`)
+	observation, err := NewClaude(nil, t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
+	if err != nil || observation.CompletedTurnID != "m1" || observation.Reply == nil || !observation.Reply.Done || observation.Reply.Text != "" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
 func TestClaudeStreamTreatsUserInterruptMarkerAsTargetedFailure(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}

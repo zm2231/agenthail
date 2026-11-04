@@ -181,6 +181,9 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = "compact"
 	}
+	if last.Interrupted && !last.Done {
+		observation.TerminalTurnID, observation.TerminalError = last.UserID, "turn interrupted"
+	}
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
 		observation.InputTurnID = state.completed.UserID
