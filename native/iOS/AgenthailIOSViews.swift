@@ -490,6 +490,7 @@ struct SessionScreen: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var queueTail = QueueTail()
+    @State private var landed = false
     @State private var overflows = false
     @State private var jumps = 0
     @State private var userScrolling = false
@@ -755,19 +756,21 @@ struct SessionScreen: View {
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
             atLatest = !startsAtOldest
+            landed = false
             await model.loadSession(session.id)
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
             } else {
                 scrollToLatest()
             }
+            landed = true
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
         }
         .modifier(QueueTailTracking(model: model, tail: $queueTail, session: session, timeline: items))
         .onChange(of: queueTail.shownIDs) { _, _ in
-            if followingLatest { scrollToLatest() }
+            if landed, followingLatest { scrollToLatest() }
         }
         .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
             if followingLatest { scrollToLatest() }
