@@ -55,12 +55,24 @@ func TestInboxShowsAHeldMessageAsPendingUntilItIsDelivered(t *testing.T) {
 	h := startRunningDaemon(t, agent)
 	h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": "sender", "model": "gpt-test", "message": "after this turn"})
 	settle()
-	if item, ok := inboxMessage(h.inbox("target"), "after this turn"); !ok || !item.Pending || item.QueueID == 0 {
+	if item, ok := inboxMessage(h.inbox("target"), "after this turn"); !ok || !item.Pending || item.QueueID == 0 || item.QueueStatus != "pending" {
 		t.Fatalf("held message: %+v ok=%v", item, ok)
 	}
 	agent.setStatus("target", surface.StatusIdle)
 	testkit.Eventually(t, "the held message delivered", 5*time.Second, func() bool {
 		item, ok := inboxMessage(h.inbox("target"), "after this turn")
-		return ok && !item.Pending
+		return ok && !item.Pending && item.QueueStatus == "delivered"
 	})
+}
+
+func TestInboxShowsACanceledMessageAsCanceled(t *testing.T) {
+	agent := newScriptedAgent("sender", "target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": "sender", "model": "gpt-test", "message": "never mind"}))
+	h.action(map[string]any{"action": "queue-cancel", "queueId": id})
+	item, ok := inboxMessage(h.inbox("target"), "never mind")
+	if !ok || item.Pending || item.QueueStatus != "canceled" || item.Evidence != surface.EvidenceCanceled {
+		t.Fatalf("canceled message: %+v ok=%v", item, ok)
+	}
 }
