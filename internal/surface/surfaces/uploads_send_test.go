@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,56 @@ func TestCodexTurnTakesImagesAsLocalImageInputAndFilesAsPaths(t *testing.T) {
 	}
 	if !reflect.DeepEqual(input, want) {
 		t.Fatalf("input=%v want %v", input, want)
+	}
+}
+
+func TestCodexSteerTakesImagesAsLocalImageInput(t *testing.T) {
+	picture, _ := storedUploads(t)
+	fake := startManagedCodex(t, nil)
+	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
+	codex := isolatedManagedRuntime(t)
+	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
+	if _, err := surface.RouteSend.Send(context.Background(), codex, session, "start", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := surface.SteerWithEvidence(context.Background(), codex, session, "look", surface.Uploads{picture})
+	if err != nil || result.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	steers := fake.Calls("turn/steer")
+	if len(steers) != 1 {
+		t.Fatalf("turn/steer calls=%v", fake.Methods())
+	}
+	var input []map[string]any
+	encoded, _ := json.Marshal(steers[0]["input"])
+	_ = json.Unmarshal(encoded, &input)
+	want := []map[string]any{{"type": "text", "text": "look"}, {"type": "localImage", "path": picture.Path}}
+	if !reflect.DeepEqual(input, want) {
+		t.Fatalf("input=%v want %v", input, want)
+	}
+}
+
+func TestAHostSessionSteerCarriesImagesAtPriorityNow(t *testing.T) {
+	picture, _ := storedUploads(t)
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	sess := listedSession(t, c, id)
+	ctx := context.Background()
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(ctx, uuid.NewString()), sess, "SLOW 30000", nil); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := surface.SteerWithEvidence(ctx, c, sess, "look", surface.Uploads{picture}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Interrupt(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "both turns", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 2 })
+	if steered := fixture.Turns(t, id)[1]; steered.Priority != "now" || !strings.Contains(steered.Text, "look") {
+		t.Fatalf("steer turn=%+v", steered)
 	}
 }
 

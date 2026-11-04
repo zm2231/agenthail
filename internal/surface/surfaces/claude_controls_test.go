@@ -206,7 +206,7 @@ func TestClaudeSteerOverRemoteControlIsOnlyTransportAccepted(t *testing.T) {
 	fixture, session := busyControlSession(t)
 	remote := newFakeRemoteControl(t)
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
-	result, err := surface.SteerWithEvidence(context.Background(), claude, session, "focus on the parser")
+	result, err := surface.SteerWithEvidence(context.Background(), claude, session, "focus on the parser", nil)
 	if err != nil || result.Evidence != surface.EvidenceTransportAccepted || result.RequestID == "" || result.RequestID != remote.posts[0]["uuid"] {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}

@@ -115,14 +115,19 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	if control.Action == "steer" {
 		value = surface.LabelCLI(ctx, value)
 	}
-	if err := validateClaudeControl(control.Action, value); err != nil {
-		return nil, err
+	if len(control.Images) == 0 || value != "" {
+		if err := validateClaudeControl(control.Action, value); err != nil {
+			return nil, err
+		}
 	}
 	if err := c.EnsureWritable(ctx, sess); err != nil {
 		return nil, err
 	}
 	if claudeHosted(sess) {
-		return c.hostControl(ctx, sess, control.Action, value)
+		return c.hostControl(ctx, sess, control.Action, value, control.Images)
+	}
+	if len(control.Images) > 0 {
+		return nil, fmt.Errorf("%w: only a session the Claude host runs takes images in a steer", surface.ErrUnsupported)
 	}
 	if control.Action == "permission-mode" {
 		return nil, fmt.Errorf("%w: only a session the Claude host runs changes its permission mode here", surface.ErrUnsupported)
@@ -214,7 +219,7 @@ func validateClaudeControl(action, value string) error {
 // hostControl keeps the Claude host's own interrupt, steer, model and
 // permission mode. The host returns once the SDK acknowledges the change or
 // takes the turn.
-func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action, value string) (*surface.ControlResult, error) {
+func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action, value string, images surface.Uploads) (*surface.ControlResult, error) {
 	switch action {
 	case "model", "permission-mode":
 		return c.hostSetting(ctx, sess, action, value)
@@ -224,7 +229,7 @@ func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action,
 		}
 		return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host"}, nil
 	case "steer":
-		sent, err := c.sendHostTurn(ctx, sess, value, "now", nil)
+		sent, err := c.sendHostTurn(ctx, sess, value, "now", images)
 		if err != nil {
 			return nil, err
 		}

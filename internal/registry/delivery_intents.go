@@ -441,7 +441,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if intentID == 0 {
 		return 0, 0, fmt.Errorf("queued delivery requires an intent")
 	}
-	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
+	if options.BusyDelivery == "steer" && !options.QueuesAsSteer() {
 		options.BusyDelivery = "queue"
 	}
 	tx, err := r.db.Begin()

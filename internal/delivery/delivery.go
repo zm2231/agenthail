@@ -218,13 +218,13 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 		d.capturePerson(sourceID, session, intent.UUID, message)
 	}
-	return d.steer(ctx, adapter, session, message, target, sourceID, "steer", intent, false)
+	return d.steer(ctx, adapter, session, message, nil, target, sourceID, "steer", intent, false)
 }
 
 // steer reports the evidence the surface proved: a Claude Remote Control steer
 // is accepted by the transport, which does not show it reached the turn.
-func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message, target, sourceID, label string, intent *registry.DeliveryIntent, sendIfEnded bool) (*Receipt, error) {
-	result, err := surface.SteerWithEvidence(ctx, adapter, session, message)
+func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, images surface.Uploads, target, sourceID, label string, intent *registry.DeliveryIntent, sendIfEnded bool) (*Receipt, error) {
+	result, err := surface.SteerWithEvidence(ctx, adapter, session, message, images)
 	if sendIfEnded && errors.Is(err, surface.ErrNothingToSteer) {
 		return nil, errTurnEnded
 	}
@@ -305,7 +305,10 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	// A Claude peer socket delivers to a running or waiting turn with the
 	// sender's address, so only an explicit queue or a message that needs
 	// per-message options waits for the turn to end.
-	if route == surface.RoutePeer && (options.BusyDelivery != "" && busyMode == deliverypolicy.Queue || options.HoldsForQueue()) {
+	if route == surface.RoutePeer && (options.BusyDelivery != "" && busyMode == deliverypolicy.Queue || options.HoldsForQueue() || len(options.Uploads) > 0) {
+		if len(options.Uploads) > 0 {
+			busyMode = deliverypolicy.Queue
+		}
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
@@ -474,8 +477,9 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	if target == "" {
 		target = session.ID
 	}
-	needsOptionSender := options.HoldsForQueue()
-	steerable := busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(adapter, session).Steer
+	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, message, options)
+	options.SteersUploads = canSteer && busyMode == deliverypolicy.Steer
+	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer
 	if steerable && observation == nil {
 		observed, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
@@ -494,8 +498,16 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		}
 		waiting = recorded
 	}
+	if steerable && options.BusyDelivery == "" && d.Registry != nil {
+		behind, err := d.Registry.QueuedFromSender(session.ID, options.SourceSessionID)
+		if err != nil {
+			d.discardIntent(intent, session.ID)
+			return nil, err
+		}
+		steerable = !behind
+	}
 	if steerable && waiting == nil {
-		return d.steer(ctx, adapter, session, message, target, options.SourceSessionID, "busy steer", intent, true)
+		return d.steer(ctx, adapter, session, steerText, steerImages, target, options.SourceSessionID, "busy steer", intent, true)
 	}
 	if !allowQueue {
 		d.discardIntent(intent, session.ID)
@@ -507,7 +519,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
-	if needsOptionSender {
+	if !canSteer {
 		options.BusyDelivery = string(deliverypolicy.Queue)
 	}
 	var queueID, deliveryID int64
@@ -530,8 +542,10 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	switch {
 	case waiting != nil:
 		receipt.Detail = fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target)
-	case len(options.Uploads) > 0:
-		receipt.Detail = fmt.Sprintf("Queued for %s: attached files can't join a running turn; sends when it ends.", target)
+	case !canSteer && len(options.Uploads.Images()) > 0:
+		receipt.Detail = fmt.Sprintf("Queued for %s: attached images can't join a running turn on this session; sends when it ends.", target)
+	case !canSteer && len(options.Uploads) > 0:
+		receipt.Detail = fmt.Sprintf("Queued for %s: attached files wait for this message's settings; sends when the turn ends.", target)
 	}
 	return receipt, nil
 }
