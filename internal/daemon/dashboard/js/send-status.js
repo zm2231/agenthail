@@ -16,15 +16,23 @@ function listed(sessionId) {
   return app.state.sessions.some(isIt) || Boolean(app.codexSearch?.results?.some(isIt));
 }
 
-export function returnToComposer(item) {
-  if (app.selected?.id === item.sessionId || (app.selected && !listed(item.sessionId))) {
+export function returnToSession(sessionId, text, attachments = []) {
+  if (app.selected?.id === sessionId) {
     const input = $("#message");
-    input.value = joined(item.text, input.value);
-    holdAttachments(app.selected.id, item.attachments);
+    input.value = joined(text, input.value);
     resizeComposer();
-  } else if (listed(item.sessionId)) {
-    app.drafts.set(item.sessionId, joined(item.text, app.drafts.get(item.sessionId) || ""));
-    holdAttachments(item.sessionId, item.attachments);
+  } else {
+    app.drafts.set(sessionId, joined(text, app.drafts.get(sessionId) || ""));
+  }
+  holdAttachments(sessionId, attachments);
+}
+
+export function returnToComposer(item) {
+  const attached = Boolean(item.attachments?.length);
+  if (app.selected?.id === item.sessionId || listed(item.sessionId)) {
+    returnToSession(item.sessionId, item.text, item.attachments);
+  } else if (app.selected && !attached) {
+    returnToSession(app.selected.id, item.text);
   } else {
     keepSend(item);
   }

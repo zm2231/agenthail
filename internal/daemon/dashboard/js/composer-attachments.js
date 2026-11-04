@@ -1,38 +1,68 @@
 import { $ } from "./dom.js";
 import { app } from "./state.js";
 import { escape } from "./format.js";
+import { toast } from "./feedback.js";
 
-const storageKey = "agenthail.heldAttachments";
+const storagePrefix = "agenthail.heldAttachment.";
+const unsaved = new Map();
+let order = 0;
 
-let held = null;
+function keyFor(sessionId, attachmentId) {
+  return storagePrefix + JSON.stringify([sessionId, attachmentId]);
+}
 
-function readStored() {
+function records() {
+  const found = new Map(unsaved);
   try {
-    const stored = JSON.parse(globalThis.localStorage.getItem(storageKey));
-    return stored && typeof stored === "object" ? stored : {};
+    const storage = globalThis.localStorage;
+    for (let index = 0; index < storage.length; index++) {
+      const key = storage.key(index);
+      if (!key?.startsWith(storagePrefix)) continue;
+      try {
+        const record = JSON.parse(storage.getItem(key));
+        if (record?.sessionId && record.attachment?.id) found.set(key, record);
+      } catch {}
+    }
+  } catch {}
+  return [...found.values()];
+}
+
+function save(record) {
+  const key = keyFor(record.sessionId, record.attachment.id);
+  try {
+    globalThis.localStorage.setItem(key, JSON.stringify(record));
+    unsaved.delete(key);
+    return true;
   } catch {
-    return null;
+    unsaved.set(key, record);
+    return false;
   }
 }
 
-function current() {
-  held ??= readStored() || {};
-  return held;
-}
-
-function writeHeld(sessionId, attachments) {
-  const next = { ...current(), ...(readStored() || {}) };
-  if (attachments.length) next[sessionId] = attachments;
-  else delete next[sessionId];
-  held = next;
+function drop(sessionId, attachmentId) {
+  const key = keyFor(sessionId, attachmentId);
+  unsaved.delete(key);
   try {
-    if (Object.keys(next).length) globalThis.localStorage.setItem(storageKey, JSON.stringify(next));
-    else globalThis.localStorage.removeItem(storageKey);
+    globalThis.localStorage.removeItem(key);
   } catch {}
 }
 
+export function canKeepAttachments() {
+  const probe = `${storagePrefix}probe`;
+  try {
+    globalThis.localStorage.setItem(probe, "1");
+    globalThis.localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function heldAttachments(sessionId) {
-  return current()[sessionId] || [];
+  return records()
+    .filter((record) => record.sessionId === sessionId)
+    .sort((a, b) => a.heldAt - b.heldAt || a.order - b.order)
+    .map((record) => record.attachment);
 }
 
 export function sendableAttachments(sessionId) {
@@ -40,25 +70,28 @@ export function sendableAttachments(sessionId) {
 }
 
 export function holdAttachments(sessionId, attachments = []) {
-  if (!attachments.length) return;
-  const current = heldAttachments(sessionId);
-  const known = new Set(current.map((attachment) => attachment.id));
-  writeHeld(sessionId, [...attachments.filter((attachment) => !known.has(attachment.id)), ...current]);
+  const known = new Set(heldAttachments(sessionId).map((attachment) => attachment.id));
+  const heldAt = Date.now();
+  let saved = true;
+  for (const attachment of attachments) {
+    if (!known.has(attachment.id)) saved = save({ sessionId, attachment, heldAt, order: ++order }) && saved;
+  }
   renderAttachments();
+  if (!saved) toast("This browser couldn't save the attached files. They stay in this tab only; send them before you reload.");
+  return saved;
 }
 
 export function releaseAttachments(sessionId, sent = heldAttachments(sessionId)) {
-  const gone = new Set(sent.map((attachment) => attachment.id));
-  writeHeld(sessionId, heldAttachments(sessionId).filter((attachment) => !gone.has(attachment.id)));
+  for (const attachment of sent) drop(sessionId, attachment.id);
   renderAttachments();
 }
 
 export function moveHeldAttachments(rekeyed) {
-  for (const [retired, current] of Object.entries(rekeyed)) {
-    const moving = heldAttachments(retired);
-    if (!moving.length) continue;
-    writeHeld(retired, []);
-    holdAttachments(current, moving);
+  for (const record of records()) {
+    const current = rekeyed[record.sessionId];
+    if (!current || current === record.sessionId) continue;
+    save({ ...record, sessionId: current });
+    drop(record.sessionId, record.attachment.id);
   }
 }
 
@@ -81,8 +114,6 @@ export function bindAttachmentEvents(changed) {
     changed();
   });
   globalThis.window?.addEventListener?.("storage", (event) => {
-    if (event.key !== storageKey && event.key !== null) return;
-    held = readStored() || held;
-    changed();
+    if (event.key === null || event.key?.startsWith(storagePrefix)) changed();
   });
 }

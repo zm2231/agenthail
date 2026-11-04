@@ -10,7 +10,7 @@ import { selectSession } from "./session-selection.js";
 import { deliveryStatusLabel } from "./delivery-labels.js";
 import { escape } from "./format.js";
 import { rememberToolRow } from "./tool-view.js";
-import { bindAttachmentEvents, releaseAttachments, renderAttachments, sendableAttachments } from "./composer-attachments.js";
+import { bindAttachmentEvents, heldAttachments, releaseAttachments, renderAttachments, sendableAttachments } from "./composer-attachments.js";
 
 const attachmentsCannotSteer = "Attached files can't join a running turn. Send queues them for next.";
 
@@ -30,11 +30,11 @@ export function syncComposerAction() {
   const steerButton = $("#steer-message");
   const capabilities = app.history?.capabilities || {};
   const busy = app.selected?.status === "busy";
-  const attached = Boolean(app.selected && sendableAttachments(app.selected.id).length);
-  const hasMessage = Boolean(input.value.trim()) || attached;
+  const attached = Boolean(app.selected && heldAttachments(app.selected.id).length);
+  const hasMessage = Boolean(input.value.trim()) || Boolean(app.selected && sendableAttachments(app.selected.id).length);
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
   const turnNotice = (app.history ? capabilities.turnNotice : app.selected?.capabilities?.turnNotice) || "";
-  const stopping = busy && capabilities.interrupt && !hasMessage && !readOnly;
+  const stopping = busy && capabilities.interrupt && !hasMessage && !attached && !readOnly;
   sendButton.dataset.mode = stopping ? "interrupt" : "send";
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
   sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
@@ -79,6 +79,7 @@ export async function send(requestedAction = "send") {
   }
   const sessionId = app.selected?.id;
   const attachments = sessionId ? sendableAttachments(sessionId) : [];
+  const holding = Boolean(sessionId && heldAttachments(sessionId).length);
   if (!message && !attachments.length) return;
   $("#send").disabled = true;
   $("#steer-message").disabled = true;
@@ -97,8 +98,8 @@ export async function send(requestedAction = "send") {
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
     const steering = composerAction === "steer" || command.toLowerCase() === "/steer";
-    if (steering && attachments.length) throw Error(attachmentsCannotSteer);
-    if (commandAction && !steering && attachments.length) throw Error("Send the attached files as a message, or remove them before running a command.");
+    if (steering && holding) throw Error(attachmentsCannotSteer);
+    if (commandAction && !steering && holding) throw Error("Send the attached files as a message, or remove them before running a command.");
     if (steering || !commandAction) {
       const sent = steering ? [] : attachments;
       const payload = steering

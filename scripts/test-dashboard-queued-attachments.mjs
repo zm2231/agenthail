@@ -163,12 +163,73 @@ async function takenBack(tab) {
 
 {
   const tab = await loaded({ storageFull: true });
+  tab.context.app.state.queue = [{ id: 7, sessionId: "a", status: "pending", attachments: [shot] }];
+  await assert.rejects(tab.context.takeBackQueued(7, "a"), /can't save the attached files/, "full storage refuses a take back that could lose files");
+  assert.equal(tab.requests.length, 0, "and leaves the message queued");
+}
+
+{
+  const tab = await loaded({ storageFull: true });
   await takenBack(tab);
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "full storage still keeps the files in this tab");
+  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "files that storage refuses stay in this tab");
+  assert.ok(tab.toasts.some((text) => /stay in this tab only; send them before you reload/.test(text)), "and the person is told they won't survive a reload");
   tab.$("#send").dataset.mode = "send";
   await tab.context.send();
   await settled();
   assert.deepEqual(tab.requests.at(-1).attachments, [shot.id], "and sends them");
+}
+
+{
+  const tab = await loaded();
+  tab.answers.push(answered({ ok: true, result: { message: "", attachments: [gone] } }));
+  await tab.context.takeBackQueued(8, "a");
+  tab.$("#message").value = "";
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, true, "a missing file alone still hides Steer");
+  assert.notEqual(tab.$("#send").dataset.mode, "interrupt", "and does not turn Send into Stop");
+  const before = tab.requests.length;
+  for (const [typed, mode] of [["now", "steer"], ["/steer now", "send"], ["/compact", "send"]]) {
+    tab.$("#message").value = typed;
+    tab.$("#send").dataset.mode = "send";
+    await tab.context.send(mode);
+  }
+  assert.equal(tab.requests.length, before, "no steer or command goes out while a file is held");
+  assert.match(tab.$("#composer-attachments").innerHTML, /old\.png/, "and the chip stays");
+}
+
+{
+  const tab = await loaded();
+  await takenBack(tab);
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(lost);
+  await tab.context.send();
+  await settled();
+  tab.context.app.state.sessions = [{ id: "b", alias: "b" }];
+  tab.context.app.selected = { id: "b", alias: "b", status: "idle" };
+  tab.$("#message").value = "";
+  tab.$("#send-status-put-back").listeners.click();
+  assert.equal(tab.$("#message").value, "", "Put back for an unlisted conversation leaves the selected one alone");
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#composer-attachments").hidden, true, "and puts no files into it");
+  const kept = [...tab.values].filter(([key]) => key.startsWith("agenthail.pendingSend.")).map(([, raw]) => JSON.parse(raw));
+  assert.equal(kept.length, 1, "the send stays stored for its own conversation");
+  assert.equal(kept[0].sessionId, "a");
+  assert.deepEqual(kept[0].attachments, [shot]);
+}
+
+{
+  const values = new Map();
+  const first = await loaded({ values });
+  const second = await loaded({ values });
+  first.answers.push(answered({ ok: true, result: { message: "", attachments: [shot] } }));
+  second.answers.push(answered({ ok: true, result: { message: "", attachments: [gone] } }));
+  await first.context.takeBackQueued(7, "a");
+  await second.context.takeBackQueued(8, "a");
+  first.context.syncComposerAction();
+  for (const tab of [first, second]) {
+    tab.context.syncComposerAction();
+    assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png[\s\S]*old\.png/, "two tabs taking back files for one conversation keep both");
+  }
 }
 
 {
