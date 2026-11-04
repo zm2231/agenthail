@@ -75,7 +75,8 @@ final class ComposerUITextView: UITextView {
     private let placeholderLabel = UILabel()
 
     static func make() -> ComposerUITextView {
-        let view = ComposerUITextView(usingTextLayoutManager: true)
+        // init(usingTextLayoutManager:) skips this subclass's property initializers.
+        let view = ComposerUITextView(frame: .zero, textContainer: nil)
         view.font = .preferredFont(forTextStyle: .body)
         view.adjustsFontForContentSizeCategory = true
         view.backgroundColor = .clear
