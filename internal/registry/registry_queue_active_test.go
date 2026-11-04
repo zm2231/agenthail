@@ -22,7 +22,7 @@ func TestActiveQueueLeavesOutFinishedRowsAndScopesToSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CancelMessage(canceled); err != nil {
+	if _, err := r.CancelMessage(canceled); err != nil {
 		t.Fatal(err)
 	}
 	first, err := r.QueueMessageWithKey("a", "first", "first-a")

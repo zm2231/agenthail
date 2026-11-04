@@ -49,7 +49,7 @@ func TestACanceledQueuedMessageIsNotPendingInTheInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CancelMessage(id); err != nil {
+	if _, err := r.CancelMessage(id); err != nil {
 		t.Fatal(err)
 	}
 	assertSettledInInbox(t, inboxItemContaining(t, r, "target", "cancel me"), "canceled", surface.EvidenceCanceled)
