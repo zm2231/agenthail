@@ -1,23 +1,28 @@
 import { $ } from "./dom.js";
 import { app } from "./state.js";
 import { resizeComposer, syncComposerAction } from "./composer.js";
-import { isPendingSendStorage, retrySend, takeBackSend, unconfirmedSends, unconfirmedSendsOutside } from "./pending-send.js";
+import { toast } from "./feedback.js";
+import { isPendingSendStorage, keepSend, retrySend, takeBackSend, unconfirmedSends, unconfirmedSendsOutside } from "./pending-send.js";
 
 function joined(older, newer) {
   return newer.trim() ? `${older}\n\n${newer}` : older;
 }
 
 function listed(sessionId) {
-  return app.selected?.id === sessionId || Boolean(app.state?.sessions?.some((session) => session.id === sessionId));
+  if (!app.state?.sessions || app.selected?.id === sessionId) return true;
+  const isIt = (session) => session.id === sessionId;
+  return app.state.sessions.some(isIt) || Boolean(app.codexSearch?.results?.some(isIt));
 }
 
 export function returnToComposer(item) {
-  if (app.selected && (app.selected.id === item.sessionId || !listed(item.sessionId))) {
+  if (app.selected?.id === item.sessionId || (app.selected && !listed(item.sessionId))) {
     const input = $("#message");
     input.value = joined(item.text, input.value);
     resizeComposer();
-  } else {
+  } else if (listed(item.sessionId)) {
     app.drafts.set(item.sessionId, joined(item.text, app.drafts.get(item.sessionId) || ""));
+  } else {
+    keepSend(item);
   }
 }
 
@@ -26,9 +31,18 @@ function sendsToShow() {
   return [...unconfirmedSends(app.selected.id), ...unconfirmedSendsOutside(listed)];
 }
 
+let toldAboutUnlisted = false;
+
+function pointToUnlistedSends() {
+  if (toldAboutUnlisted || app.selected || !unconfirmedSendsOutside(listed).length) return;
+  toldAboutUnlisted = true;
+  toast("A message wasn't confirmed. Open any conversation to see it.");
+}
+
 export function renderSendStatus() {
   const row = $("#send-status");
   if (!row) return;
+  pointToUnlistedSends();
   const sends = sendsToShow();
   row.hidden = sends.length === 0;
   if (!sends.length) return;

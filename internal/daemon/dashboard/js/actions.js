@@ -32,7 +32,7 @@ export async function logicalAction(scope, actionName, payload) {
     clearLogicalRequest(scope);
     return result;
   } catch (error) {
-    if (!isNetworkFailure(error) && !error.unknown) clearLogicalRequest(scope);
+    if (!isNetworkFailure(error) && !error.unknown && error.status !== 401) clearLogicalRequest(scope);
     throw error;
   }
 }

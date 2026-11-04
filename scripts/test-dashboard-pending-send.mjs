@@ -248,6 +248,20 @@ const age = (storage, by) => {
   assert.equal(server.calls.length, 0, "and is not sent by the store");
 }
 
+{
+  const storage = browserStorage();
+  const server = daemon();
+  server.answer = lost;
+  const one = await tab(storage, server);
+  const two = await tab(storage, server);
+  const now = Date.now;
+  const tied = { sessionId: "session-1", createdAt: 1000, sequence: 1, attemptedAt: 1000, unconfirmed: true };
+  storage.setItem("agenthail.pendingSend.b", JSON.stringify({ ...tied, id: "b", key: "b", text: "b", wire: wire("b") }));
+  storage.setItem("agenthail.pendingSend.a", JSON.stringify({ ...tied, id: "a", key: "a", text: "a", wire: wire("a") }));
+  assert.deepEqual([...one.unconfirmedSends("session-1", now())].map((item) => item.id), ["a", "b"], "sends tied across tabs have one order");
+  assert.deepEqual([...two.unconfirmedSends("session-1", now())].map((item) => item.id), ["a", "b"]);
+}
+
 for (const useLocks of [false, true]) {
   const storage = browserStorage();
   const server = daemon();

@@ -196,4 +196,55 @@ for (const [typed, mode, expected] of [["redirect", "steer", "redirect"], ["/ste
   assert.equal(tab.$("#message").value, "for a removed session", "and goes back to a composer that can be reached");
 }
 
+{
+  const tab = await loaded();
+  tab.context.app.codexSearch = { results: [{ id: "searched", alias: "searched" }] };
+  tab.context.app.selected = { id: "searched", alias: "searched", status: "idle" };
+  tab.$("#message").value = "for a search result";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(refused("Not now."));
+  const sending = tab.context.send();
+  tab.context.app.selected = { id: "b", alias: "b", status: "idle" };
+  tab.$("#message").value = "";
+  await sending;
+  await settled();
+  assert.equal(tab.$("#message").value, "", "a refusal for a search result stays out of another session's composer");
+  assert.equal(tab.context.app.drafts.get("searched"), "for a search result", "and goes to its own draft");
+}
+
+{
+  const tab = await loaded();
+  tab.$("#message").value = "nothing selected";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(lost);
+  await tab.context.send();
+  await settled();
+  tab.context.app.state.sessions = [];
+  tab.context.app.selected = null;
+  tab.context.renderSendStatus();
+  assert.ok(tab.toasts.some((text) => /Open any conversation/.test(text)), "with nothing selected, an unlisted send is pointed out");
+  assert.equal(tab.$("#send-status").hidden, true);
+
+  const [stored] = [...tab.values.values()].map((value) => JSON.parse(value));
+  tab.context.returnToComposer(tab.context.takeBackSend(stored.id));
+  assert.equal(tab.values.size, 1, "with nowhere to put a refused send, it stays stored");
+  tab.context.app.selected = { id: "b", alias: "b", status: "idle" };
+  tab.context.renderSendStatus();
+  assert.equal(tab.$("#send-status").hidden, false, "and shows once a conversation is open");
+  assert.match(tab.$("#send-status-text").textContent, /^Not confirmed\. It may already have arrived/, "without retrying by itself");
+}
+
+{
+  const tab = await loaded();
+  tab.storageFull = true;
+  tab.$("#message").value = "no room, signed out";
+  tab.$("#send").dataset.mode = "send";
+  const unauthorized = () => ({ ok: false, status: 401, text: async () => JSON.stringify({ error: { message: "dashboard access token required" } }) });
+  tab.answers.push(unauthorized, unauthorized);
+  await tab.context.send();
+  await tab.context.send();
+  assert.equal(tab.requests[0].key, tab.requests[1].key, "with no storage, a 401 keeps the key too");
+  assert.equal(tab.$("#message").value, "no room, signed out");
+}
+
 console.log("dashboard composer send tests passed");

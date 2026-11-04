@@ -29,7 +29,7 @@ function read() {
   } catch {
     return [];
   }
-  return items.sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence);
+  return items.sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence || a.id.localeCompare(b.id));
 }
 
 function save(item) {
@@ -149,6 +149,10 @@ export async function retrySend(id) {
 
 export function takeBackSend(id) {
   return take(id);
+}
+
+export function keepSend(item) {
+  save({ ...item, createdAt: 0, unconfirmed: true });
 }
 
 function showable(now) {
