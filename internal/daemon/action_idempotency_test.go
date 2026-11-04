@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -143,7 +142,7 @@ func assertActionSubmitted(t *testing.T, response *httptest.ResponseRecorder) {
 
 func TestActionIdempotencyReplaysCanonicalRequestAndRejectsMismatch(t *testing.T) {
 	fake := idempotencyFake()
-	r, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	r, handler := openIdempotencyFixture(t, registrytest.Path(t), fake)
 	token := pairedControlToken(t, r)
 	first := serveV1Action(handler, `{"message":"one","sessionId":"from","action":"send"}`, "key-1", token)
 	if first.Code != http.StatusOK || len(fake.sent) != 1 {
@@ -161,7 +160,7 @@ func TestActionIdempotencyReplaysCanonicalRequestAndRejectsMismatch(t *testing.T
 }
 
 func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
+	path := registrytest.Path(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	fake := idempotencyFake()
@@ -203,7 +202,7 @@ func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
 func TestActionIdempotencyReplaysTextFailureContentType(t *testing.T) {
 	fake := idempotencyFake()
 	fake.sendErr = surface.DeliveryTerminal(errors.New("provider unavailable"), surface.DeliveryInvalidRequest)
-	store, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	store, handler := openIdempotencyFixture(t, registrytest.Path(t), fake)
 	cookie := browserCookie(t, store)
 	send := func() *httptest.ResponseRecorder {
 		request := dashboardActionRequestWithKey(`{"action":"send","sessionId":"from","message":"one"}`, "text-failure")
@@ -221,7 +220,7 @@ func TestActionIdempotencyReplaysTextFailureContentType(t *testing.T) {
 
 func TestActionIdempotencyRunsAfterAPIAuthorization(t *testing.T) {
 	fake := idempotencyFake()
-	r, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	r, handler := openIdempotencyFixture(t, registrytest.Path(t), fake)
 	token := pairedControlToken(t, r)
 	const body = `{"action":"send","sessionId":"from","message":"one"}`
 	assertAPIV1Error(t, serveV1Action(handler, body, "auth-order", ""), http.StatusUnauthorized, "unauthorized")
@@ -234,7 +233,7 @@ func TestActionIdempotencyRunsAfterAPIAuthorization(t *testing.T) {
 }
 
 func TestActionIdempotencyCompletionFailureLeavesPending(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
+	path := registrytest.Path(t)
 	fake := idempotencyFake()
 	var r *registry.Registry
 	adapter := &hookedSendSurface{daemonSurface: fake, beforeSend: func() { _ = r.Close() }}
