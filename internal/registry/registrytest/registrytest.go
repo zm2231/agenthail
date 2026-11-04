@@ -3,10 +3,10 @@
 package registrytest
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,73 +18,99 @@ import (
 )
 
 var template struct {
-	once sync.Once
-	data []byte
-	err  error
+	once  sync.Once
+	data  []byte
+	host  int
+	epoch int
+	err   error
 }
+
+const (
+	hostIDBytes = 6
+	epochBytes  = 16
+)
 
 // Path writes a new registry at this build's schema into the test's temporary
 // directory and returns its path. The schema is migrated once per test
 // process. Each copy gets its own host id and host epoch here, because
-// registry.Open does not touch a registry already at this schema.
+// registry.Open does not touch a registry already at this schema. They are
+// rewritten in the file's bytes with same-length hex, which leaves every
+// SQLite record its size.
 func Path(t testing.TB) string {
 	t.Helper()
-	template.once.Do(func() { template.data, template.err = build() })
+	template.once.Do(func() { template.err = build() })
 	if template.err != nil {
 		t.Fatal(template.err)
 	}
-	path := filepath.Join(t.TempDir(), "registry.db")
-	if err := os.WriteFile(path, template.data, 0600); err != nil {
+	data := bytes.Clone(template.data)
+	raw := make([]byte, hostIDBytes+epochBytes)
+	if _, err := rand.Read(raw); err != nil {
 		t.Fatal(err)
 	}
-	if err := giveOwnIdentity(path); err != nil {
+	hex.Encode(data[template.host+1:], raw[:hostIDBytes])
+	hex.Encode(data[template.epoch:], raw[hostIDBytes:])
+	path := filepath.Join(t.TempDir(), "registry.db")
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-func giveOwnIdentity(path string) error {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return err
-	}
-	raw := make([]byte, 6+16)
-	_, randErr := rand.Read(raw)
-	var hostErr, epochErr error
-	if randErr == nil {
-		_, hostErr = db.Exec(`UPDATE host_identity SET host_id=? WHERE id=1`, "h"+hex.EncodeToString(raw[:6]))
-		_, epochErr = db.Exec(`UPDATE catalog_state SET host_epoch=? WHERE id=1`, hex.EncodeToString(raw[6:]))
-	}
-	return errors.Join(randErr, hostErr, epochErr, db.Close())
-}
-
-func build() ([]byte, error) {
+func build() error {
 	dir, err := os.MkdirTemp("", "registry-template")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "registry.db")
 	r, err := registry.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	identity, identityErr := r.HostIdentity()
+	epoch, _, epochErr := r.CatalogState()
 	if err := r.Close(); err != nil {
-		return nil, err
+		return err
+	}
+	if identityErr != nil || epochErr != nil {
+		return fmt.Errorf("read the template registry's identity: %v %v", identityErr, epochErr)
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, checkpointErr := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	if err := db.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	if checkpointErr != nil {
-		return nil, fmt.Errorf("prepare the template registry: %v", checkpointErr)
+		return fmt.Errorf("prepare the template registry: %v", checkpointErr)
 	}
 	if info, err := os.Stat(path + "-wal"); err == nil && info.Size() > 0 {
-		return nil, fmt.Errorf("the template registry kept %d bytes of WAL", info.Size())
+		return fmt.Errorf("the template registry kept %d bytes of WAL", info.Size())
 	}
-	return os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	host, err := onlyOffset(data, identity.ID, 1+2*hostIDBytes)
+	if err != nil {
+		return fmt.Errorf("template host id: %w", err)
+	}
+	at, err := onlyOffset(data, epoch, 2*epochBytes)
+	if err != nil {
+		return fmt.Errorf("template host epoch: %w", err)
+	}
+	template.data, template.host, template.epoch = data, host, at
+	return nil
+}
+
+func onlyOffset(data []byte, value string, length int) (int, error) {
+	if len(value) != length {
+		return 0, fmt.Errorf("%q is %d bytes, want %d", value, len(value), length)
+	}
+	if n := bytes.Count(data, []byte(value)); n != 1 {
+		return 0, fmt.Errorf("%q appears %d times in the file, want once", value, n)
+	}
+	return bytes.Index(data, []byte(value)), nil
 }
