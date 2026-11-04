@@ -513,6 +513,27 @@ func TestARestoreRefusesWhileAnotherProcessHasTheRegistryOpenAndSaysWhat(t *test
 	}
 }
 
+func TestAnOpenThatCannotTakeTheLockFails(t *testing.T) {
+	path, _ := registryAtSchemaWithBackup(t)
+	lock := registryLockPath(path)
+	if err := os.Chmod(lock, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lock, 0o600) })
+	if file, err := os.OpenFile(lock, os.O_RDWR, 0); err == nil {
+		file.Close()
+		t.Skip("this runner can open any file")
+	}
+	r, err := Open(path)
+	if err == nil {
+		r.Close()
+		t.Fatal("the registry opened with nothing keeping a restore out")
+	}
+	if !strings.Contains(err.Error(), "lock the registry") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestAWriteFromAnOpenBeforeARestoreCannotLandInTheSetAsideRegistry(t *testing.T) {
 	shortRestoreHoldWait(t)
 	path, target := registryAtSchemaWithBackup(t)

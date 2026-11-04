@@ -40,12 +40,11 @@ func shellQuote(path string) string {
 }
 
 // os.OpenFile sets close-on-exec, so a process this one spawns does not keep the lock.
-// A registry whose directory cannot hold the lock file opens without it: nothing can restore over a registry there either.
 func holdRegistryOpen(path string) (*os.File, error) {
 	disk, _, _ := strings.Cut(path, "?")
 	file, err := os.OpenFile(registryLockPath(disk), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("lock the registry: %w", err)
 	}
 	deadline := time.Now().Add(restoreWait)
 	for syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) != nil {
