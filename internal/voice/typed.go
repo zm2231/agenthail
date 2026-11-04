@@ -35,7 +35,7 @@ func (s *Service) followTyped(f *follower, event sessionstream.Event, turn *type
 	case event.Role == "user" && turn.prompt == "" && strings.TrimSpace(event.Body) != "":
 		s.noteTyped(f, event, turn)
 		return
-	case event.SpokenAssistantContent():
+	case event.SpokenAssistantContent() && !event.Commentary():
 		turn.reply = event.Body
 	}
 	if event.Terminal() {

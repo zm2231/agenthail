@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -268,14 +267,12 @@ func TestCodexContextUsageIgnoresPartialRecordUntilComplete(t *testing.T) {
 }
 
 // liveContext drives managed Streams for a session with a local transcript.
-// Each Stream first sees its turn in progress, so the transcript poll sets the
-// baseline, and then receives the queued notifications with the completed turn.
+// Each Stream first polls the transcript, which sets the baseline, and then
+// receives the notifications.
 type liveContext struct {
 	codex   *Codex
+	fake    *codextest.Daemon
 	session *surface.Session
-	mu      sync.Mutex
-	reads   int
-	batch   []liveNotification
 }
 
 type liveNotification struct {
@@ -285,30 +282,15 @@ type liveNotification struct {
 
 func newLiveContext(t *testing.T, records ...string) *liveContext {
 	t.Helper()
-	live := &liveContext{}
-	var fake *codextest.Daemon
-	fake = startManagedCodex(t, func(method string, params map[string]any) map[string]any {
-		if method != "thread/read" && method != "thread/turns/list" {
-			return nil
-		}
-		live.mu.Lock()
-		defer live.mu.Unlock()
-		live.reads++
-		if live.reads%2 == 1 {
-			return managedReadAnswer(method, params, managedTurn("turn", "inProgress"))
-		}
-		for _, notification := range live.batch {
-			fake.Notify(notification.method, notification.params)
-		}
-		live.batch = nil
-		return managedReadAnswer(method, params, managedTurn("turn", "completed", agentMessage("final", "final_answer", "done")))
-	})
 	path := filepath.Join(t.TempDir(), "codex.jsonl")
 	writeTestTranscript(t, path, records...)
-	live.codex = isolatedManagedRuntime(t)
-	live.session = &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged, Transcript: path}
-	fake.AddThread(codextest.Thread{ID: live.session.ID})
-	fake.Load(live.session.ID)
+	live := &liveContext{
+		codex:   isolatedManagedRuntime(t),
+		fake:    startManagedCodex(t, nil),
+		session: &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged, Transcript: path, TranscriptOffsetSet: true},
+	}
+	live.fake.AddThread(codextest.Thread{ID: live.session.ID})
+	live.fake.Load(live.session.ID)
 	return live
 }
 
@@ -331,21 +313,16 @@ func (l *liveContext) tokenUsage(current, cumulative float64) liveNotification {
 // context usage it emitted.
 func (l *liveContext) stream(t *testing.T, notifications ...liveNotification) *surface.ContextUsage {
 	t.Helper()
-	l.mu.Lock()
-	l.batch = notifications
-	l.mu.Unlock()
-	var last *surface.ContextUsage
-	if err := l.codex.Stream(context.Background(), l.session, "turn", func(event surface.StreamEvent) {
-		if event.Kind == "context" {
-			last = event.Context
+	events := streamManagedState(t, l.codex, l.fake, l.session, func() {
+		for _, notification := range notifications {
+			l.fake.Notify(notification.method, notification.params)
 		}
-	}, 3*time.Second); err != nil {
-		t.Fatal(err)
+	}, func(events []surface.StreamEvent) bool { return len(events) >= len(notifications) })
+	last := events[len(events)-1]
+	if last.Kind != "context" || last.Context == nil {
+		t.Fatalf("events=%+v", events)
 	}
-	if last == nil {
-		t.Fatal("stream emitted no context usage")
-	}
-	return last
+	return last.Context
 }
 
 func TestCodexLiveContextEventsSurviveStaleTranscriptPolls(t *testing.T) {

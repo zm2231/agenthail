@@ -123,6 +123,9 @@ func (s *sessionSource) loadSeed() error {
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
 	if seeded && transcriptBacked {
+		if rebuilt, err := s.rebuildStaleCodexJournal(ctx); err != nil || rebuilt {
+			return err
+		}
 		caughtUp, err := s.catchUpFromCheckpoint(ctx, trustedIdentity)
 		if err == nil && !caughtUp {
 			err = s.catchUpLocalTranscript(ctx, trustedIdentity, "")
@@ -160,10 +163,16 @@ func (s *sessionSource) loadSeed() error {
 		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 		s.session.TranscriptIdentity = read.TranscriptIdentity
 	} else if localTranscript {
-		return fmt.Errorf("Codex local transcript is unavailable")
+		held, err := s.journalHoldsTranscript()
+		if err != nil {
+			return err
+		}
+		if held {
+			return fmt.Errorf("Codex local transcript is unavailable")
+		}
 	}
 	s.session.TranscriptFromStart = !read.TranscriptOffsetSet
-	if localTranscript && read.TranscriptIdentity == "" {
+	if localTranscript && read.TranscriptOffsetSet && read.TranscriptIdentity == "" {
 		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {

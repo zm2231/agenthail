@@ -897,6 +897,7 @@ type StreamEvent struct {
 	Sender           string           `json:"sender,omitempty"`
 	Title            string           `json:"title,omitempty"`
 	Status           string           `json:"status,omitempty"`
+	Phase            string           `json:"phase,omitempty"`
 	ResetsAt         string           `json:"resetsAt,omitempty"`
 	CallID           string           `json:"callId,omitempty"`
 	Attachment       *Attachment      `json:"attachment,omitempty"`
