@@ -92,6 +92,12 @@ CREATE INDEX session_moves_conversation ON session_moves(conversation, role, sta
 -- index sessions_recent
 CREATE INDEX sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id);
 
+-- index tasks_parent
+CREATE INDEX tasks_parent ON tasks(parent_session_id);
+
+-- index tasks_running
+CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
 -- table action_receipts
 CREATE TABLE action_receipts (
 	idempotency_key TEXT PRIMARY KEY,
@@ -707,6 +713,28 @@ CREATE TABLE signin_profiles (
 	profile TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	UNIQUE(browser, profile)
+);
+
+-- table tasks
+CREATE TABLE tasks (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	child_session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+	task TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'running',
+	result TEXT NOT NULL DEFAULT '',
+	result_kind TEXT NOT NULL DEFAULT '',
+	result_turn_id TEXT NOT NULL DEFAULT '',
+	latest TEXT NOT NULL DEFAULT '',
+	latest_turn_id TEXT NOT NULL DEFAULT '',
+	latest_at_ms INTEGER NOT NULL DEFAULT 0,
+	last_turn_id TEXT NOT NULL DEFAULT '',
+	last_state TEXT NOT NULL DEFAULT '',
+	last_text TEXT NOT NULL DEFAULT '',
+	stalled INTEGER NOT NULL DEFAULT 0,
+	wake INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- trigger catalog_retired_version_archived

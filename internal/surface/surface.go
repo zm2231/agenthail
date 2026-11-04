@@ -811,9 +811,13 @@ type RuntimeEnsurer interface {
 }
 
 type TurnObservation struct {
-	Status          SessionStatus    `json:"status"`
-	ActiveTurnID    string           `json:"activeTurnId,omitempty"`
-	TerminalTurnID  string           `json:"terminalTurnId,omitempty"`
+	Status         SessionStatus `json:"status"`
+	ActiveTurnID   string        `json:"activeTurnId,omitempty"`
+	TerminalTurnID string        `json:"terminalTurnId,omitempty"`
+	// TerminalError is why TerminalTurnID ended, when it ended with no reply to carry it.
+	TerminalError string `json:"terminalError,omitempty"`
+	// TurnUnconfirmed means the newest turn can't be told apart from a running one.
+	TurnUnconfirmed bool             `json:"turnUnconfirmed,omitempty"`
 	CompletedTurnID string           `json:"completedTurnId,omitempty"`
 	InputTurnID     string           `json:"inputTurnId,omitempty"`
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`

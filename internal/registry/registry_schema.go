@@ -463,6 +463,28 @@ CREATE TABLE IF NOT EXISTS hosts (
 	catalog_seq INTEGER NOT NULL DEFAULT 0,
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
+CREATE TABLE IF NOT EXISTS tasks (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	child_session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+	task TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'running',
+	result TEXT NOT NULL DEFAULT '',
+	result_kind TEXT NOT NULL DEFAULT '',
+	result_turn_id TEXT NOT NULL DEFAULT '',
+	latest TEXT NOT NULL DEFAULT '',
+	latest_turn_id TEXT NOT NULL DEFAULT '',
+	latest_at_ms INTEGER NOT NULL DEFAULT 0,
+	last_turn_id TEXT NOT NULL DEFAULT '',
+	last_state TEXT NOT NULL DEFAULT '',
+	last_text TEXT NOT NULL DEFAULT '',
+	stalled INTEGER NOT NULL DEFAULT 0,
+	wake INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS tasks_running ON tasks(child_session_id) WHERE state='running';
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_session_id);
 CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL
