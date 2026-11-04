@@ -1874,6 +1874,39 @@ select {
   border: 0;
   border-radius: 9px;
 }
+#composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 10px 8px;
+  font-size: 12px;
+}
+#composer-attachments[hidden] {
+  display: none;
+}
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--muted);
+}
+.composer-attachment.is-missing {
+  color: var(--quiet);
+}
+.composer-attachment button {
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+}
+.queue-attachments {
+  color: var(--muted);
+  font-size: 12px;
+}
 .soft-button,
 .primary-button,
 .chat-actions button {

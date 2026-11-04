@@ -24,7 +24,7 @@ func (d *Daemon) settleTask(child string, settlement registry.TaskSettlement) (b
 }
 
 func (d *Daemon) publishTaskSettled(child, state, kind string) {
-	d.publishEvent("task.settled", child, map[string]string{"state": state, "kind": kind})
+	d.publishEvent(taskEventSettled, child, map[string]string{"state": state, "kind": kind})
 }
 
 // finishedTaskTurn reads a settlement from one observation, so the text always
@@ -96,6 +96,9 @@ func (d *Daemon) settlementUnderGoal(ctx context.Context, adapter surface.Surfac
 		return settlement, false
 	}
 	if err != nil || goal.Status != surface.GoalStatusComplete {
+		if err == nil && goalStopped(goal.Status) {
+			d.publishEvent(taskEventGoalStopped, session.ID, nil)
+		}
 		if err := d.Registry.RecordTaskTurn(session.ID, settlement.TurnID, settlement.State, settlement.Result); err != nil {
 			d.log.Printf("task turn %s: %s", d.resolveDisplay(session.ID), err)
 		}

@@ -1,3 +1,5 @@
+import { persistentDrafts } from "./draft-store.js";
+
 export const app = {
   state: {
     sessions: [],
@@ -22,7 +24,7 @@ export const app = {
   sessionViewport: null,
   mobileChatOpen: false,
   slashCommands: [],
-  drafts: new Map(),
+  drafts: persistentDrafts(),
   pendingIdempotency: new Map(),
   transcriptSignature: null,
   pendingEntryScroll: false,

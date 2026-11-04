@@ -15,7 +15,6 @@ import (
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -119,8 +118,12 @@ type Daemon struct {
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
 	taskGoals                taskGoalReads
+	taskWaitRead             func()
+	taskNoticeMu             sync.Mutex
+	taskRequestsRead         map[string]taskRequestRead
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
+	busyPolicyProblem        atomic.Pointer[string]
 	spawnLocks               keyedLocks
 	// launchCodex, when set, replaces running 'agenthail launch codex'.
 	launchCodex func(ctx context.Context, executable string) ([]byte, error)
@@ -163,9 +166,6 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 }
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
-	if reg != nil {
-		reg.SetBusyPolicy(deliverypolicy.Load)
-	}
 	d := &Daemon{
 		Registry:          reg,
 		pollInterval:      defaultPollInterval,
@@ -190,6 +190,9 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
 		g2:                newG2Counter(time.Now()),
+	}
+	if reg != nil {
+		reg.SetBusyPolicy(d.busyPolicy)
 	}
 	d.sources.prompts = d.backfillPrompt
 	d.sources.hookCaptured = d.holdsUncheckedHookCapture

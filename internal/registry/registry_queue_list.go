@@ -123,11 +123,7 @@ func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) 
 
 func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) ([]QueueRow, error) {
 	now := r.now()
-	mode, err := r.busyMode()
-	if err != nil {
-		return nil, err
-	}
-	query := queueRowSelect(mode)
+	query := queueRowSelect(r.busyMode())
 	args := []any{now.UnixMilli()}
 	if !includeDelivered {
 		query += ` WHERE q.status NOT IN ('delivered','canceled') AND (q.status!='dead' OR q.dead_at_ms>?)`
@@ -145,11 +141,7 @@ func (r *Registry) ListQueue(includeDelivered bool, adapters surface.Adapters) (
 
 func (r *Registry) QueueItem(id int64, adapters surface.Adapters) (*QueueRow, error) {
 	now := r.now()
-	mode, err := r.busyMode()
-	if err != nil {
-		return nil, err
-	}
-	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect(mode)+` WHERE q.id=?`, now.UnixMilli(), id), adapters, now)
+	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect(r.busyMode())+` WHERE q.id=?`, now.UnixMilli(), id), adapters, now)
 	if err != nil {
 		return nil, err
 	}

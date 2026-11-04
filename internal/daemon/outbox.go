@@ -91,10 +91,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var steered *surface.ControlResult
 	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads, PersonName: item.PersonName}
-	steers, policyErr := d.Registry.Steers(item.BusyDelivery)
-	if policyErr != nil {
-		d.log.Printf("read busy delivery policy for queue item %d: %s", item.ID, policyErr)
-	}
+	steers := d.Registry.Steers(item.BusyDelivery)
 	if item.BusyDelivery == "" && route == surface.RoutePeer {
 		steers = false
 	}

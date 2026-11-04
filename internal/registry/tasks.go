@@ -151,9 +151,14 @@ func (r *Registry) RunningTaskChildren() (map[string]bool, error) {
 	return children, nil
 }
 
-func (r *Registry) SetTaskWake(id int64) error {
-	_, err := r.db.Exec(`UPDATE tasks SET wake=1 WHERE id=?`, id)
+// ArmTaskWake asks for a notice when a running task settles.
+func (r *Registry) ArmTaskWake(id int64) error {
+	_, err := r.db.Exec(`UPDATE tasks SET wake=1 WHERE id=? AND state='running'`, id)
 	return err
+}
+
+func (r *Registry) TasksToWake() ([]Task, error) {
+	return queryRows(r.read, []Task{}, scanTask, `SELECT `+taskColumns+` FROM tasks WHERE wake=1 AND state IN ('done','failed')`)
 }
 
 func (r *Registry) ClearTaskWake(id int64) error {
@@ -162,6 +167,6 @@ func (r *Registry) ClearTaskWake(id int64) error {
 }
 
 func cancelTaskTx(tx *sql.Tx, child string, at time.Time) error {
-	_, err := tx.Exec(`UPDATE tasks SET state='cancelled',stalled=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`, at.UnixMilli(), child)
+	_, err := tx.Exec(`UPDATE tasks SET state='cancelled',stalled=0,wake=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`, at.UnixMilli(), child)
 	return err
 }
