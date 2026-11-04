@@ -104,6 +104,12 @@ final class QueueTailTests: XCTestCase {
         XCTAssertTrue(tail.rows.isEmpty, "and doesn't come back as leaving")
     }
 
+    func testAPeerIsNamedTheWayTheDaemonNamesIt() {
+        for (sender, name) in [("agenthail/claude: @helper", "@helper"), ("agenthail/claude: worker", "worker"), ("agenthail/codex: Fix the build", "Fix the build"), ("uds:/tmp/a.sock", "uds:/tmp/a.sock"), ("agenthail/claude: ", "agenthail/claude:")] {
+            XCTAssertEqual(PeerEnvelope(sender: sender, body: "m").senderName, name)
+        }
+    }
+
     func testAnActionFailureFromTheLastSessionDoesNotShowOnTheNextOne() {
         var tail = QueueTail()
         let earlier = tail.generation

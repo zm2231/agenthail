@@ -5,7 +5,12 @@ struct PeerEnvelope: Equatable {
     let body: String
 
     var senderName: String? {
-        sender.map { name in name.split(separator: " ").last { $0.hasPrefix("@") }.map(String.init) ?? name }
+        sender.map { name in
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("agenthail/"), let colon = trimmed.range(of: ": ") else { return trimmed }
+            let suffix = trimmed[colon.upperBound...].trimmingCharacters(in: .whitespaces)
+            return suffix.isEmpty ? trimmed : suffix
+        }
     }
 
     var summary: String {
