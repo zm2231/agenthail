@@ -976,8 +976,15 @@ private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
 }
 
+// The row is already cancelled by the time this decodes, so an unreadable result falls back to the row itself.
 private struct CancelQueuedResponse: Decodable {
     var result: CancelledQueueItem? = nil
+
+    private enum CodingKeys: String, CodingKey { case result }
+
+    init(from decoder: Decoder) throws {
+        result = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(CancelledQueueItem.self, forKey: .result)
+    }
 }
 
 private struct ProjectAddResponse: Decodable {

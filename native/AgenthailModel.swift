@@ -1060,7 +1060,9 @@ final class AgenthailModel: ObservableObject {
             }
             if !taken.isEmpty {
                 let lost = draft(for: sessionID).takeBack(taken, attachments: attachments)
-                if operationError == nil { operationError = ComposerAttachments.lostNotice(lost) }
+                if let notice = ComposerAttachments.lostNotice(lost) {
+                    operationError = [operationError, notice].compactMap { $0 }.joined(separator: " ")
+                }
             }
             _ = await refresh(fresh: true)
         }
