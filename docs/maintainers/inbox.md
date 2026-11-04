@@ -28,6 +28,8 @@ Failure, refusal and held notices go only to agent senders (`readsNotices`), so 
 
 The iPhone inbox has two tabs. Current reads `GET /api/v1/queue`, which lists what can still be acted on and needs no paging. History reads this endpoint, reloads its first page every 5 seconds while it is on screen, and leaves out what Current shows. A host too old to serve this endpoint is named in the tab, and the other hosts still list.
 
-An item is `pending` while its intent is `submitted`, `queued` or `held`. A message that waited carries its `queueId`, `attempts` and `lastError`, and its full text from the queue row. Otherwise the text is the intent's copy, which keeps the first 16 KiB; past that `truncated` is true, and the whole message is the turn in the target session's transcript.
+A message that waited carries its `queueId`, its queue row's `queueStatus`, `attempts` and `lastError`, and its full text from the queue row. `queueStatus` is `removed` when the row no longer exists.
+
+An item is `pending` while its intent is `submitted`, `queued` or `held` and its queue row, if it has one, is not `canceled`, `delivered` or `removed`. A cancel updates only the queue row, so the inbox settles the item from it: a canceled row reads `canceled` and a removed one `unknown`. The intent keeps its status, so a cancel raises no delivery problem. Otherwise the text is the intent's copy, which keeps the first 16 KiB; past that `truncated` is true, and the whole message is the turn in the target session's transcript.
 
 Intents are not pruned.

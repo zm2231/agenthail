@@ -29,6 +29,7 @@ type inboxItem struct {
 	Pending         bool                          `json:"pending"`
 	Failure         string                        `json:"failure,omitempty"`
 	QueueID         int64                         `json:"queueId,omitempty"`
+	QueueStatus     string                        `json:"queueStatus,omitempty"`
 	Attempts        int                           `json:"attempts,omitempty"`
 	LastError       string                        `json:"lastError,omitempty"`
 	Relayed         bool                          `json:"relayed,omitempty"`
@@ -86,6 +87,7 @@ func (d *Daemon) inboxItem(item registry.InboxItem) inboxItem {
 		Pending:         item.Pending(),
 		Failure:         item.Failure,
 		QueueID:         item.QueueID,
+		QueueStatus:     item.QueueStatus,
 		Attempts:        item.Attempts,
 		LastError:       item.LastError,
 		Relayed:         item.Relayed,
