@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,35 @@ func TestAnotherSendersQueuedRowDoesNotHoldASteer(t *testing.T) {
 	}
 	if len(adapter.steered) != 1 {
 		t.Fatalf("steered=%q", adapter.steered)
+	}
+}
+
+func TestAQueuedRowSaysWhoSentIt(t *testing.T) {
+	d, _, handler := steerImageFixture(t, false)
+	person, err := d.Registry.QueueMessageWithOptions("to", "from the person", "by-person", surface.SendOptions{BusyDelivery: "queue", Author: surface.AuthorPerson})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := d.Registry.QueueMessageWithOptions("to", "from a session", "by-peer", surface.SendOptions{BusyDelivery: "queue", SourceSessionID: "from"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue?sessionId=to", nil)
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &page) != nil {
+		t.Fatalf("queue status=%d body=%s", response.Code, response.Body.String())
+	}
+	authors := map[int64]any{}
+	for _, item := range page.Items {
+		authors[int64(item["id"].(float64))] = item["author"]
+	}
+	if authors[person] != "person" || authors[peer] != "" {
+		t.Fatalf("authors=%v, person row %d, peer row %d", authors, person, peer)
 	}
 }
 

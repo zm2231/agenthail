@@ -1134,6 +1134,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let evidence: String
     var hostID: String? = nil
     var attachments: [QueueAttachment]? = nil
+    var author: String? = nil
 
     var listID: String { "\(hostID ?? "")/\(id)" }
     var hasAttachments: Bool { !(attachments ?? []).isEmpty }

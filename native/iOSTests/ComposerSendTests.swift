@@ -206,6 +206,26 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
     }
 
+    func testARowAnotherSessionSentIsNotCancelledToSteerIt() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#)])
+        try await model.steerQueued(queuedItem(session, attachments: #","author":"""# + rowImage), capabilities: takesImages)
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
+    }
+
+    func testACancelThatFailsSendsNothing() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(409, #"{"error":{"message":"already delivering"}}"#)])
+        do {
+            try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+            XCTFail("the failure must reach the row")
+        } catch {
+            XCTAssertTrue(AgenthailAPIError.userMessage(error).contains("already delivering"), String(describing: error))
+        }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 1)
+        XCTAssertEqual(model.composer, "")
+    }
+
     func testASteerThatFailsReturnsTheMessageAndAttachmentsToTheComposer() async throws {
         let (model, session) = try makeModel(store: temporaryStore())
         ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(500, #"{"error":{"message":"no route"}}"#)])

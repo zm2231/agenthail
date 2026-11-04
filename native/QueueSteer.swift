@@ -6,6 +6,9 @@ enum QueueSteer {
     }
 
     static func refusal(_ item: QueueState, capabilities: Capabilities) -> String? {
+        if let author = item.author, author != "person" {
+            return "This message came from another session, and Steer would send it as yours. It sends when the turn ends."
+        }
         if carriesTurnOptions(item) {
             return "Steer can't carry this message's model or turn settings. It sends when the turn ends."
         }

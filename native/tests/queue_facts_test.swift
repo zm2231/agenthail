@@ -70,6 +70,8 @@ struct QueueFactsTest {
         func row(_ fields: String) -> QueueState {
             try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":3,"sessionId":"s1","target":"@builder","message":"see these","status":"pending","attempts":0,"queuedAt":"2026-10-18T06:00:00Z","evidence":"queued"\#(fields)}"#.utf8))
         }
+        expect(QueueSteer.refusal(row(#","author":"""#), capabilities: steerCaps(true))?.contains("another session") == true, "a row another session sent can't steer as the person")
+        expect(QueueSteer.refusal(row(#","author":"person","attachments":[{"id":"a","name":"shot.png","mediaType":"image/png","bytes":3}]"#), capabilities: steerCaps(true)) == nil, "the person's own row steers")
         let fileOnly = row(#","attachments":[{"id":"b","name":"log.txt","mediaType":"text/plain","bytes":4}]"#)
         expect(QueueSteer.refusal(queue(1, status: "pending"), capabilities: steerCaps(nil)) == nil, "a text row steers on any computer")
         expect(QueueSteer.refusal(attached, capabilities: steerCaps(true)) == nil, "an image steers where the session's steer takes images")
