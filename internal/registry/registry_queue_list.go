@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ type QueueRow struct {
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       QueueOperation           `json:"operation"`
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
+	Uploads         surface.Uploads          `json:"-"`
 }
 
 type AttentionItem struct {
@@ -94,7 +97,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 }
 
 func queueRowSelect(mode deliverypolicy.Mode) string {
-	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
+	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,q.uploads,
 	` + queueHoldCase(true, mode) + `,
 	` + queueHoldCase(false, mode) + `,
 	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,''),COALESCE(s.runtime_kind,'')
@@ -105,7 +108,7 @@ func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) 
 	var row QueueRow
 	var evidence, targetSurface, transport, bridge, runtimeKind string
 	var steerHold, otherHold QueueHold
-	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
+	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.Uploads, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
 		return QueueRow{}, err
 	}
 	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge, RuntimeKind: surface.RuntimeKind(runtimeKind)}
@@ -299,18 +302,23 @@ func (r *Registry) RetryMessage(id int64) error {
 	return r.ReconcileAttentionItems(r.now())
 }
 
-func (r *Registry) CancelMessage(id int64) error {
-	var sessionID, message string
-	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
+type CanceledMessage struct {
+	SessionID string
+	Message   string
+	Uploads   surface.Uploads
+}
+
+func (r *Registry) CancelMessage(id int64) (CanceledMessage, error) {
+	var canceled CanceledMessage
+	err := r.db.QueryRow(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead') RETURNING session_id,message,uploads`, id).Scan(&canceled.SessionID, &canceled.Message, &canceled.Uploads)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CanceledMessage{}, fmt.Errorf("queue item %d is not pending or dead-lettered", id)
+	}
 	if err != nil {
-		return err
+		return CanceledMessage{}, err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not pending or dead-lettered", id)
-	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from delivery queue"})
-	return r.ReconcileAttentionItems(r.now())
+	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: canceled.SessionID, QueueID: id, Message: canceled.Message, Result: "removed from delivery queue"})
+	return canceled, r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {

@@ -64,6 +64,12 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		})
 		return
 	}
+	stored, uploadErr := d.storedUploads(item.Uploads)
+	if uploadErr != nil {
+		d.finishQueueFailure(item, session, uploadErr, now)
+		return
+	}
+	item.Uploads = stored
 	if d.restartCoordinator(ctx, session, item, now) {
 		return
 	}

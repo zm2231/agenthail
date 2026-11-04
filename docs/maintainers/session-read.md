@@ -131,6 +131,16 @@ observations, not session-stream lifecycle events.
 The browser and native app consume the shared journal. There is no separate
 per-viewer provider stream in the dashboard.
 
+## Journal storage
+
+Tool and event rows are most of the journal, and sessions idle for a week are most of those. Once a day, starting ten minutes after the daemon starts, it compresses `toolResult`, `toolCall` and `event` payloads with zstd, one session at a time, for sessions whose newest row is over 7 days old. `payload_codec` marks each row: 0 plain, 1 zstd. A row zstd doesn't shrink stays plain. Message and text rows always stay plain, because the prompt columns and indexes read them as JSON. Bodies in `session_journal_bodies` are not compressed.
+
+This changes storage only. `scanSessionJournalEntry` decompresses every row it returns, and it is the only way a payload leaves the registry. A sweep changes no `seq`, `position`, `observed_at` or `bytes`, so stream cursors, idleness and retention read as they did: retention still counts the plain size.
+
+`session_journal_state.swept_seq` records how far a sweep has looked, so a session is a candidate only when `swept_seq < next_seq`. Rows compress outside the write transaction, and each update matches on `seq` and `payload_codec=0`, so a row an upsert moved meanwhile is left as written. Writes always store plain rows. An upsert with unchanged content writes nothing, so reopening a session keeps its compressed rows; a rebuild writes everything plain. Any write moves the session's newest row to now, so it waits another 7 days and is compressed once.
+
+Each sweep logs its rows and bytes in `daemon.log` as `journal sweep: …`. A sweep of 59,901 rows, 153 to 62 MB, took 58 s on a 445 MB registry, most of it the pause between sessions.
+
 ## Catalog reads
 
 Snapshot assembly reads saved catalog identity and batches aliases and queue
