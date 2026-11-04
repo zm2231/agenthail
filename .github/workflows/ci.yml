@@ -46,7 +46,8 @@ jobs:
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
       - name: Race tests
-        run: go test ./... -race -count=1 -timeout 25m
+        # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
+        run: go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
       - name: Build
         run: go build ./...
       - name: Vet
@@ -170,7 +171,29 @@ jobs:
       - name: Shipped Node download test
         run: scripts/test-fetch-node.sh
       - name: Race tests
-        run: go test ./... -race -count=1 -timeout 25m
+        # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
+        run: go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+
+  linux-archives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/node-v*.tar.gz
+          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
       - name: Build Linux archives
         run: |
           for arch in amd64 arm64; do
