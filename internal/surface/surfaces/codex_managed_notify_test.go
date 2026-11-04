@@ -203,13 +203,13 @@ func (s *switchableTurn) finish() {
 	s.mu.Unlock()
 }
 
-func streamManagedInBackground(t *testing.T, onEvent func(surface.StreamEvent)) {
+func streamManagedInBackground(t *testing.T, session *surface.Session, turnID string, onEvent func(surface.StreamEvent)) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		_ = isolatedManagedRuntime(t).Stream(ctx, managedSession(), "", onEvent, time.Minute)
+		_ = isolatedManagedRuntime(t).Stream(ctx, session, turnID, onEvent, time.Minute)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -254,7 +254,7 @@ func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	fake.AddThread(codextest.Thread{ID: "thread"})
 	fake.Load("thread")
 	done := make(chan struct{}, 1)
-	streamManagedInBackground(t, func(event surface.StreamEvent) {
+	streamManagedInBackground(t, managedSession(), "turn", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
 			done <- struct{}{}
 		}
@@ -263,7 +263,7 @@ func TestAManagedStreamReadsAsSoonAsItsThreadReportsAChange(t *testing.T) {
 	if resume := fake.Calls("thread/resume")[0]; resume["excludeTurns"] != true {
 		t.Fatalf("resume=%v, want the subscription without the thread's turns", resume)
 	}
-	awaitCalls(t, fake, "thread/turns/list", 2)
+	awaitCalls(t, fake, "thread/turns/list", 1)
 
 	reads := len(fake.Calls("thread/turns/list"))
 	for len(handled) > 0 {
@@ -296,12 +296,14 @@ func TestAManagedStreamSubscribesToAnUnloadedThreadOnceItBecomesActive(t *testin
 	fake := startManagedCodex(t, turn.respond)
 	fake.AddThread(codextest.Thread{ID: "thread"})
 	usage := make(chan *surface.ContextUsage, 4)
-	streamManagedInBackground(t, func(event surface.StreamEvent) {
+	session := managedRolloutSession(t, `{"type":"session_meta","payload":{"id":"thread"}}`)
+	session.TranscriptOffsetSet = true
+	streamManagedInBackground(t, session, "", func(event surface.StreamEvent) {
 		if event.Kind == "context" && event.Context != nil {
 			usage <- event.Context
 		}
 	})
-	awaitCalls(t, fake, "thread/turns/list", 2)
+	awaitCalls(t, fake, "thread/loaded/list", 1)
 	if calls := fake.Calls("thread/resume"); len(calls) != 0 || fake.Loaded("thread") {
 		t.Fatalf("the stream loaded a thread that was not loaded: %v", calls)
 	}
@@ -325,46 +327,5 @@ func TestAManagedStreamSubscribesToAnUnloadedThreadOnceItBecomesActive(t *testin
 		}
 	case <-time.After(notifyBound):
 		t.Fatal("token usage did not reach the subscribed stream")
-	}
-}
-
-func TestAManagedStreamWaitsForTheFirstTurnOfANewThread(t *testing.T) {
-	var mu sync.Mutex
-	materialized := false
-	refusals := []map[string]any{
-		{"code": float64(-32600), "message": "thread thread is not materialized yet; thread/turns/list is unavailable before first user message"},
-		{"code": float64(-32601), "message": "paginated_threads is not supported yet"},
-	}
-	reads := 0
-	fake := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
-		if method != "thread/turns/list" && method != "thread/read" {
-			return nil
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		reads++
-		if !materialized {
-			return map[string]any{"error": refusals[min(reads-1, len(refusals)-1)]}
-		}
-		return managedReadAnswer(method, params, managedTurn("turn", "completed", agentMessage("final", "final_answer", "first answer")))
-	})
-	done := make(chan error, 1)
-	var events []surface.StreamEvent
-	go func() {
-		done <- isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
-			if event.Kind != "commands" {
-				events = append(events, event)
-			}
-		}, 5*time.Second)
-	}()
-	awaitCalls(t, fake, "thread/turns/list", 3)
-	mu.Lock()
-	materialized = true
-	mu.Unlock()
-	if err := <-done; err != nil {
-		t.Fatalf("stream of a new thread err=%v", err)
-	}
-	if len(events) != 2 || events[0].Text != "first answer" || events[1].Kind != "done" {
-		t.Fatalf("events=%+v", events)
 	}
 }

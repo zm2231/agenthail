@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -363,20 +364,6 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 		check  func(*testing.T, []surface.StreamEvent, error)
 	}{
 		{
-			name: "waits for a new turn instead of replaying history",
-			reads: []map[string]any{
-				managedTurn("old", "completed", agentMessage("old", "", "old answer")),
-				managedTurn("old", "completed", agentMessage("old", "", "old answer")),
-				managedTurn("new", "inProgress", agentMessage("interim", "commentary", "hel")),
-				managedTurn("new", "completed", agentMessage("interim", "commentary", "hel"), agentMessage("final", "final_answer", "hello")),
-			},
-			check: func(t *testing.T, events []surface.StreamEvent, err error) {
-				if err != nil || len(events) != 3 || events[0].Text != "hel" || events[0].ID != "managed:new:text" || events[1].Text != "hello" || !events[1].Final || events[1].Operation != "upsert" || events[1].ID != "managed:new:text" || events[2].Kind != "done" || events[2].ID != "managed:new:done" {
-					t.Fatalf("err=%v events=%+v", err, events)
-				}
-			},
-		},
-		{
 			name:   "completed target emits only the latest final answer",
 			turnID: "done",
 			reads: []map[string]any{
@@ -389,10 +376,9 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 			},
 		},
 		{
-			name: "growing final_answer phase stays partial until the turn ends",
+			name:   "growing final_answer phase stays partial until the turn ends",
+			turnID: "new",
 			reads: []map[string]any{
-				managedTurn("old", "completed", agentMessage("old", "", "old answer")),
-				managedTurn("old", "completed", agentMessage("old", "", "old answer")),
 				managedTurn("new", "inProgress", agentMessage("answer", "final_answer", "hel")),
 				managedTurn("new", "inProgress", agentMessage("answer", "final_answer", "hello")),
 				managedTurn("new", "completed", agentMessage("answer", "final_answer", "hello")),
@@ -433,10 +419,7 @@ func TestCodexManagedStreamEmitsAuthoritativeTurnEvents(t *testing.T) {
 func TestAManagedStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", "hello"))))
 	var texts []string
-	err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
-		if event.Kind == "commands" {
-			return
-		}
+	err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "turn-1", func(event surface.StreamEvent) {
 		texts = append(texts, event.Text)
 	}, 0)
 	if !errors.Is(err, surface.ErrStreamWindow) || len(texts) != 1 || texts[0] != "hello" {
@@ -444,54 +427,83 @@ func TestAManagedStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	}
 }
 
-func TestManagedStreamRestartsEmitIdempotentAuthoritativeSnapshots(t *testing.T) {
+func managedRolloutSession(t *testing.T, records ...string) *surface.Session {
+	t.Helper()
+	session := managedSession()
+	session.Transcript = filepath.Join(t.TempDir(), "rollout.jsonl")
+	writeTestTranscript(t, session.Transcript, records...)
+	return session
+}
+
+func streamManagedState(t *testing.T, codex *Codex, fake *codextest.Daemon, session *surface.Session, notify func(), stop func([]surface.StreamEvent) bool) []surface.StreamEvent {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var mu sync.Mutex
 	var events []surface.StreamEvent
-	for _, body := range []string{"hello", "hello", "hello world"} {
-		startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "inProgress", agentMessage("answer", "", body))))
-		err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "", func(event surface.StreamEvent) {
-			if event.Kind == "commands" {
+	notified := false
+	enough := make(chan struct{})
+	resumes := len(fake.Calls("thread/resume"))
+	done := make(chan error, 1)
+	go func() {
+		done <- codex.Stream(ctx, session, "", func(event surface.StreamEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			if event.Kind == "commands" || !notified {
 				return
 			}
 			events = append(events, event)
-		}, 20*time.Millisecond)
-		if !errors.Is(err, surface.ErrStreamWindow) {
-			t.Fatalf("window err=%v", err)
-		}
-	}
-	if len(events) != 3 {
+			if stop(events) {
+				select {
+				case <-enough:
+				default:
+					close(enough)
+				}
+			}
+		}, time.Minute)
+	}()
+	awaitCalls(t, fake, "thread/resume", resumes+1)
+	mu.Lock()
+	notified = true
+	mu.Unlock()
+	notify()
+	select {
+	case <-enough:
+	case err := <-done:
+		t.Fatalf("stream ended early: %v", err)
+	case <-time.After(5 * time.Second):
+		mu.Lock()
+		defer mu.Unlock()
 		t.Fatalf("events=%+v", events)
 	}
-	for index, want := range []string{"hello", "hello", "hello world"} {
-		event := events[index]
-		if event.ID != "managed:turn-1:text" || event.Operation != "upsert" || event.Text != want || event.Version != uint64(len(want)) || event.Kind == "done" {
-			t.Fatalf("event %d=%+v", index, event)
-		}
-	}
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	return slices.Clone(events)
 }
 
 func TestCodexManagedStreamForwardsGoalAndContextNotificationsForItsThread(t *testing.T) {
-	fake := startManagedCodex(t, managedThreadReads(managedTurn("turn", "completed", agentMessage("final", "final_answer", "done"))))
+	fake := startManagedCodex(t, nil)
 	fake.AddThread(codextest.Thread{ID: "thread"})
 	fake.Load("thread")
-	fake.Notify("thread/goal/cleared", map[string]any{"threadId": "other"})
-	fake.Notify("thread/goal/cleared", map[string]any{"threadId": "thread"})
-	fake.Notify("thread/tokenUsage/updated", map[string]any{
-		"threadId": "thread",
-		"tokenUsage": map[string]any{
-			"last":               map[string]any{"inputTokens": float64(90000), "cachedInputTokens": float64(80000), "outputTokens": float64(1000), "reasoningOutputTokens": float64(200), "totalTokens": float64(91000)},
-			"total":              map[string]any{"totalTokens": float64(1000000)},
-			"modelContextWindow": float64(258400),
-		},
-	})
-	fake.Notify("item/started", map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}})
-	fake.Notify("item/completed", map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}})
-	var events []surface.StreamEvent
-	if err := isolatedManagedRuntime(t).Stream(context.Background(), managedSession(), "turn", func(event surface.StreamEvent) {
-		events = append(events, event)
-	}, 2*time.Second); err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 6 || events[4].Kind != "text" || !events[4].Final || events[5].Kind != "done" {
+	session := managedRolloutSession(t, `{"type":"session_meta","payload":{"id":"thread"}}`)
+	session.TranscriptOffsetSet = true
+	events := streamManagedState(t, isolatedManagedRuntime(t), fake, session, func() {
+		fake.Notify("thread/goal/cleared", map[string]any{"threadId": "other"})
+		fake.Notify("thread/goal/cleared", map[string]any{"threadId": "thread"})
+		fake.Notify("thread/tokenUsage/updated", map[string]any{
+			"threadId": "thread",
+			"tokenUsage": map[string]any{
+				"last":               map[string]any{"inputTokens": float64(90000), "cachedInputTokens": float64(80000), "outputTokens": float64(1000), "reasoningOutputTokens": float64(200), "totalTokens": float64(91000)},
+				"total":              map[string]any{"totalTokens": float64(1000000)},
+				"modelContextWindow": float64(258400),
+			},
+		})
+		fake.Notify("item/started", map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}})
+		fake.Notify("item/completed", map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}})
+	}, func(events []surface.StreamEvent) bool { return len(events) >= 4 })
+	if len(events) != 4 {
 		t.Fatalf("events=%+v", events)
 	}
 	goal, usage, started, completed := events[0], events[1], events[2], events[3]

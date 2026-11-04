@@ -32,7 +32,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 			continue
 		}
 		event := seedEvent(s.session.Surface, item)
-		keep[event.ProviderKey] = true
+		keep[seedJournalKey(event.ProviderKey, event.Operation, event.Kind)] = true
 		fresh = append(fresh, event)
 	}
 	var events []surface.StreamEvent
@@ -112,7 +112,7 @@ const journalRederives = 2
 func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	reader, ok := s.adapter.(surface.TranscriptItemReader)
 	if !ok {
-		return s.rederiveCodexJournal(ctx)
+		return nil
 	}
 	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
 	if err != nil || version >= transcriptJournalDerivation {

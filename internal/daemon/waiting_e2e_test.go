@@ -400,7 +400,7 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 		thread, _ := lifecycle.Daemon().Thread(id)
 		return thread.Turns[0].User == "Apply the migration\n"+surface.CLILabel+"also update the changelog"
 	})
-	awaitThreadReads(t, lifecycle, 3)
+	testkit.Eventually(t, "the held steer to be delivered", 5*time.Second, func() bool { return h.queueItem(held).Status == "delivered" })
 	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 1 || thread.Turns[0].User != "Apply the migration\n"+surface.CLILabel+"also update the changelog" {
 		t.Fatalf("thread=%+v", thread.Turns)
 	}

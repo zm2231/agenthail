@@ -51,6 +51,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		}
 		item.Kind = "message"
 		item.Role = str(payload, "role")
+		item.Phase = str(payload, "phase")
 		item.Title = item.Role
 		if channel := str(payload, "channel"); channel != "" {
 			item.Title += " · " + channel

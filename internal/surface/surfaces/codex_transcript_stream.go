@@ -140,5 +140,5 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text, Turn: item.Turn})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Phase: item.Phase, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text, Turn: item.Turn})
 }

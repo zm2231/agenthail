@@ -20,6 +20,7 @@ type sessionJournalPayload struct {
 	Sender           string                   `json:"sender,omitempty"`
 	Title            string                   `json:"title,omitempty"`
 	Status           string                   `json:"status,omitempty"`
+	Phase            string                   `json:"phase,omitempty"`
 	ResetsAt         string                   `json:"resetsAt,omitempty"`
 	ItemID           string                   `json:"itemId"`
 	ProviderKey      string                   `json:"providerKey,omitempty"`
@@ -87,7 +88,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
 }
 
 func commandsOf(commands *surface.RuntimeCommands) []surface.RuntimeCommand {
