@@ -221,7 +221,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if record, found := catalogSessions[session.ID]; found {
 			_ = json.Unmarshal(record.Project, &identity.Project)
 			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
-			identity.UnavailableReason = record.UnavailableReason
 			observedAt = record.ObservedAt
 		}
 		if observedAt.IsZero() {

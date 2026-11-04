@@ -57,8 +57,8 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 	}
 	d.catalogIdentities.setProjects(records)
 	identity := d.catalogIdentities.identity(context.Background(), session, time.Now(), func() *CatalogProject { return nil })
-	if identity.Project == nil && identity.UnavailableReason != "" {
-		return nil, fmt.Errorf("resolve the project of %s: %s", session.Cwd, identity.UnavailableReason)
+	if identity.Project == nil && identity.Problem != "" {
+		return nil, fmt.Errorf("resolve the project of %s: %s", session.Cwd, identity.Problem)
 	}
 	return identity.Project, nil
 }

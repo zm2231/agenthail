@@ -732,7 +732,7 @@ func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string
 	}
 	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
 	if transient {
-		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
+		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.Problem)
 	}
 	return identity.Project, nil
 }
