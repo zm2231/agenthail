@@ -1712,7 +1712,7 @@ func refusalAttentionOpen(t *testing.T, r *Registry, id int64) bool {
 
 func TestControlOperationsWaitForIdleAndAreNeverSteered(t *testing.T) {
 	r := openTestRegistry(t)
-	r.SetBusyPolicy(func() (deliverypolicy.Mode, error) { return deliverypolicy.Steer, nil })
+	r.SetBusyPolicy(func() deliverypolicy.Mode { return deliverypolicy.Steer })
 	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}); err != nil {
 		t.Fatal(err)
 	}

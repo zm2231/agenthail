@@ -20,7 +20,7 @@ type Registry struct {
 	openLock      *os.File
 	path          string
 	now           func() time.Time
-	busyPolicy    func() (deliverypolicy.Mode, error)
+	busyPolicy    func() deliverypolicy.Mode
 	retiredCounts catalogRetiredCache
 	seen          deviceSeen
 	retryBackoff  time.Duration
@@ -31,23 +31,22 @@ func (r *Registry) SetRetryBackoff(backoff time.Duration) {
 	r.retryBackoff = backoff
 }
 
-func (r *Registry) SetBusyPolicy(policy func() (deliverypolicy.Mode, error)) {
+func (r *Registry) SetBusyPolicy(policy func() deliverypolicy.Mode) {
 	r.busyPolicy = policy
 }
 
-func (r *Registry) busyMode() (deliverypolicy.Mode, error) {
+func (r *Registry) busyMode() deliverypolicy.Mode {
 	if r.busyPolicy == nil {
-		return deliverypolicy.Queue, nil
+		return deliverypolicy.Queue
 	}
 	return r.busyPolicy()
 }
 
-func (r *Registry) Steers(busyDelivery string) (bool, error) {
+func (r *Registry) Steers(busyDelivery string) bool {
 	if busyDelivery != "" {
-		return busyDelivery == string(deliverypolicy.Steer), nil
+		return busyDelivery == string(deliverypolicy.Steer)
 	}
-	mode, err := r.busyMode()
-	return mode == deliverypolicy.Steer, err
+	return r.busyMode() == deliverypolicy.Steer
 }
 
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)

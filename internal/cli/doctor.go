@@ -133,7 +133,7 @@ func (a *App) cmdDoctor(args []string) error {
 	signins := a.signinStatus(ctx)
 	_, settingsErr := daemon.LoadDashboardConfig()
 	if settingsErr != nil {
-		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait: %w", daemon.DashboardConfigPath(), settingsErr)
+		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", daemon.DashboardConfigPath(), settingsErr)
 		failures++
 	}
 	home, _ := os.UserHomeDir()
