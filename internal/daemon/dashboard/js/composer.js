@@ -205,6 +205,15 @@ export function bindComposerEvents() {
   configurePendingSends({ answered: sendAnswered, refused: sendRefused, changed: renderSendStatus });
   bindSendStatus();
   bindAttachmentEvents(syncComposerAction);
+  app.drafts.watch?.((sessionId, text, previous) => {
+    if (app.selected?.id !== sessionId) return true;
+    const input = $("#message");
+    if (input.value !== previous) return false;
+    input.value = text;
+    resizeComposer();
+    syncComposerAction();
+    return true;
+  });
   $("#message").addEventListener("input", () => {
     if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
     resizeComposer();

@@ -52,7 +52,11 @@ async function loaded({ status = "busy", values = new Map(), refuses = () => fal
       removeItem: (key) => values.delete(key),
     },
     navigator: {},
-    window: { addEventListener() {}, confirm: () => true },
+    window: {
+      listeners: {},
+      addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); },
+      confirm: () => true,
+    },
     crypto: { randomUUID: () => `id-${++ids}` },
     fetch: async (_url, request) => {
       requests.push(JSON.parse(request.body));
@@ -318,6 +322,47 @@ async function takenBack(tab, queueId = 7) {
   tab.context.syncComposerAction();
   assert.equal(tab.$("#send").disabled, true, "nothing left to send");
   assert.equal(drafts(tab).length, 0, "an empty composer keeps no draft");
+}
+
+{
+  const values = new Map();
+  const tab = await loaded({ values });
+  tab.$("#message").value = "unsent words";
+  tab.$("#message").listeners.input();
+  const moving = await loaded({ values, refuses: (key) => key.includes('"a2"') });
+  moving.context.applyRekeys({ a: "a2" });
+  const reloaded = await loaded({ values });
+  assert.equal(reloaded.context.app.drafts.get("a"), "unsent words", "a draft move storage refuses keeps the draft where it was");
+}
+
+{
+  const values = new Map();
+  const stale = await loaded({ values });
+  stale.$("#message").value = "old words";
+  stale.$("#message").listeners.input();
+  const current = await loaded({ values });
+  assert.equal(current.$("#message").value, "old words");
+  current.$("#message").value = "newer words";
+  current.$("#message").listeners.input();
+  stale.context.app.drafts.set("a", stale.$("#message").value);
+  assert.equal((await loaded({ values })).context.app.drafts.get("a"), "newer words", "a stale tab switching away does not overwrite a newer draft");
+  current.$("#message").value = "";
+  current.$("#message").listeners.input();
+  stale.context.app.drafts.set("a", stale.$("#message").value);
+  assert.equal((await loaded({ values })).context.app.drafts.get("a"), undefined, "nor bring back text another tab cleared");
+}
+
+{
+  const values = new Map();
+  const watching = await loaded({ values });
+  watching.$("#message").value = "first";
+  watching.$("#message").listeners.input();
+  const other = await loaded({ values });
+  other.$("#message").value = "first, then more";
+  other.$("#message").listeners.input();
+  const key = [...values.keys()].find((name) => name.startsWith("agenthail.draft."));
+  for (const listener of watching.context.window.listeners.storage) listener({ key, newValue: values.get(key) });
+  assert.equal(watching.$("#message").value, "first, then more", "an untouched composer shows the draft another tab saved");
 }
 
 console.log("queued attachments: ok");
