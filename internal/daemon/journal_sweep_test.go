@@ -70,7 +70,24 @@ func TestACancelledSweepStops(t *testing.T) {
 	cancel()
 	d.sweepJournals(ctx, time.Now())
 	ids, err := r.IdleJournalSessions(time.Now())
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("one session is swept before the pause notices: %v %v", ids, err)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("a cancelled sweep touched a session: %v %v", ids, err)
+	}
+}
+
+func TestStoppingTheDaemonsBackgroundWorkEndsTheSweepLoop(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	if !d.background.start(d.runJournalSweeps) {
+		t.Fatal("the sweep did not start")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		d.background.stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sweep loop outlived the daemon's background work")
 	}
 }

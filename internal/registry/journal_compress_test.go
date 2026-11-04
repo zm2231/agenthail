@@ -122,7 +122,7 @@ func TestACompressedJournalReadsTheSameThroughEveryReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	compressed, err := r.CompressJournalSession(session)
+	compressed, err := r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,13 +160,13 @@ func TestOnlySessionsIdlePastTheCutoffWithUnsweptRowsAreCandidates(t *testing.T)
 	if got := candidates(); len(got) != 1 || got[0] != session {
 		t.Fatalf("idle session: candidates=%v", got)
 	}
-	if _, err := r.CompressJournalSession(session); err != nil {
+	if _, err := r.CompressJournalSession(session, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := candidates(); len(got) != 0 {
 		t.Fatalf("after a sweep: candidates=%v", got)
 	}
-	second, err := r.CompressJournalSession(session)
+	second, err := r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil || second.Rows != 0 {
 		t.Fatalf("second sweep=%+v err=%v", second, err)
 	}
@@ -181,13 +181,46 @@ func TestOnlySessionsIdlePastTheCutoffWithUnsweptRowsAreCandidates(t *testing.T)
 	}
 }
 
+func TestASessionThatWakesAfterBeingListedIsLeftAlone(t *testing.T) {
+	r, session := journalCompressFixture(t)
+	now := time.Now()
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	fillJournal(t, r, session, now.Add(-8*24*time.Hour))
+	ids, err := r.IdleJournalSessions(cutoff)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("candidates=%v err=%v", ids, err)
+	}
+	var sweptBefore int64
+	if err := r.read.QueryRow(`SELECT swept_seq FROM session_journal_state WHERE session_id=?`, session).Scan(&sweptBefore); err != nil {
+		t.Fatal(err)
+	}
+	appendJournalRow(t, r, session, "toolCall", "woke", strings.Repeat("new work ", 200), now, nil, nil)
+
+	compressed, err := r.CompressJournalSession(session, cutoff)
+	if err != nil || compressed != (JournalCompression{}) {
+		t.Fatalf("compressed=%+v err=%v", compressed, err)
+	}
+	for key, codec := range storedCodecs(t, r, session) {
+		if codec != journalCodecPlain {
+			t.Fatalf("%s has codec %d", key, codec)
+		}
+	}
+	var sweptAfter int64
+	if err := r.read.QueryRow(`SELECT swept_seq FROM session_journal_state WHERE session_id=?`, session).Scan(&sweptAfter); err != nil {
+		t.Fatal(err)
+	}
+	if sweptAfter != sweptBefore {
+		t.Fatalf("swept_seq moved from %d to %d", sweptBefore, sweptAfter)
+	}
+}
+
 func TestRowsThatDoNotShrinkStopBeingCandidates(t *testing.T) {
 	r, session := journalCompressFixture(t)
 	appendJournalRow(t, r, session, "toolCall", "tiny", "x", time.Now().Add(-30*24*time.Hour), nil, nil)
 	if _, err := r.db.Exec(`UPDATE session_journal SET payload=X'7B7D' WHERE session_id=?`, session); err != nil {
 		t.Fatal(err)
 	}
-	compressed, err := r.CompressJournalSession(session)
+	compressed, err := r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil || compressed.Rows != 0 {
 		t.Fatalf("compressed=%+v err=%v", compressed, err)
 	}
@@ -201,9 +234,20 @@ func TestAnUpsertDuringASweepKeepsItsNewContent(t *testing.T) {
 	r, session := journalCompressFixture(t)
 	old := time.Now().Add(-30 * 24 * time.Hour)
 	fillJournal(t, r, session, old)
-	packed, err := r.packJournalRows(session)
+	packed, err := r.packJournalRows(session, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
+	}
+	var plain, compressed int64
+	for _, row := range packed.rows {
+		var key string
+		if err := r.read.QueryRow(`SELECT provider_key FROM session_journal WHERE session_id=? AND seq=?`, session, row.seq).Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		if key != "c1" {
+			plain += int64(row.plainSize)
+			compressed += int64(len(row.payload))
+		}
 	}
 	newer := strings.Repeat("rewritten while the sweep ran ", 100)
 	moved := appendJournalRow(t, r, session, "toolCall", "c1", newer, time.Now(), nil, nil)
@@ -211,8 +255,8 @@ func TestAnUpsertDuringASweepKeepsItsNewContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Rows != 2 {
-		t.Fatalf("stored %d rows, want the 2 that did not move", summary.Rows)
+	if summary.Rows != 2 || summary.Plain != plain || summary.Packed != compressed {
+		t.Fatalf("summary=%+v, want the 2 rows that did not move: %d -> %d", summary, plain, compressed)
 	}
 	if got := storedCodecs(t, r, session)["c1"]; got != journalCodecPlain {
 		t.Fatalf("the moved row has codec %d", got)
@@ -225,7 +269,7 @@ func TestAnUpsertDuringASweepKeepsItsNewContent(t *testing.T) {
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("the moved row is due another sweep: %v %v", ids, err)
 	}
-	summary, err = r.CompressJournalSession(session)
+	summary, err = r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil || summary.Rows != 1 {
 		t.Fatalf("next sweep=%+v err=%v", summary, err)
 	}
@@ -235,7 +279,7 @@ func TestAnUpsertOfACompressedRow(t *testing.T) {
 	r, session := journalCompressFixture(t)
 	old := time.Now().Add(-30 * 24 * time.Hour)
 	fillJournal(t, r, session, old)
-	if _, err := r.CompressJournalSession(session); err != nil {
+	if _, err := r.CompressJournalSession(session, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	same, found, err := r.SessionJournalEntryByProviderKey(session, "c1")
@@ -263,7 +307,7 @@ func TestARebuildWritesPlainRowsAndTheNextSweepCompressesThemOnce(t *testing.T) 
 	r, session := journalCompressFixture(t)
 	old := time.Now().Add(-30 * 24 * time.Hour)
 	fillJournal(t, r, session, old)
-	if _, err := r.CompressJournalSession(session); err != nil {
+	if _, err := r.CompressJournalSession(session, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	window, err := r.SessionJournalAfter(session, 0, 50)
@@ -289,11 +333,11 @@ func TestARebuildWritesPlainRowsAndTheNextSweepCompressesThemOnce(t *testing.T) 
 			t.Fatalf("%s has codec %d after a rebuild", key, codec)
 		}
 	}
-	first, err := r.CompressJournalSession(session)
+	first, err := r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil || first.Rows != 3 {
 		t.Fatalf("first sweep=%+v err=%v", first, err)
 	}
-	second, err := r.CompressJournalSession(session)
+	second, err := r.CompressJournalSession(session, time.Now().Add(time.Hour))
 	if err != nil || second.Rows != 0 {
 		t.Fatalf("second sweep=%+v err=%v", second, err)
 	}
@@ -311,7 +355,7 @@ func TestCompressionLeavesRetentionWhereItWas(t *testing.T) {
 	for i := range 4 {
 		size = appendJournalRow(t, r, session, "toolCall", "c"+strconv.Itoa(i), body, old, nil, nil).Bytes
 	}
-	if _, err := r.CompressJournalSession(session); err != nil {
+	if _, err := r.CompressJournalSession(session, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	tight := SessionJournalRetention{Count: 2048, Bytes: size * 4}

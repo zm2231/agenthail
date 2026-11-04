@@ -44,7 +44,10 @@ func (d *Daemon) sweepJournals(ctx context.Context, now time.Time) {
 	}
 	var total registry.JournalCompression
 	for _, session := range sessions {
-		compressed, err := d.Registry.CompressJournalSession(session)
+		if ctx.Err() != nil {
+			return
+		}
+		compressed, err := d.Registry.CompressJournalSession(session, now.Add(-journalIdleAfter))
 		if err != nil {
 			d.log.Printf("journal sweep: session %s: %s", session, err)
 		}

@@ -328,7 +328,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runGoalSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
-	go d.runJournalSweeps(ctx)
+	d.background.start(d.runJournalSweeps)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})
 	go func() {

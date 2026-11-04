@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -57,14 +59,15 @@ type JournalCompression struct {
 
 type packedJournalRows struct {
 	sessionID  string
+	idleSince  string
 	throughSeq int64
 	rows       []packedJournalRow
-	summary    JournalCompression
 }
 
 type packedJournalRow struct {
-	seq     int64
-	payload []byte
+	seq       int64
+	payload   []byte
+	plainSize int
 }
 
 // IdleJournalSessions lists sessions whose newest row predates idleSince and that have rows no sweep has looked at.
@@ -85,16 +88,16 @@ func (r *Registry) IdleJournalSessions(idleSince time.Time) ([]string, error) {
 }
 
 // CompressJournalSession changes no seq, position, observed_at or bytes, so stream cursors, retention and idleness read the same afterwards.
-func (r *Registry) CompressJournalSession(sessionID string) (JournalCompression, error) {
-	packed, err := r.packJournalRows(sessionID)
+func (r *Registry) CompressJournalSession(sessionID string, idleSince time.Time) (JournalCompression, error) {
+	packed, err := r.packJournalRows(sessionID, idleSince)
 	if err != nil {
 		return JournalCompression{}, err
 	}
 	return r.storePackedJournalRows(packed)
 }
 
-func (r *Registry) packJournalRows(sessionID string) (packedJournalRows, error) {
-	packed := packedJournalRows{sessionID: sessionID}
+func (r *Registry) packJournalRows(sessionID string, idleSince time.Time) (packedJournalRows, error) {
+	packed := packedJournalRows{sessionID: sessionID, idleSince: formatTimestamp(idleSince)}
 	if err := r.read.QueryRow(`SELECT next_seq FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&packed.throughSeq); err != nil {
 		return packed, err
 	}
@@ -113,13 +116,12 @@ func (r *Registry) packJournalRows(sessionID string) (packedJournalRows, error) 
 		if len(compressed) >= len(payload) {
 			continue
 		}
-		packed.rows = append(packed.rows, packedJournalRow{seq: seq, payload: compressed})
-		packed.summary.Plain += int64(len(payload))
-		packed.summary.Packed += int64(len(compressed))
+		packed.rows = append(packed.rows, packedJournalRow{seq: seq, payload: compressed, plainSize: len(payload)})
 	}
 	return packed, rows.Err()
 }
 
+// A session can wake after it was listed, so idleness is decided here, under the write lock.
 // An upsert gives a row a new seq, so one that moved after packing no longer matches and stays as written.
 func (r *Registry) storePackedJournalRows(packed packedJournalRows) (JournalCompression, error) {
 	tx, err := r.db.Begin()
@@ -127,8 +129,17 @@ func (r *Registry) storePackedJournalRows(packed packedJournalRows) (JournalComp
 		return JournalCompression{}, err
 	}
 	defer tx.Rollback()
-	summary := packed.summary
-	summary.Rows = 0
+	var newest string
+	if err := tx.QueryRow(`SELECT observed_at FROM session_journal WHERE session_id=? ORDER BY seq DESC LIMIT 1`, packed.sessionID).Scan(&newest); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return JournalCompression{}, nil
+		}
+		return JournalCompression{}, err
+	}
+	if newest >= packed.idleSince {
+		return JournalCompression{}, nil
+	}
+	var summary JournalCompression
 	for _, row := range packed.rows {
 		result, err := tx.Exec(`UPDATE session_journal SET payload=?,payload_codec=? WHERE session_id=? AND seq=? AND payload_codec=0`, row.payload, journalCodecZstd, packed.sessionID, row.seq)
 		if err != nil {
@@ -138,7 +149,11 @@ func (r *Registry) storePackedJournalRows(packed packedJournalRows) (JournalComp
 		if err != nil {
 			return JournalCompression{}, err
 		}
-		summary.Rows += int(changed)
+		if changed > 0 {
+			summary.Rows++
+			summary.Plain += int64(row.plainSize)
+			summary.Packed += int64(len(row.payload))
+		}
 	}
 	if _, err := tx.Exec(`UPDATE session_journal_state SET swept_seq=MAX(swept_seq,?) WHERE session_id=?`, packed.throughSeq, packed.sessionID); err != nil {
 		return JournalCompression{}, err
