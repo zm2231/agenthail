@@ -73,7 +73,10 @@ func (a *App) daemonRun() error {
 	for _, e := range a.Surfaces {
 		_ = e
 	}
-	d := daemon.New(a.registry(), a.allSurfaces())
+	began := time.Now()
+	opened := a.registry()
+	d := daemon.New(opened, a.allSurfaces())
+	d.SetStartup(began, time.Since(began))
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -198,22 +201,24 @@ func (a *App) restartDaemonForDashboard() error {
 }
 
 func waitForDashboard(listen string, timeout time.Duration) error {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
-		response, err := client.Get("http://" + listen + "/")
-		if err == nil {
-			response.Body.Close()
-			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusOK || response.StatusCode == http.StatusFound {
-				return true, nil
-			}
-		}
-		return false, nil
+		return dashboardAnswers(listen), nil
 	}); err == nil {
 		return nil
 	}
 	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemonStatusLogPath())
+}
+
+func dashboardAnswers(listen string) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	response, err := client.Get("http://" + listen + "/")
+	if err != nil {
+		return false
+	}
+	response.Body.Close()
+	return response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusOK || response.StatusCode == http.StatusFound
 }
 
 func (a *App) daemonInstallService() error {

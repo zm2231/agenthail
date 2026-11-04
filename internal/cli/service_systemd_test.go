@@ -3,9 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -41,6 +44,8 @@ type fakeSystemctl struct {
 	managerDown   bool
 	linger        bool
 	lingerRefused bool
+	startFails    bool
+	otherMainPID  int
 }
 
 func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
@@ -49,7 +54,13 @@ func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", "")
-	bin := filepath.Join(t.TempDir(), "agenthail")
+	// Install enables the dashboard at the default address; this stands in for what the real daemon would serve there.
+	dashboard := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(dashboard.Close)
+	previousListen := daemon.DefaultDashboardListen
+	daemon.DefaultDashboardListen = dashboard.Listener.Addr().String()
+	t.Cleanup(func() { daemon.DefaultDashboardListen = previousListen })
+	bin :=filepath.Join(t.TempDir(), "agenthail")
 	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -83,6 +94,15 @@ func (f *fakeSystemctl) stopDaemon() {
 func (f *fakeSystemctl) run(name string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.Join(args, " ") == "--user show "+systemdUnitName+" --property=MainPID --value" {
+		if f.otherMainPID != 0 {
+			return []byte(strconv.Itoa(f.otherMainPID) + "\n"), nil
+		}
+		if f.process == nil || f.managerDown {
+			return []byte("0\n"), nil
+		}
+		return []byte(strconv.Itoa(f.process.Process.Pid) + "\n"), nil
+	}
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
@@ -122,7 +142,9 @@ func (f *fakeSystemctl) run(name string, args ...string) ([]byte, error) {
 		}
 	case "restart " + systemdUnitName:
 		f.stopDaemon()
-		f.startDaemon()
+		if !f.startFails {
+			f.startDaemon()
+		}
 	case "stop " + systemdUnitName:
 		f.stopDaemon()
 	case "is-active " + systemdUnitName:

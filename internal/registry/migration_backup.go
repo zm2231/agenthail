@@ -1,7 +1,9 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +11,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"modernc.org/sqlite"
 )
 
 // keptMigrationBackups is how many pre-migration copies stay beside a
@@ -34,26 +39,33 @@ func migrationBackupPath(path string, target int) string {
 	return fmt.Sprintf("%s-before-v%d.db", stem, target)
 }
 
-// backUpBeforeMigration copies the registry, which the caller holds the
-// write lock on at schema found, before it is migrated to target. The copy
-// is made on its own connection, since VACUUM cannot run inside the lock's
-// transaction, and is checked to hold schema found before it takes its name.
+// MigrationTiming is what an open that upgraded the registry spent on it.
+type MigrationTiming struct {
+	From, To int
+	Backup   time.Duration
+	Migrate  time.Duration
+}
+
+// Every other open waits on the caller's write lock, so this copies pages rather than rebuilding with VACUUM.
 func (r *Registry) backUpBeforeMigration(found, target int) error {
 	final := migrationBackupPath(r.diskPath(), target)
 	temporary := final + ".tmp"
-	_ = os.Remove(temporary)
+	removeCopy(temporary)
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("back up the registry before migrating it: %w", err)
 	}
 	file.Close()
-	defer os.Remove(temporary)
+	defer removeCopy(temporary)
 	source, err := sql.Open("sqlite", r.path+r.querySeparator()+"_pragma=busy_timeout(15000)")
 	if err != nil {
 		return fmt.Errorf("back up the registry before migrating it: %w", err)
 	}
 	defer source.Close()
-	if _, err := source.Exec(`VACUUM INTO ?`, temporary); err != nil {
+	if err := copyPages(source, temporary); err != nil {
+		return fmt.Errorf("back up the registry to %s before migrating it: %w", final, err)
+	}
+	if err := leaveWAL(temporary); err != nil {
 		return fmt.Errorf("back up the registry to %s before migrating it: %w", final, err)
 	}
 	if copied := schemaOf(temporary); copied != found {
@@ -63,6 +75,54 @@ func (r *Registry) backUpBeforeMigration(found, target int) error {
 		return fmt.Errorf("back up the registry before migrating it: %w", err)
 	}
 	pruneMigrationBackups(r.diskPath())
+	return nil
+}
+
+func removeCopy(path string) {
+	for _, suffix := range []string{"", "-journal", "-wal", "-shm"} {
+		_ = os.Remove(path + suffix)
+	}
+}
+
+func copyPages(source *sql.DB, destination string) error {
+	conn, err := source.Conn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Raw(func(driver any) error {
+		backup, err := driver.(interface {
+			NewBackup(string) (*sqlite.Backup, error)
+		}).NewBackup(destination)
+		if err != nil {
+			return err
+		}
+		for {
+			more, err := backup.Step(-1)
+			if err != nil {
+				return errors.Join(err, backup.Finish())
+			}
+			if !more {
+				return backup.Finish()
+			}
+		}
+	})
+}
+
+// A page copy keeps the WAL header; the restore command expects one self-contained file.
+func leaveWAL(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var mode string
+	if err := db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil {
+		return err
+	}
+	if mode != "delete" {
+		return fmt.Errorf("the copy stayed in journal mode %s", mode)
+	}
 	return nil
 }
 

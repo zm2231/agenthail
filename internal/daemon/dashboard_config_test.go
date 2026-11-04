@@ -39,7 +39,7 @@ func TestDashboardConfigRejectsInvalidValues(t *testing.T) {
 
 func TestDashboardConfigPersistsCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	config := DashboardConfig{Enabled: true, Listen: defaultDashboardListen, CodexRecentHours: 9}
+	config := DashboardConfig{Enabled: true, Listen: DefaultDashboardListen, CodexRecentHours: 9}
 	if err := SaveDashboardConfig(config); err != nil {
 		t.Fatal(err)
 	}

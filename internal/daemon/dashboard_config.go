@@ -12,8 +12,12 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
+const StandardDashboardListen = "127.0.0.1:7412"
+
+// DefaultDashboardListen moves only in tests, which must not reach a person's own Agenthail.
+var DefaultDashboardListen = StandardDashboardListen
+
 const (
-	defaultDashboardListen  = "127.0.0.1:7412"
 	defaultCodexRecentHours = 5
 	maximumCodexRecentHours = 168
 )
@@ -46,7 +50,7 @@ func DashboardTokenPath() string {
 func LoadDashboardConfig() (DashboardConfig, error) {
 	data, err := os.ReadFile(DashboardConfigPath())
 	if os.IsNotExist(err) {
-		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, BusyDelivery: deliverypolicy.Queue, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
+		return DashboardConfig{Listen: DefaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, BusyDelivery: deliverypolicy.Queue, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
 	}
 	if err != nil {
 		return DashboardConfig{}, fmt.Errorf("read dashboard config: %w", err)
@@ -56,7 +60,7 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 		return DashboardConfig{}, fmt.Errorf("parse dashboard config: %w", err)
 	}
 	if config.Listen == "" {
-		config.Listen = defaultDashboardListen
+		config.Listen = DefaultDashboardListen
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
@@ -77,7 +81,7 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 
 func SaveDashboardConfig(config DashboardConfig) error {
 	if config.Listen == "" {
-		config.Listen = defaultDashboardListen
+		config.Listen = DefaultDashboardListen
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
