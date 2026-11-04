@@ -244,6 +244,30 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix("composer.json.unreadable-") }, [aside])
     }
 
+    func testAFileThatCannotBeReadYetIsLeftAloneAndRestoredLater() throws {
+        let store = temporaryStore()
+        let first = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        first.selectedSessionID = "computer::codex-flow"
+        first.composer = "Typed before the lock"
+        first.saveComposerState()
+        let directory = store.file.deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.file.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path) }
+        try XCTSkipIf(FileManager.default.isReadableFile(atPath: store.file.path), "this runner can read any file")
+
+        let locked = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNotNil(locked.operationError)
+        locked.selectedSessionID = "computer::codex-flow"
+        locked.composer = "Typed while locked"
+        locked.saveComposerState()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["composer.json"], "a file that may be fine is not moved")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path)
+        XCTAssertEqual(store.load().saved.drafts["computer::codex-flow"], "Typed before the lock", "nothing overwrote it")
+        let unlocked = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNil(unlocked.operationError)
+    }
+
     func testAFileThatCannotBeMovedAsideIsNeverOverwritten() throws {
         let store = temporaryStore()
         let directory = store.file.deletingLastPathComponent()
@@ -252,6 +276,7 @@ final class ComposerSendTests: XCTestCase {
         try unreadable.write(to: store.file)
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
         addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        try XCTSkipIf(FileManager.default.isWritableFile(atPath: directory.path), "this runner can write any directory")
 
         let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         XCTAssertNotNil(model.operationError)

@@ -33,12 +33,11 @@ struct ComposerStore {
         var setAside: URL?
     }
 
-    /// A file that can't be read is moved aside rather than left for the next save to overwrite.
+    // A failed read can be temporary, such as a launch before first unlock, so only a file that was read and makes no sense moves.
     func load(now: Date = Date()) -> Loaded {
         guard FileManager.default.fileExists(atPath: file.path) else { return Loaded() }
-        if let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
-            return Loaded(saved: saved)
-        }
+        guard let data = try? Data(contentsOf: file) else { return Loaded(unreadable: true) }
+        if let saved = try? JSONDecoder().decode(Saved.self, from: data) { return Loaded(saved: saved) }
         let aside = file.deletingLastPathComponent().appendingPathComponent("\(file.lastPathComponent).unreadable-\(Int64(now.timeIntervalSince1970 * 1000))")
         let moved = (try? FileManager.default.moveItem(at: file, to: aside)) != nil
         return Loaded(unreadable: true, setAside: moved ? aside : nil)

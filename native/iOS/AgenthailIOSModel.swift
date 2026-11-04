@@ -1557,8 +1557,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard let composerStore else { return }
         let loaded = composerStore.load()
         if loaded.unreadable {
-            Self.composerLog.error("composer file unreadable; set aside as \(loaded.setAside?.lastPathComponent ?? "nothing, it could not be moved", privacy: .public)")
-            operationError = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
+            Self.composerLog.error("composer file unreadable; \(loaded.setAside.map { "set aside as \($0.lastPathComponent)" } ?? "left in place, not saving this launch", privacy: .public)")
+            operationError = loaded.setAside == nil
+                ? "Saved drafts couldn’t be read yet. New drafts won’t be saved until you reopen Agenthail."
+                : "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
             if loaded.setAside == nil { self.composerStore = nil }
         }
         let saved = loaded.saved
