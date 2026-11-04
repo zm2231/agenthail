@@ -23,19 +23,20 @@ func (a *App) cmdRegistry(args []string) error {
 	if err != nil || target < 1 {
 		return errors.New(registryUsage)
 	}
-	if pid, running := daemon.IsRunning(); running {
-		return fmt.Errorf("the daemon is running (pid %d); run 'agenthail daemon stop' first", pid)
-	}
-	restored, err := registry.RestoreMigrationBackup(target)
+	release, err := daemon.HoldDaemonLock()
 	if err != nil {
-		return err
+		return fmt.Errorf("the daemon is running or starting; run 'agenthail daemon stop' first: %w", err)
 	}
-	fmt.Printf("Restored the registry to schema %d from %s\n", restored.Schema, restored.From)
-	if restored.Aside != "" {
-		fmt.Printf("The registry it replaced is kept as %s\n", restored.Aside)
+	defer release()
+	restored, err := registry.RestoreMigrationBackup(target)
+	if restored.From != "" {
+		fmt.Printf("Restored the registry to schema %d from %s\n", restored.Schema, restored.From)
+		if restored.Aside != "" {
+			fmt.Printf("The registry it replaced is kept as %s\n", restored.Aside)
+		}
+		fmt.Println("If the daemon is not running, start it with 'agenthail daemon start'")
 	}
-	fmt.Println("Start the daemon with 'agenthail daemon start'")
-	return nil
+	return err
 }
 
 func printMigrationBackups() error {

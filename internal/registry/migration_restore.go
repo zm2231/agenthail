@@ -58,6 +58,15 @@ func restoreMigrationBackup(path string, target int) (RestoredRegistry, error) {
 	if file == "" {
 		return RestoredRegistry{}, fmt.Errorf("no copy was kept from before schema %d", target)
 	}
+	unlock, err := holdRestoreLock(path)
+	if err != nil {
+		return RestoredRegistry{}, err
+	}
+	defer unlock()
+	return swapInMigrationBackup(path, file)
+}
+
+func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 	schema := backupSchema(file)
 	if schema < 1 {
 		return RestoredRegistry{}, fmt.Errorf("%s cannot be read", file)
@@ -79,12 +88,13 @@ func restoreMigrationBackup(path string, target int) (RestoredRegistry, error) {
 		return RestoredRegistry{}, fmt.Errorf("set the current registry aside: %w", err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
-		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), moveBack(moved))
+		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), undoSetAside(aside, moved))
 	}
+	restored := RestoredRegistry{Schema: schema, From: file, Aside: aside}
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		return RestoredRegistry{}, fmt.Errorf("restore %s: %w", file, err)
+		return restored, fmt.Errorf("the registry was restored from %s, but it may not survive a power loss until the disk recovers: %w", file, err)
 	}
-	return RestoredRegistry{Schema: schema, From: file, Aside: aside}, nil
+	return restored, nil
 }
 
 func writeRestoredCopy(file, to string) error {
@@ -141,7 +151,8 @@ func verifyRestoredCopy(path string, schema int) error {
 
 type movedFile struct{ from, to string }
 
-// The WAL travels with the registry because it can hold rows the main file does not, and opening the registry could remove it.
+// The main file is linked rather than moved so the registry path never goes missing, since an opener would create an empty registry there.
+// The sidecars move first because an old WAL must never meet the restored file. Opening the registry to learn its schema could remove its WAL.
 func setRegistryAside(path string) (string, []movedFile, error) {
 	current, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -153,18 +164,29 @@ func setRegistryAside(path string) (string, []movedFile, error) {
 	schema := schemaInHeader(current)
 	current.Close()
 	aside := registryAsidePath(path, schema, time.Now())
+	if err := os.Link(path, aside); err != nil {
+		return "", nil, err
+	}
 	var moved []movedFile
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
 		err := os.Rename(path+suffix, aside+suffix)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return "", nil, errors.Join(err, moveBack(moved))
+			return "", nil, errors.Join(err, undoSetAside(aside, moved))
 		}
 		moved = append(moved, movedFile{path + suffix, aside + suffix})
 	}
 	return aside, moved, nil
+}
+
+func undoSetAside(aside string, moved []movedFile) error {
+	failures := []error{moveBack(moved)}
+	if aside != "" {
+		failures = append(failures, os.Remove(aside))
+	}
+	return errors.Join(failures...)
 }
 
 func registryAsidePath(path string, schema int, now time.Time) string {

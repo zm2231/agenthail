@@ -30,6 +30,18 @@ func acquireDaemonLock() (*os.File, error) {
 	return file, nil
 }
 
+// HoldDaemonLock proves no daemon is running, and keeps one from starting until release.
+func HoldDaemonLock() (release func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(LockFilePath()), 0700); err != nil {
+		return nil, err
+	}
+	file, err := acquireDaemonLock()
+	if err != nil {
+		return nil, err
+	}
+	return func() { releaseDaemonLock(file) }, nil
+}
+
 func releaseDaemonLock(file *os.File) {
 	if file == nil {
 		return

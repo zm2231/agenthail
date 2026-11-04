@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -165,15 +166,12 @@ func TestARestoreRefusesARunningDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	daemonLike := exec.Command("/bin/sh", "-c", "sleep 60; :", "agenthail", "daemon-run")
-	if err := daemonLike.Start(); err != nil {
+	lock, err := os.OpenFile(filepath.Join(home, ".agenthail", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		daemonLike.Process.Kill()
-		daemonLike.Wait()
-	})
-	if err := os.WriteFile(filepath.Join(home, ".agenthail", "daemon.pid"), []byte(strconv.Itoa(daemonLike.Process.Pid)), 0600); err != nil {
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
 	output, err := runAgenthail(t, home, "registry", "restore", strconv.Itoa(future))

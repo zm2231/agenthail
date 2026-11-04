@@ -156,6 +156,9 @@ func (r *Registry) current() (bool, error) {
 }
 
 func connect(path string) (*Registry, error) {
+	if err := waitForRestore(path); err != nil {
+		return nil, err
+	}
 	sep := "?"
 	if strings.Contains(path, "?") {
 		sep = "&"

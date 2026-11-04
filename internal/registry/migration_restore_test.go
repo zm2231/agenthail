@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func plainCopyOfBackup(t *testing.T, path string, target int) string {
@@ -387,23 +388,92 @@ func TestARefusedRestoreLeavesTheRegistryAlone(t *testing.T) {
 	}
 }
 
-func TestAFailedFinalRenamePutsTheRegistryBack(t *testing.T) {
+func TestUndoingASetAsideLeavesTheRegistryAsItWas(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
-	if err := os.WriteFile(path, []byte("current"), 0600); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{path, path + "-wal"} {
+		if err := os.WriteFile(file, []byte("current"), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	aside, moved, err := setRegistryAside(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) || aside == "" {
-		t.Fatalf("not moved: %v %q", err, aside)
+	if _, err := os.Stat(path + "-wal"); !os.IsNotExist(err) || aside == "" {
+		t.Fatalf("not set aside: %v %q", err, aside)
 	}
-	if err := moveBack(moved); err != nil {
+	if err := undoSetAside(aside, moved); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(path); string(data) != "current" {
-		t.Fatalf("data=%q", data)
+	for _, file := range []string{path, path + "-wal"} {
+		if data, _ := os.ReadFile(file); string(data) != "current" {
+			t.Fatalf("%s=%q", file, data)
+		}
+	}
+	if _, err := os.Stat(aside); !os.IsNotExist(err) {
+		t.Fatalf("the aside link stayed: %v", err)
+	}
+}
+
+func TestTheRegistryPathNeverGoesMissingDuringARestore(t *testing.T) {
+	path, newer := registryNewerThanBuildWithBackup(t, true)
+	stop := make(chan struct{})
+	missing := make(chan bool, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				missing <- false
+				return
+			default:
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					missing <- true
+					return
+				}
+			}
+		}
+	}()
+	if _, err := restoreMigrationBackup(path, newer); err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	if <-missing {
+		t.Fatal("an opener in that moment would have created an empty registry")
+	}
+}
+
+func TestAnOpenDuringARestoreWaitsForItAndGetsTheRestoredRegistry(t *testing.T) {
+	path, newer := registryNewerThanBuildWithBackup(t, true)
+	unlock, err := holdRestoreLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		r, err := Open(path)
+		if err == nil {
+			_, err = r.Session("kept")
+			r.Close()
+		}
+		opened <- err
+	}()
+	select {
+	case err := <-opened:
+		t.Fatalf("the open went through during a restore: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if _, err := restoreMigrationBackup(path, newer); err == nil {
+		t.Fatal("a second restore ran alongside the first")
+	}
+	if _, err := swapInMigrationBackup(path, compressedBackupPath(path, newer)); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if err := <-opened; err != nil {
+		t.Fatalf("the waiting open failed: %v", err)
+	}
+	if _, err := os.Stat(restoreLockPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("the lock file stayed: %v", err)
 	}
 }
 
