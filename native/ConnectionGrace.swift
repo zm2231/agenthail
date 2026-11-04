@@ -1,17 +1,26 @@
 import Foundation
 
 struct ConnectionGrace {
-    var window: TimeInterval = 15
+    var window: TimeInterval = 30
     private(set) var lastContact: Date?
+    private var failingSince: Date?
 
-    mutating func contact(at now: Date = Date()) { lastContact = now }
+    mutating func contact(at now: Date = Date()) {
+        lastContact = now
+        failingSince = nil
+    }
 
-    mutating func forget() { lastContact = nil }
+    mutating func forget() {
+        lastContact = nil
+        failingSince = nil
+    }
 
     // Only a dropped or slow transport is held; a refusal, an unpaired device or an incompatible daemon is shown at once.
-    func holds(_ error: Error, at now: Date = Date()) -> Bool {
-        guard Self.isTransport(error), let lastContact else { return false }
-        return now.timeIntervalSince(lastContact) < window
+    mutating func holds(_ error: Error, at now: Date = Date()) -> Bool {
+        guard Self.isTransport(error), lastContact != nil else { return false }
+        let since = failingSince ?? now
+        failingSince = since
+        return now.timeIntervalSince(since) < window
     }
 
     static func isTransport(_ error: Error) -> Bool {

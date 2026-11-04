@@ -89,7 +89,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
         _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Send once")
         try await api.action("goal-set", sessionID: "codex-flow", message: "Set a goal")
-        _ = try await api.queuePage()
+        _ = try await api.activeQueue()
 
         let generated = try XCTUnwrap(TurnSettingsFlowProtocol.state.actionIdempotencyKeys.compactMap { $0 }.first)
         XCTAssertNotNil(UUID(uuidString: generated))

@@ -29,6 +29,8 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: InboxMessage.swift
+      - path: PeerEnvelope.swift
       - path: TaggedResponses.swift
       - path: UIConfig.swift
       - path: SurfaceMode.swift

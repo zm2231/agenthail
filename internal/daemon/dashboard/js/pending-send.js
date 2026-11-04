@@ -127,9 +127,9 @@ export function configurePendingSends(next) {
 
 let sequence = 0;
 
-export function enqueueSend(sessionId, wire, text) {
+export function enqueueSend(sessionId, wire, text, attachments = []) {
   const id = crypto.randomUUID();
-  const item = { id, key: crypto.randomUUID(), sessionId, wire, text, createdAt: Date.now(), sequence: ++sequence, attemptedAt: 0, unconfirmed: false };
+  const item = { id, key: crypto.randomUUID(), sessionId, wire, text, attachments, createdAt: Date.now(), sequence: ++sequence, attemptedAt: 0, unconfirmed: false };
   if (!save(item)) return false;
   startedHere.add(id);
   pump(sessionId);

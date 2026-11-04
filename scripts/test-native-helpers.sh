@@ -14,6 +14,8 @@ JOBS="${AGENTHAIL_TEST_JOBS:-$(sysctl -n hw.ncpu)}"
 
 SOURCES=(
   AgenthailAPI.swift
+  InboxMessage.swift
+  PeerEnvelope.swift
   TaggedResponses.swift
   AgenthailModel.swift
   AgenthailModelPaging.swift
@@ -98,7 +100,6 @@ SOURCES=(
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
   macOS/Overview.swift
-  macOS/PeerEnvelope.swift
   macOS/QueueFacts.swift
   ScrimField.swift
   GlassSolve.swift
