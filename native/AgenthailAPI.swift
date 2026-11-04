@@ -107,8 +107,10 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 #endif
 
-    func version(requiring protocolVersion: Int = 1) async throws -> APIVersion {
-        let version: APIVersion = try await get("/api/v1/version")
+    static let probeTimeout: TimeInterval = 8
+
+    func version(requiring protocolVersion: Int = 1, timeout: TimeInterval = 25) async throws -> APIVersion {
+        let version: APIVersion = try await request("/api/v1/version", method: "GET", body: nil, timeout: timeout)
         guard version.minimumProtocol <= protocolVersion, version.maximumProtocol >= protocolVersion else {
             throw AgenthailAPIError.incompatible(version.protocolVersion)
         }
