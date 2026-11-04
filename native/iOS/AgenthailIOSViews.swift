@@ -780,7 +780,7 @@ struct IOSComposer: View {
     @State private var editor = IOSComposerEditor()
 
     private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.busyDelivery(for: detail.session.id) == "steer" }
-    private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
+    private var sending: Bool { model.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
     private var permissionMode: String? {
         guard detail.capabilities.permissionMode else { return nil }
         return model.sessionRequests?.permissionMode
@@ -803,7 +803,7 @@ struct IOSComposer: View {
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
             && !ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
-            && (steering || detail.capabilities.send)
+            && detail.capabilities.send
     }
 
     @ViewBuilder private var turnControls: some View {
@@ -887,9 +887,10 @@ struct IOSComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
-                if let status = model.deliveryStatus[session.id] {
+                if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
                     ComposerReceipt(model: model, sessionID: session.id, status: status)
                 }
+                ComposerSendStatus(model: model, session: session)
                 if !model.composerAttachments.isEmpty {
                     ComposerAttachmentStrip(model: model)
                 }

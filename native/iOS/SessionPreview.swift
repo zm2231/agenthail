@@ -337,6 +337,18 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     private let feed = PreviewStreamFeed()
 
     override func startLoading() {
+        if request.url?.path == "/api/v1/actions" {
+            if ProcessInfo.processInfo.arguments.contains("--preview-send-lost") {
+                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-send-refused") {
+                client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: Data(#"{"error":{"message":"This session has ended."}}"#.utf8))
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
+        }
         let streamed = SessionCapture.current?.initialSessionID ?? "demo"
         let requestQuery = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let requestID = requestQuery.first(where: { $0.name == "id" })?.value
