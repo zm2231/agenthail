@@ -1269,7 +1269,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"message\":\"waiting\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"attachments\":[],\"message\":\"waiting\"}}\n"
   },
   "api/action queue-clear": {
     "status": 200,
@@ -3657,7 +3657,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"message\":\"waiting\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"attachments\":[],\"message\":\"waiting\"}}\n"
   },
   "api/v1/actions queue-clear": {
     "status": 200,

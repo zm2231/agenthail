@@ -7,9 +7,6 @@ import (
 )
 
 func attachmentViews(stored surface.Uploads) []map[string]any {
-	if len(stored) == 0 {
-		return nil
-	}
 	views := make([]map[string]any, 0, len(stored))
 	for _, upload := range stored {
 		views = append(views, uploadView(upload))

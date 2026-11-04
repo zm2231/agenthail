@@ -72,9 +72,5 @@ func (d *Daemon) doQueueCancel(_ context.Context, _ principal, request dashboard
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", err.Error())
 	}
-	result := map[string]any{"message": canceled.Message}
-	if attachments := d.handBack(canceled.Uploads); attachments != nil {
-		result["attachments"] = attachments
-	}
-	return actionOK(map[string]any{"ok": true, "result": result}), nil
+	return actionOK(map[string]any{"ok": true, "result": map[string]any{"message": canceled.Message, "attachments": d.handBack(canceled.Uploads)}}), nil
 }
