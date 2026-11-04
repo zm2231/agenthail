@@ -54,7 +54,7 @@ func TestCatalogIdentityMapsWorktreesAndSubfoldersToTheMainCheckout(t *testing.T
 		t.Fatal(err)
 	}
 	for _, identity := range []catalogIdentity{base, worktree, nested} {
-		if identity.UnavailableReason != "" || identity.Project == nil {
+		if identity.Problem != "" || identity.Project == nil {
 			t.Fatalf("identity=%+v", identity)
 		}
 		if identity.Project.ID != base.Project.ID || identity.Project.DisplayName != "widget" || identity.Project.RootPath != canonicalRepo || identity.Project.Kind != catalogProjectGit {
@@ -79,11 +79,11 @@ func TestCatalogIdentityKeepsARemovedWorktreeInItsProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.UnavailableReason != "" || identity.Project == nil || identity.Project.RootPath != canonicalRepo || identity.Checkout.Path != filepath.Join(canonicalRepo, ".worktrees", "task-b2") {
+	if identity.Problem != "" || identity.Project == nil || identity.Project.RootPath != canonicalRepo || identity.Checkout.Path != filepath.Join(canonicalRepo, ".worktrees", "task-b2") {
 		t.Fatalf("identity=%+v project=%+v", identity, identity.Project)
 	}
 	gone := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: filepath.Join(t.TempDir(), "scratch", "gone")}, time.Now(), noStoredProject)
-	if gone.Project != nil || gone.UnavailableReason != "" {
+	if gone.Project != nil || gone.Problem != "" {
 		t.Fatalf("gone=%+v", gone)
 	}
 }
@@ -95,7 +95,7 @@ func TestCatalogIdentityLeavesUnregisteredFoldersOutOfProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.UnavailableReason != "" || identity.Project != nil || identity.Checkout.Path != canonicalPath {
+	if identity.Problem != "" || identity.Project != nil || identity.Checkout.Path != canonicalPath {
 		t.Fatalf("identity=%+v", identity)
 	}
 }
@@ -138,12 +138,12 @@ func TestCatalogIdentityKeepsTheKnownProjectWhenGitFails(t *testing.T) {
 	cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
 	cache.wait()
 	failed := cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
-	if failed.UnavailableReason == "" || failed.Project == nil || failed.Project.ID != resolved.Project.ID {
+	if failed.Problem == "" || failed.Project == nil || failed.Project.ID != resolved.Project.ID {
 		t.Fatalf("failed=%+v resolved=%+v", failed, resolved.Project)
 	}
 	stored := &CatalogProject{ID: "project-stored", DisplayName: "widget", RootPath: repo, Kind: catalogProjectGit}
 	fresh := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, later, func() *CatalogProject { return stored })
-	if fresh.UnavailableReason == "" || fresh.Project != stored {
+	if fresh.Problem == "" || fresh.Project != stored {
 		t.Fatalf("fresh=%+v", fresh)
 	}
 }
@@ -165,7 +165,7 @@ func TestCatalogIdentityKeepsTheProjectWhenGitRefusesTheRepository(t *testing.T)
 	cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
 	cache.wait()
 	refused := cache.identity(context.Background(), surface.Session{Cwd: repo}, later, noStoredProject)
-	if refused.UnavailableReason == "" || refused.Project == nil || refused.Project.ID != resolved.Project.ID {
+	if refused.Problem == "" || refused.Project == nil || refused.Project.ID != resolved.Project.ID {
 		t.Fatalf("refused=%+v resolved=%+v", refused, resolved.Project)
 	}
 }
@@ -181,7 +181,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 func catalogProjectAt(t *testing.T, cache *catalogIdentityCache, path string) *CatalogProject {
 	t.Helper()
 	identity := cache.identity(context.Background(), surface.Session{Cwd: path}, time.Now(), noStoredProject)
-	if identity.UnavailableReason != "" || identity.Project == nil {
+	if identity.Problem != "" || identity.Project == nil {
 		t.Fatalf("identity for %s: %+v", path, identity)
 	}
 	return identity.Project
@@ -330,11 +330,11 @@ func TestAWorkspaceWhoseGitFailsIsNotReadAgainBeforeItExpires(t *testing.T) {
 	cache := newCatalogIdentityCache()
 	now := time.Now()
 	failed := cache.identity(context.Background(), surface.Session{Cwd: repo}, now, noStoredProject)
-	if failed.UnavailableReason == "" {
+	if failed.Problem == "" {
 		t.Fatalf("failed=%+v", failed)
 	}
 	before := calls()
-	if again := cache.identity(context.Background(), surface.Session{Cwd: repo}, now.Add(time.Minute), noStoredProject); again.UnavailableReason == "" || calls() != before {
+	if again := cache.identity(context.Background(), surface.Session{Cwd: repo}, now.Add(time.Minute), noStoredProject); again.Problem == "" || calls() != before {
 		t.Fatalf("failed workspace read again: %d git calls", calls()-before)
 	}
 }

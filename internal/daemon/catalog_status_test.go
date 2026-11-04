@@ -497,7 +497,7 @@ func TestCatalogIdentityResolvesPathWithNewline(t *testing.T) {
 		}
 		gitRun(t, repo, "init", "-b", "main")
 		identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
-		if identity.UnavailableReason != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != name {
+		if identity.Problem != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != name {
 			t.Fatalf("%q: identity=%+v", name, identity)
 		}
 	}
