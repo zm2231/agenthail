@@ -53,7 +53,7 @@ final class HostDropTests: XCTestCase {
         XCTAssertNil(model.snapshot?.sessions.first?.unavailableReason)
     }
 
-    func testProbesThatKeepTimingOutEndUpShownUnreachable() async throws {
+    func testAComputerThatStaysDownEndsUpShownUnreachableAfterTheWindow() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
         let connection = try XCTUnwrap(model.connection("hdrop"))
@@ -72,8 +72,12 @@ final class HostDropTests: XCTestCase {
     func testAReachabilityProbeTimesOutSoonerThanARequest() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let onConnect = HostDropProtocol.state.probeTimeouts.count
+        XCTAssertGreaterThan(onConnect, 0, "connecting probes")
+        HostDropProtocol.state.dropStreams()
+        for _ in 0..<300 where HostDropProtocol.state.probeTimeouts.count == onConnect { try await Task.sleep(for: .milliseconds(10)) }
         let timeouts = HostDropProtocol.state.probeTimeouts
-        XCTAssertFalse(timeouts.isEmpty)
+        XCTAssertGreaterThan(timeouts.count, onConnect, "a dropped stream probes")
         XCTAssertTrue(timeouts.allSatisfy { $0 == AgenthailAPI.probeTimeout }, "probe timeouts: \(timeouts)")
         XCTAssertLessThan(AgenthailAPI.probeTimeout * 2, ConnectionGrace().window, "two probes fail inside the window")
     }
