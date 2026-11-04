@@ -348,7 +348,6 @@ struct CreationHostPicker {
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueuePage: Decodable {
     var items: [QueueState]
-    var nextBefore: Int64?
 }
 struct SessionCreationReceipt: Decodable {
     let ok: Bool?

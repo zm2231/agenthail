@@ -502,9 +502,22 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        if let sessionID {
+            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
+                throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
+            }
+            let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+            let name = catalog.hosts.first { $0.id == owner }?.name ?? connection.name
+            return try await InboxPage.load(from: [InboxPage.Host(id: owner, name: name, api: connection.api)], sessionID: route.sessionID, before: cursors, partial: partial)
+        }
+        let direct = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        let remote = catalog.hosts.compactMap { host -> InboxPage.Host? in
+            guard let target = catalog.target(forHost: host.id), let peer = target.remote, let connection = connections[target.hostID] else { return nil }
+            return InboxPage.Host(id: host.id, name: host.name, api: connection.api, remote: peer)
+        }
+        let hosts = direct + remote
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await InboxPage.load(from: hosts, sessionID: sessionID, before: cursors, partial: partial)
+        return try await InboxPage.load(from: hosts, sessionID: nil, before: cursors, partial: partial)
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {
@@ -524,60 +537,62 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("Connect to your computer first.")
-        }
-        let key = "queue:\(item.listID)"
+        try await updateQueue(id: item.id, hostID: item.hostID, retry: retry)
+    }
+
+    func updateQueue(id: Int64, hostID: String?, retry: Bool) async throws {
+        guard let hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (api, target) = try reach(hostID)
+        let key = "queue:\(hostID)/\(id)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        try await connection.api.action(retry ? "queue-retry" : "queue-cancel", queueID: item.id)
-        await connection.refresh(fresh: true)
+        try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: id, host: target.remote)
+        await connections[target.hostID]?.refresh(fresh: true)
     }
 
     /// Cancels a queued message and puts it back ahead of its session's draft.
     func takeBack(_ item: QueueState) async throws {
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("Connect to your computer first.")
-        }
+        guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (api, target) = try reach(hostID)
         let key = "queue:\(item.listID)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        let cancelled = try await connection.api.cancelQueued(item)
-        await connection.refresh(fresh: true)
+        let cancelled = try await api.cancelQueued(item, host: target.remote)
+        await connections[target.hostID]?.refresh(fresh: true)
         returnToDraft(cancelled.message ?? item.message, attachments: cancelled.attachments ?? [], id: draftKey(for: item))
     }
 
     func sessionQueue(_ sessionID: String) async throws -> [QueueState] {
         let (api, route) = try resolve(sessionID)
-        let page = try await api.queuePage(sessionID: route.sessionID, timeout: InboxPage.hostTimeout)
-        return QueueSteer.waiting(page.items.map { InboxPage.qualified($0, host: route.hostID) })
+        let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+        let items = try await api.activeQueue(sessionID: route.sessionID, timeout: InboxPage.hostTimeout)
+        return QueueSteer.waiting(items.map { InboxPage.qualified($0, host: owner) })
     }
 
     func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
         guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("Connect to your computer first.")
-        }
+        guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (api, target) = try reach(hostID)
         let id = draftKey(for: item)
         let route = try resolve(id).route
         let key = "queue:\(item.listID)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        let cancelled = try await connection.api.cancelQueued(item)
+        let cancelled = try await api.cancelQueued(item, host: target.remote)
         let message = cancelled.message ?? item.message
         let attachments = cancelled.attachments ?? []
         do {
-            let receipt = try await connection.api.steerQueued(message: message, attachments: attachments, sessionID: route.sessionID)
+            let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: route.sessionID)
             deliveryStatus[id] = deliveryLabel(receipt.result?.evidence, detail: receipt.result?.detail)
         } catch {
             returnToDraft(message, attachments: attachments, id: id)
-            await connection.refresh(fresh: true)
+            await connections[target.hostID]?.refresh(fresh: true)
             throw AgenthailAPIError.unavailable("Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))")
         }
-        await connection.refresh(fresh: true)
+        await connections[target.hostID]?.refresh(fresh: true)
         await refreshSession(id)
     }
 
@@ -1317,17 +1332,25 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await fetchRequests(sessionID, key: sessionRequestsKey)
     }
 
+    // A send to a computer reached through another is queued on the owner, or on the other computer while the owner is down.
+    func queuedDelivery(id: Int64, sessionID: String) async -> QueueState? {
+        guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { return nil }
+        let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+        let expected = HostCatalog.qualify(route.hostID, route.sessionID)
+        for host in owner == route.hostID ? [nil] : [owner, nil] {
+            let found = try? await connection.api.queueItem(id: id, host: host, timeout: InboxPage.hostTimeout)
+            if let item = found.flatMap({ $0 }).map({ InboxPage.qualified($0, host: owner) }), item.sessionId == expected { return item }
+        }
+        return nil
+    }
+
     private func refreshDeliveries() async {
         guard !deliveryQueueIDs.isEmpty, !refreshingDeliveries else { return }
         refreshingDeliveries = true
         defer { refreshingDeliveries = false }
         let expected = deliveryQueueIDs
         for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { continue }
-            let found: QueueState?
-            do { found = try await connection.api.queueItem(id: queueID, timeout: InboxPage.hostTimeout).map { InboxPage.qualified($0, host: route.hostID) } }
-            catch { continue }
-            guard let item = found, item.sessionId == HostCatalog.qualify(route.hostID, route.sessionID) else { continue }
+            guard let item = await queuedDelivery(id: queueID, sessionID: sessionID) else { continue }
             switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
             case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
             case "queued": deliveryStatus[sessionID] = item.queuedReceipt

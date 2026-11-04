@@ -75,7 +75,7 @@ struct SessionQueueSection: View {
         let idle = !model.pendingControls.contains("queue:\(item.listID)")
         return HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                if let line = item.message.split(separator: "\n").first {
+                if let line = PeerEnvelope(item.message).summary.split(separator: "\n").first {
                     Text(line).font(.subheadline).lineLimit(1).truncationMode(.tail)
                 }
                 details(item, refused: refusal != nil)

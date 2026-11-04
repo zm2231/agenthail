@@ -67,17 +67,20 @@ struct QueueListView: View {
     var sessionID: String? = nil
     var onOpenSession: ((String) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var page = InboxPage()
     @State private var loading = true
+    @State private var settled = false
     @State private var loadingOlder = false
     @State private var showHistory = false
     @State private var retryCandidate: QueueState?
+    @State private var retryMessage: InboxMessage?
     @State private var reloadID = UUID()
 
-    private var items: [QueueState] { page.items }
-    private var current: [QueueState] { items.filter { !$0.isHistorical }.reversed() }
-    private var history: [QueueState] { items.filter { $0.isHistorical } }
+    private var current: [QueueState] { page.active }
+    private var history: [InboxMessage] { page.history }
+    private var pollsHistory: Bool { showHistory && scenePhase == .active }
     private var activeInSnapshot: [String] {
         (model.snapshot?.queue ?? []).filter { sessionID == nil || $0.sessionId == sessionID }.map { "\($0.id):\($0.status)" }
     }
@@ -96,6 +99,11 @@ struct QueueListView: View {
                         .foregroundStyle(PhonePalette.muted).font(.footnote)
                         .accessibilityIdentifier("inbox-unreachable")
                 }
+                ForEach(page.outdated, id: \.self) { name in
+                    Label("Update Agenthail on \(name) to see its messages here.", systemImage: "arrow.up.circle")
+                        .foregroundStyle(PhonePalette.muted).font(.footnote)
+                        .accessibilityIdentifier("inbox-outdated-\(name)")
+                }
                 if sessionID == nil, !model.leadReplacements.isEmpty {
                     Section("Lead replaced") {
                         ForEach(model.leadReplacements, id: \.listID) { replacement in
@@ -111,7 +119,7 @@ struct QueueListView: View {
                         }
                     }
                 }
-                if loading && items.isEmpty { ProgressView("Loading deliveries") }
+                if loading && page.isEmpty { ProgressView("Loading deliveries") }
                 if !showHistory {
                     let review = current.filter { $0.status == "dead" }
                     let pending = current.filter { $0.status != "dead" }
@@ -125,19 +133,26 @@ struct QueueListView: View {
                         Section("Waiting to deliver") { ForEach(pending, id: \.listID) { item in queueRow(item) } }
                     }
                     if !loading && error == nil && model.connectionError == nil && current.isEmpty {
-                        ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Older outcomes are in History."))
+                        ContentUnavailableView("No pending deliveries", systemImage: "tray", description: Text("Instructions waiting to send or needing a delivery decision appear here. Everything else is in History."))
                             .listRowSeparator(.hidden)
                     }
                 } else {
                     if history.isEmpty && !loading && !page.hasOlder {
-                        ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Completed, canceled and older failed instructions appear here."))
+                        ContentUnavailableView("No delivery history", systemImage: "clock", description: Text(sessionID == nil ? "Messages sent to your sessions appear here." : "Messages sent to this session appear here."))
                             .listRowSeparator(.hidden)
                     }
-                    ForEach(history, id: \.listID) { item in queueRow(item) }
+                    ForEach(history, id: \.listID) { message in
+                        InboxHistoryRow(
+                            message: message,
+                            busy: model.pendingControls.contains("queue:\(message.hostID ?? "")/\(message.queueId ?? 0)"),
+                            openSession: { open(message.sessionId) },
+                            sendAgain: { retryMessage = message }
+                        )
+                    }
                     if page.hasOlder {
                         Button { Task { await loadOlder() } } label: {
                             HStack {
-                                Text(history.isEmpty ? "Nothing in the last 30 days. Load older" : "Load older")
+                                Text("Load older")
                                 Spacer()
                                 if loadingOlder { ProgressView() }
                             }.frame(minHeight: 44)
@@ -155,6 +170,21 @@ struct QueueListView: View {
         .task { await reload() }
         .refreshable { _ = await model.refresh(fresh: true); await reload() }
         .onChange(of: activeInSnapshot) { _, _ in Task { await reload() } }
+        .task(id: pollsHistory) {
+            guard pollsHistory else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: InboxPage.historyPollInterval)
+                if !Task.isCancelled { await reload() }
+            }
+        }
+        .confirmationDialog("Send this message again?", isPresented: Binding(get: { retryMessage != nil }, set: { if !$0 { retryMessage = nil } }), titleVisibility: .visible) {
+            if let message = retryMessage {
+                Button("Send again") { sendAgain(message); retryMessage = nil }
+                Button("Cancel", role: .cancel) { retryMessage = nil }
+            }
+        } message: {
+            Text(retryMessage?.evidence == "unknown" ? "This delivery outcome was never confirmed. Check the session before sending again." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
+        }
         .confirmationDialog("Send this instruction again?", isPresented: Binding(get: { retryCandidate != nil }, set: { if !$0 { retryCandidate = nil } }), titleVisibility: .visible) {
             if let item = retryCandidate {
                 Button("Send again") { update(item, retry: true); retryCandidate = nil }
@@ -165,8 +195,22 @@ struct QueueListView: View {
         }
     }
 
+    private func open(_ id: String) {
+        if let onOpenSession { onOpenSession(id) } else { dismiss(); model.openSession(id) }
+    }
+
+    private func sendAgain(_ message: InboxMessage) {
+        guard let queueID = message.queueId else { return }
+        error = nil
+        Task {
+            do { try await model.updateQueue(id: queueID, hostID: message.hostID, retry: true); await reload() }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+
     private func queueRow(_ item: QueueState) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let envelope = PeerEnvelope(item.message)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(item.outcomeLabel)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? PhonePalette.attention : PhonePalette.muted)
@@ -180,17 +224,15 @@ struct QueueListView: View {
             if item.status == "pending" {
                 Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
-            Button {
-                if let onOpenSession { onOpenSession(item.sessionId) }
-                else { dismiss(); model.openSession(item.sessionId) }
-            } label: {
+            Button { open(item.sessionId) } label: {
                 HStack {
                     Text(item.target).font(.headline)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right").font(.caption)
                 }.frame(minHeight: 44, alignment: .leading)
             }.buttonStyle(.plain).accessibilityIdentifier("inbox-session-\(item.id)")
-            Text(item.message).font(.body).lineLimit(4).textSelection(.enabled)
+            if let sender = envelope.sender { Text("From \(sender)").font(.footnote).foregroundStyle(PhonePalette.muted) }
+            Text(envelope.body).font(.body).lineLimit(4).textSelection(.enabled)
             if let attachments = item.attachments, !attachments.isEmpty {
                 Label(attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip")
                     .font(.footnote)
@@ -202,7 +244,7 @@ struct QueueListView: View {
                 Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             DisclosureGroup("Instruction details") {
-                Text(item.message).textSelection(.enabled)
+                Text(envelope.body).textSelection(.enabled)
                 LabeledContent("Attempts", value: item.attempts.formatted()).font(.footnote)
                 if let value = item.model { LabeledContent("Model", value: value).font(.footnote) }
                 if let value = item.effort { LabeledContent("Effort", value: value).font(.footnote) }
@@ -236,7 +278,7 @@ struct QueueListView: View {
             do {
                 try await model.takeBack(item)
                 error = nil
-                if let onOpenSession { onOpenSession(item.sessionId) } else { dismiss(); model.openSession(item.sessionId) }
+                open(item.sessionId)
             } catch {
                 self.error = error.localizedDescription
             }
@@ -269,7 +311,7 @@ struct QueueListView: View {
                 Spacer()
                 Text(problem.at).font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1).truncationMode(.middle)
             }
-            Text(problem.message).font(.body).textSelection(.enabled)
+            Text(PeerEnvelope(problem.message).body).font(.body).textSelection(.enabled)
             Text(problem.reason).font(.footnote).foregroundStyle(PhonePalette.muted).textSelection(.enabled)
             Button("Dismiss", role: .destructive) {
                 Task {
@@ -292,7 +334,7 @@ struct QueueListView: View {
         let requestID = UUID(); reloadID = requestID
         do {
             let first = try await model.inboxPage(sessionID: sessionID) { partial in
-                guard reloadID == requestID else { return }
+                guard reloadID == requestID, !settled else { return }
                 page = page.refreshed(with: partial); loading = false
             }
             guard reloadID == requestID, !Task.isCancelled else { return }
@@ -302,6 +344,7 @@ struct QueueListView: View {
             self.error = error.localizedDescription
         }
         loading = false
+        settled = true
     }
     private func loadOlder() async {
         guard page.hasOlder, !loadingOlder else { return }

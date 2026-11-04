@@ -395,6 +395,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
                 else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
+            case "/api/v1/inbox": captured = #"{"items":[]}"#
             case "/api/v1/projects/activity": captured = SessionPreview.projectActivityJSON
             case "/api/v1/session":
                 let before = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "timelineBefore" })?.value
@@ -427,6 +428,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-session-queue"): body = SessionPreview.sessionQueueJSON(rows: UserDefaults.standard.integer(forKey: "preview-session-queue-rows"))
         case "/api/v1/queue": body = SessionPreview.queueJSON
+        case "/api/v1/inbox": body = InboxPreview.nextPage()
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON
         case "/api/v1/usage": body = UsagePreview.json()
