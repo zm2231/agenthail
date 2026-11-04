@@ -33,6 +33,15 @@ struct InboxMessage: Decodable, Identifiable, Equatable {
     var canSendAgain: Bool { queueId != nil && queueStatus == "dead" }
     var reason: String? { [lastError, failure].compactMap { $0 }.first { !$0.isEmpty } }
 
+    var senderLabel: String? {
+        switch sourceSessionId?.components(separatedBy: "::").last {
+        case "agenthail-person": return "you"
+        case "agenthail-cli": return "the command line or a script"
+        case "agenthail": return "Agenthail"
+        default: return source.flatMap { $0.isEmpty ? nil : $0 }
+        }
+    }
+
     var outcomeLabel: String {
         switch evidence {
         case "delivered", "reply_observed": return "Delivered"

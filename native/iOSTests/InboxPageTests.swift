@@ -254,6 +254,17 @@ final class InboxPageTests: XCTestCase {
         XCTAssertTrue(page.items[1].canSendAgain)
         XCTAssertFalse(page.items[0].canSendAgain)
         XCTAssertEqual(page.items[1].outcomeLabel, "Never confirmed")
+        XCTAssertEqual(page.items[1].senderLabel, "Agenthail")
+        XCTAssertEqual(InboxPage.qualified(page.items[1], host: "hlaptop").senderLabel, "Agenthail", "the computer's name does not change who sent it")
+    }
+
+    func testAnAgentReadsAsItsNameAndThePersonAsYou() {
+        func sender(_ id: String, _ source: String) -> String? {
+            InboxMessage(id: 1, sessionId: "s", target: "@s", sourceSessionId: id, source: source, message: "m", status: "delivered", evidence: "delivered", pending: false, createdAt: "2026-11-02T08:00:00Z").senderLabel
+        }
+        XCTAssertEqual(sender("agenthail-person", "agenthail/Person"), "you")
+        XCTAssertEqual(sender("agenthail-cli", "agenthail/CLI"), "the command line or a script")
+        XCTAssertEqual(sender("worker-id", "@worker"), "@worker")
     }
 
     func testAPeerEnvelopeReadsAsItsSenderAndBody() {

@@ -7,7 +7,7 @@ struct InboxHistoryRow: View {
     let sendAgain: () -> Void
 
     private var envelope: PeerEnvelope { PeerEnvelope(message.message) }
-    private var sender: String? { envelope.sender ?? message.source.flatMap { $0.isEmpty ? nil : $0 } }
+    private var sender: String? { envelope.sender ?? message.senderLabel }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,7 +34,7 @@ struct InboxHistoryRow: View {
             DisclosureGroup("Message details") {
                 Text(envelope.body).textSelection(.enabled)
                 if let attempts = message.attempts { LabeledContent("Attempts", value: attempts.formatted()).font(.footnote) }
-                if let value = message.sourceSessionId, !value.isEmpty { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
+                if let value = message.sourceSessionId, !value.isEmpty, message.source == message.senderLabel { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
             }.font(.footnote)
             if message.canSendAgain {
                 Button("Send again", action: sendAgain).buttonStyle(.bordered).controlSize(.large).disabled(busy)
