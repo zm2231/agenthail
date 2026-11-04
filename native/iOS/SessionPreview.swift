@@ -360,9 +360,11 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let feed = PreviewStreamFeed()
+    nonisolated(unsafe) private static var queueFails = false
 
     override func startLoading() {
         if request.url?.path == "/api/v1/actions" {
+            Self.queueFails = ProcessInfo.processInfo.arguments.contains("--preview-queue-fails-after-action")
             if ProcessInfo.processInfo.arguments.contains("--preview-send-lost") {
                 client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
                 return
@@ -440,6 +442,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/queue" where Self.queueFails: status = 503; body = #"{"error":{"message":"unavailable"}}"#
         case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-session-queue"): body = SessionPreview.sessionQueueJSON(rows: UserDefaults.standard.integer(forKey: "preview-session-queue-rows"))
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/inbox": body = InboxPreview.nextPage()

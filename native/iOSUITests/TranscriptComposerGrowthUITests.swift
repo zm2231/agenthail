@@ -128,6 +128,16 @@ final class TranscriptComposerGrowthUITests: XCTestCase {
         assertAtLatest(app, "after a row arrived late")
     }
 
+    func testAFailedReloadFallsBackToTheSnapshotInsteadOfKeepingADeadRow() {
+        let app = launch(rows: 2, extra: ["--preview-reading", "--preview-follow", "--preview-queue-not-in-snapshot", "--preview-queue-fails-after-action"])
+        let menu = app.buttons["session-queue-menu-11"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "the first load shows the row")
+        menu.tap()
+        app.buttons["Cancel delivery"].tapWhenReady()
+        XCTAssertTrue(menu.waitForNonExistence(timeout: 5), "a row the snapshot doesn't have stayed after a failed reload")
+        XCTAssertFalse(app.buttons["session-queue-header"].exists)
+    }
+
     func testTheSectionStaysResponsiveOverAStreamingTranscriptWithAWallpaper() {
         continueAfterFailure = false
         for space in stride(from: 40, through: 280, by: 60) {

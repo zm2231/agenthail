@@ -13,7 +13,7 @@ struct SessionQueueSection: View {
     private static let collapsesAt = 3
     private static let heightCap: CGFloat = 156
 
-    // Rows known from the snapshot render on the first frame, so the composer doesn't grow while the transcript lands.
+    // Rows known from the snapshot render on the first frame, so the card doesn't appear while the transcript lands.
     private var snapshotRows: [QueueState] {
         (model.snapshot?.queue ?? []).map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
     }
@@ -27,6 +27,18 @@ struct SessionQueueSection: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !items.isEmpty || problem != nil {
+                card
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .floatingGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            }
+        }
+        .task(id: refreshKey) { await reload() }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !items.isEmpty {
                 Button { chosenExpanded = !expanded } label: {
@@ -48,8 +60,6 @@ struct SessionQueueSection: View {
                     .accessibilityIdentifier("session-queue-problem")
             }
         }
-        .padding(.horizontal, 8)
-        .task(id: refreshKey) { await reload() }
     }
 
     private var rows: some View {
@@ -152,7 +162,8 @@ struct SessionQueueSection: View {
     }
 
     private func reload() async {
-        guard let fresh = try? await model.sessionQueue(session.id), !Task.isCancelled else { return }
+        let fresh = try? await model.sessionQueue(session.id)
+        guard !Task.isCancelled else { return }
         loaded = fresh
     }
 }
