@@ -221,6 +221,17 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(action["queueId"] as? Int, 9)
     }
 
+    func testAPageAsTheComputerSendsItDecodes() throws {
+        let page = try JSONDecoder().decode(InboxMessagePage.self, from: Data(#"""
+        {"items":[{"id":2,"messageId":"c8c3c290-ab80-43ee-921e-750446bf693e","sessionId":"to","target":"to","sourceSessionId":"agenthail","source":"agenthail/Agenthail","message":"pending message","status":"queued","evidence":"queued","pending":true,"queueId":2,"queueStatus":"pending","createdAt":"2026-11-04T07:38:40.000000000Z","updatedAt":"2026-11-04T07:38:40.000000000Z"},{"id":1,"messageId":"8979cf50-f31b-455f-a539-0389db9d857e","sessionId":"from","target":"from","sourceSessionId":"agenthail","source":"agenthail/Agenthail","message":"dead message","status":"unknown","evidence":"unknown","pending":false,"queueId":1,"queueStatus":"dead","attempts":1,"lastError":"delivery outcome is unknown: connection closed; retry explicitly if the target did not receive it","createdAt":"2026-11-04T07:38:40.000000000Z","updatedAt":"2026-11-04T07:38:40.000000000Z"}]}
+        """#.utf8))
+        XCTAssertEqual(page.items.map(\.pending), [true, false])
+        XCTAssertNotNil(page.items[1].createdDate)
+        XCTAssertTrue(page.items[1].canSendAgain)
+        XCTAssertFalse(page.items[0].canSendAgain)
+        XCTAssertEqual(page.items[1].outcomeLabel, "Never confirmed")
+    }
+
     func testAPeerEnvelopeReadsAsItsSenderAndBody() {
         let envelope = PeerEnvelope(#"<cross-session-message from="uds:/run/x.sock" from-name="@reviewer" hop-chain="ab">Check the signing step.</cross-session-message>"#)
         XCTAssertEqual(envelope.sender, "@reviewer")
