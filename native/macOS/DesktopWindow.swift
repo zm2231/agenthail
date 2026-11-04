@@ -1844,7 +1844,14 @@ struct QueueDock: View {
                         }
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
+                        if let names = QueueFacts.attachmentNames(item) {
+                            Label(names, systemImage: "paperclip")
+                                .font(.system(size: DesktopType.caption))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ??[], age: relativeAge(item.queuedAt)))
                             .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .lineLimit(1)
@@ -1858,7 +1865,8 @@ struct QueueDock: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.text2)
-                        .help("Steer into the current turn")
+                        .disabled(item.hasAttachments)
+                        .help(item.hasAttachments ? QueueFacts.noSteerWithAttachments : "Steer into the current turn")
                     }
                     Button {
                         model.removeQueued(item)
@@ -1871,6 +1879,8 @@ struct QueueDock: View {
                     Menu {
                         if canSteer {
                             Button("Steer into current turn") { model.steerQueued(item) }
+                                .disabled(item.hasAttachments)
+                                .help(item.hasAttachments ? QueueFacts.noSteerWithAttachments : "")
                         }
                         Button("Send after this turn (current)") {}
                             .disabled(true)

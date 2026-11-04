@@ -191,6 +191,13 @@ struct QueueListView: View {
                 }.frame(minHeight: 44, alignment: .leading)
             }.buttonStyle(.plain).accessibilityIdentifier("inbox-session-\(item.id)")
             Text(item.message).font(.body).lineLimit(4).textSelection(.enabled)
+            if let attachments = item.attachments, !attachments.isEmpty {
+                Label(attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip")
+                    .font(.footnote)
+                    .foregroundStyle(PhonePalette.muted)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-attachments-\(item.listID)")
+            }
             if let reason = item.lastError, !reason.isEmpty {
                 Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted)
             }

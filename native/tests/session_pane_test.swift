@@ -340,6 +340,7 @@ struct SessionPaneTest {
         let queueServer = try! StubServer { request, _ in
             guard request.contains("queue-cancel") else { return StubServer.reply("200 OK", "{}") }
             cancels.append(request)
+            if request.contains("\"queueId\":5") { return StubServer.reply("200 OK", #"{"ok":true,"result":{"message":"with files","attachments":[{"id":"up-1","name":"shot.png","mediaType":"image/png","bytes":7},{"id":"up-2","name":"gone.txt","mediaType":"text/plain","bytes":1,"missing":true}]}}"#) }
             return request.contains("\"queueId\":3") ? StubServer.reply("409 Conflict", #"{"error":{"message":"already delivering"}}"#) : StubServer.reply("200 OK", "{}")
         }
         let queuePort = await queueServer.ready()
@@ -356,6 +357,17 @@ struct SessionPaneTest {
         for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
         try? await Task.sleep(for: .milliseconds(200))
         check(queueModel.draft(for: "Q").text == "" && cancels.count == 3 && queueModel.operationError?.contains("already delivering") == true, "a message that can't be cancelled stays queued, and later ones stay behind it: \(queueModel.draft(for: "Q").text.debugDescription) \(cancels.count)")
+        queueModel.operationError = nil
+        queueModel.takeBackQueued([queued(5, "row text")], sessionID: "Q")
+        for _ in 0..<60 where queueModel.draft(for: "Q").attachments.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.draft(for: "Q").text == "with files" && queueModel.draft(for: "Q").attachments.map(\.uploaded?.id) == ["up-1"], "take-back restores the reply's message and attachments")
+        check(queueModel.operationError?.contains("gone.txt") == true, "a missing attachment is named")
+        let cancelsBeforeSteer = cancels.count
+        var attachedRow = queued(6, "with a file")
+        attachedRow.attachments = [QueueAttachment(id: "up-3", name: "a.png", mediaType: "image/png", bytes: 1)]
+        queueModel.steerQueued(attachedRow)
+        try? await Task.sleep(for: .milliseconds(300))
+        check(cancels.count == cancelsBeforeSteer, "a queued message with attachments is never cancelled to steer it")
         queueServer.stop()
 
         let unreachable = model.openPane()

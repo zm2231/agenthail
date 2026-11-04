@@ -2,6 +2,11 @@ import Foundation
 
 /// A message that left the composer and has no answer from its computer yet.
 struct PendingSend: Identifiable, Equatable {
+    var alreadyUploaded: [String]? {
+        let ids = attachments.compactMap(\.uploaded?.id)
+        return !attachments.isEmpty && ids.count == attachments.count ? ids : nil
+    }
+
     let id: UUID
     var sessionID: String
     let message: String

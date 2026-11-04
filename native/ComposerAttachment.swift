@@ -9,8 +9,24 @@ struct ComposerAttachment: Identifiable, Hashable, Sendable {
     let name: String
     let data: Data
     let mediaType: String
+    var uploaded: UploadedAttachment? = nil
 
     var isImage: Bool { ComposerAttachments.imageMediaTypes.contains(mediaType) }
+    var byteCount: Int64 { uploaded?.bytes ?? Int64(data.count) }
+
+    // An attachment taken back from the queue is still on its computer, so it has no bytes here.
+    init(uploaded: UploadedAttachment) {
+        name = uploaded.name
+        data = Data()
+        mediaType = uploaded.mediaType
+        self.uploaded = uploaded
+    }
+
+    init(name: String, data: Data, mediaType: String) {
+        self.name = name
+        self.data = data
+        self.mediaType = mediaType
+    }
 }
 
 enum ComposerAttachmentProblem: Error, Equatable {
@@ -112,7 +128,7 @@ enum ComposerAttachments {
     static func adding(_ new: [ComposerAttachment], to existing: [ComposerAttachment]) -> (attachments: [ComposerAttachment], problem: ComposerAttachmentProblem?) {
         var result = existing
         var problem: ComposerAttachmentProblem?
-        for attachment in new where !result.contains(where: { $0.name == attachment.name && $0.data == attachment.data }) {
+        for attachment in new where !result.contains(where: { $0.name == attachment.name && $0.data == attachment.data && $0.uploaded == attachment.uploaded }) {
             guard result.count < maxCount else {
                 problem = .tooMany
                 break
@@ -120,6 +136,26 @@ enum ComposerAttachments {
             result.append(attachment)
         }
         return (result, problem)
+    }
+
+    /// Puts attachments taken back from the queue on a draft's, and names any that could not come back.
+    static func takingBack(_ queued: [QueueAttachment], to existing: [ComposerAttachment]) -> (attachments: [ComposerAttachment], lost: [String]) {
+        var result = existing
+        var lost: [String] = []
+        for item in queued {
+            guard item.missing != true else {
+                lost.append(item.name)
+                continue
+            }
+            let added = adding([ComposerAttachment(uploaded: item.upload)], to: result)
+            if added.problem != nil { lost.append(item.name) }
+            result = added.attachments
+        }
+        return (result, lost)
+    }
+
+    static func lostNotice(_ lost: [String]) -> String? {
+        lost.isEmpty ? nil : "Could not come back with the message: \(lost.joined(separator: ", "))."
     }
 }
 

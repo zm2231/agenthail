@@ -1007,7 +1007,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func steerQueued(_ item: QueueState) {
-        guard let api else { return }
+        guard let api, !item.hasAttachments else { return }
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
@@ -1046,17 +1046,22 @@ final class AgenthailModel: ObservableObject {
         guard let api else { return }
         Task {
             var taken: [String] = []
+            var attachments: [QueueAttachment] = []
             operationError = nil
             for item in items.sorted(by: { $0.id < $1.id }) {
                 do {
-                    try await api.action("queue-cancel", queueID: item.id)
-                    taken.append(item.message)
+                    let cancelled = try await api.cancelQueued(item)
+                    taken.append(cancelled.message ?? item.message)
+                    attachments += cancelled.attachments ?? []
                 } catch {
                     operationError = AgenthailAPIError.userMessage(error)
                     break
                 }
             }
-            if !taken.isEmpty { draft(for: sessionID).takeBack(taken) }
+            if !taken.isEmpty {
+                let lost = draft(for: sessionID).takeBack(taken, attachments: attachments)
+                if operationError == nil { operationError = ComposerAttachments.lostNotice(lost) }
+            }
             _ = await refresh(fresh: true)
         }
     }
@@ -1445,7 +1450,11 @@ final class ComposerDraft: ObservableObject {
         attachments = ComposerAttachments.adding(restoredAttachments, to: attachments).attachments
     }
 
-    func takeBack(_ queued: [String]) {
+    @discardableResult
+    func takeBack(_ queued: [String], attachments queuedAttachments: [QueueAttachment] = []) -> [String] {
         text = QueueTakeBack.text(queued: queued, draft: text)
+        let taken = ComposerAttachments.takingBack(queuedAttachments, to: attachments)
+        attachments = taken.attachments
+        return taken.lost
     }
 }

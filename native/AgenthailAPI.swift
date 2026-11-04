@@ -310,7 +310,13 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(ActionReceipt.self, from: data)
     }
 
+    func cancelQueued(_ item: QueueState) async throws -> CancelledQueueItem {
+        let response: CancelQueuedResponse = try await post("/api/v1/actions", body: ["action": "queue-cancel", "queueId": item.id])
+        return CancelledQueueItem(message: response.result?.message ?? item.message, attachments: response.result?.attachments ?? item.attachments)
+    }
+
     func upload(_ attachment: ComposerAttachment, sessionID: String) async throws -> UploadedAttachment {
+        if let uploaded = attachment.uploaded { return uploaded }
         var components = URLComponents()
         components.path = "/api/v1/uploads"
         components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "name", value: attachment.name)]
@@ -968,6 +974,10 @@ private struct EmptyResponse: Decodable {}
 
 private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
+}
+
+private struct CancelQueuedResponse: Decodable {
+    var result: CancelledQueueItem? = nil
 }
 
 private struct ProjectAddResponse: Decodable {

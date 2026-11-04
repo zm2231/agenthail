@@ -149,6 +149,88 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(store.load().saved.sends, [])
     }
 
+    private func queuedItem(_ session: SessionState, attachments: String = "") throws -> QueueState {
+        var item = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":9,"sessionId":"\#(session.id)","target":"t","message":"from the row","status":"pending","attempts":0,"queuedAt":"2026-11-04 10:00:00","evidence":"queued"\#(attachments)}"#.utf8))
+        item.hostID = "computer"
+        return item
+    }
+
+    private let cancelledWithAttachments = #"{"ok":true,"result":{"message":"from the reply","attachments":[{"id":"up-1","name":"shot.png","mediaType":"image/png","bytes":2048,"width":10,"height":10},{"id":"up-2","name":"gone.pdf","mediaType":"application/pdf","bytes":9,"missing":true}]}}"#
+
+    func testTakingBackRestoresAttachmentsAndNamesAMissingOne() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, cancelledWithAttachments), .answer(200, sentReceipt)])
+        try await model.takeBack(queuedItem(session))
+        XCTAssertEqual(model.composer, "from the reply")
+        XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-1"])
+        XCTAssertEqual(model.composerAttachments.first?.byteCount, 2048)
+        XCTAssertTrue(model.attachmentProblem?.contains("gone.pdf") == true, String(describing: model.attachmentProblem))
+
+        model.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.attempts.count == 2 && model.pendingSends.isEmpty }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts[1].body["attachments"] as? [String], ["up-1"], "a taken-back attachment goes by its id, with no upload")
+    }
+
+    func testTakingBackFromAnOlderComputerKeepsTheRowsMessageAndAttachments() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#)])
+        try await model.takeBack(queuedItem(session, attachments: #","attachments":[{"id":"up-3","name":"row.png","mediaType":"image/png","bytes":1}]"#))
+        XCTAssertEqual(model.composer, "from the row")
+        XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-3"])
+    }
+
+    func testATakenBackAttachmentSurvivesTheAppBeingKilled() async throws {
+        let store = temporaryStore()
+        let (model, session) = try makeModel(store: store)
+        ComposerSendProtocol.state.script([.answer(200, cancelledWithAttachments)])
+        try await model.takeBack(queuedItem(session))
+        model.saveComposerState()
+        XCTAssertEqual(store.load().saved.attachmentNames, [:], "it isn't reported lost")
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        await reopened.loadSession(session.id)
+        XCTAssertEqual(reopened.composerAttachments.map(\.uploaded?.id), ["up-1"])
+        XCTAssertEqual(reopened.composerAttachments.first?.name, "shot.png")
+        XCTAssertEqual(reopened.composerAttachments.first?.mediaType, "image/png")
+    }
+
+    func testAStashedTakenBackAttachmentSurvivesTheAppBeingKilled() async throws {
+        let store = temporaryStore()
+        let (model, session) = try makeModel(store: store)
+        ComposerSendProtocol.state.script([.answer(200, cancelledWithAttachments)])
+        try await model.takeBack(queuedItem(session))
+        model.toggleStash()
+        XCTAssertTrue(model.composerAttachments.isEmpty)
+        model.saveComposerState()
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        await reopened.loadSession(session.id)
+        XCTAssertTrue(reopened.composerAttachments.isEmpty)
+        reopened.toggleStash()
+        XCTAssertEqual(reopened.composerAttachments.map(\.uploaded?.id), ["up-1"])
+    }
+
+    func testAKilledSendOfATakenBackAttachmentResumesWithItsID() async throws {
+        let store = temporaryStore()
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        let session = try makeSession()
+        ComposerSendProtocol.state.script([.answer(200, cancelledWithAttachments), .offline, .offline])
+        try await first?.takeBack(queuedItem(session))
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.attempts.count >= 2 }
+        first?.saveComposerState()
+        first = nil
+        XCTAssertEqual(store.load().saved.sends.first?.uploaded, ["up-1"])
+
+        ComposerSendProtocol.state.reset()
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let second = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        second.selectedSessionID = session.id
+        try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts[0].body["attachments"] as? [String], ["up-1"])
+        XCTAssertNil(second.failedSends[session.id])
+    }
+
     func testADraftSurvivesTheAppBeingKilled() async throws {
         let store = temporaryStore()
         let (model, session) = try makeModel(store: store)
