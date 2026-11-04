@@ -52,12 +52,16 @@ export async function action(action, extra = {}, idempotencyKey = crypto.randomU
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
   if (!networkAction) extra = withHolder(sessionID, extra);
+  return postAction({ action, sessionId: sessionID, ...extra }, idempotencyKey);
+}
+
+export async function postAction(wire, idempotencyKey) {
   let response;
   try {
     response = await fetch("/api/action", {
       method: "POST",
       headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ action, sessionId: sessionID, ...extra }),
+      body: JSON.stringify(wire),
     });
   } catch (error) {
     error.networkFailure = true;
@@ -70,9 +74,11 @@ export async function action(action, extra = {}, idempotencyKey = crypto.randomU
     } catch (error) {
       const typed = Error(`HTTP ${response.status || 500}`);
       typed.httpFailure = true;
+      typed.status = response.status;
       throw typed;
     }
     const failure = Error(detail);
+    failure.status = response.status;
     try {
       const body = JSON.parse(detail);
       const typed = body.error;
