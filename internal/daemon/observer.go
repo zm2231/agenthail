@@ -42,9 +42,16 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		d.log.Printf("scan queue counts: %s", err)
 		return
 	}
+	taskChildren, err := d.Registry.RunningTaskChildren()
+	if err != nil {
+		d.log.Printf("scan running tasks: %s", err)
+		return
+	}
+	d.taskGoals.retain(taskChildren)
 	d.pruneObservationFailures(watched)
 	for _, watchedSession := range watched {
-		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed {
+		gone, isTask := taskChildren[watchedSession.ID]
+		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask {
 			continue
 		}
 		session, sessionErr := d.Registry.Session(watchedSession.ID)
@@ -70,14 +77,20 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		// An exited Claude session stays a delivery target whatever its stored
 		// status, since a send resumes it; it is observed only to drain its queue.
 		exited := claudeProcessExited(session)
-		if (exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session)) {
+		if !isTask && ((exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session))) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}
 		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
+			if gone {
+				d.settleGoneTask(session)
+			}
 			continue
 		}
 		d.observeSession(ctx, adapter, session)
+		if gone {
+			d.settleGoneTask(session)
+		}
 	}
 }
 
@@ -148,7 +161,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.recordObservationFailure(session.ID)
 		d.logObserveError(session.ID, err)
 		if unobserved {
-			d.releaseUnobservedHold(session)
+			d.releaseUnobservedHold(ctx, adapter, session)
 		}
 		return
 	}
@@ -221,6 +234,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if found && !session.Delegated() && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
 		d.armCompletionNotification(session.ID)
 	}
+	d.settleTaskFromObservation(ctx, adapter, session, observation)
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return

@@ -65,13 +65,19 @@ func (f *terminalLaunchFixture) refused(t *testing.T, token string) bool {
 	return status == http.StatusUnauthorized && errorCode(body) == "unauthenticated"
 }
 
+func (f *terminalLaunchFixture) callRefused(t *testing.T, token string) bool {
+	t.Helper()
+	out, refused := callMCP(t, mcpSession(t, f.server, token), "agenthail_whoami", nil)
+	return refused && out["code"] == "unauthenticated"
+}
+
 func TestATerminalCodexLaunchCarriesACredentialThatBindsOnlyThroughItsClaim(t *testing.T) {
 	f := newTerminalLaunchFixture(t, surface.LauncherTMUX)
 	mcp := f.launch(t, "codex")
 	if mcp == nil || mcp.Token == "" || mcp.Ref == "" || mcp.URL != f.server.URL+"/mcp" {
 		t.Fatalf("launch credential=%+v", mcp)
 	}
-	if !f.refused(t, mcp.Token) {
+	if !f.callRefused(t, mcp.Token) {
 		t.Fatal("a pending credential authenticated")
 	}
 	if status := f.claim(t, mcp.Ref, "launched-thread"); status != http.StatusOK {
@@ -80,7 +86,7 @@ func TestATerminalCodexLaunchCarriesACredentialThatBindsOnlyThroughItsClaim(t *t
 	if status := f.claim(t, mcp.Ref, "another-thread"); status != http.StatusConflict {
 		t.Fatalf("second claim status=%d", status)
 	}
-	if !f.refused(t, mcp.Token) {
+	if !f.callRefused(t, mcp.Token) {
 		t.Fatal("a claimed credential authenticated before its session registered")
 	}
 	f.launcher.locations = map[string]surface.Location{"launched-thread": {Session: "agenthail-1", Pane: "%1"}}

@@ -1,7 +1,9 @@
 import { $ } from "./dom.js";
 import { app } from "./state.js";
-import { chosenHolder, renderHolderPicker, sharedHolders } from "./holders.js";
+import { chosenHolder, renderHolderPicker, sharedHolders, withHolder } from "./holders.js";
 import { action, logicalAction, sessionTarget } from "./actions.js";
+import { configurePendingSends, enqueueSend } from "./pending-send.js";
+import { bindSendStatus, renderSendStatus, returnToComposer } from "./send-status.js";
 import { toast } from "./feedback.js";
 import { load } from "./dashboard-state.js";
 import { selectSession } from "./session-selection.js";
@@ -38,6 +40,7 @@ export function syncComposerAction() {
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
   renderHolderPicker();
+  renderSendStatus();
   if (readOnly) return;
   $("#composer-note").textContent = app.selected?.waitingOn
     ? "This agent is waiting on you. Messages queue until you answer it."
@@ -70,6 +73,7 @@ export async function send(requestedAction = "send") {
   if (!message) return;
   $("#send").disabled = true;
   $("#steer-message").disabled = true;
+  const sessionId = app.selected?.id;
   try {
     const [command, ...rest] = message.split(/\s+/);
     const argument = rest.join(" ");
@@ -84,39 +88,78 @@ export async function send(requestedAction = "send") {
     const commandAction = commandActions[command.toLowerCase()];
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
-    const sendPayload = { message, author: "person", ...selectedTurnOptions() };
-    const result = composerAction === "steer"
-      ? await action("steer", { message, author: "person" })
-      : commandAction
-      ? await action(commandAction[0], commandAction[1])
-      : await logicalAction("send", "send", sendPayload);
-    $("#message").value = "";
-    app.drafts.delete(app.selected.id);
-    resizeComposer();
-    renderSlashMenu();
-    const status = deliveryStatusLabel(result);
-    const target = sessionTarget(app.selected);
+    const steering = composerAction === "steer" || command.toLowerCase() === "/steer";
+    if (steering || !commandAction) {
+      const payload = steering
+        ? { message: composerAction === "steer" ? message : argument, author: "person" }
+        : { message, author: "person", ...selectedTurnOptions() };
+      if (!sessionId) throw Error("Choose a conversation first");
+      const wire = { action: steering ? "steer" : "send", sessionId, ...withHolder(sessionId, payload) };
+      if (enqueueSend(sessionId, wire, message)) {
+        clearComposer(sessionId, message);
+        return;
+      }
+      const unstored = await logicalAction(wire.action, wire.action, payload);
+      clearComposer(sessionId, message);
+      await sendAnswered({ sessionId, wire }, unstored);
+      return;
+    }
+    const result = await action(commandAction[0], commandAction[1]);
+    clearComposer(sessionId, message);
     toast(
-      result?.result?.waitingOn || result?.result?.evidence === "transport_accepted" || commandAction && result?.result?.evidence === "queued"
+      result?.result?.waitingOn || result?.result?.evidence === "transport_accepted" || result?.result?.evidence === "queued"
         ? result.result.detail
-        : composerAction === "steer"
-        ? "Current turn redirected."
         : command?.toLowerCase() === "/model" && result?.result?.output
         ? result.result.output
-        : commandAction
-        ? `${command} requested.`
-        : result?.result?.notice
-        ? `${status} to ${target}. ${result.result.notice}`
-        : `${status} to ${target}.`,
+        : `${command} requested.`,
     );
     await load();
     await selectSession(app.selected.id);
   } catch (error) {
-    const holders = sharedHolders(app.selected);
-    toast(holders.length && !chosenHolder(app.selected.id) ? `Open in ${holders.length} terminals. Choose one above, then send.` : error.message);
+    toast(refusalNotice(sessionId, error));
   } finally {
     syncComposerAction();
   }
+}
+
+function clearComposer(sessionId, message) {
+  if (app.selected?.id === sessionId) {
+    if ($("#message").value.trim() === message) $("#message").value = "";
+    app.drafts.delete(sessionId);
+  } else if (app.drafts.get(sessionId)?.trim() === message) {
+    app.drafts.delete(sessionId);
+  }
+  resizeComposer();
+  renderSlashMenu();
+}
+
+function refusalNotice(sessionId, error) {
+  if (app.selected?.id !== sessionId) return error.message;
+  const holders = sharedHolders(app.selected);
+  return holders.length && !chosenHolder(sessionId) ? `Open in ${holders.length} terminals. Choose one above, then send.` : error.message;
+}
+
+async function sendAnswered(item, result) {
+  const session = app.state?.sessions?.find((candidate) => candidate.id === item.sessionId) || app.selected;
+  const target = sessionTarget(session);
+  const status = deliveryStatusLabel(result);
+  toast(
+    result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"
+      ? result.result.detail
+      : item.wire.action === "steer"
+      ? "Current turn redirected."
+      : result?.result?.notice
+      ? `${status} to ${target}. ${result.result.notice}`
+      : `${status} to ${target}.`,
+  );
+  await load();
+  if (app.selected?.id === item.sessionId) await selectSession(item.sessionId);
+}
+
+function sendRefused(item, error) {
+  returnToComposer(item);
+  toast(refusalNotice(item.sessionId, error));
+  syncComposerAction();
 }
 
 export function renderSlashMenu() {
@@ -146,6 +189,8 @@ export function selectedTurnOptions() {
 }
 
 export function bindComposerEvents() {
+  configurePendingSends({ answered: sendAnswered, refused: sendRefused, changed: renderSendStatus });
+  bindSendStatus();
   $("#message").addEventListener("input", () => {
     resizeComposer();
     renderSlashMenu();

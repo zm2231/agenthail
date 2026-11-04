@@ -330,6 +330,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
+	payload_codec INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -346,7 +347,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	seed_identity TEXT NOT NULL DEFAULT '',
 	history_before INTEGER NOT NULL DEFAULT -1,
 	derived_version INTEGER NOT NULL DEFAULT 0,
-	transcript_checkpoint TEXT NOT NULL DEFAULT ''
+	transcript_checkpoint TEXT NOT NULL DEFAULT '',
+	swept_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
@@ -401,6 +403,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_provider_key
 	ON delivery_intents(target_session_id, provider_key) WHERE provider_key!='';
 CREATE INDEX IF NOT EXISTS delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
+CREATE INDEX IF NOT EXISTS delivery_intents_target
+	ON delivery_intents(target_session_id, id DESC);
 CREATE TABLE IF NOT EXISTS catalog_events (
 	seq INTEGER PRIMARY KEY AUTOINCREMENT,
 	dedupe_key TEXT NOT NULL UNIQUE,
@@ -461,6 +465,28 @@ CREATE TABLE IF NOT EXISTS hosts (
 	catalog_seq INTEGER NOT NULL DEFAULT 0,
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
+CREATE TABLE IF NOT EXISTS tasks (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	child_session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+	task TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'running',
+	result TEXT NOT NULL DEFAULT '',
+	result_kind TEXT NOT NULL DEFAULT '',
+	result_turn_id TEXT NOT NULL DEFAULT '',
+	latest TEXT NOT NULL DEFAULT '',
+	latest_turn_id TEXT NOT NULL DEFAULT '',
+	latest_at_ms INTEGER NOT NULL DEFAULT 0,
+	last_turn_id TEXT NOT NULL DEFAULT '',
+	last_state TEXT NOT NULL DEFAULT '',
+	last_text TEXT NOT NULL DEFAULT '',
+	stalled INTEGER NOT NULL DEFAULT 0,
+	wake INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS tasks_running ON tasks(child_session_id) WHERE state='running';
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_session_id);
 CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL

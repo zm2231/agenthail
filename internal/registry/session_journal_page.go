@@ -42,7 +42,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 			return SessionJournalPage{}, &SessionJournalHistoryGapError{Earliest: earliestPosition, Latest: latestPosition}
 		}
 	}
-	query := `SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=?`
+	query := `SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=?`
 	args := []any{sessionID}
 	if before > 0 {
 		query += ` AND position<?`

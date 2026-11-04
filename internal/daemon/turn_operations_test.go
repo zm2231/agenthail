@@ -18,11 +18,13 @@ type operationSurface struct {
 	options surface.SendOptions
 	queue   surface.NativeQueueRequest
 	fork    surface.ForkOptions
+	sends   int
 }
 
 func (s *operationSurface) SendWithOptions(_ context.Context, _ *surface.Session, _ string, options surface.SendOptions) (*surface.SendResult, error) {
 	s.options = options
-	return &surface.SendResult{UUID: "turn", Accepted: true}, nil
+	s.sends++
+	return &surface.SendResult{UUID: fmt.Sprintf("turn-%d", s.sends), Accepted: true}, nil
 }
 func (s *operationSurface) NativeQueue(_ context.Context, _ *surface.Session, q surface.NativeQueueRequest) (map[string]any, error) {
 	s.queue = q

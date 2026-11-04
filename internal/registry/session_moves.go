@@ -451,6 +451,9 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	if err := setMoveStateTx(tx, r.now(), move.ID, MoveDone, "", MoveSent); err != nil {
 		return nil, false, err
 	}
+	if err := cancelTaskTx(tx, move.Conversation, r.now()); err != nil {
+		return nil, false, err
+	}
 	var events []CatalogEvent
 	var observedAt string
 	if err := tx.QueryRow(`SELECT observed_at FROM catalog_sessions WHERE session_id=?`, move.Conversation).Scan(&observedAt); err == nil {

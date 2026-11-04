@@ -432,7 +432,9 @@ lines.on('line', (line) => {
 // whose input an earlier host closed was seen doing. With FAKE_CLAUDE_LINGER_MS
 // it closes its output and exits that much later. With
 // FAKE_CLAUDE_LINGER_RELEASE it closes its output, writes <release>.<pid> to
-// say it lingers, and exits once the release file exists.
+// say it lingers, and exits once the release file exists, ignoring the SIGTERM
+// the SDK sends two seconds after closing its input, so a slow machine still
+// sees it linger; the SDK's SIGKILL five seconds later ends it.
 lines.on('close', async () => {
   inputClosed = true;
   for (const [id, resolve] of [...pending]) {
@@ -457,4 +459,7 @@ lines.on('close', async () => {
   }
   process.exit(0);
 });
-process.on('SIGTERM', () => process.exit(0));
+process.on('SIGTERM', () => {
+  const release = process.env.FAKE_CLAUDE_LINGER_RELEASE;
+  if (!release || fs.existsSync(release)) process.exit(0);
+});

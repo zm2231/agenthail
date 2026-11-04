@@ -856,6 +856,7 @@ func deleteUnheldClaudeSessionTx(tx *sql.Tx, sessionID string) error {
 	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?1 AND surface=?2 AND host_id='' AND transcript='' AND has_local=0
 		AND NOT EXISTS (SELECT 1 FROM aliases WHERE session_id=?1)
 		AND NOT EXISTS (SELECT 1 FROM coordinators WHERE session_id=?1)
+		AND NOT EXISTS (SELECT 1 FROM tasks WHERE child_session_id=?1)
 		AND NOT EXISTS (SELECT 1 FROM message_queue WHERE session_id=?1 AND status IN ('pending','inflight'))`, sessionID, string(surface.KindClaude))
 	return err
 }

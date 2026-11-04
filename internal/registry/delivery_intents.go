@@ -457,43 +457,18 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
+	options.SourceSessionID = senderSessionID
+	queueID, boundID, err := enqueueMessageTx(tx, r.now(), targetSessionID, message, deliveryKey, options, 0, QueueOperationMessage, queueIntent{Bind: intentID})
 	if err != nil {
-		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return 0, 0, err
-		}
-		var queueID, existingIntentID int64
-		if scanErr := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&queueID); scanErr != nil {
-			return 0, 0, scanErr
-		}
-		scanErr := tx.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&existingIntentID)
-		if scanErr == sql.ErrNoRows {
-			if _, bindErr := tx.Exec(`UPDATE delivery_intents SET queue_id=?,status=?,evidence=?,updated_at=datetime('now') WHERE id=? AND status=?`, queueID, DeliveryIntentQueued, surface.EvidenceQueued, intentID, DeliveryIntentSubmitted); bindErr != nil {
-				return 0, 0, bindErr
-			}
-			existingIntentID = intentID
-		} else if scanErr != nil {
-			return 0, 0, scanErr
-		} else if _, deleteErr := tx.Exec(`DELETE FROM delivery_intents WHERE id=? AND status=?`, intentID, DeliveryIntentSubmitted); deleteErr != nil {
-			return 0, 0, deleteErr
-		}
-		if commitErr := tx.Commit(); commitErr != nil {
-			return 0, 0, commitErr
-		}
-		return queueID, existingIntentID, nil
-	}
-	queueID, err := res.LastInsertId()
-	if err != nil {
-		return 0, 0, err
-	}
-	if _, err := tx.Exec(`UPDATE delivery_intents SET queue_id=?,status=?,evidence=?,updated_at=datetime('now') WHERE id=? AND status=?`, queueID, DeliveryIntentQueued, surface.EvidenceQueued, intentID, DeliveryIntentSubmitted); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: targetSessionID, SourceSessionID: senderSessionID, QueueID: queueID, Message: message})
-	return queueID, intentID, nil
+	if boundID == intentID {
+		_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: targetSessionID, SourceSessionID: senderSessionID, QueueID: queueID, Message: message})
+	}
+	return queueID, boundID, nil
 }
 
 // FailDeliveryIntentWithNotice makes the failure durable before returning. If
@@ -538,11 +513,8 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (boo
 }
 
 func insertQueuedDeliveryIntent(tx *sql.Tx, senderSessionID, targetSessionID, message string, queueID int64, relayed bool) (int64, error) {
-	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?) AND EXISTS(SELECT 1 FROM sessions WHERE id=?)`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued, senderSessionID, targetSessionID)
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence) VALUES(?,?,?,?,?,?,?,?)`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued)
 	if err != nil {
-		return 0, err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return 0, err
 	}
 	return res.LastInsertId()
@@ -668,11 +640,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	}
 	notice := fmt.Sprintf("[agenthail delivery failure id=%d target=%s] %s", intent.ID, intent.TargetSessionID, intent.Failure)
 	key := fmt.Sprintf("delivery-intent-notice:%d:%d", intent.ID, intent.Retries)
-	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key)
-	if err != nil {
-		return 0, false, err
-	}
-	queueID, err := res.LastInsertId()
+	queueID, err := queueNoticeTx(tx, intent.SenderSessionID, notice, key)
 	if err != nil {
 		return 0, false, err
 	}
@@ -701,7 +669,7 @@ func queueDeliveryRefusalNotice(tx *sql.Tx, queueID, refusal int64, reason strin
 	}
 	notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] %s. The message stays queued and is delivered once the target starts.", intent.ID, intent.TargetSessionID, reason)
 	key := fmt.Sprintf("delivery-intent-refusal:%d:%d", intent.ID, refusal)
-	_, err = tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now')) ON CONFLICT DO NOTHING`, intent.SenderSessionID, notice, QueueOperationMessage, key)
+	_, err = queueNoticeTx(tx, intent.SenderSessionID, notice, key)
 	return err
 }
 
@@ -751,10 +719,11 @@ func scanDeliveryIntent(row *sql.Row) (*DeliveryIntent, error) {
 	return &intent, nil
 }
 
+const maxIntentMessage = 16 * 1024
+
 func boundedIntentMessage(message string) string {
-	const max = 16 * 1024
-	if len(message) <= max {
+	if len(message) <= maxIntentMessage {
 		return message
 	}
-	return message[:max]
+	return message[:maxIntentMessage]
 }

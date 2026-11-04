@@ -47,8 +47,20 @@ func (d *Daemon) mcpAction(ctx context.Context, caller *mcpCaller, tool string, 
 
 func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 	if reply.Status == http.StatusAccepted {
-		var submitted struct{ Status string }
+		var submitted struct {
+			Status  string
+			TaskID  int64 `json:"taskId"`
+			Session struct {
+				ID string `json:"id"`
+			} `json:"session"`
+		}
 		if json.Unmarshal(reply.Body, &submitted) == nil && submitted.Status == "submitted" {
+			if submitted.TaskID != 0 {
+				encoded, err := json.Marshal(map[string]any{"taskId": submitted.TaskID, "sessionId": submitted.Session.ID, "state": registry.TaskRunning, "outcome": "unknown"})
+				if err == nil {
+					return encoded, nil
+				}
+			}
 			return nil, mcpUnknownOutcome()
 		}
 	}

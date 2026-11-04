@@ -182,7 +182,7 @@ func (r *Registry) catalogRetiredCounts(ctx context.Context, tx *sql.Tx) ([]Cata
 		return cache.counts, nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT s.surface,COALESCE(json_extract(cs.host_project,'$.id'),''),
-		sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,cs.unavailable_reason<>'',COUNT(*)
+		sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,s.host_id<>'' AND cs.unavailable_reason<>'',COUNT(*)
 		FROM catalog_sessions cs INDEXED BY catalog_sessions_retired JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN session_archive sa ON sa.session_id=s.id
 		LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')

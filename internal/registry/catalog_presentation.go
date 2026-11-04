@@ -188,7 +188,7 @@ func catalogFingerprints(ctx context.Context, tx *sql.Tx, ids []string) (map[str
 }
 
 const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
- cs.unavailable_reason,s.parent_session_id,s.root_session_id,s.subagent_depth,s.agent_nickname,s.agent_role,
+ CASE WHEN s.host_id!='' THEN cs.unavailable_reason ELSE '' END,s.parent_session_id,s.root_session_id,s.subagent_depth,s.agent_nickname,s.agent_role,
  CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,

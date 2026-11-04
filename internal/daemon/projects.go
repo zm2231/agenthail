@@ -631,7 +631,14 @@ func (d *Daemon) forwardProjectAction(ctx context.Context, host *pairedHost, req
 func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
 	var err error
 	if action == "session-archive" {
+		task, found, taskErr := d.Registry.TaskForChild(sessionID)
+		if taskErr != nil {
+			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", taskErr.Error())
+		}
 		err = d.Registry.ArchiveSession(sessionID, time.Now().UTC())
+		if err == nil && found && task.State == registry.TaskRunning {
+			d.publishTaskSettled(sessionID, registry.TaskCancelled, "")
+		}
 	} else {
 		err = d.Registry.UnarchiveSession(sessionID)
 	}
@@ -732,7 +739,7 @@ func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string
 	}
 	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
 	if transient {
-		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.UnavailableReason)
+		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.Problem)
 	}
 	return identity.Project, nil
 }
