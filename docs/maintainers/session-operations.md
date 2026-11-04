@@ -116,8 +116,9 @@ for paging, replay, gaps and source lifetime.
 
 Busy-target behavior is explicit: `send` delivers immediately when idle and follows
 the persisted `busyDelivery` setting (`queue` by default, or `steer` when the
-target advertises steering) when busy. A steer-policy target without steering
-capability is queued instead. An agent's message to a Claude session with a
+target advertises steering) when busy. A settings file that can't be read means
+`queue` until it is fixed, never a stalled queue; the daemon logs it and `doctor`
+names the file. A steer-policy target without steering capability is queued instead. An agent's message to a Claude session with a
 native peer socket is the exception: the socket delivers it to a running or
 waiting turn with the sender's name and reply address, and Claude holds it in
 its own queue until the turn can read it, so it is sent at once whatever the

@@ -58,7 +58,7 @@ func (a *App) openRegistry() (*registry.Registry, error) {
 	if a.registryErr != nil {
 		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
 	} else {
-		a.Registry.SetBusyPolicy(deliverypolicy.Load)
+		a.Registry.SetBusyPolicy(deliverypolicy.Current)
 	}
 	return a.Registry, a.registryErr
 }

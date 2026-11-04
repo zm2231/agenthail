@@ -153,12 +153,8 @@ func (r *Registry) QueueCount(sessionID string) int {
 }
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {
-	mode, err := r.busyMode()
-	if err != nil {
-		return false, err
-	}
 	var found int
-	err = r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND `+queueSteerRow("message_queue", mode), sessionID).Scan(&found)
+	err := r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND `+queueSteerRow("message_queue", r.busyMode()), sessionID).Scan(&found)
 	return found > 0, err
 }
 
