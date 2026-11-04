@@ -84,7 +84,7 @@ final class ComposerUITextView: UITextView {
         view.textContainer.lineFragmentPadding = 0
         view.placeholderLabel.font = view.font
         view.placeholderLabel.adjustsFontForContentSizeCategory = true
-        view.placeholderLabel.textColor = .placeholderText
+        view.placeholderLabel.textColor = UIColor { $0.userInterfaceStyle == .light ? .secondaryLabel : .placeholderText }
         view.placeholderLabel.numberOfLines = 0
         view.placeholderLabel.isAccessibilityElement = false
         view.addSubview(view.placeholderLabel)
