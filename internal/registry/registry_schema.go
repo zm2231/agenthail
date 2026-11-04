@@ -403,6 +403,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_provider_key
 	ON delivery_intents(target_session_id, provider_key) WHERE provider_key!='';
 CREATE INDEX IF NOT EXISTS delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
+CREATE INDEX IF NOT EXISTS delivery_intents_target
+	ON delivery_intents(target_session_id, id DESC);
 CREATE TABLE IF NOT EXISTS catalog_events (
 	seq INTEGER PRIMARY KEY AUTOINCREMENT,
 	dedupe_key TEXT NOT NULL UNIQUE,

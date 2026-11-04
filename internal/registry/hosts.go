@@ -52,7 +52,7 @@ type PairedHost struct {
 	Token         string `json:"-"`
 	State         string `json:"state"`
 	LastError     string `json:"lastError,omitempty"`
-	LastContactAt string `json:"lastContactAt,omitempty"`
+	ConnectedAt   string `json:"connectedAt,omitempty"`
 	CreatedAt     string `json:"createdAt"`
 	CatalogEpoch  string `json:"-"`
 	CatalogSeq    uint64 `json:"-"`
@@ -167,7 +167,7 @@ const pairedHostColumns = `host_id,name,endpoint,address,token,state,last_error,
 func scanPairedHost(row rowScanner) (PairedHost, error) {
 	var host PairedHost
 	var seq int64
-	err := row.Scan(&host.ID, &host.Name, &host.Endpoint, &host.Address, &host.Token, &host.State, &host.LastError, &host.LastContactAt, &host.CreatedAt, &host.CatalogEpoch, &seq)
+	err := row.Scan(&host.ID, &host.Name, &host.Endpoint, &host.Address, &host.Token, &host.State, &host.LastError, &host.ConnectedAt, &host.CreatedAt, &host.CatalogEpoch, &seq)
 	if seq > 0 {
 		host.CatalogSeq = uint64(seq)
 	}

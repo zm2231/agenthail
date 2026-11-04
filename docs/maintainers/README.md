@@ -23,4 +23,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Agent card: what a session knows about itself, and who started it](agent-card.md)
 - [MCP server: session credentials, read tools, scope and limits](mcp.md)
 - [Agent messages in the transcript: the `agent` field and the fold rule](agent-messages.md)
+- [Inbox: what a session was sent, where it is recorded, and how it is read](inbox.md)
 - [Dashboard design reference](../../design.md)

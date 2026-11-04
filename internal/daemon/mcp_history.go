@@ -11,8 +11,8 @@ import (
 type mcpHistoryInput struct {
 	View      string `json:"view,omitempty" jsonschema:"history (deliveries and their outcomes, the default) or queue (instructions waiting to be delivered)."`
 	SessionID string `json:"sessionId,omitempty" jsonschema:"For history: only this session's entries."`
-	Limit     int    `json:"limit,omitempty" jsonschema:"Entries per page, 1 to 50; default 20."`
-	Before    int64  `json:"before,omitempty" jsonschema:"An entry id from a previous page, to read further back."`
+	Limit     int    `json:"limit,omitempty" jsonschema:"For history: entries per page, 1 to 50; default 20."`
+	Before    int64  `json:"before,omitempty" jsonschema:"For history: an entry id from a previous page, to read further back."`
 }
 
 func (d *Daemon) mcpHistory(ctx context.Context, caller *mcpCaller, input mcpHistoryInput) (any, error) {
@@ -23,13 +23,14 @@ func (d *Daemon) mcpHistory(ctx context.Context, caller *mcpCaller, input mcpHis
 	if err != nil {
 		return nil, err
 	}
-	query := url.Values{"limit": {strconv.Itoa(limit)}}
-	if input.Before > 0 {
-		query.Set("before", strconv.FormatInt(input.Before, 10))
-	}
+	query := url.Values{}
 	handler, path := d.dashboardHistoryHandler, "/api/v1/history"
 	switch input.View {
 	case "", "history":
+		query.Set("limit", strconv.Itoa(limit))
+		if input.Before > 0 {
+			query.Set("before", strconv.FormatInt(input.Before, 10))
+		}
 		if input.SessionID != "" {
 			query.Set("sessionId", input.SessionID)
 		}

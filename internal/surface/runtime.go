@@ -33,7 +33,8 @@ const (
 	PersonSessionID = "agenthail-person"
 	// CLISessionID sends what agenthail send, a script or an API call sent
 	// from outside any session. A terminal is not proof of a person.
-	CLISessionID = "agenthail-cli"
+	CLISessionID    = "agenthail-cli"
+	SystemSessionID = "agenthail"
 )
 
 // SourcelessSender is who sent a message that has no source session.
@@ -51,14 +52,17 @@ func (o SendOptions) Sender() string {
 	return SourcelessSender(o.Author)
 }
 
-// AgenthailSender returns the pseudo-session for the person or the Agenthail
-// CLI, or false for any other id. personName names the person.
+// AgenthailSender returns the pseudo-session for the person, the Agenthail
+// CLI or Agenthail itself, or false for any other id. personName names the
+// person.
 func AgenthailSender(id, personName string) (Session, bool) {
 	switch id {
 	case PersonSessionID:
 		return Session{ID: id, Surface: "person", RuntimeKind: RuntimeOperator, Name: personName, Status: StatusIdle}, true
 	case CLISessionID:
 		return Session{ID: id, Surface: "cli", RuntimeKind: RuntimeOperator, Name: "Agenthail CLI", Status: StatusIdle}, true
+	case SystemSessionID:
+		return Session{ID: id, Surface: SurfaceKind(RuntimeOperator), RuntimeKind: RuntimeOperator, Name: "Agenthail", Status: StatusIdle}, true
 	}
 	return Session{}, false
 }

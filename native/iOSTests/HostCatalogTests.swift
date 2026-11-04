@@ -277,7 +277,7 @@ private final class RepositoryArchiveProtocol: URLProtocol, @unchecked Sendable 
     override func stopLoading() {}
 }
 
-private extension DashboardSnapshot {
+extension DashboardSnapshot {
     mutating func daemonHosts(_ hosts: [HostHealth]) {
         self = DashboardSnapshot(updatedAt: updatedAt, eventCursor: eventCursor, hostEpoch: hostEpoch, catalogSeq: catalogSeq, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil, hosts: hosts), surfaces: surfaces, sessions: sessions, totalSessions: totalSessions, queue: queue, channels: channels, relays: relays, history: history, attention: attention, deliveryProblems: deliveryProblems, codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
     }

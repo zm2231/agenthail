@@ -335,7 +335,12 @@ func (h *runningDaemon) receipt(body map[string]any) map[string]any {
 
 func (h *runningDaemon) queue() []dashboardQueue {
 	h.t.Helper()
-	status, payload := h.request(http.MethodGet, "/api/v1/queue", nil)
+	return h.queueAt("/api/v1/queue")
+}
+
+func (h *runningDaemon) queueAt(path string) []dashboardQueue {
+	h.t.Helper()
+	status, payload := h.request(http.MethodGet, path, nil)
 	if status != http.StatusOK {
 		h.t.Fatalf("queue status=%d body=%s", status, payload)
 	}
@@ -384,13 +389,11 @@ func delivered(item dashboardQueue) bool {
 
 func (h *runningDaemon) queueItem(id int64) dashboardQueue {
 	h.t.Helper()
-	for _, item := range h.queue() {
-		if item.ID == id {
-			return item
-		}
+	items := h.queueAt(fmt.Sprintf("/api/v1/queue?id=%d", id))
+	if len(items) != 1 {
+		h.t.Fatalf("queue item %d not found: %+v", id, items)
 	}
-	h.t.Fatalf("queue item %d not listed", id)
-	return dashboardQueue{}
+	return items[0]
 }
 
 // execStore edits the daemon's registry file directly, standing in for time

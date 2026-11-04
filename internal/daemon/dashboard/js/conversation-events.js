@@ -10,6 +10,7 @@ import { selectSession } from "./session-selection.js";
 import { openVoice } from "./voice.js";
 import { cancelCodexSearch } from "./session-search.js";
 import { action } from "./actions.js";
+import { takeBackQueued } from "./queue-take-back.js";
 import { renderDeliveryProblems, renderLeadReplacements } from "./overview.js";
 import { load } from "./dashboard-state.js";
 import { displayName } from "./session-labels.js";
@@ -194,6 +195,19 @@ export function bindConversationEvents() {
         toast("Queued message scheduled for retry.");
         await load();
       } catch (error) {
+        toast(error.message);
+      }
+      return;
+    }
+    const takeBack = event.target.closest("[data-take-back]");
+    if (takeBack) {
+      takeBack.disabled = true;
+      try {
+        const missing = await takeBackQueued(Number(takeBack.dataset.takeBack));
+        toast(missing.length ? `Back in the composer. ${missing.map((attachment) => attachment.name).join(", ")} ${missing.length > 1 ? "are" : "is"} no longer stored; attach again.` : "Back in the composer.");
+        await load();
+      } catch (error) {
+        takeBack.disabled = false;
         toast(error.message);
       }
       return;
