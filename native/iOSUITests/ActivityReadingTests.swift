@@ -59,8 +59,8 @@ final class ActivityReadingTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: added)], timeout: 5), .completed, "tapping the chip again closes the diff")
 
         let line = app.buttons["tool-edit-1"]
-        line.scrollIntoMiddle(of: timeline)
-        line.tapWhenStill()
+        for _ in 0..<4 where !line.isHittable { timeline.swipeDown() }
+        line.tapWhenReady()
         XCTAssertTrue(added.waitForExistence(timeout: 5), "an edit line opens to the same diff in place of the raw strings")
         XCTAssertFalse(app.staticTexts["Added"].exists, "the separate before and after blocks are gone")
     }

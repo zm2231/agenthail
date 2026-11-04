@@ -210,6 +210,7 @@ struct QueueListView: View {
 
     private func queueRow(_ item: QueueState) -> some View {
         let envelope = PeerEnvelope(item.message)
+        let steering = model.queueSteer(item)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(item.outcomeLabel)
@@ -251,9 +252,18 @@ struct QueueListView: View {
                 if let value = item.mode { LabeledContent("Mode", value: value).font(.footnote) }
                 if let value = item.sourceSessionId { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
             }.font(.footnote)
+            if let refusal = steering?.refusal {
+                Text(refusal).font(.footnote).foregroundStyle(PhonePalette.muted)
+                    .accessibilityIdentifier("queue-steer-refusal-\(item.id)")
+            }
             HStack {
                 if item.status == "dead" {
                     Button("Send again") { retryCandidate = item }.buttonStyle(.bordered)
+                }
+                if let steering, steering.refusal == nil {
+                    Button("Steer") { steer(item, capabilities: steering.capabilities) }.buttonStyle(.bordered)
+                        .accessibilityHint("Sends this message into the running turn")
+                        .accessibilityIdentifier("queue-steer-\(item.id)")
                 }
                 if item.status == "pending" && !item.isHistorical {
                     Button("Edit") { takeBack(item) }.buttonStyle(.bordered)
@@ -270,6 +280,14 @@ struct QueueListView: View {
             if item.status == "pending" && !item.isHistorical {
                 Button("Edit") { takeBack(item) }.tint(.accentColor)
             }
+        }
+    }
+
+    private func steer(_ item: QueueState, capabilities: Capabilities) {
+        error = nil
+        Task {
+            do { try await model.steerQueued(item, capabilities: capabilities) } catch { self.error = error.localizedDescription }
+            await reload()
         }
     }
 

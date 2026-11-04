@@ -488,16 +488,11 @@ struct SessionScreen: View {
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
-    @State private var queueHeight: CGFloat = 0
     @State private var atLatest = true
     @State private var overflows = false
     @State private var jumps = 0
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
-
-    private static func takesMessages(_ detail: SessionDetail) -> Bool {
-        !detail.readOnly && (detail.capabilities.send || detail.capabilities.steer)
-    }
 
     private var displayTitle: String {
         session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
@@ -636,7 +631,6 @@ struct SessionScreen: View {
             .transcriptScrimContent()
             .id(jumps)
         }
-        .contentMargins(.bottom, detail.map(Self.takesMessages) == true ? queueHeight : 0, for: .scrollContent)
         .scrollPosition($position)
         .accessibilityIdentifier("session-timeline")
         .phoneBackdrop(.transcript)
@@ -656,14 +650,13 @@ struct SessionScreen: View {
                 userScrolling = false
             }
         }
-        // A distance, not a Bool: a Bool that flips back during landing never delivers its action, leaving atLatest stale.
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentSize.height - geometry.visibleRect.maxY
-        } action: { _, distance in
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height - geometry.visibleRect.maxY < 60
+        } action: { _, value in
 #if DEBUG
             guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
-            atLatest = distance < 60
+            atLatest = value
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height > geometry.visibleRect.height
@@ -674,17 +667,7 @@ struct SessionScreen: View {
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
         .overlay(alignment: .bottom) {
-            VStack(spacing: 8) {
-                if !atLatest && detail != nil { jumpToLatest }
-                if let detail, Self.takesMessages(detail) {
-                    SessionQueueSection(model: model, session: session, capabilities: detail.capabilities, readOnly: detail.readOnly)
-                        .id(session.id)
-                        .frame(maxWidth: SessionStyle.readingWidth)
-                        .padding(.horizontal)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { queueHeight = $0 }
-                }
-            }
-            .padding(.bottom, 8)
+            if !atLatest && detail != nil { jumpToLatest.padding(.bottom, 8) }
         }
         .edgeBar(.top, spacing: 0) {
             if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
@@ -709,7 +692,7 @@ struct SessionScreen: View {
                     .padding(.top, 6)
                 }
                 if let detail {
-                    if !Self.takesMessages(detail) {
+                    if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
                         Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
                             .font(.footnote).foregroundStyle(PhonePalette.muted)
                             .padding(.horizontal, 14).padding(.vertical, 10)

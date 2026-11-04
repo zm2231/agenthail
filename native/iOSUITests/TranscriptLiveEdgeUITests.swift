@@ -76,13 +76,10 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         sleep(2)
         let latest = newestReply(app)
         XCTAssertGreaterThan(latest, 0, "the session opened without a reply on screen")
+        for _ in 0..<2 { timeline.swipeDown(velocity: .slow) }
         let middle = timeline.frame.insetBy(dx: 0, dy: timeline.frame.height * 0.25)
-        var midScreenTool: String?
-        for _ in 0..<8 where midScreenTool == nil {
-            timeline.swipeDown(velocity: .slow)
-            midScreenTool = elements(app).filter({ $0.identifier.hasPrefix("tool-call-") && middle.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }).map(\.identifier).first
-        }
-        guard let toolID = midScreenTool else { return XCTFail("no tool row mid-screen") }
+        guard let toolID = elements(app).filter({ $0.identifier.hasPrefix("tool-call-") && middle.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }).map(\.identifier).first
+        else { return XCTFail("no tool row mid-screen") }
         let tool = timeline.buttons[toolID]
         tool.tap()
         expectation(for: NSPredicate(format: "value == 'Expanded'"), evaluatedWith: tool)

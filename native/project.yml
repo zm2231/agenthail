@@ -30,7 +30,6 @@ targets:
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: QueueSteer.swift
-      - path: iOS/SessionQueueSection.swift
       - path: InboxMessage.swift
       - path: PeerEnvelope.swift
       - path: TaggedResponses.swift

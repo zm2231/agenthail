@@ -564,11 +564,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         returnToDraft(cancelled.message ?? item.message, attachments: cancelled.attachments ?? [], id: draftKey(for: item))
     }
 
-    func sessionQueue(_ sessionID: String) async throws -> [QueueState] {
-        let (api, route) = try resolve(sessionID)
-        let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
-        let items = try await api.activeQueue(sessionID: route.sessionID, timeout: InboxPage.hostTimeout)
-        return QueueSteer.waiting(items.map { InboxPage.qualified($0, host: owner) })
+    func queueSteer(_ item: QueueState) -> (capabilities: Capabilities, refusal: String?)? {
+        guard !item.isHistorical, !QueueSteer.waiting([item]).isEmpty else { return nil }
+        let id = item.sessionId
+        let known = snapshot?.sessions.first { $0.id == id }
+            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: snapshot?.daemon.pairedHost(owning: id)) : nil }
+        guard let session = known, session.status == "busy", session.waitingOn == nil, session.capabilities.steer, !session.isReadOnly else { return nil }
+        return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
     }
 
     func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
