@@ -33,6 +33,7 @@ func (s *sessionSource) run() {
 	defer func() {
 		s.closeFollowers()
 		s.remove()
+		close(s.done)
 		s.manager.running.Done()
 	}()
 	seedErr := s.seedJournal()
