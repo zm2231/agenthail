@@ -66,7 +66,7 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
 		caller := mcpCallerFrom(ctx)
 		if caller == nil {
-			return mcpRefused(refuse("unauthenticated", "A valid Agenthail session credential is required.")), nil, nil
+			return mcpRefused(&mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}), nil, nil
 		}
 		ctx, replay := d.replayMCPWrite(ctx, caller, tool.Name, input)
 		var value any
