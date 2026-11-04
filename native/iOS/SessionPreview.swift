@@ -241,7 +241,7 @@ struct SessionPreview: View {
             ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities, "claudeConfigRoot": ["name": "work", "root": "/home/dev/.work/.claude"]]
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
-        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
+        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue, "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-waiting") }) {
             snapshot["busyDelivery"] = "steer"
             var waitingSessions = sessions
@@ -317,6 +317,13 @@ struct SessionPreview: View {
     nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11T18:20:00.000000000Z"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"canceled","evidence":"canceled","attempts":0,"queuedAt":"2026-09-09T11:00:00.000000000Z"}]}"#
 
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
+
+    nonisolated static var previewSnapshotQueue: [[String: Any]] {
+        guard !ProcessInfo.processInfo.arguments.contains("--preview-queue-not-in-snapshot") else { return [] }
+        let queued = ProcessInfo.processInfo.arguments.contains("--preview-session-queue") ? sessionQueueJSON(rows: UserDefaults.standard.integer(forKey: "preview-session-queue-rows")) : queueJSON
+        let page = (try? JSONSerialization.jsonObject(with: Data(queued.utf8))) as? [String: Any]
+        return ((page?["items"] as? [[String: Any]]) ?? []).filter { $0["status"] as? String == "pending" }
+    }
 
     nonisolated static func sessionQueueJSON(rows: Int) -> String {
         let common = #""sessionId":"demo","target":"Make the build reliable","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z""#

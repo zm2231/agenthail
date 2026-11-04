@@ -488,6 +488,8 @@ struct SessionScreen: View {
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
+    @State private var scrollOffset = TranscriptScrollOffset()
+    @State private var landed = false
     @State private var atLatest = true
     @State private var overflows = false
     @State private var jumps = 0
@@ -663,6 +665,7 @@ struct SessionScreen: View {
         } action: { _, value in
             overflows = value
         }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, y in scrollOffset.y = y }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
@@ -702,8 +705,8 @@ struct SessionScreen: View {
                         TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
                         IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
                             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { old, new in
-                                guard new > old, followingLatest, !userScrolling else { return }
-                                scrollToLatest()
+                                guard new > old, landed, followingLatest, !userScrolling else { return }
+                                position.scrollTo(y: scrollOffset.y + new - old)
                             }
                     }
                 }
@@ -754,12 +757,14 @@ struct SessionScreen: View {
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
             atLatest = !startsAtOldest
+            landed = false
             await model.loadSession(session.id)
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
             } else {
                 scrollToLatest()
             }
+            landed = true
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
@@ -768,6 +773,11 @@ struct SessionScreen: View {
             if followingLatest { scrollToLatest() }
         }
     }
+}
+
+// A class so reading the offset on every scroll frame invalidates no view.
+final class TranscriptScrollOffset {
+    var y: CGFloat = 0
 }
 
 struct IOSComposer: View {

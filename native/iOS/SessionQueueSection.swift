@@ -5,7 +5,7 @@ struct SessionQueueSection: View {
     let session: SessionState
     let capabilities: Capabilities
     let readOnly: Bool
-    @State private var items: [QueueState] = []
+    @State private var loaded: [QueueState]?
     @State private var problem: String?
     @State private var chosenExpanded: Bool?
     @State private var rowsHeight: CGFloat = 0
@@ -13,11 +13,16 @@ struct SessionQueueSection: View {
     private static let collapsesAt = 3
     private static let heightCap: CGFloat = 156
 
+    // Rows known from the snapshot render on the first frame, so the composer doesn't grow while the transcript lands.
+    private var snapshotRows: [QueueState] {
+        (model.snapshot?.queue ?? []).map { InboxPage.qualified($0, host: $0.hostID ?? "") }.filter { $0.sessionId == session.id }
+    }
+    private var items: [QueueState] { loaded ?? QueueSteer.waiting(snapshotRows) }
     private var expanded: Bool { chosenExpanded ?? (items.count < Self.collapsesAt) }
     private var canSteer: Bool { session.status == "busy" && session.waitingOn == nil && capabilities.steer && !readOnly }
 
     private var refreshKey: String {
-        let listed = (model.snapshot?.queue ?? []).filter { $0.sessionId == session.id }.map { "\($0.id):\($0.status)" }
+        let listed = snapshotRows.map { "\($0.id):\($0.status)" }
         return ([session.status, String(session.queueCount), model.deliveryStatus[session.id] ?? ""] + listed).joined(separator: "|")
     }
 
@@ -147,7 +152,7 @@ struct SessionQueueSection: View {
     }
 
     private func reload() async {
-        guard let loaded = try? await model.sessionQueue(session.id), !Task.isCancelled else { return }
-        items = loaded
+        guard let fresh = try? await model.sessionQueue(session.id), !Task.isCancelled else { return }
+        loaded = fresh
     }
 }

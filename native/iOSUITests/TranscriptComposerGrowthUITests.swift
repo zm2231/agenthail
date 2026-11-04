@@ -121,6 +121,13 @@ final class TranscriptComposerGrowthUITests: XCTestCase {
         assertAtLatest(app, "with the section collapsed")
     }
 
+    func testARowTheSnapshotDidNotHaveAppearsWithoutLeavingTheLatestRow() {
+        let app = launch(rows: 2, extra: ["--preview-reading", "--preview-follow", "--preview-queue-not-in-snapshot"])
+        settle()
+        XCTAssertTrue(app.buttons["session-queue-menu-11"].exists)
+        assertAtLatest(app, "after a row arrived late")
+    }
+
     func testTheSectionStaysResponsiveOverAStreamingTranscriptWithAWallpaper() {
         continueAfterFailure = false
         for space in stride(from: 40, through: 280, by: 60) {
