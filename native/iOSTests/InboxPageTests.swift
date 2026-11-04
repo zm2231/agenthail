@@ -197,9 +197,9 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(refreshed.refreshed(with: back).unreachable, [])
     }
 
-    func testSteerWorksThroughAMirrorWhileTheOwnerIsHeld() async throws {
+    private func modelWithTheOwnerHeld() throws -> AgenthailIOSModel {
         KeychainStore.removeAll()
-        defer { KeychainStore.removeAll(); InboxHostProtocol.failing = [] }
+        addTeardownBlock { KeychainStore.removeAll(); InboxHostProtocol.failing = [] }
         try AgenthailIOSTests.pair("hlaptop", "https://fast.invalid", name: "laptop")
         try AgenthailIOSTests.pair("hserver", "https://older.invalid", name: "server")
         let configuration = URLSessionConfiguration.ephemeral
@@ -216,8 +216,30 @@ final class InboxPageTests: XCTestCase {
         InboxHostProtocol.failing = ["older.invalid"]
         owner.recordStreamInterruption(probeError: URLError(.timedOut))
         XCTAssertTrue(owner.holding, "the owner is shown connected during its grace")
-
         InboxHostProtocol.actions = []
+        return model
+    }
+
+    func testEditCancelsThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
+        try await model.takeBack(InboxPage.qualified(queueRow(id: 9), host: "hserver"))
+        XCTAssertEqual(InboxHostProtocol.actions.first?["to"] as? String, "fast.invalid")
+        XCTAssertEqual(InboxHostProtocol.actions.first?["host"] as? String, "hserver")
+        XCTAssertEqual(InboxHostProtocol.actions.first?["action"] as? String, "queue-cancel")
+    }
+
+    func testRetryAndCancelGoThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
+        try await model.updateQueue(id: 9, hostID: "hserver", retry: true)
+        try await model.updateQueue(InboxPage.qualified(queueRow(id: 10), host: "hserver"), retry: false)
+        let actions = InboxHostProtocol.actions
+        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-retry", "queue-cancel"])
+        XCTAssertEqual(actions.compactMap { $0["to"] as? String }, ["fast.invalid", "fast.invalid"])
+        XCTAssertEqual(actions.compactMap { $0["host"] as? String }, ["hserver", "hserver"])
+    }
+
+    func testSteerWorksThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
         try await model.steerQueued(InboxPage.qualified(queueRow(id: 9), host: "hserver"), capabilities: Capabilities(steer: true))
         let actions = InboxHostProtocol.actions
         XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-cancel", "steer"])
