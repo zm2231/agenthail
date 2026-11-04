@@ -587,10 +587,10 @@ func hostsList(ctx context.Context, client *daemonAPIClient, jsonOut bool) error
 		fmt.Println("no paired hosts; pair one with 'agenthail hosts invite' on the other host")
 		return nil
 	}
-	fmt.Printf("%-16s %-14s %-13s %-8s %-16s %s\n", "HOST", "ID", "STATE", "SESSIONS", "ADDRESS", "LAST CONTACT")
+	fmt.Printf("%-16s %-14s %-13s %-8s %-16s %s\n", "HOST", "ID", "STATE", "SESSIONS", "ADDRESS", "CONNECTED")
 	for _, host := range listing.Hosts {
 		contact := "never"
-		if at, err := time.Parse(time.RFC3339Nano, host.LastContactAt); err == nil {
+		if at, err := time.Parse(time.RFC3339Nano, host.ConnectedAt); err == nil {
 			contact = relTime(at)
 		}
 		fmt.Printf("%-16s %-14s %-13s %-8d %-16s %s\n", truncate(host.Name, 16), host.ID, host.State, host.SessionCount, host.Address, contact)
