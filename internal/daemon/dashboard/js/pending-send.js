@@ -1,43 +1,60 @@
 import { isNetworkFailure, postAction } from "./actions.js";
 
-const storageKey = "agenthail.pendingSends";
+const storagePrefix = "agenthail.pendingSend.";
 const autoRetryWindow = 60 * 60 * 1000;
 const abandonedAfter = 60 * 1000;
 
-let unstored = [];
 let handlers = { answered() {}, refused() {}, changed() {} };
 const startedHere = new Set();
 const pumping = new Set();
 
-function read() {
+function readOne(storageKey) {
   try {
-    const stored = globalThis.localStorage?.getItem(storageKey);
-    return stored ? [...JSON.parse(stored), ...unstored] : [...unstored];
+    return JSON.parse(globalThis.localStorage.getItem(storageKey));
   } catch {
-    return [...unstored];
+    return null;
   }
 }
 
-function write(items) {
+function read() {
+  const items = [];
   try {
-    if (!globalThis.localStorage) throw Error("no storage");
-    if (items.length) globalThis.localStorage.setItem(storageKey, JSON.stringify(items));
-    else globalThis.localStorage.removeItem(storageKey);
-    unstored = [];
+    const storage = globalThis.localStorage;
+    for (let index = 0; index < storage.length; index++) {
+      const storageKey = storage.key(index);
+      if (!storageKey?.startsWith(storagePrefix)) continue;
+      const item = readOne(storageKey);
+      if (item?.id) items.push(item);
+    }
   } catch {
-    unstored = items;
+    return [];
   }
-  handlers.changed();
+  return items.sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence);
+}
+
+function save(item) {
+  try {
+    globalThis.localStorage.setItem(storagePrefix + item.id, JSON.stringify(item));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    handlers.changed();
+  }
 }
 
 function change(id, edit) {
-  write(read().map((item) => (item.id === id ? edit(item) : item)));
+  const item = readOne(storagePrefix + id);
+  if (item) save(edit(item));
 }
 
 function take(id) {
-  const items = read();
-  const item = items.find((candidate) => candidate.id === id);
-  if (item) write(items.filter((candidate) => candidate.id !== id));
+  const item = readOne(storagePrefix + id);
+  if (!item) return null;
+  try {
+    globalThis.localStorage.removeItem(storagePrefix + id);
+  } catch {}
+  handlers.changed();
   return item;
 }
 
@@ -65,12 +82,16 @@ function holdingItem(id, work) {
 
 function attempt(id) {
   return holdingItem(id, async () => {
-    const item = read().find((candidate) => candidate.id === id);
+    const item = readOne(storagePrefix + id);
     if (!item) return "answered";
     change(id, (current) => ({ ...current, attemptedAt: Date.now() }));
     try {
       const result = await postAction(item.wire, item.key);
       startedHere.delete(id);
+      if (result?.status === "submitted") {
+        change(id, (current) => ({ ...current, unconfirmed: true }));
+        return "unconfirmed";
+      }
       if (take(id)) handlers.answered(item, result);
       return "answered";
     } catch (error) {
@@ -104,11 +125,15 @@ export function configurePendingSends(next) {
   handlers = { ...handlers, ...next };
 }
 
+let sequence = 0;
+
 export function enqueueSend(sessionId, wire, text) {
   const id = crypto.randomUUID();
-  write([...read(), { id, key: crypto.randomUUID(), sessionId, wire, text, createdAt: Date.now(), attemptedAt: 0, unconfirmed: false }]);
+  const item = { id, key: crypto.randomUUID(), sessionId, wire, text, createdAt: Date.now(), sequence: ++sequence, attemptedAt: 0, unconfirmed: false };
+  if (!save(item)) return false;
   startedHere.add(id);
-  return pump(sessionId);
+  pump(sessionId);
+  return true;
 }
 
 export function retryPendingSends() {
@@ -116,7 +141,7 @@ export function retryPendingSends() {
 }
 
 export async function retrySend(id) {
-  const item = read().find((candidate) => candidate.id === id);
+  const item = readOne(storagePrefix + id);
   if (!item) return;
   await attempt(id);
   await pump(item.sessionId);
@@ -126,17 +151,26 @@ export function takeBackSend(id) {
   return take(id);
 }
 
-export function unconfirmedSends(sessionId, now = Date.now()) {
+function showable(now) {
   return read()
-    .filter((item) => item.sessionId === sessionId && !startedHere.has(item.id) && unanswered(item, now))
+    .filter((item) => !startedHere.has(item.id) && unanswered(item, now))
     .map((item) => ({ ...item, retrying: retriesByItself(item, now) }));
 }
 
+export function unconfirmedSends(sessionId, now = Date.now()) {
+  return showable(now).filter((item) => item.sessionId === sessionId);
+}
+
+export function unconfirmedSendsOutside(known, now = Date.now()) {
+  return showable(now).filter((item) => !known(item.sessionId));
+}
+
 export function movePendingSends(rekeyed) {
-  const items = read();
-  if (items.some((item) => rekeyed[item.sessionId])) write(items.map((item) => ({ ...item, sessionId: rekeyed[item.sessionId] || item.sessionId })));
+  for (const item of read()) {
+    if (rekeyed[item.sessionId]) change(item.id, (current) => ({ ...current, sessionId: rekeyed[current.sessionId] || current.sessionId }));
+  }
 }
 
 export function isPendingSendStorage(key) {
-  return key === storageKey;
+  return key === null || key?.startsWith(storagePrefix);
 }

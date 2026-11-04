@@ -1,7 +1,7 @@
 import { $ } from "./dom.js";
 import { app } from "./state.js";
 import { chosenHolder, renderHolderPicker, sharedHolders, withHolder } from "./holders.js";
-import { action, sessionTarget } from "./actions.js";
+import { action, logicalAction, sessionTarget } from "./actions.js";
 import { configurePendingSends, enqueueSend } from "./pending-send.js";
 import { bindSendStatus, renderSendStatus, returnToComposer } from "./send-status.js";
 import { toast } from "./feedback.js";
@@ -95,8 +95,13 @@ export async function send(requestedAction = "send") {
         : { message, author: "person", ...selectedTurnOptions() };
       if (!sessionId) throw Error("Choose a conversation first");
       const wire = { action: steering ? "steer" : "send", sessionId, ...withHolder(sessionId, payload) };
+      if (enqueueSend(sessionId, wire, message)) {
+        clearComposer(sessionId, message);
+        return;
+      }
+      const unstored = await logicalAction(wire.action, wire.action, payload);
       clearComposer(sessionId, message);
-      enqueueSend(sessionId, wire, message);
+      await sendAnswered({ sessionId, wire }, unstored);
       return;
     }
     const result = await action(commandAction[0], commandAction[1]);

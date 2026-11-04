@@ -2,22 +2,31 @@ import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
 
 const hour = 60 * 60 * 1000;
-const storageKey = "agenthail.pendingSends";
 
 function browserStorage() {
   const values = new Map();
-  return {
+  const storage = {
+    get length() { return values.size; },
+    key: (index) => [...values.keys()][index] ?? null,
     getItem: (key) => (values.has(key) ? values.get(key) : null),
-    setItem: (key, value) => values.set(key, String(value)),
+    setItem: (key, value) => {
+      storage.beforeSet?.(key);
+      values.set(key, String(value));
+    },
     removeItem: (key) => values.delete(key),
   };
+  return storage;
+}
+
+function stored(storage) {
+  const items = [];
+  for (let index = 0; index < storage.length; index++) items.push(JSON.parse(storage.getItem(storage.key(index))));
+  return items.sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence);
 }
 
 function daemon() {
-  const delivered = [];
   const seen = new Map();
-  const state = { calls: [], answer: null };
-  state.delivered = delivered;
+  const state = { calls: [], answer: null, delivered: [] };
   state.fetch = async (_url, request) => {
     const key = request.headers["Idempotency-Key"];
     state.calls.push({ key, body: request.body });
@@ -26,7 +35,7 @@ function daemon() {
     if (seen.has(key)) assert.equal(seen.get(key), request.body, "a retry must send the same body");
     else {
       seen.set(key, request.body);
-      delivered.push(JSON.parse(request.body).message);
+      state.delivered.push(JSON.parse(request.body).message);
     }
     return { ok: true, json: async () => ({ ok: true }) };
   };
@@ -52,11 +61,18 @@ async function tab(storage, server, locks) {
   return { ...context, events };
 }
 
-const stored = (storage) => JSON.parse(storage.getItem(storageKey) || "[]");
+const settled = () => new Promise((resolve) => setTimeout(resolve, 15));
 const wire = (message, sessionId = "session-1") => ({ action: "send", sessionId, message, author: "person" });
 const lost = () => { throw new TypeError("network lost"); };
 const httpAnswer = (status, message) => () => ({ ok: false, status, text: async () => JSON.stringify({ error: { message } }) });
-const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(storage).map((item) => ({ ...item, createdAt: item.createdAt - by, attemptedAt: item.attemptedAt - by }))));
+const submitted = () => ({ ok: true, json: async () => ({ ok: true, status: "submitted" }) });
+const send = async (page, message, sessionId) => {
+  assert.equal(page.enqueueSend(sessionId || "session-1", wire(message, sessionId), message), true);
+  await settled();
+};
+const age = (storage, by) => {
+  for (const item of stored(storage)) storage.setItem(`agenthail.pendingSend.${item.id}`, JSON.stringify({ ...item, createdAt: item.createdAt - by, attemptedAt: item.attemptedAt && item.attemptedAt - by }));
+};
 
 {
   const storage = browserStorage();
@@ -64,10 +80,10 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const page = await tab(storage, server);
   let during;
   const original = server.fetch;
-  server.fetch = (...args) => { during = stored(storage).length; return original(...args); };
-  await page.enqueueSend("session-1", wire("hello"), "hello");
+  server.fetch = (...args) => { during = storage.length; return original(...args); };
+  await send(page, "hello");
   assert.equal(during, 1, "a send is kept while it has no answer");
-  assert.equal(storage.getItem(storageKey), null, "a confirmed send leaves nothing stored");
+  assert.equal(storage.length, 0, "a confirmed send leaves nothing stored");
   assert.deepEqual(server.delivered, ["hello"]);
   assert.deepEqual(page.events.answered, ["hello"]);
 }
@@ -77,7 +93,7 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = lost;
-  await page.enqueueSend("session-1", wire("lost"), "lost");
+  await send(page, "lost");
   assert.equal(stored(storage)[0].unconfirmed, true, "no answer leaves it unconfirmed");
   assert.equal(page.unconfirmedSends("session-1")[0].retrying, true);
   assert.equal(page.events.refused.length, 0, "no answer does not return the text");
@@ -85,7 +101,7 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   await page.retryPendingSends();
   assert.equal(server.calls[0].key, server.calls[1].key, "a retry keeps its key");
   assert.equal(server.calls[0].body, server.calls[1].body, "a retry keeps its body");
-  assert.equal(storage.getItem(storageKey), null);
+  assert.equal(storage.length, 0);
 }
 
 {
@@ -93,11 +109,11 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = httpAnswer(409, "This session has ended.");
-  await page.enqueueSend("session-1", wire("refused"), "refused");
+  await send(page, "refused");
   assert.deepEqual(page.events.refused, [["refused", "This session has ended."]]);
-  assert.equal(storage.getItem(storageKey), null, "a refusal is not retried");
+  assert.equal(storage.length, 0, "a refusal is not retried");
   server.answer = null;
-  await page.enqueueSend("session-1", wire("refused"), "refused");
+  await send(page, "refused");
   assert.notEqual(server.calls[0].key, server.calls[1].key, "sending again after a refusal uses a new key");
 }
 
@@ -106,7 +122,7 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = httpAnswer(401, "dashboard access token required");
-  await page.enqueueSend("session-1", wire("signed out"), "signed out");
+  await send(page, "signed out");
   assert.equal(page.events.refused.length, 0, "a lost sign-in is not a refusal");
   assert.equal(stored(storage).length, 1, "a lost sign-in keeps the send");
   assert.equal(stored(storage)[0].unconfirmed, true);
@@ -120,7 +136,7 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = httpAnswer(401, "dashboard access token required");
-  await page.enqueueSend("session-1", wire("late"), "late");
+  await send(page, "late");
   server.answer = null;
   age(storage, hour + 1);
   const calls = server.calls.length;
@@ -138,14 +154,14 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = lost;
-  await page.enqueueSend("session-1", wire("first"), "first");
+  await send(page, "first");
   age(storage, hour + 1);
   server.answer = null;
-  await page.enqueueSend("session-1", wire("second"), "second");
+  await send(page, "second");
   assert.deepEqual(server.delivered, ["second"], "an expired send does not hold up a new one");
   assert.equal(page.unconfirmedSends("session-1").length, 1);
   assert.equal(page.takeBackSend(page.unconfirmedSends("session-1")[0].id).text, "first", "put back hands over the text");
-  assert.equal(storage.getItem(storageKey), null);
+  assert.equal(storage.length, 0);
 }
 
 {
@@ -153,8 +169,9 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = lost;
-  await page.enqueueSend("session-1", wire("one"), "one");
-  await page.enqueueSend("session-1", wire("two"), "two");
+  await send(page, "one");
+  page.enqueueSend("session-1", wire("two"), "two");
+  await settled();
   assert.deepEqual(stored(storage).map((item) => item.text), ["one", "two"]);
   server.answer = null;
   await page.retryPendingSends();
@@ -166,10 +183,69 @@ const age = (storage, by) => storage.setItem(storageKey, JSON.stringify(stored(s
   const server = daemon();
   const page = await tab(storage, server);
   server.answer = lost;
-  await page.enqueueSend("old", wire("moved", "old"), "moved");
+  await send(page, "moved", "old");
   page.movePendingSends({ old: "new" });
   assert.equal(page.unconfirmedSends("new").length, 1, "a rekeyed session keeps its send");
-  assert.equal(JSON.parse(storage.getItem(storageKey))[0].wire.sessionId, "old", "the request stays the one the key was used for");
+  assert.equal(stored(storage)[0].wire.sessionId, "old", "the request stays the one the key was used for");
+}
+
+{
+  const storage = browserStorage();
+  const server = daemon();
+  const page = await tab(storage, server);
+  server.answer = lost;
+  await send(page, "gone", "removed");
+  await send(page, "here");
+  const known = (id) => id === "session-1";
+  assert.deepEqual([...page.unconfirmedSendsOutside(known)].map((item) => item.text), ["gone"], "a send for an unlisted session can still be found");
+}
+
+{
+  const storage = browserStorage();
+  const server = daemon();
+  const page = await tab(storage, server);
+  server.answer = submitted;
+  await send(page, "still pending");
+  assert.equal(stored(storage).length, 1, "a 202 submitted is not an answer, so the send stays");
+  assert.equal(page.events.answered.length, 0, "and nothing says it arrived");
+  assert.equal(page.unconfirmedSends("session-1").length, 1);
+  server.answer = null;
+  await page.retryPendingSends();
+  assert.equal(storage.length, 0, "the completed receipt removes it");
+  assert.deepEqual(page.events.answered, ["still pending"]);
+}
+
+{
+  const storage = browserStorage();
+  const server = daemon();
+  server.answer = lost;
+  const one = await tab(storage, server);
+  const two = await tab(storage, server);
+  storage.beforeSet = () => {
+    storage.beforeSet = undefined;
+    two.enqueueSend("session-1", wire("from two"), "from two");
+  };
+  one.enqueueSend("session-1", wire("from one"), "from one");
+  await settled();
+  assert.deepEqual(stored(storage).map((item) => item.text).sort(), ["from one", "from two"], "a write in one tab during another's keeps both sends");
+
+  const [first, second] = stored(storage);
+  storage.beforeSet = () => {
+    storage.beforeSet = undefined;
+    one.takeBackSend(second.id);
+  };
+  two.movePendingSends({ "session-1": "session-2" });
+  assert.ok(stored(storage).some((item) => item.id === first.id), "a change in one tab leaves another tab's send alone");
+}
+
+{
+  const storage = browserStorage();
+  const server = daemon();
+  const page = await tab(storage, server);
+  storage.setItem = () => { throw new Error("quota"); };
+  assert.equal(page.enqueueSend("session-1", wire("no room"), "no room"), false, "a send that can't be stored says so");
+  await settled();
+  assert.equal(server.calls.length, 0, "and is not sent by the store");
 }
 
 for (const useLocks of [false, true]) {
@@ -186,11 +262,11 @@ for (const useLocks of [false, true]) {
   const one = await tab(storage, server, locks);
   const two = await tab(storage, server, locks);
   server.answer = lost;
-  await one.enqueueSend("session-1", wire("both"), "both");
+  await send(one, "both");
   server.answer = null;
   await Promise.all([one.retryPendingSends(), two.retryPendingSends()]);
   assert.deepEqual(server.delivered, ["both"], `two tabs deliver once (locks: ${useLocks})`);
-  assert.equal(storage.getItem(storageKey), null);
+  assert.equal(storage.length, 0);
   assert.equal(one.events.answered.length + two.events.answered.length, 1, "one tab reports it");
   if (useLocks) assert.equal(server.calls.length, 2, "with locks only one tab retries");
 }
@@ -203,14 +279,14 @@ for (const useLocks of [false, true]) {
   let release;
   const original = server.fetch;
   server.fetch = async (...args) => { await new Promise((resolve) => { release = resolve; }); return original(...args); };
-  const sending = one.enqueueSend("session-1", wire("in flight"), "in flight");
-  await new Promise((resolve) => setTimeout(resolve, 1));
+  one.enqueueSend("session-1", wire("in flight"), "in flight");
+  await settled();
   server.fetch = original;
   await two.retryPendingSends();
   assert.equal(server.calls.length, 0, "another tab leaves a send that is still in flight alone");
   assert.equal(two.unconfirmedSends("session-1").length, 0, "and does not call it unconfirmed");
   release();
-  await sending;
+  await settled();
   assert.deepEqual(server.delivered, ["in flight"]);
 }
 
@@ -218,9 +294,14 @@ for (const useLocks of [false, true]) {
   const storage = browserStorage();
   const server = daemon();
   const page = await tab(storage, server);
-  storage.setItem(storageKey, JSON.stringify([{ id: "closed", key: "k", sessionId: "session-1", wire: wire("tab closed"), text: "tab closed", createdAt: Date.now() - 120000, attemptedAt: Date.now() - 120000, unconfirmed: false }]));
+  const closed = { id: "closed", key: "k", sessionId: "session-1", wire: wire("tab closed"), text: "tab closed", createdAt: Date.now() - 120000, sequence: 1, attemptedAt: Date.now() - 120000, unconfirmed: false };
+  storage.setItem("agenthail.pendingSend.closed", JSON.stringify(closed));
+  storage.setItem("agenthail.pendingSend.broken", "{not json");
+  storage.setItem("agenthail.other", "kept");
+  assert.equal(page.unconfirmedSends("session-1").length, 1, "an unreadable entry is skipped");
   await page.retryPendingSends();
   assert.deepEqual(server.delivered, ["tab closed"], "a send whose tab closed mid-request is retried");
+  assert.equal(storage.getItem("agenthail.other"), "kept");
 }
 
 console.log("dashboard pending send tests passed");

@@ -21,6 +21,7 @@ function page() {
   const answers = [];
   const toasts = [];
   let ids = 0;
+  const tab = { storageFull: false };
   const context = {
     $,
     app: {
@@ -31,7 +32,16 @@ function page() {
       pendingIdempotency: new Map(),
       slashCommands: [],
     },
-    localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) },
+    localStorage: {
+      get length() { return values.size; },
+      key: (index) => [...values.keys()][index] ?? null,
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        if (tab.storageFull) throw new Error("quota");
+        values.set(key, value);
+      },
+      removeItem: (key) => values.delete(key),
+    },
     navigator: {},
     window: { addEventListener() {}, confirm: () => true },
     crypto: { randomUUID: () => `id-${++ids}` },
@@ -52,12 +62,12 @@ function page() {
     escape: (text) => text,
     rememberToolRow() {},
   };
-  return { context, $, requests, answers, toasts, values };
+  return Object.assign(tab, { context, $, requests, answers, toasts, values });
 }
 
 async function loaded() {
   const tab = page();
-  await dashboardModules(["composer"], tab.context);
+  await dashboardModules(["composer", "send-status", "pending-send"], tab.context);
   tab.context.bindComposerEvents();
   return tab;
 }
@@ -130,7 +140,7 @@ for (const [typed, mode, expected] of [["redirect", "steer", "redirect"], ["/ste
   assert.equal(tab.requests[0].body.action, "steer");
   assert.equal(tab.requests[0].body.message, expected);
   const key = tab.requests[0].key;
-  const [stored] = JSON.parse(tab.values.get("agenthail.pendingSends"));
+  const stored = JSON.parse([...tab.values.values()][0]);
   assert.equal(stored.key, key, "a lost steer keeps its key to retry");
   assert.equal(stored.text, typed, "and the text as typed");
 }
@@ -150,6 +160,40 @@ for (const [typed, mode, expected] of [["redirect", "steer", "redirect"], ["/ste
   tab.$("#message").value = "something else";
   await typedOver;
   assert.equal(tab.$("#message").value, "something else", "an answered command leaves newer text alone");
+}
+
+{
+  const tab = await loaded();
+  tab.storageFull = true;
+  tab.$("#message").value = "no room";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(lost);
+  await tab.context.send();
+  await settled();
+  assert.equal(tab.$("#message").value, "no room", "with nowhere to store it, the text stays in the composer");
+  assert.equal(tab.requests.length, 1);
+  await tab.context.send();
+  await settled();
+  assert.equal(tab.requests[0].key, tab.requests[1].key, "sending it again keeps the key");
+  assert.equal(tab.$("#message").value, "", "and an answer clears it");
+}
+
+{
+  const tab = await loaded();
+  tab.$("#message").value = "for a removed session";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(lost);
+  await tab.context.send();
+  await settled();
+  tab.context.app.state.sessions = [{ id: "b", alias: "b" }];
+  tab.context.app.selected = { id: "b", alias: "b", status: "idle" };
+  tab.$("#message").value = "";
+  tab.context.renderSendStatus();
+  assert.equal(tab.$("#send-status").hidden, false, "a send for an unlisted session still shows");
+  assert.match(tab.$("#send-status-text").textContent, /no longer listed/);
+  const [stored] = [...tab.values.values()].map((value) => JSON.parse(value));
+  tab.context.returnToComposer(tab.context.takeBackSend(stored.id));
+  assert.equal(tab.$("#message").value, "for a removed session", "and goes back to a composer that can be reached");
 }
 
 console.log("dashboard composer send tests passed");
