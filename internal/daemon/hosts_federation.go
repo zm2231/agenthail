@@ -52,6 +52,7 @@ type federation struct {
 	ctx       context.Context
 	wg        sync.WaitGroup
 	running   bool
+	downGrace time.Duration
 }
 
 type pairedHost struct {
@@ -76,7 +77,7 @@ type pairedHost struct {
 }
 
 func newFederation() *federation {
-	return &federation{hosts: map[string]*pairedHost{}}
+	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace}
 }
 
 func (h *pairedHost) status() (string, string) {
@@ -374,8 +375,9 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 
 func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 	delay := hostRetryMin
+	var outage hostOutage
 	for ctx.Err() == nil {
-		connected, err := d.mirrorHostOnce(ctx, host)
+		connected, err := d.mirrorHostOnce(ctx, host, &outage)
 		if ctx.Err() != nil {
 			return
 		}
@@ -383,7 +385,7 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 			delay = hostRetryMin
 		}
 		if err != nil {
-			d.markHostDown(host, err)
+			d.hostFailed(host, &outage, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -452,13 +454,13 @@ type remoteSnapshot struct {
 	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
 }
 
-func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost) (bool, error) {
+func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *hostOutage) (bool, error) {
 	version, err := host.client.Version(ctx)
 	if err != nil {
 		return false, err
 	}
 	host.setBuild(version.Identity)
-	d.setHostState(host, hostStateConnected, "", true)
+	d.hostAnswered(host, outage)
 	for ctx.Err() == nil {
 		seq, err := d.reconcileHost(ctx, host)
 		if err != nil {
@@ -478,7 +480,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	var snapshot remoteSnapshot
 	query, err := d.mirrorSnapshotQuery(host.record.ID)
 	if err != nil {
-		return 0, err
+		return 0, localMirror(err)
 	}
 	if err := host.client.GetJSON(ctx, "/api/v1/snapshot", query, &snapshot); err != nil {
 		return 0, err
@@ -501,7 +503,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 	}
 	existing, err := d.Registry.HostCatalogRowIDs(host.record.ID)
 	if err != nil {
-		return 0, err
+		return 0, localMirror(err)
 	}
 	retired := heldRetired(snapshot)
 	present := make(map[string]struct{}, len(existing))
@@ -514,7 +516,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 			continue
 		}
 		if err := d.removeHostRow(host.record.ID, id, "omitted_by_host"); err != nil {
-			return 0, err
+			return 0, localMirror(err)
 		}
 	}
 	for id := range retired {
@@ -529,7 +531,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		retiredClock = *snapshot.RetiredClock
 	}
 	if err := d.Registry.RecordHostRetiredClock(host.record.ID, retiredClock); err != nil {
-		return 0, err
+		return 0, localMirror(err)
 	}
 	coordinators := make([]registry.CoordinatorEntry, 0, len(snapshot.Coordinators))
 	for _, entry := range snapshot.Coordinators {
@@ -538,11 +540,11 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		}
 	}
 	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
-		return 0, err
+		return 0, localMirror(err)
 	}
 	host.epoch = snapshot.HostEpoch
 	if err := d.Registry.RecordHostCatalogCursor(host.record.ID, snapshot.HostEpoch, snapshot.CatalogSeq); err != nil {
-		return 0, err
+		return 0, localMirror(err)
 	}
 	return snapshot.CatalogSeq, nil
 }
@@ -591,7 +593,7 @@ func (d *Daemon) followHostCatalog(ctx context.Context, host *pairedHost, after 
 			d.logRuntimeError("host "+host.record.Name+" catalog event", err)
 		}
 		if err := d.Registry.RecordHostCatalogCursor(host.record.ID, host.epoch, envelope.Seq); err != nil {
-			return false, err
+			return false, localMirror(err)
 		}
 	}
 	return false, fmt.Errorf("host %s closed the catalog stream", host.record.Name)
