@@ -44,7 +44,7 @@ The raw token exists in these places only, never in the registry or a log:
 
 **Pending credentials.** A new session has no row to bind a credential to when its token must already be in the start call, and a Codex thread has no id until `thread/start` returns. So the daemon mints the credential unbound, with a `pending_ref` and a short lifetime:
 
-- an unbound credential never authenticates;
+- an unbound credential never authenticates. Within its lifetime it passes the MCP handshake with no caller, because Codex connects during `thread/start` and keeps the tools it lists then for the thread's first turn; every tool call is refused (`unauthenticated`, retryable) until it binds. Past its lifetime it gets a 401;
 - the ref is claimed once for one session id (`claimed_session_id`); a second claim, or one after the lifetime, is refused;
 - the claimed credential binds when that session registers, in the registration transaction, and replaces any live credential the session had;
 - an unbound credential past its lifetime is deleted when the daemon next issues one and when the MCP server starts.
