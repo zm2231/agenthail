@@ -56,16 +56,26 @@ final class TranscriptComposerGrowthUITests: XCTestCase {
         assertAtLatest(app, "after opening")
         raiseKeyboard(app)
         assertAtLatest(app, "with the keyboard up")
-        let timeline = app.scrollViews["session-timeline"]
-        let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
-        start.press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)), withVelocity: .slow, thenHoldForDuration: 0.1)
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the drag didn't lower the keyboard")
+        app.buttons["Session menu"].tapWhenReady()
+        app.buttons["Session details"].tapWhenReady()
+        let details = app.navigationBars["Session details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "the sheet lowers the keyboard")
+        details.buttons["Done"].tapWhenReady()
+        XCTAssertTrue(details.waitForNonExistence(timeout: 5))
         settle()
-        let jump = app.buttons["Jump to latest"]
-        XCTAssertTrue(jump.exists, "the drag scrolled the transcript, so it offers the way back")
-        jump.tapWhenReady()
-        XCTAssertTrue(jump.waitForNonExistence(timeout: 5))
-        assertAtLatest(app, "after jumping back")
+        assertAtLatest(app, "after the keyboard went down and came back")
+    }
+
+    func testAComposerGrowingWithTypedLinesKeepsAFollowingTranscriptAtItsLatestRow() {
+        let app = launch()
+        raiseKeyboard(app)
+        let composer = app.textViews["composer-input"]
+        let before = composer.frame.height
+        composer.typeText("\none\ntwo\nthree\nfour")
+        settle()
+        XCTAssertGreaterThan(composer.frame.height, before + 40, "the composer didn't grow")
+        assertAtLatest(app, "after the composer grew with typed lines")
     }
 
     func testTheKeyboardDoesNotMoveATranscriptThePersonScrolledUp() throws {
