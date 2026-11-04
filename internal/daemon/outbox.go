@@ -98,9 +98,10 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	if item.BusyDelivery == "" && route == surface.RoutePeer {
 		steers = false
 	}
-	steer := steers && !options.HoldsForQueue() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
+	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, item.Message, options)
+	steer := steers && canSteer && (route != surface.RoutePeer || len(options.Uploads) == 0) && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
-		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, item.Message)
+		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, steerText, steerImages)
 		if sendErr == nil {
 			result = &surface.SendResult{UUID: steered.RequestID, Accepted: true}
 		}

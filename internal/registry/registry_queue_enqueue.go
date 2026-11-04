@@ -108,7 +108,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 }
 
 func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, intent queueIntent) (int64, int64, error) {
-	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
+	if options.BusyDelivery == "steer" && !options.QueuesAsSteer() {
 		options.BusyDelivery = "queue"
 	}
 	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
@@ -150,6 +150,12 @@ func (r *Registry) QueueCount(sessionID string) int {
 	var n int
 	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
 	return n
+}
+
+func (r *Registry) QueuedFromSender(sessionID, senderID string) (bool, error) {
+	var found int
+	err := r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND source_session_id=? AND status IN ('pending','inflight'))`, sessionID, senderID).Scan(&found)
+	return found == 1, err
 }
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {

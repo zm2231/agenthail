@@ -63,6 +63,10 @@ func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threa
 }
 
 func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	return c.SteerWithImages(ctx, sess, message, nil)
+}
+
+func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, message string, images surface.Uploads) error {
 	if err := refuseCodexComposerCommand(message); err != nil {
 		return err
 	}
@@ -86,7 +90,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 	if _, err := conn.Request(ctx, "turn/steer", map[string]any{
 		"threadId":       sess.ID,
 		"expectedTurnId": turnID,
-		"input":          []map[string]any{{"type": "text", "text": message}},
+		"input":          codexUserInput(message, images),
 	}, 5*time.Second); err != nil {
 		return surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/steer: %w", err))
 	}

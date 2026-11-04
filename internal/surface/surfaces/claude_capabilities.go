@@ -24,6 +24,7 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true
+		capabilities.SteerImages = true
 		capabilities.Lifecycle = surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true}
 		return capabilities
 	}

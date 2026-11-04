@@ -66,12 +66,18 @@ const queueTargetStatus = `CASE WHEN s.id IS NOT NULL AND (s.status='offline' OR
 
 const queueToPeerSocket = `%[1]s.author!='person' AND EXISTS (SELECT 1 FROM sessions ps WHERE ps.id=%[1]s.session_id AND ps.surface='claude' AND ps.transport='uds')`
 
-func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
+func queueSteerEligible(alias string, mode deliverypolicy.Mode) string {
 	choice := `%[1]s.busy_delivery='steer'`
 	if mode == deliverypolicy.Steer {
 		choice = `(%[1]s.busy_delivery='steer' OR %[1]s.busy_delivery='' AND NOT (` + queueToPeerSocket + `))`
 	}
 	return fmt.Sprintf(choice+` AND %[1]s.operation='message' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`, alias)
+}
+
+// A row that follows the busy policy steers only once nothing earlier from its
+// sender waits for a turn of its own. An explicit steer may pass them.
+func queueSteerRow(alias string, mode deliverypolicy.Mode) string {
+	return queueSteerEligible(alias, mode) + fmt.Sprintf(` AND (%[1]s.busy_delivery='steer' OR NOT EXISTS (SELECT 1 FROM message_queue ahead WHERE ahead.session_id=%[1]s.session_id AND ahead.source_session_id=%[1]s.source_session_id AND ahead.id<%[1]s.id AND ahead.status IN ('pending','inflight') AND NOT (`, alias) + queueSteerEligible("ahead", mode) + `)))`
 }
 
 func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {

@@ -607,12 +607,20 @@ type SendOptions struct {
 	// message text for everything else.
 	Uploads Uploads `json:"-"`
 	Images  Uploads `json:"-"`
+	// SteersUploads says the dispatcher found this session's steer can carry
+	// these uploads, so the row may keep busy delivery steer.
+	SteersUploads bool `json:"-"`
 }
 
-// HoldsForQueue reports whether the send carries parts a busy-session steer
-// cannot deliver, so it must wait in the queue for a turn of its own.
+// HoldsForQueue reports whether the send carries parts no steer can deliver,
+// so it must wait in the queue for a turn of its own.
 func (o SendOptions) HoldsForQueue() bool {
-	return o.Model != "" || !o.TurnOptions.Empty() || len(o.Uploads) > 0
+	return o.Model != "" || !o.TurnOptions.Empty()
+}
+
+// QueuesAsSteer reports whether a queued row keeps its steer delivery.
+func (o SendOptions) QueuesAsSteer() bool {
+	return !o.HoldsForQueue() && (len(o.Uploads) == 0 || o.SteersUploads)
 }
 
 // Author records who wrote a message. A composer declares AuthorPerson when a
@@ -1070,7 +1078,9 @@ type Capabilities struct {
 	Model      bool `json:"model"`
 	Interrupt  bool `json:"interrupt"`
 	Steer      bool `json:"steer"`
-	Attach     bool `json:"attach"`
+	// SteerImages is a steer that carries images into the running turn.
+	SteerImages bool `json:"steerImages"`
+	Attach      bool `json:"attach"`
 	// Respond and PermissionMode are a session whose open requests a person
 	// answers here and whose permission mode changes while it runs.
 	Respond        bool `json:"respond"`
