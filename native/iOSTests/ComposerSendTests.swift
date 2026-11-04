@@ -128,6 +128,7 @@ final class ComposerSendTests: XCTestCase {
         first?.send(to: session)
         try await waitUntil { ComposerSendProtocol.state.attempts.count >= 1 }
         let key = ComposerSendProtocol.state.attempts[0].key
+        let raw = ComposerSendProtocol.state.attempts[0].raw
         first = nil
         XCTAssertEqual(store.load().sends.map(\.message), ["Survives"])
         XCTAssertEqual(store.load().drafts, [:], "a message that left the composer is not also a draft")
@@ -138,6 +139,7 @@ final class ComposerSendTests: XCTestCase {
         second.selectedSessionID = session.id
         try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
         XCTAssertEqual(ComposerSendProtocol.state.attempts[0].key, key)
+        XCTAssertEqual(ComposerSendProtocol.state.attempts[0].raw, raw, "the resumed message is the same request, byte for byte")
         XCTAssertEqual(store.load().sends, [])
     }
 
