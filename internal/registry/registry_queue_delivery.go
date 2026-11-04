@@ -54,15 +54,11 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	if err := r.ReconcileAttentionItems(now); err != nil {
 		return nil, err
 	}
-	mode, err := r.busyMode()
-	if err != nil {
-		return nil, err
-	}
-	filter, args := claimCandidateFilter(sessionID, busyDelivery, mode)
+	filter, args := claimCandidateFilter(sessionID, busyDelivery, r.busyMode())
 	var peekStatus string
 	var peekOperation QueueOperation
 	var peekAvailableAt, peekInflightAt int64
-	err = r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
+	err := r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

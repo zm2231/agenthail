@@ -35,10 +35,7 @@ func (r *Registry) QueuePage(request QueuePageRequest, adapters surface.Adapters
 		limit = QueueHistoryPageLimit
 	}
 	limit = min(limit, queueHistoryPageMax)
-	mode, err := r.busyMode()
-	if err != nil {
-		return QueuePage{}, err
-	}
+	mode := r.busyMode()
 	deadCutoff := now.Add(-deadReviewWindow).UnixMilli()
 	scope, scopeArgs := "", []any{}
 	if request.SessionID != "" {
