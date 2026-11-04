@@ -119,6 +119,7 @@ type Daemon struct {
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
 	taskGoals                taskGoalReads
+	taskWaitRead             func()
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	spawnLocks               keyedLocks
