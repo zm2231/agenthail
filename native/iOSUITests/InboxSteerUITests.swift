@@ -31,13 +31,13 @@ final class InboxSteerUITests: XCTestCase {
         record(app, "inbox-steer-refused-dark")
     }
 
-    func testTappingSteerReportsNoProblem() {
+    func testTappingSteerSendsTheRowAsASteerAndItLeaves() {
         let app = openInbox(theme: "dark")
         let steer = app.buttons["queue-steer-11"]
         XCTAssertTrue(steer.waitForExistence(timeout: 10))
         steer.tap()
-        sleep(2)
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Steer may not have reached'")).firstMatch.exists)
+        XCTAssertTrue(steer.waitForNonExistence(timeout: 5), "the row stays until a send with steer delivery arrives")
+        XCTAssertTrue(app.staticTexts["queue-steer-refusal-12"].exists, "the other row stays")
     }
 
     func testSteerReadsInLightMode() {
