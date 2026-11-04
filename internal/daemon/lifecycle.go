@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/poll"
-	"github.com/zm2231/agenthail/internal/registry"
 )
 
 func LockFilePath() string {
@@ -33,9 +32,6 @@ func acquireDaemonLock() (*os.File, error) {
 
 // HoldDaemonLock proves no daemon is running, and keeps one from starting until release.
 func HoldDaemonLock() (release func(), err error) {
-	if err := registry.RefuseSudoHome(); err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(filepath.Dir(LockFilePath()), 0700); err != nil {
 		return nil, err
 	}

@@ -36,6 +36,13 @@ func TestRootIsRefusedInAPersonsHome(t *testing.T) {
 	}
 }
 
+func TestRootIsRefusedForARegistryDirectlyInAPersonsHome(t *testing.T) {
+	err := refuseRootInAnothersHome("/home/person/custom.db", 0, ownersOf(map[string]uint32{"/": 0, "/home": 0, "/home/person": 4242}))
+	if err == nil || !strings.Contains(err.Error(), "don't run agenthail with sudo") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestRootIsAllowedInItsOwnHome(t *testing.T) {
 	for name, registryPath := range map[string]string{
 		"its home":         "/root/.agenthail/registry.db",
@@ -89,7 +96,7 @@ func TestEveryOpenAndARestoreRefuseBeforeCreatingAnything(t *testing.T) {
 		"OpenDefault": func() error { _, err := OpenDefault(true); return err },
 		"OpenCurrent": func() error { _, err := OpenCurrent(path); return err },
 		"restore":     func() error { _, err := restoreMigrationBackup(path, 1); return err },
-		"daemon lock": RefuseSudoHome,
+		"any command": RefuseSudoHome,
 	} {
 		err := attempt()
 		if err == nil || !strings.Contains(err.Error(), "don't run agenthail with sudo") {

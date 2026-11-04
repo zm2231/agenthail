@@ -28,21 +28,22 @@ func refuseRootInAnothersHome(path string, euid int, ownerOf func(string) (uint3
 		return nil
 	}
 	disk, _, _ := strings.Cut(path, "?")
-	for home := filepath.Dir(filepath.Dir(disk)); ; home = filepath.Dir(home) {
-		owner, err := ownerOf(home)
+	checked := 0
+	for directory := filepath.Dir(disk); checked < 2; directory = filepath.Dir(directory) {
+		owner, err := ownerOf(directory)
 		if err == nil {
-			if owner == 0 {
-				return nil
+			if owner != 0 {
+				return fmt.Errorf("don't run agenthail with sudo; run it as %s", nameOfAccount(owner))
 			}
-			return fmt.Errorf("don't run agenthail with sudo; run it as %s", nameOfAccount(owner))
+			checked++
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("read the owner of %s: %w", directory, err)
 		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("read the owner of %s: %w", home, err)
-		}
-		if home == filepath.Dir(home) {
+		if directory == filepath.Dir(directory) {
 			return nil
 		}
 	}
+	return nil
 }
 
 func ownerOfPath(path string) (uint32, error) {
