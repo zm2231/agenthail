@@ -1851,7 +1851,7 @@ struct QueueDock: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ??[], age: relativeAge(item.queuedAt)))
+                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
                             .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .lineLimit(1)
