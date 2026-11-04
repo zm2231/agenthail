@@ -72,12 +72,7 @@ func (e *NewerSchemaError) Error() string {
 	if e.Backup == "" {
 		return refusal
 	}
-	aside := strings.TrimSuffix(e.Path, filepath.Ext(e.Path)) + fmt.Sprintf("-v%d.db", e.Found)
-	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; mv -- %s %s; rm -f -- %s %s; cp -- %s %s; agenthail daemon start", refusal, e.BackupSchema, shellQuote(e.Path), shellQuote(aside), shellQuote(e.Path+"-wal"), shellQuote(e.Path+"-shm"), shellQuote(e.Backup), shellQuote(e.Path))
-}
-
-func shellQuote(path string) string {
-	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; agenthail registry restore %d; agenthail daemon start", refusal, e.BackupSchema, e.Found)
 }
 
 func defaultPath() string {
