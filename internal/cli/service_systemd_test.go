@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,7 +54,13 @@ func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", "")
-	bin := filepath.Join(t.TempDir(), "agenthail")
+	// Install enables the dashboard at the default address; this stands in for what the real daemon would serve there.
+	dashboard := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(dashboard.Close)
+	previousListen := daemon.DefaultDashboardListen
+	daemon.DefaultDashboardListen = dashboard.Listener.Addr().String()
+	t.Cleanup(func() { daemon.DefaultDashboardListen = previousListen })
+	bin :=filepath.Join(t.TempDir(), "agenthail")
 	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\nwhile :; do sleep 0.05; done\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

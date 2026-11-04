@@ -14,16 +14,20 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestMain(m *testing.M) {
 	if os.Getenv("AGENTHAIL_TEST_RUN_MAIN") == "1" {
 		os.Args = append([]string{"agenthail"}, os.Args[1:]...)
-		main()
-		os.Exit(0)
+		os.Exit(testkit.RunAwayFromLiveDashboard(func() int {
+			main()
+			return 0
+		}, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
 	}
-	os.Exit(m.Run())
+	os.Exit(testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
 }
 
 // runAgenthail runs this binary's main with args under a scratch HOME.

@@ -9,5 +9,5 @@ import (
 
 func TestMain(m *testing.M) {
 	testkit.ClearAgentEnv()
-	os.Exit(m.Run())
+	os.Exit(testkit.RunAwayFromLiveDashboard(m.Run, StandardDashboardListen, &DefaultDashboardListen))
 }
