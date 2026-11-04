@@ -90,6 +90,9 @@ func OpenDefault(allowUpgrade bool) (*Registry, error) {
 }
 
 func open(path string, private, allowUpgrade bool) (*Registry, error) {
+	if err := refuseSudoHomeFor(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
 	}
@@ -124,6 +127,9 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 func OpenCurrent(path string) (*Registry, error) {
 	if path == "" {
 		path = defaultPath()
+	}
+	if err := refuseSudoHomeFor(path); err != nil {
+		return nil, err
 	}
 	if _, err := os.Stat(path); err != nil {
 		return nil, err

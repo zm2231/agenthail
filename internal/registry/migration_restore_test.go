@@ -529,8 +529,54 @@ func TestAnOpenThatCannotTakeTheLockFails(t *testing.T) {
 		r.Close()
 		t.Fatal("the registry opened with nothing keeping a restore out")
 	}
-	if !strings.Contains(err.Error(), "lock the registry") {
-		t.Fatalf("err=%v", err)
+	if !strings.Contains(err.Error(), "lock the registry") || !strings.Contains(err.Error(), "sudo chown") || !strings.Contains(err.Error(), shellQuote(lock)) {
+		t.Fatalf("the error does not say which file or how to fix it: %v", err)
+	}
+}
+
+func TestALockPathThatIsASymlinkIsRefusedAndItsTargetLeftAlone(t *testing.T) {
+	for name, hold := range map[string]func(string) (func(), error){
+		"open": func(path string) (func(), error) {
+			file, err := holdRegistryOpen(path)
+			if err != nil {
+				return nil, err
+			}
+			return func() { file.Close() }, nil
+		},
+		"restore": holdRestoreLock,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "registry.db")
+			existing := filepath.Join(t.TempDir(), "protected")
+			if err := os.WriteFile(existing, []byte("protected"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(existing, registryLockPath(path)); err != nil {
+				t.Fatal(err)
+			}
+			if release, err := hold(path); err == nil {
+				release()
+				t.Fatal("took the lock through a symlink")
+			} else if !strings.Contains(err.Error(), shellQuote(registryLockPath(path))) {
+				t.Fatalf("the refusal does not name the file: %v", err)
+			}
+			if content, err := os.ReadFile(existing); err != nil || string(content) != "protected" {
+				t.Fatalf("target=%q err=%v", content, err)
+			}
+
+			dangling := filepath.Join(t.TempDir(), "registry.db")
+			missing := filepath.Join(t.TempDir(), "made-through-the-link")
+			if err := os.Symlink(missing, registryLockPath(dangling)); err != nil {
+				t.Fatal(err)
+			}
+			if release, err := hold(dangling); err == nil {
+				release()
+				t.Fatal("took the lock through a dangling symlink")
+			}
+			if _, err := os.Lstat(missing); !os.IsNotExist(err) {
+				t.Fatalf("the symlink's target was created: %v", err)
+			}
+		})
 	}
 }
 

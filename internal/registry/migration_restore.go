@@ -54,6 +54,9 @@ func RestoreMigrationBackup(target int) (RestoredRegistry, error) {
 }
 
 func restoreMigrationBackup(path string, target int) (RestoredRegistry, error) {
+	if err := refuseSudoHomeFor(path); err != nil {
+		return RestoredRegistry{}, err
+	}
 	file := existingMigrationBackup(path, target)
 	if file == "" {
 		return RestoredRegistry{}, fmt.Errorf("no copy was kept from before schema %d", target)

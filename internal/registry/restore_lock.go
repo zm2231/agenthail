@@ -20,7 +20,7 @@ func registryLockPath(path string) string {
 // Every open holds this shared until Close, and a restore needs it exclusively, so no process can be left writing to the file a restore sets aside.
 func holdRestoreLock(path string) (func(), error) {
 	lockPath := registryLockPath(path)
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	file, err := openLockFile(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("lock the registry for a restore: %w", err)
 	}
@@ -40,9 +40,17 @@ func shellQuote(path string) string {
 }
 
 // os.OpenFile sets close-on-exec, so a process this one spawns does not keep the lock.
+func openLockFile(lockPath string) (*os.File, error) {
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("%w; the file must be a regular file belonging to the account running agenthail: sudo chown \"$USER\" %s", err, shellQuote(lockPath))
+	}
+	return file, nil
+}
+
 func holdRegistryOpen(path string) (*os.File, error) {
 	disk, _, _ := strings.Cut(path, "?")
-	file, err := os.OpenFile(registryLockPath(disk), os.O_CREATE|os.O_RDWR, 0600)
+	file, err := openLockFile(registryLockPath(disk))
 	if err != nil {
 		return nil, fmt.Errorf("lock the registry: %w", err)
 	}
