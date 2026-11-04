@@ -111,6 +111,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_create` | Start a Claude or Codex session with a first message, within the caller's ceiling, or a Notion thread | `spawn`; Notion needs `control.all` |
 | `agenthail_report` | A task's child reports `done` or `failed` with its result; the first report settles the task and later ones update `latest` | the child of a task |
 | `agenthail_result` | A task's state, result and `latest`, by `taskId` or child `target`, clipped to the output limit | the parent, or a reader of the child |
+| `agenthail_wait` | Wait until a task settles, its child asks for something, or its goal stops | the parent, or a reader of the child |
 | `agenthail_channel_send` | Post to a channel or project as the caller | any session |
 | `agenthail_channel` | Create, delete, rename or list channels and change their members | `control.all` |
 | `agenthail_relay` | Add, remove or list relays | `control.all` |
@@ -139,6 +140,12 @@ The first terminal turn is the result, even if a follow-up was already on its wa
 A Codex process that hasn't loaded a thread reads its running turn as `interrupted`, so that status from such a reader settles nothing, and relays and completion notices don't treat it as the turn's end. The same read can't tell a running turn from one whose owner died, so such a child stays open until it is archived or its turn is seen to complete, and holds no spawn slot meanwhile. A child that exited but can still be resumed also stays open and holds no slot. A child's row is not pruned while it has a task, so a result stays readable.
 
 After settling, a report only updates `latest`, and `agenthail_result` records a turn that finished since. Settled children are not watched. Until a task settles, its idle child counts toward the caller's running-session limit. Rows are durable, so a result survives a daemon restart.
+
+`agenthail_wait {tasks, timeoutSec, cursor}` takes the event cursor, reads the tasks' durable state, and returns if anything is ready: a settled task, an open request on a running child, or a stopped goal. Otherwise it subscribes from that cursor, so an event between the read and the subscribe still wakes it, and reads again on a relevant event, a dropped subscription, or every 30 seconds. A daemon restart ends the call; the next wait starts from the database. The returned cursor records what has been reported, so the next wait doesn't repeat it. It holds no state on the daemon. Inside a Codex code-mode `exec`, the script yields a cell id after its `yield_time_ms` while the wait keeps running; Codex's `wait` tool resumes the cell for the result.
+
+The default is 600 seconds and the maximum 3600; `0` only looks. Hosted Claude and Codex sessions run the agenthail server with a 3700-second tool timeout. A Claude session Agenthail doesn't host keeps Claude's own limit, measured at 60 seconds on 2.1.318, so its waits return at 45 seconds with the cursor.
+
+A wait that times out sets `wake` on the running tasks the caller started. Each observer pass sends one queued notice, keyed `task-settled-<id>`, for a settled task with `wake` set, then clears it, so a settlement from any path or a restart in between still gets exactly one. Reading the result, by `agenthail_result` or a wait, clears `wake` and cancels a notice not yet delivered. A request a wait returned withdraws the waiter's own notice for it, including one not yet queued; the person is still notified. A notice the queue has already started delivering can't be recalled and may arrive just after the read.
 
 ### Control scope
 

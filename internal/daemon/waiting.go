@@ -38,6 +38,9 @@ func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, sessi
 	unlock()
 	if changed {
 		d.publishWaiting(ctx, session.ID, observation.WaitingOn)
+		if observation.WaitingOn != nil {
+			d.publishTaskRequest(session.ID)
+		}
 	}
 	return observation, err
 }

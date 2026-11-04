@@ -48,6 +48,8 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		return
 	}
 	d.taskGoals.retain(taskChildren)
+	d.retainTaskRequestsRead(taskChildren)
+	d.deliverTaskWakes()
 	d.pruneObservationFailures(watched)
 	for _, watchedSession := range watched {
 		gone, isTask := taskChildren[watchedSession.ID]
