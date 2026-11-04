@@ -60,11 +60,15 @@ func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.Stre
 	}
 }
 
-func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation string, item surface.TimelineItem) bool {
-	journalKey := providerKey
+func seedJournalKey(providerKey, operation, kind string) string {
 	if operation == "phase" {
-		journalKey += ":phase:" + item.Kind
+		return providerKey + ":phase:" + kind
 	}
+	return providerKey
+}
+
+func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation string, item surface.TimelineItem) bool {
+	journalKey := seedJournalKey(providerKey, operation, item.Kind)
 	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, journalKey)
 	if err != nil || !found {
 		return false

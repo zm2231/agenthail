@@ -32,7 +32,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 			continue
 		}
 		event := seedEvent(s.session.Surface, item)
-		keep[event.ProviderKey] = true
+		keep[seedJournalKey(event.ProviderKey, event.Operation, event.Kind)] = true
 		fresh = append(fresh, event)
 	}
 	var events []surface.StreamEvent

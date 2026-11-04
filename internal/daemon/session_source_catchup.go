@@ -35,7 +35,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			return err
 		}
 		if !read.TranscriptOffsetSet {
-			if len(pages) == 0 && trustedIdentity == "" && s.session.Surface == surface.KindClaude {
+			if len(pages) == 0 && trustedIdentity == "" {
 				held, err := s.journalHoldsTranscript()
 				if err != nil {
 					return err
@@ -134,7 +134,9 @@ func (s *sessionSource) journalHoldsTranscript() (bool, error) {
 			return false, err
 		}
 		for _, entry := range page.Entries {
-			if entry.Kind != "source-error" {
+			switch entry.Kind {
+			case "source-error", "goal", "context", "commands":
+			default:
 				return true, nil
 			}
 		}

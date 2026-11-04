@@ -61,7 +61,7 @@ func (c *Codex) RuntimeKinds() []surface.RuntimeKind {
 }
 
 func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
-	return session != nil && !c.managed && session.Transport != codexTransportManaged
+	return session != nil
 }
 
 func (c *Codex) Capabilities() surface.Capabilities {

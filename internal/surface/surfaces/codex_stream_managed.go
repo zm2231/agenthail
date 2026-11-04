@@ -46,26 +46,28 @@ func (c *Codex) subscribeManagedThread(ctx context.Context, client codexClient, 
 	return err == nil
 }
 
-func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), commands *commandsWatch, timeout time.Duration) error {
+func (c *Codex) followManagedTurn(ctx context.Context, sess *surface.Session, turnID string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	client, err := c.openReader(ctx, sess)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	return c.followManagedTurnClient(ctx, client, sess, turnID, onEvent, timeout)
+}
+
+func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient, sess *surface.Session, turnID string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	emitted := ""
-	baselineTurnID := ""
 	finalEmitted := false
-	var lastContext surface.ContextUsage
-	var nextContextPoll time.Time
 	notifier, _ := client.(codexNotifier)
 	subscribed := notifier != nil && c.subscribeManagedThread(ctx, client, sess.ID)
-	// handle forwards the thread's notifications and reports whether one may
+	// changed drains the thread's notifications and reports whether one may
 	// have changed what a read returns.
-	handle := func() bool {
+	changed := func() bool {
 		if notifier == nil {
 			return false
 		}
 		changed := false
 		for _, event := range notifier.DrainNotifications() {
-			if event.Method == "skills/changed" && commands != nil {
-				commands.Refresh()
-				continue
-			}
 			if !codexContainsID(event.Params, sess.ID) {
 				continue
 			}
@@ -75,33 +77,11 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 			if event.Method == "thread/status/changed" && !subscribed {
 				subscribed = c.subscribeManagedThread(ctx, client, sess.ID)
 			}
-			if goalEvent, ok := codexGoalStreamEvent(event); ok {
-				onEvent(goalEvent)
-				continue
-			}
-			if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
-				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-			}
 		}
 		if managedNotificationsHandled != nil {
 			managedNotificationsHandled()
 		}
 		return changed
-	}
-	if uuid == "" {
-		thread, readErr := c.readLatestTurn(ctx, client, sess.ID)
-		if readErr != nil {
-			return readErr
-		}
-		if len(thread.Turns) > 0 {
-			latest := thread.Turns[len(thread.Turns)-1]
-			if latest.Done {
-				baselineTurnID = latest.ID
-			} else {
-				uuid = latest.ID
-			}
-		}
 	}
 	var notified <-chan struct{}
 	if notifier != nil {
@@ -109,28 +89,13 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 	}
 	deadline := time.Now().Add(timeout)
 	for first := true; first || time.Now().Before(deadline); first = false {
-		thread, err := c.managedStreamRead(ctx, client, sess.ID, uuid)
+		thread, err := c.managedStreamRead(ctx, client, sess.ID, turnID)
 		if err != nil {
 			return err
 		}
 		// A change reported while reading may postdate the read.
-		reread := handle()
-		if !time.Now().Before(nextContextPoll) {
-			nextContextPoll = time.Now().Add(time.Second)
-			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
-				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-			}
-		}
-		turn := codexTurnByID(thread, uuid)
-		if uuid == "" && len(thread.Turns) > 0 {
-			latest := &thread.Turns[len(thread.Turns)-1]
-			if latest.ID != baselineTurnID || !latest.Done {
-				uuid = latest.ID
-				turn = latest
-			}
-		}
-		if turn != nil {
+		reread := changed()
+		if turn := codexTurnByID(thread, turnID); turn != nil {
 			if turn.Done && turn.Error != "" {
 				return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
 			}
@@ -169,7 +134,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				timer.Stop()
 				return ctx.Err()
 			case <-notified:
-				if handle() {
+				if changed() {
 					break wait
 				}
 			case <-timer.C:
