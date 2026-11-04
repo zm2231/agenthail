@@ -227,6 +227,7 @@ Interface preferences (ui.conf, versioned; every change is a commit):
 Other:
   launch <surface>              Launch a surface app with debug settings
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
+  registry restore [<N>]        Go back to the copy from before schema N; lists the copies without N
   permissions [--json]          The daemon's macOS privacy grants and where to change them
   permissions request           Have macOS ask for the grants the daemon lacks
   person name [<name>|--reset]  The name sessions see on your messages

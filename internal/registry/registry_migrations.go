@@ -43,6 +43,9 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 	}
 	timing.Migrate = time.Since(began)
 	if version > 0 {
+		began = time.Now()
+		timing.CompressErr = compressMigrationBackups(r.diskPath())
+		timing.Compress = time.Since(began)
 		r.migration = &timing
 	}
 	return nil
@@ -58,9 +61,10 @@ func (r *Registry) Migration() (MigrationTiming, bool) {
 
 func (r *Registry) newerSchemaError(found int) *NewerSchemaError {
 	refusal := &NewerSchemaError{Found: found, Supported: schemaVersion, Path: r.diskPath()}
-	backup := migrationBackupPath(refusal.Path, found)
-	if schema := schemaOf(backup); schema > 0 && schema <= schemaVersion {
-		refusal.Backup, refusal.BackupSchema = backup, schema
+	if backup := existingMigrationBackup(refusal.Path, found); backup != "" {
+		if schema := backupSchema(backup); schema > 0 && schema <= schemaVersion {
+			refusal.Backup, refusal.BackupSchema = backup, schema
+		}
 	}
 	return refusal
 }

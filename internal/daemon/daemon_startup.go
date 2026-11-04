@@ -21,7 +21,10 @@ func (d *Daemon) logRegistryStartup() {
 		return
 	}
 	if migration, migrated := d.Registry.Migration(); migrated {
-		d.log.Printf("registry migrated from schema %d to %d: backup %s, migration %s", migration.From, migration.To, migration.Backup.Round(time.Millisecond), migration.Migrate.Round(time.Millisecond))
+		d.log.Printf("registry migrated from schema %d to %d: backup %s, migration %s, compress %s", migration.From, migration.To, migration.Backup.Round(time.Millisecond), migration.Migrate.Round(time.Millisecond), migration.Compress.Round(time.Millisecond))
+		if migration.CompressErr != nil {
+			d.log.Printf("registry backup left uncompressed: %v", migration.CompressErr)
+		}
 	}
 }
 

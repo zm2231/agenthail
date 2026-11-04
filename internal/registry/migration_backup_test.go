@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,11 +59,12 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 	}
 	r.Close()
 
-	backup := migrationBackupPath(path, schemaVersion)
-	info, err := os.Stat(backup)
+	kept := compressedBackupPath(path, schemaVersion)
+	info, err := os.Stat(kept)
 	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("backup %s: err=%v mode=%v", backup, err, info.Mode().Perm())
+		t.Fatalf("backup %s: err=%v mode=%v", kept, err, info.Mode().Perm())
 	}
+	backup := plainCopyOfBackup(t, path, schemaVersion)
 	if got := schemaOf(backup); got != schemaVersion-1 {
 		t.Fatalf("backup schema=%d, want %d", got, schemaVersion-1)
 	}
@@ -79,7 +79,7 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 	if got := migrationBackups(path); len(got) != 2 || got[0] != schemaVersion || got[1] != schemaVersion-2 {
 		t.Fatalf("kept backups for schemas %v, want the newest two", got)
 	}
-	if _, err := os.Stat(backup + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(migrationBackupPath(path, schemaVersion) + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("the temporary copy was left behind: %v", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 		t.Fatalf("migration timing = %+v, %v", timing, recorded)
 	}
 
-	backup := migrationBackupPath(path, schemaVersion)
+	backup := plainCopyOfBackup(t, path, schemaVersion)
 	header := make([]byte, 20)
 	file, err := os.Open(backup)
 	if err != nil {
@@ -171,8 +171,7 @@ func TestABackupWorksInADirectoryWithAnOddName(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Close()
-	backup := migrationBackupPath(path, schemaVersion)
-	if got := schemaOf(backup); got != schemaVersion-1 {
+	if got := backupSchema(compressedBackupPath(path, schemaVersion)); got != schemaVersion-1 {
 		t.Fatalf("backup schema=%d, want %d", got, schemaVersion-1)
 	}
 }
@@ -304,14 +303,15 @@ func TestANewerSchemaRefusalNamesTheCopyFromBeforeItAndHowToRestoreIt(t *testing
 	if !errors.As(err, &refused) || refused.Backup != migrationBackupPath(path, newer) || refused.BackupSchema != schemaVersion {
 		t.Fatalf("err=%v, want a refusal naming the backup", err)
 	}
-	steps := err.Error()[strings.Index(err.Error(), "agenthail daemon stop; ")+len("agenthail daemon stop; "):]
-	steps = strings.TrimSuffix(steps, "; agenthail daemon start")
-	if output, err := exec.Command("/bin/sh", "-c", steps).CombinedOutput(); err != nil {
-		t.Fatalf("restore steps %q: %v %s", steps, err, output)
+	if want := "agenthail daemon stop; agenthail registry restore " + strconv.Itoa(newer) + "; agenthail daemon start"; !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("err=%v, want it to end %q", err, want)
+	}
+	if _, err := restoreMigrationBackup(path, newer); err != nil {
+		t.Fatal(err)
 	}
 	restored, err := Open(path)
 	if err != nil {
-		t.Fatalf("after the restore steps: %v", err)
+		t.Fatalf("after the restore: %v", err)
 	}
 	defer restored.Close()
 	if _, err := restored.Session("kept"); err != nil {

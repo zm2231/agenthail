@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	_ "modernc.org/sqlite"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -75,6 +77,135 @@ func TestHelpVersionAndArgumentErrorsLeaveTheRegistryAlone(t *testing.T) {
 				t.Fatalf("agenthail %s created a registry (stat err %v); output:\n%s", strings.Join(args, " "), err, output)
 			}
 		})
+	}
+}
+
+// newerRegistryWithCompressedCopy leaves what a downgrade finds: a registry this build is too old for, and the compressed copy the newer build kept.
+func newerRegistryWithCompressedCopy(t *testing.T, home string) (path string, future int) {
+	t.Helper()
+	path = filepath.Join(home, ".agenthail", "registry.db")
+	reg, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	future = registry.SchemaVersion() + 1
+	plain := path + ".plain"
+	if _, err := db.Exec(`VACUUM INTO ?`, plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = ` + strconv.Itoa(future)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(plain); err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed := filepath.Join(home, ".agenthail", "registry-before-v"+strconv.Itoa(future)+".db.zst")
+	if err := os.WriteFile(compressed, encoder.EncodeAll(data, nil), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path, future
+}
+
+func TestTheBuildThatRefusesANewerRegistryCanRestoreItsCopy(t *testing.T) {
+	home := t.TempDir()
+	path, future := newerRegistryWithCompressedCopy(t, home)
+
+	refusal, err := runAgenthail(t, home, "whoami")
+	restore := "agenthail registry restore " + strconv.Itoa(future)
+	if err == nil || !strings.Contains(refusal, restore) {
+		t.Fatalf("err=%v output=%q, want the refusal to offer %q", err, refusal, restore)
+	}
+	listing, err := runAgenthail(t, home, "registry", "restore")
+	if err != nil || !strings.Contains(listing, "schema "+strconv.Itoa(registry.SchemaVersion())) {
+		t.Fatalf("listing against a newer registry: err=%v output=%q", err, listing)
+	}
+
+	args := strings.Fields(strings.TrimPrefix(restore, "agenthail "))
+	output, err := runAgenthail(t, home, args...)
+	if err != nil {
+		t.Fatalf("%s: %v\n%s", restore, err, output)
+	}
+	aside := filepath.Join(home, ".agenthail", "registry-v"+strconv.Itoa(future)+".db")
+	if !strings.Contains(output, aside) {
+		t.Fatalf("the output does not name %s:\n%s", aside, output)
+	}
+	if _, err := os.Stat(aside); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := runAgenthail(t, home, "whoami"); strings.Contains(after, "registry is schema") {
+		t.Fatalf("still refused after the restore (err %v):\n%s", err, after)
+	}
+	reg, err := registry.OpenCurrent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Close()
+}
+
+func TestARestoreRefusesARunningDaemon(t *testing.T) {
+	home := t.TempDir()
+	path, future := newerRegistryWithCompressedCopy(t, home)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(home, ".agenthail", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runAgenthail(t, home, "registry", "restore", strconv.Itoa(future))
+	if err == nil || !strings.Contains(output, "agenthail daemon stop") {
+		t.Fatalf("err=%v output=%q", err, output)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the registry changed: %v", err)
+	}
+}
+
+func TestADaemonThatCannotTakeItsLockNeverOpensTheRegistry(t *testing.T) {
+	home := t.TempDir()
+	path, _ := newerRegistryWithCompressedCopy(t, home)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(home, ".agenthail", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runAgenthail(t, home, "daemon-run")
+	if err == nil || !strings.Contains(output, "daemon already running or starting") || strings.Contains(output, "registry is schema") {
+		t.Fatalf("err=%v output=%q, want the lock refusal before any open", err, output)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the registry changed: %v", err)
 	}
 }
 

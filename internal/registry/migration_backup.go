@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +45,9 @@ type MigrationTiming struct {
 	From, To int
 	Backup   time.Duration
 	Migrate  time.Duration
+	Compress time.Duration
+	// CompressErr leaves the uncompressed copy in place, which still restores.
+	CompressErr error
 }
 
 // Every other open waits on the caller's write lock, so this copies pages rather than rebuilding with VACUUM.
@@ -70,6 +74,10 @@ func (r *Registry) backUpBeforeMigration(found, target int) error {
 	}
 	if copied := schemaOf(temporary); copied != found {
 		return fmt.Errorf("back up the registry before migrating it: the copy is schema %d, want %d", copied, found)
+	}
+	// A restore leaves its copy in place, and this newer copy must replace it.
+	if err := os.Remove(final + compressedBackupSuffix); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("back up the registry before migrating it: %w", err)
 	}
 	if err := os.Rename(temporary, final); err != nil {
 		return fmt.Errorf("back up the registry before migrating it: %w", err)
@@ -144,7 +152,10 @@ func schemaOf(path string) int {
 func pruneMigrationBackups(path string) {
 	backups := migrationBackups(path)
 	for _, target := range backups[min(len(backups), keptMigrationBackups):] {
-		_ = os.Remove(migrationBackupPath(path, target))
+		plain := migrationBackupPath(path, target)
+		for _, file := range []string{plain, plain + compressedBackupSuffix, plain + compressedBackupSuffix + ".tmp"} {
+			_ = os.Remove(file)
+		}
 	}
 }
 
@@ -152,7 +163,7 @@ func pruneMigrationBackups(path string) {
 // taken for, newest first.
 func migrationBackups(path string) []int {
 	stem := strings.TrimSuffix(path, filepath.Ext(path))
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(filepath.Base(stem)) + `-before-v([0-9]+)\.db$`)
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(filepath.Base(stem)) + `-before-v([0-9]+)\.db(?:\.zst)?$`)
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	var targets []int
 	for _, entry := range entries {
@@ -163,7 +174,7 @@ func migrationBackups(path string) []int {
 		}
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(targets)))
-	return targets
+	return slices.Compact(targets)
 }
 
 // diskPath is the registry's file without connection parameters.

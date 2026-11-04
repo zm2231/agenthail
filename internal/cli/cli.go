@@ -199,6 +199,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
+	case "registry":
+		return a.cmdRegistry(rest)
 	case "hook":
 		return a.cmdHook(rest)
 	case "hooks":

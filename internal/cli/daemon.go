@@ -73,6 +73,12 @@ func (a *App) daemonRun() error {
 	for _, e := range a.Surfaces {
 		_ = e
 	}
+	// Opening can migrate, so a daemon that may not run must find that out first.
+	release, err := daemon.HoldDaemonLock()
+	if err != nil {
+		return err
+	}
+	defer release()
 	began := time.Now()
 	opened := a.registry()
 	d := daemon.New(opened, a.allSurfaces())
