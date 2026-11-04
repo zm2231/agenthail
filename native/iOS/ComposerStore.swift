@@ -27,9 +27,21 @@ struct ComposerStore {
             .map { ComposerStore(file: $0.appendingPathComponent("composer.json")) }
     }
 
-    func load() -> Saved {
-        guard let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return Saved() }
-        return saved
+    struct Loaded {
+        var saved = Saved()
+        var unreadable = false
+        var setAside: URL?
+    }
+
+    /// A file that can't be read is moved aside rather than left for the next save to overwrite.
+    func load(now: Date = Date()) -> Loaded {
+        guard FileManager.default.fileExists(atPath: file.path) else { return Loaded() }
+        if let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode(Saved.self, from: data) {
+            return Loaded(saved: saved)
+        }
+        let aside = file.deletingLastPathComponent().appendingPathComponent("\(file.lastPathComponent).unreadable-\(Int64(now.timeIntervalSince1970 * 1000))")
+        let moved = (try? FileManager.default.moveItem(at: file, to: aside)) != nil
+        return Loaded(unreadable: true, setAside: moved ? aside : nil)
     }
 
     func save(_ saved: Saved) {

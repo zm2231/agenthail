@@ -130,8 +130,8 @@ final class ComposerSendTests: XCTestCase {
         let key = ComposerSendProtocol.state.attempts[0].key
         let raw = ComposerSendProtocol.state.attempts[0].raw
         first = nil
-        XCTAssertEqual(store.load().sends.map(\.message), ["Survives"])
-        XCTAssertEqual(store.load().drafts, [:], "a message that left the composer is not also a draft")
+        XCTAssertEqual(store.load().saved.sends.map(\.message), ["Survives"])
+        XCTAssertEqual(store.load().saved.drafts, [:], "a message that left the composer is not also a draft")
 
         ComposerSendProtocol.state.reset()
         ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
@@ -140,7 +140,7 @@ final class ComposerSendTests: XCTestCase {
         try await waitUntil(seconds: 5) { second.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
         XCTAssertEqual(ComposerSendProtocol.state.attempts[0].key, key)
         XCTAssertEqual(ComposerSendProtocol.state.attempts[0].raw, raw, "the resumed message is the same request, byte for byte")
-        XCTAssertEqual(store.load().sends, [])
+        XCTAssertEqual(store.load().saved.sends, [])
     }
 
     func testADraftSurvivesTheAppBeingKilled() async throws {
@@ -148,7 +148,7 @@ final class ComposerSendTests: XCTestCase {
         let (model, session) = try makeModel(store: store)
         model.composer = "Typed, not sent"
         model.saveComposerState()
-        XCTAssertEqual(store.load().drafts[session.id], "Typed, not sent")
+        XCTAssertEqual(store.load().saved.drafts[session.id], "Typed, not sent")
 
         let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         await reopened.loadSession(session.id)
@@ -159,7 +159,7 @@ final class ComposerSendTests: XCTestCase {
         let store = temporaryStore()
         let (model, session) = try makeModel(store: store)
         model.composer = "Typed"
-        try await waitUntil(seconds: 3) { store.load().drafts[session.id] == "Typed" }
+        try await waitUntil(seconds: 3) { store.load().saved.drafts[session.id] == "Typed" }
     }
 
     func testAKilledSendWhoseAttachmentNeverUploadedComesBackAsADraft() async throws {
@@ -218,6 +218,54 @@ final class ComposerSendTests: XCTestCase {
         model.send(to: session)
         try await waitUntil { model.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 2 }
         XCTAssertEqual(ComposerSendProtocol.state.attempts[1].body["pid"] as? Int, 22)
+    }
+
+    func testAFileThatCannotBeReadIsKeptAndAnnouncedOnce() throws {
+        let store = temporaryStore()
+        let directory = store.file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unreadable = Data("not the format".utf8)
+        try unreadable.write(to: store.file)
+
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNotNil(model.operationError)
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let aside = try XCTUnwrap(names.first { $0.hasPrefix("composer.json.unreadable-") })
+        XCTAssertFalse(names.contains("composer.json"))
+
+        model.selectedSessionID = "computer::codex-flow"
+        model.composer = "Typed after"
+        model.saveComposerState()
+        XCTAssertEqual(store.load().saved.drafts["computer::codex-flow"], "Typed after")
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent(aside)), unreadable, "a later save does not touch the kept file")
+
+        let next = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNil(next.operationError, "the notice appears once")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix("composer.json.unreadable-") }, [aside])
+    }
+
+    func testAFileThatCannotBeMovedAsideIsNeverOverwritten() throws {
+        let store = temporaryStore()
+        let directory = store.file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unreadable = Data("not the format".utf8)
+        try unreadable.write(to: store.file)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNotNil(model.operationError)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        model.selectedSessionID = "computer::codex-flow"
+        model.composer = "Typed after"
+        model.saveComposerState()
+        XCTAssertEqual(try Data(contentsOf: store.file), unreadable)
+    }
+
+    func testAMissingFileIsNotAProblem() {
+        let store = temporaryStore()
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNil(model.operationError)
     }
 
     func testAttachmentsLostWithTheAppAreNamedOnReturn() async throws {

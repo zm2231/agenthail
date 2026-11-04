@@ -82,6 +82,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "SessionOpen")
+    private static let composerLog = Logger(subsystem: "com.agenthail.ios", category: "Composer")
     private var openInterval: (id: OSSignpostID, state: OSSignpostIntervalState, session: String, painted: Bool, resumes: Bool)?
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
@@ -1554,7 +1555,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func restoreComposerState() {
         guard let composerStore else { return }
-        let saved = composerStore.load()
+        let loaded = composerStore.load()
+        if loaded.unreadable {
+            Self.composerLog.error("composer file unreadable; set aside as \(loaded.setAside?.lastPathComponent ?? "nothing, it could not be moved", privacy: .public)")
+            operationError = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
+            if loaded.setAside == nil { self.composerStore = nil }
+        }
+        let saved = loaded.saved
         drafts = saved.drafts
         stashes = saved.stashes.mapValues { ComposerStash(text: $0, attachments: []) }
         lostAttachments = saved.attachmentNames
