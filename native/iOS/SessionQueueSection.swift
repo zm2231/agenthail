@@ -7,8 +7,13 @@ struct SessionQueueSection: View {
     let readOnly: Bool
     @State private var items: [QueueState] = []
     @State private var problem: String?
-    @State private var expanded = true
+    @State private var chosenExpanded: Bool?
+    @State private var rowsHeight: CGFloat = 0
 
+    private static let collapsesAt = 3
+    private static let heightCap: CGFloat = 156
+
+    private var expanded: Bool { chosenExpanded ?? (items.count < Self.collapsesAt) }
     private var canSteer: Bool { session.status == "busy" && session.waitingOn == nil && capabilities.steer && !readOnly }
 
     private var refreshKey: String {
@@ -17,9 +22,9 @@ struct SessionQueueSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             if !items.isEmpty {
-                Button { expanded.toggle() } label: {
+                Button { chosenExpanded = !expanded } label: {
                     HStack(spacing: 6) {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
                         Text("Queued · \(items.count)").font(.footnote.weight(.semibold))
@@ -31,13 +36,7 @@ struct SessionQueueSection: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("session-queue-header")
-                if expanded {
-                    ViewThatFits(in: .vertical) {
-                        rows
-                        ScrollView { rows }
-                    }
-                    .frame(maxHeight: 200)
-                }
+                if expanded { scrollingRows }
             }
             if let problem {
                 Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
@@ -49,55 +48,102 @@ struct SessionQueueSection: View {
     }
 
     private var rows: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(items, id: \.listID) { item in row(item) }
         }
     }
 
+    private var scrollingRows: some View {
+        let overflows = rowsHeight > Self.heightCap
+        return ScrollView {
+            rows
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                .padding(.bottom, overflows ? 22 : 0)
+        }
+        .frame(height: min(rowsHeight, Self.heightCap))
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.visible)
+        .scrollIndicatorsFlash(trigger: overflows)
+        .mask {
+            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: overflows ? 0.82 : 1), .init(color: overflows ? .clear : .black, location: 1)], startPoint: .top, endPoint: .bottom)
+        }
+        .accessibilityIdentifier("session-queue-scroll")
+    }
+
     private func row(_ item: QueueState) -> some View {
         let refusal = canSteer ? QueueSteer.refusal(item, capabilities: capabilities) : nil
-        return VStack(alignment: .leading, spacing: 2) {
-            if let line = item.message.split(separator: "\n").first {
-                Text(line).font(.subheadline).lineLimit(1).truncationMode(.tail)
-            }
-            if let attachments = item.attachments, !attachments.isEmpty {
-                Label(attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip")
-                    .font(.footnote).foregroundStyle(PhonePalette.muted).lineLimit(1).truncationMode(.middle)
-                    .accessibilityIdentifier("session-queue-attachments-\(item.id)")
-            }
-            Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
-            if let refusal {
-                Text(refusal).font(.footnote).foregroundStyle(PhonePalette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("session-queue-refusal-\(item.id)")
-            }
-            HStack(spacing: 18) {
-                let idle = !model.pendingControls.contains("queue:\(item.listID)")
-                if canSteer {
-                    action("Steer", "session-queue-steer-\(item.id)", enabled: idle && refusal == nil) { try await model.steerQueued(item, capabilities: capabilities) }
+        let idle = !model.pendingControls.contains("queue:\(item.listID)")
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                if let line = item.message.split(separator: "\n").first {
+                    Text(line).font(.subheadline).lineLimit(1).truncationMode(.tail)
                 }
-                action("Edit", "session-queue-edit-\(item.id)", enabled: idle) { try await model.takeBack(item) }
-                action("Cancel", "session-queue-cancel-\(item.id)", enabled: idle) { try await model.updateQueue(item, retry: false) }
+                details(item, refused: refusal != nil)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if canSteer && refusal == nil {
+                Button("Steer") { run { try await model.steerQueued(item, capabilities: capabilities) } }
+                    .font(.footnote.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .foregroundStyle(idle ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(PhonePalette.muted))
+                    .disabled(!idle)
+                    .accessibilityIdentifier("session-queue-steer-\(item.id)")
+            }
+            Menu {
+                if let refusal {
+                    Section(refusal) { Button("Steer") {}.disabled(true) }
+                }
+                Button("Edit", systemImage: "pencil") { run { try await model.takeBack(item) } }
+                Button("Cancel delivery", systemImage: "xmark", role: .destructive) { run { try await model.updateQueue(item, retry: false) } }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(PhonePalette.muted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(!idle)
+            .accessibilityLabel("More actions for this queued message")
+            .accessibilityIdentifier("session-queue-menu-\(item.id)")
         }
         .accessibilityElement(children: .contain)
     }
 
-    private func action(_ title: String, _ identifier: String, enabled: Bool, _ perform: @escaping () async throws -> Void) -> some View {
-        Button(title) {
-            Task {
-                problem = nil
-                do { try await perform() } catch { problem = AgenthailAPIError.userMessage(error) }
-                await reload()
+    @ViewBuilder private func details(_ item: QueueState, refused: Bool) -> some View {
+        let names = (item.attachments ?? []).map(\.name).joined(separator: ", ")
+        let reason = refused ? "Can't steer" : news(item)
+        if !names.isEmpty || reason != nil {
+            HStack(spacing: 4) {
+                if !names.isEmpty {
+                    Image(systemName: "paperclip").imageScale(.small)
+                    Text(names).lineLimit(1).truncationMode(.middle)
+                        .accessibilityIdentifier("session-queue-attachments-\(item.id)")
+                }
+                if let reason {
+                    Text(names.isEmpty ? reason : "· \(reason)").lineLimit(1).layoutPriority(1)
+                        .accessibilityIdentifier("session-queue-reason-\(item.id)")
+                }
             }
+            .font(.footnote)
+            .foregroundStyle(PhonePalette.muted)
         }
-        .font(.footnote.weight(.semibold))
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-        .buttonStyle(.plain)
-        .foregroundStyle(enabled ? AnyShapeStyle(PhonePalette.accent) : AnyShapeStyle(PhonePalette.muted))
-        .disabled(!enabled)
-        .accessibilityIdentifier(identifier)
+    }
+
+    private func news(_ item: QueueState) -> String? {
+        switch item.heldBy {
+        case nil, "busy": return nil
+        default: return item.holdLabel
+        }
+    }
+
+    private func run(_ perform: @escaping () async throws -> Void) {
+        Task {
+            problem = nil
+            do { try await perform() } catch { problem = AgenthailAPIError.userMessage(error) }
+            await reload()
+        }
     }
 
     private func reload() async {
