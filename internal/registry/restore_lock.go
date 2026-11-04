@@ -8,49 +8,52 @@ import (
 	"time"
 )
 
-var restoreWait = 2 * time.Minute
+var (
+	restoreWait     = 2 * time.Minute
+	restoreHoldWait = 10 * time.Second
+)
 
-func restoreLockPath(path string) string {
-	return path + ".restore-lock"
+func registryLockPath(path string) string {
+	return path + ".lock"
 }
 
+// Every open holds this shared until Close, and a restore needs it exclusively, so no process can be left writing to the file a restore sets aside.
 func holdRestoreLock(path string) (func(), error) {
-	lockPath := restoreLockPath(path)
+	lockPath := registryLockPath(path)
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("lock the registry for a restore: %w", err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("another restore of the registry is running")
-	}
-	return func() {
-		_ = os.Remove(lockPath)
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		_ = file.Close()
-	}, nil
-}
-
-// waitForRestore keeps every opener, including a daemon a service manager respawns, away from a registry being swapped.
-func waitForRestore(path string) error {
-	disk, _, _ := strings.Cut(path, "?")
-	lockPath := restoreLockPath(disk)
-	deadline := time.Now().Add(restoreWait)
-	for {
-		file, err := os.Open(lockPath)
-		if err != nil {
-			return nil
-		}
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
-		if err == nil {
-			_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-			file.Close()
-			return nil
-		}
-		file.Close()
+	deadline := time.Now().Add(restoreHoldWait)
+	for syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the registry is still being restored after %s", restoreWait)
+			file.Close()
+			return nil, fmt.Errorf("the registry is open in another process, such as a running agenthail command; stop it and run this again (lsof %s lists them)", shellQuote(lockPath))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	return func() { _ = file.Close() }, nil
+}
+
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+// os.OpenFile sets close-on-exec, so a process this one spawns does not keep the lock.
+// A registry whose directory cannot hold the lock file opens without it: nothing can restore over a registry there either.
+func holdRegistryOpen(path string) (*os.File, error) {
+	disk, _, _ := strings.Cut(path, "?")
+	file, err := os.OpenFile(registryLockPath(disk), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, nil
+	}
+	deadline := time.Now().Add(restoreWait)
+	for syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) != nil {
+		if time.Now().After(deadline) {
+			file.Close()
+			return nil, fmt.Errorf("the registry is still being restored after %s", restoreWait)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return file, nil
 }

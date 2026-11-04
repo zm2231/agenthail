@@ -17,6 +17,7 @@ import (
 type Registry struct {
 	db            *sql.DB
 	read          *sql.DB
+	openLock      *os.File
 	path          string
 	now           func() time.Time
 	busyPolicy    func() (deliverypolicy.Mode, error)
@@ -156,7 +157,8 @@ func (r *Registry) current() (bool, error) {
 }
 
 func connect(path string) (*Registry, error) {
-	if err := waitForRestore(path); err != nil {
+	openLock, err := holdRegistryOpen(path)
+	if err != nil {
 		return nil, err
 	}
 	sep := "?"
@@ -165,6 +167,7 @@ func connect(path string) (*Registry, error) {
 	}
 	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
+		closeOpenLock(openLock)
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
@@ -172,11 +175,18 @@ func connect(path string) (*Registry, error) {
 	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-65536)")
 	if err != nil {
 		db.Close()
+		closeOpenLock(openLock)
 		return nil, err
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+	return &Registry{db: db, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+}
+
+func closeOpenLock(file *os.File) {
+	if file != nil {
+		_ = file.Close()
+	}
 }
 
 func (r *Registry) Path() string     { return r.path }
@@ -193,5 +203,6 @@ func (r *Registry) Close() error {
 	r.seen.pending = nil
 	r.seen.mu.Unlock()
 	r.writeStamps(pending)
+	defer closeOpenLock(r.openLock)
 	return errors.Join(r.read.Close(), r.db.Close())
 }

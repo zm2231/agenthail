@@ -1,12 +1,16 @@
 package registry
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -429,6 +433,7 @@ func TestTheRegistryPathNeverGoesMissingDuringARestore(t *testing.T) {
 }
 
 func TestAnOpenDuringARestoreWaitsForItAndGetsTheRestoredRegistry(t *testing.T) {
+	shortRestoreHoldWait(t)
 	path, newer := registryNewerThanBuildWithBackup(t, true)
 	unlock, err := holdRestoreLock(path)
 	if err != nil {
@@ -458,9 +463,145 @@ func TestAnOpenDuringARestoreWaitsForItAndGetsTheRestoredRegistry(t *testing.T) 
 	if err := <-opened; err != nil {
 		t.Fatalf("the waiting open failed: %v", err)
 	}
-	if _, err := os.Stat(restoreLockPath(path)); !os.IsNotExist(err) {
-		t.Fatalf("the lock file stayed: %v", err)
+}
+
+func shortRestoreHoldWait(t *testing.T) {
+	t.Helper()
+	previous := restoreHoldWait
+	restoreHoldWait = 200 * time.Millisecond
+	t.Cleanup(func() { restoreHoldWait = previous })
+}
+
+func registryAtSchemaWithBackup(t *testing.T) (path string, target int) {
+	t.Helper()
+	path = filepath.Join(t.TempDir(), "registry.db")
+	registryAtSchema(t, path, schemaVersion)
+	target = schemaVersion + 1
+	registryAtSchemaCopy(t, path, migrationBackupPath(path, target), schemaVersion)
+	return path, target
+}
+
+func TestARestoreRefusesWhileAnotherProcessHasTheRegistryOpenAndSaysWhat(t *testing.T) {
+	shortRestoreHoldWait(t)
+	path, target := registryAtSchemaWithBackup(t)
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = restoreMigrationBackup(path, target)
+	if err == nil {
+		t.Fatal("the restore ran with the registry open")
+	}
+	for _, want := range []string{"agenthail command", "lsof", registryLockPath(path)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err=%q, want it to mention %q", err, want)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the registry changed: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreMigrationBackup(path, target); err != nil {
+		t.Fatalf("after the holder closed: %v", err)
+	}
+}
+
+func TestAWriteFromAnOpenBeforeARestoreCannotLandInTheSetAsideRegistry(t *testing.T) {
+	shortRestoreHoldWait(t)
+	path, target := registryAtSchemaWithBackup(t)
+	opener, err := holdRegistryOpen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreMigrationBackup(path, target); err == nil {
+		t.Fatal("a restore started between an opener's lock and its first SQLite call")
+	}
+	closeOpenLock(opener)
+	if _, err := restoreMigrationBackup(path, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAChildOfAnOpenRegistryDoesNotHoldItsLock(t *testing.T) {
+	shortRestoreHoldWait(t)
+	path, target := registryAtSchemaWithBackup(t)
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command("/bin/sh", "-c", "sleep 60; :")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		child.Process.Kill()
+		child.Wait()
+	})
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreMigrationBackup(path, target); err != nil {
+		t.Fatalf("a spawned child kept the lock: %v", err)
+	}
+}
+
+func TestAKilledHolderReleasesTheLock(t *testing.T) {
+	shortRestoreHoldWait(t)
+	path, target := registryAtSchemaWithBackup(t)
+	holder := exec.Command(os.Args[0], "-test.run=^TestHolderProcessThatIsKilled$")
+	holder.Env = append(os.Environ(), holderPathEnv+"="+path)
+	stdout, err := holder.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Wait()
+	defer holder.Process.Kill()
+	reader := bufio.NewReader(stdout)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("the holder never opened the registry: %v", err)
+		}
+		if strings.Contains(line, "holding") {
+			break
+		}
+	}
+	if _, err := restoreMigrationBackup(path, target); err == nil {
+		t.Fatal("the restore ran while another process held the registry")
+	}
+	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	holder.Wait()
+	if _, err := restoreMigrationBackup(path, target); err != nil {
+		t.Fatalf("after the holder was killed: %v", err)
+	}
+}
+
+const holderPathEnv = "AGENTHAIL_TEST_REGISTRY_HOLDER_PATH"
+
+func TestHolderProcessThatIsKilled(t *testing.T) {
+	path := os.Getenv(holderPathEnv)
+	if path == "" {
+		t.Skip("run by TestAKilledHolderReleasesTheLock")
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	fmt.Println("holding")
+	time.Sleep(time.Minute)
 }
 
 func TestListingNamesEachCopyOnce(t *testing.T) {
