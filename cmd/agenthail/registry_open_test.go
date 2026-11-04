@@ -184,6 +184,31 @@ func TestARestoreRefusesARunningDaemon(t *testing.T) {
 	}
 }
 
+func TestADaemonThatCannotTakeItsLockNeverOpensTheRegistry(t *testing.T) {
+	home := t.TempDir()
+	path, _ := newerRegistryWithCompressedCopy(t, home)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(home, ".agenthail", "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runAgenthail(t, home, "daemon-run")
+	if err == nil || !strings.Contains(output, "daemon already running or starting") || strings.Contains(output, "registry is schema") {
+		t.Fatalf("err=%v output=%q, want the lock refusal before any open", err, output)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("the registry changed: %v", err)
+	}
+}
+
 func TestACommandRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".agenthail", "registry.db")

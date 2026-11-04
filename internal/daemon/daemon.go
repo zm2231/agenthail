@@ -422,11 +422,6 @@ func (d *Daemon) settleDeliveryProblems() {
 }
 
 func (d *Daemon) RunWithSignal() error {
-	lock, err := acquireDaemonLock()
-	if err != nil {
-		return err
-	}
-	defer releaseDaemonLock(lock)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	d.log.Printf("daemon pid %d", os.Getpid())

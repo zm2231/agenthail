@@ -395,14 +395,17 @@ func TestUndoingASetAsideLeavesTheRegistryAsItWas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	aside, moved, err := setRegistryAside(path)
+	aside, sidecars, err := linkRegistryAside(path)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := detachSidecars(path, sidecars); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path + "-wal"); !os.IsNotExist(err) || aside == "" {
 		t.Fatalf("not set aside: %v %q", err, aside)
 	}
-	if err := undoSetAside(aside, moved); err != nil {
+	if err := reattachSidecars(path, aside, sidecars); err != nil {
 		t.Fatal(err)
 	}
 	for _, file := range []string{path, path + "-wal"} {

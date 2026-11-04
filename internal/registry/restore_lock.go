@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const restoreWait = 2 * time.Minute
+var restoreWait = 2 * time.Minute
 
 func restoreLockPath(path string) string {
 	return path + ".restore-lock"

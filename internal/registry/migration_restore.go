@@ -66,6 +66,8 @@ func restoreMigrationBackup(path string, target int) (RestoredRegistry, error) {
 	return swapInMigrationBackup(path, file)
 }
 
+var restoreStep = func(string) {}
+
 func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 	schema := backupSchema(file)
 	if schema < 1 {
@@ -83,13 +85,19 @@ func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 	if err := verifyRestoredCopy(temporary, schema); err != nil {
 		return RestoredRegistry{}, fmt.Errorf("restore %s: %w", file, err)
 	}
-	aside, moved, err := setRegistryAside(path)
+	restoreStep("verified")
+	aside, sidecars, err := linkRegistryAside(path)
 	if err != nil {
 		return RestoredRegistry{}, fmt.Errorf("set the current registry aside: %w", err)
 	}
-	if err := os.Rename(temporary, path); err != nil {
-		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), undoSetAside(aside, moved))
+	restoreStep("linked")
+	if err := detachSidecars(path, sidecars); err != nil {
+		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), reattachSidecars(path, aside, sidecars))
 	}
+	if err := os.Rename(temporary, path); err != nil {
+		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), reattachSidecars(path, aside, sidecars))
+	}
+	restoreStep("swapped")
 	restored := RestoredRegistry{Schema: schema, From: file, Aside: aside}
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return restored, fmt.Errorf("the registry was restored from %s, but it may not survive a power loss until the disk recovers: %w", file, err)
@@ -149,11 +157,9 @@ func verifyRestoredCopy(path string, schema int) error {
 	return nil
 }
 
-type movedFile struct{ from, to string }
-
-// The main file is linked rather than moved so the registry path never goes missing, since an opener would create an empty registry there.
-// The sidecars move first because an old WAL must never meet the restored file. Opening the registry to learn its schema could remove its WAL.
-func setRegistryAside(path string) (string, []movedFile, error) {
+// Links keep every original reachable and the registry path present, because an opener would create an empty registry at a missing path.
+// Opening the registry to learn its schema could remove its WAL, so this reads the header.
+func linkRegistryAside(path string) (string, []string, error) {
 	current, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return "", nil, nil
@@ -167,24 +173,47 @@ func setRegistryAside(path string) (string, []movedFile, error) {
 	if err := os.Link(path, aside); err != nil {
 		return "", nil, err
 	}
-	var moved []movedFile
+	var sidecars []string
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
-		err := os.Rename(path+suffix, aside+suffix)
+		err := os.Link(path+suffix, aside+suffix)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return "", nil, errors.Join(err, undoSetAside(aside, moved))
+			return "", nil, errors.Join(err, removeAsideLinks(aside, sidecars))
 		}
-		moved = append(moved, movedFile{path + suffix, aside + suffix})
+		sidecars = append(sidecars, suffix)
 	}
-	return aside, moved, nil
+	return aside, sidecars, nil
 }
 
-func undoSetAside(aside string, moved []movedFile) error {
-	failures := []error{moveBack(moved)}
-	if aside != "" {
-		failures = append(failures, os.Remove(aside))
+// SQLite applies an old WAL to whatever file it finds and reports the result as malformed, so these go before the restored file arrives.
+func detachSidecars(path string, sidecars []string) error {
+	for _, suffix := range sidecars {
+		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		restoreStep("detached " + suffix)
+	}
+	return nil
+}
+
+func reattachSidecars(path, aside string, sidecars []string) error {
+	if aside == "" {
+		return nil
+	}
+	for _, suffix := range sidecars {
+		if err := os.Link(aside+suffix, path+suffix); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("the registry's previous files are still at %s: %w", aside, err)
+		}
+	}
+	return removeAsideLinks(aside, sidecars)
+}
+
+func removeAsideLinks(aside string, sidecars []string) error {
+	failures := []error{os.Remove(aside)}
+	for _, suffix := range sidecars {
+		failures = append(failures, os.Remove(aside+suffix))
 	}
 	return errors.Join(failures...)
 }
@@ -201,12 +230,3 @@ func registryAsidePath(path string, schema int, now time.Time) string {
 	return fmt.Sprintf("%s-%d.db", strings.TrimSuffix(name, ".db"), now.UnixMilli())
 }
 
-func moveBack(moved []movedFile) error {
-	var failures []error
-	for _, file := range moved {
-		if err := os.Rename(file.to, file.from); err != nil {
-			failures = append(failures, fmt.Errorf("move %s back: %w", file.to, err))
-		}
-	}
-	return errors.Join(failures...)
-}
