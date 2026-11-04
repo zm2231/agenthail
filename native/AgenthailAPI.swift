@@ -107,8 +107,10 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 #endif
 
-    func version(requiring protocolVersion: Int = 1) async throws -> APIVersion {
-        let version: APIVersion = try await get("/api/v1/version")
+    static let probeTimeout: TimeInterval = 8
+
+    func version(requiring protocolVersion: Int = 1, timeout: TimeInterval = 25) async throws -> APIVersion {
+        let version: APIVersion = try await request("/api/v1/version", method: "GET", body: nil, timeout: timeout)
         guard version.minimumProtocol <= protocolVersion, version.maximumProtocol >= protocolVersion else {
             throw AgenthailAPIError.incompatible(version.protocolVersion)
         }
@@ -310,7 +312,13 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(ActionReceipt.self, from: data)
     }
 
+    func cancelQueued(_ item: QueueState) async throws -> CancelledQueueItem {
+        let response: CancelQueuedResponse = try await post("/api/v1/actions", body: ["action": "queue-cancel", "queueId": item.id])
+        return CancelledQueueItem(message: response.result?.message ?? item.message, attachments: response.result?.attachments ?? item.attachments)
+    }
+
     func upload(_ attachment: ComposerAttachment, sessionID: String) async throws -> UploadedAttachment {
+        if let uploaded = attachment.uploaded { return uploaded }
         var components = URLComponents()
         components.path = "/api/v1/uploads"
         components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "name", value: attachment.name)]
@@ -968,6 +976,17 @@ private struct EmptyResponse: Decodable {}
 
 private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
+}
+
+// The row is already cancelled by the time this decodes, so an unreadable result falls back to the row itself.
+private struct CancelQueuedResponse: Decodable {
+    var result: CancelledQueueItem? = nil
+
+    private enum CodingKeys: String, CodingKey { case result }
+
+    init(from decoder: Decoder) throws {
+        result = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(CancelledQueueItem.self, forKey: .result)
+    }
 }
 
 private struct ProjectAddResponse: Decodable {

@@ -363,7 +363,7 @@ func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 	if item, err := r.QueueItem(held, nil); err != nil || item.Status != "pending" || item.HeldBy != QueueHeldHostUnreachable {
 		t.Fatalf("held item after three days=%+v err=%v", item, err)
 	}
-	if err := r.CancelMessage(canceled); err != nil {
+	if _, err := r.CancelMessage(canceled); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := r.HostDeliveries(hostID)

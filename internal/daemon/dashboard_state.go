@@ -14,7 +14,7 @@ import (
 )
 
 func (d *Daemon) dashboardQueueItem(item registry.QueueRow) dashboardQueue {
-	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: d.publicSessionID(item.SessionID), SourceSessionID: d.publicSessionID(item.SourceSessionID), Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, HeldBy: item.HeldBy, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
+	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: d.publicSessionID(item.SessionID), SourceSessionID: d.publicSessionID(item.SourceSessionID), Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, HeldBy: item.HeldBy, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery, Attachments: attachmentViews(item.Uploads)}
 }
 
 func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.CatalogPageRequest) (dashboardState, error) {
@@ -221,7 +221,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if record, found := catalogSessions[session.ID]; found {
 			_ = json.Unmarshal(record.Project, &identity.Project)
 			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
-			identity.UnavailableReason = record.UnavailableReason
 			observedAt = record.ObservedAt
 		}
 		if observedAt.IsZero() {

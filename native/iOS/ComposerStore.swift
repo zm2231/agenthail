@@ -18,6 +18,8 @@ struct ComposerStore {
         var stashes: [String: String] = [:]
         var sends: [Send] = []
         var attachmentNames: [String: [String]] = [:]
+        var uploadedAttachments: [String: [UploadedAttachment]]? = nil
+        var stashedUploads: [String: [UploadedAttachment]]? = nil
     }
 
     let file: URL
@@ -61,7 +63,7 @@ struct ComposerStore {
 
 extension ComposerStore.Saved.Send {
     init(_ send: PendingSend) {
-        self.init(id: send.id, sessionID: send.sessionID, message: send.message, turnSettings: send.turnSettings, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty)
+        self.init(id: send.id, sessionID: send.sessionID, message: send.message, turnSettings: send.turnSettings, idempotencyKey: send.idempotencyKey, uploaded: send.uploaded ?? send.alreadyUploaded, wire: send.wire, hadAttachments: !send.attachments.isEmpty)
     }
 
     /// Nil when attachments were not uploaded before the app ended: their bytes are gone, so this cannot be resent as it was.

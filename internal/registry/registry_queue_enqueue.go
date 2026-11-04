@@ -23,7 +23,7 @@ func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) QueueDeliveryWithIntent(sessionID, message, deliveryKey string, options surface.SendOptions) (int64, int64, error) {
-	return r.enqueueMessage(sessionID, message, deliveryKey, options, 0, QueueOperationMessage, true)
+	return r.enqueueMessage(sessionID, message, deliveryKey, options, 0, QueueOperationMessage, queueIntent{Sender: options.Sender()})
 }
 
 type QueueOperation string
@@ -81,22 +81,22 @@ func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, rel
 }
 
 func (r *Registry) QueueRelayMessageWithOptions(sessionID, message, deliveryKey string, relayHops int, options surface.SendOptions) (int64, error) {
-	id, _, err := r.enqueueMessage(sessionID, message, deliveryKey, options, relayHops, QueueOperationMessage, true)
+	id, _, err := r.enqueueMessage(sessionID, message, deliveryKey, options, relayHops, QueueOperationMessage, queueIntent{Sender: options.Sender()})
 	return id, err
 }
 
 func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (int64, error) {
-	id, _, err := r.enqueueMessage(sessionID, message, deliveryKey, options, relayHops, operation, false)
+	id, _, err := r.enqueueMessage(sessionID, message, deliveryKey, options, relayHops, operation, queueIntent{})
 	return id, err
 }
 
-func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
+func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, intent queueIntent) (int64, int64, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	id, deliveryID, err := enqueueMessageTx(tx, r.now(), sessionID, message, deliveryKey, options, relayHops, operation, recordIntent)
+	id, deliveryID, err := enqueueMessageTx(tx, r.now(), sessionID, message, deliveryKey, options, relayHops, operation, intent)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -107,31 +107,35 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	return id, deliveryID, nil
 }
 
-func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
+func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, intent queueIntent) (int64, int64, error) {
 	if options.BusyDelivery == "steer" && options.HoldsForQueue() {
 		options.BusyDelivery = "queue"
 	}
 	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,uploads,person_name,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author, options.Uploads, options.PersonName)
 	if err != nil {
-		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
-			var id int64
-			if err := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&id); err != nil {
-				return 0, 0, err
-			}
-			deliveryID, err := queuedDeliveryIntentID(tx, id)
-			return id, deliveryID, err
+		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return 0, 0, err
 		}
-		return 0, 0, err
+		var id int64
+		if err := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=? AND delivery_key!=''`, deliveryKey).Scan(&id); err != nil {
+			return 0, 0, err
+		}
+		if operation != QueueOperationMessage {
+			return id, 0, nil
+		}
+		deliveryID, err := intent.attachExisting(tx, sessionID, message, id, relayHops > 0)
+		return id, deliveryID, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, 0, err
 	}
-	var deliveryID int64
-	if recordIntent && options.SourceSessionID != "" {
-		if deliveryID, err = insertQueuedDeliveryIntent(tx, options.SourceSessionID, sessionID, message, id, relayHops > 0); err != nil {
-			return 0, 0, err
-		}
+	if operation != QueueOperationMessage {
+		return id, 0, nil
+	}
+	deliveryID, err := intent.attach(tx, sessionID, message, id, relayHops > 0)
+	if err != nil {
+		return 0, 0, err
 	}
 	return id, deliveryID, nil
 }

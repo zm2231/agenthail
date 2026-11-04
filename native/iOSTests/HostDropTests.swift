@@ -40,6 +40,48 @@ final class HostDropTests: XCTestCase {
         XCTAssertTrue(HostDropProtocol.state.streaming, "the stream reconnects")
     }
 
+    func testAProbeThatTimesOutAfterTheWindowStaysHeldAndRecovers() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        connection.grace.window = 1
+        HostDropProtocol.state.failNextProbes(1, after: 1.3)
+        HostDropProtocol.state.dropStreams()
+        let seen = try await states(of: model, for: .seconds(4))
+        XCTAssertEqual(seen, ["connected"], "one slow timed-out probe flipped every session: \(seen)")
+        XCTAssertTrue(connection.reachable, "the next probe recovers it")
+        XCTAssertNil(model.snapshot?.sessions.first?.unavailableReason)
+    }
+
+    func testAComputerThatStaysDownEndsUpShownUnreachableAfterTheWindow() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let connection = try XCTUnwrap(model.connection("hdrop"))
+        connection.grace.window = 1
+        HostDropProtocol.state.setDown(true)
+        HostDropProtocol.state.dropStreams()
+        let clock = ContinuousClock()
+        let end = clock.now + .seconds(8)
+        while clock.now < end, model.snapshot?.sessions.first?.host?.state != "unreachable" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "unreachable")
+        XCTAssertTrue((model.snapshot?.sessions.first?.unavailableReason ?? "").contains("can't be reached"))
+    }
+
+    func testAReachabilityProbeTimesOutSoonerThanARequest() async throws {
+        let model = try await connectedModel()
+        defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
+        let onConnect = HostDropProtocol.state.probeTimeouts.count
+        XCTAssertGreaterThan(onConnect, 0, "connecting probes")
+        HostDropProtocol.state.dropStreams()
+        for _ in 0..<300 where HostDropProtocol.state.probeTimeouts.count == onConnect { try await Task.sleep(for: .milliseconds(10)) }
+        let timeouts = HostDropProtocol.state.probeTimeouts
+        XCTAssertGreaterThan(timeouts.count, onConnect, "a dropped stream probes")
+        XCTAssertTrue(timeouts.allSatisfy { $0 == AgenthailAPI.probeTimeout }, "probe timeouts: \(timeouts)")
+        XCTAssertLessThan(AgenthailAPI.probeTimeout * 2, ConnectionGrace().window, "two probes fail inside the window")
+    }
+
     func testOneFailedProbeWhenReturningToTheForegroundDoesNotMarkTheComputerDisconnected() async throws {
         let model = try await connectedModel()
         defer { model.forgetHost("hdrop"); KeychainStore.removeAll() }
@@ -217,12 +259,14 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var open: [HostDropProtocol] = []
         private var failing = 0
+        private var failureDelay: TimeInterval = 0
+        private var timeouts: [TimeInterval] = []
         private var downNow = false
         private var refused = false
         private var snapshotsFail = false
         private var subagentsFail = false
         private var drops: [Data] = []
-        func reset() { lock.withLock { open = []; failing = 0; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false; drops = [] } }
+        func reset() { lock.withLock { open = []; failing = 0; failureDelay = 0; timeouts = []; downNow = false; refused = false; snapshotsFail = false; subagentsFail = false; drops = [] } }
         func postedDrops(_ body: Data) { lock.withLock { drops.append(body) } }
         var dropUploads: [Data] { lock.withLock { drops } }
         func setSnapshotFails(_ value: Bool) { lock.withLock { snapshotsFail = value } }
@@ -235,7 +279,10 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         var down: Bool { lock.withLock { downNow } }
         var unauthorized: Bool { lock.withLock { refused } }
         var streaming: Bool { lock.withLock { !open.isEmpty } }
-        func failNextProbes(_ count: Int) { lock.withLock { failing = count } }
+        func failNextProbes(_ count: Int, after delay: TimeInterval = 0) { lock.withLock { failing = count; failureDelay = delay } }
+        var probeFailureDelay: TimeInterval { lock.withLock { failureDelay } }
+        func sawProbe(timeout: TimeInterval) { lock.withLock { timeouts.append(timeout) } }
+        var probeTimeouts: [TimeInterval] { lock.withLock { timeouts } }
         func takeProbeFailure() -> Bool { lock.withLock { guard failing > 0 else { return false }; failing -= 1; return true } }
         func opened(_ stream: HostDropProtocol) { lock.withLock { open.append(stream) } }
         func closed(_ stream: HostDropProtocol) { lock.withLock { open.removeAll { $0 === stream } } }
@@ -275,8 +322,13 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         if path == "/api/v1/device/connection-drops" {
             Self.state.postedDrops(request.httpBody ?? request.httpBodyStream.map(Self.read) ?? Data())
         }
+        if path == "/api/v1/version" {
+            Self.state.sawProbe(timeout: request.timeoutInterval)
+        }
         if path == "/api/v1/version", Self.state.takeProbeFailure() {
-            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            DispatchQueue.global().asyncAfter(deadline: .now() + Self.state.probeFailureDelay) { [self] in
+                client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            }
             return
         }
         let body: String

@@ -42,7 +42,7 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 		}
 		notice := fmt.Sprintf("[agenthail delivery held id=%d target=%s] The message you sent to %s has not reached its model. %s", intent.ID, intent.TargetSessionID, intent.TargetSessionID, reason)
 		key := fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries)
-		_, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now')) ON CONFLICT DO NOTHING`, intent.SenderSessionID, notice, QueueOperationMessage, key)
+		_, err := queueNoticeTx(tx, intent.SenderSessionID, notice, key)
 		return true, err
 	})
 }

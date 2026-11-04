@@ -103,7 +103,7 @@ final class HostConnection {
             while !Task.isCancelled, !stopped {
                 let started = Date()
                 do {
-                    let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
+                    let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol, timeout: AgenthailAPI.probeTimeout)
                     guard !Task.isCancelled, !stopped else { return }
                     grace.contact()
                     build = version.build
@@ -247,7 +247,7 @@ final class HostConnection {
                     reconnecting = true
                     let probed = Date()
                     do {
-                        let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol)
+                        let version = try await api.version(requiring: AgenthailAPI.snapshotProtocol, timeout: AgenthailAPI.probeTimeout)
                         guard !stopped else { return }
                         build = version.build
                         recordStreamInterruption(probeError: nil)
