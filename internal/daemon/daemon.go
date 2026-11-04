@@ -110,6 +110,7 @@ type Daemon struct {
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
 	build                    buildinfo.Identity
+	startup                  daemonStartup
 	identityMu               sync.RWMutex
 	identity                 registry.HostIdentity
 	federation               *federation
@@ -303,7 +304,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("record the daemon's Claude config root, which every process needs to read the daemon's Claude conversations: %w", err)
 	}
-	d.log.Printf("started; %d surfaces", len(d.Surfaces))
+	d.logStarted()
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)
 	} else if recovered > 0 {
@@ -428,6 +429,7 @@ func (d *Daemon) RunWithSignal() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	d.log.Printf("daemon pid %d", os.Getpid())
+	d.logRegistryStartup()
 	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
 		return fmt.Errorf("write pidfile: %w", err)
 	}

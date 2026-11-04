@@ -22,6 +22,7 @@ type Registry struct {
 	busyPolicy   func() (deliverypolicy.Mode, error)
 	seen         deviceSeen
 	retryBackoff time.Duration
+	migration    *MigrationTiming
 }
 
 func (r *Registry) SetRetryBackoff(backoff time.Duration) {

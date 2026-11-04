@@ -154,8 +154,7 @@ func TestLaunchdInstallLetsRunAtLoadStartTheDaemon(t *testing.T) {
 func TestLaunchdInstallFailsWhenLaunchdDoesNotRunTheDaemon(t *testing.T) {
 	fake := newFakeLaunchd(t)
 	fake.write("orphan", "")
-	launchdReadyTimeout = 500 * time.Millisecond
-	t.Cleanup(func() { launchdReadyTimeout = 15 * time.Second })
+	shortenDaemonBounds(t, 500*time.Millisecond, 15*time.Second)
 	out, err := captureStdout(t, launchdService{}.Install)
 	if err == nil || !strings.Contains(err.Error(), daemon.LogFilePath()) {
 		t.Fatalf("install of a daemon launchd does not run = %v\n%s", err, out)

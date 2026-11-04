@@ -9,7 +9,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 )
@@ -102,9 +101,9 @@ func (s *systemdService) Start() error {
 	if output, err := s.systemctl("start", systemdUnitName); err != nil {
 		return fmt.Errorf("start %s: %w (%s)", systemdUnitName, err, output)
 	}
-	pid, ok := waitForDaemonPID(0, 15*time.Second)
-	if !ok {
-		return fmt.Errorf("systemd started %s but the daemon did not become ready; inspect %s", systemdUnitName, daemon.LogFilePath())
+	pid, err := s.daemonStart(0).wait()
+	if err != nil {
+		return fmt.Errorf("systemd started %s but %w", systemdUnitName, err)
 	}
 	fmt.Printf("daemon started (pid %d) by systemd %s\n", pid, systemdUnitName)
 	return nil
@@ -140,9 +139,9 @@ func (s *systemdService) Restart() error {
 	if output, err := s.systemctl("restart", systemdUnitName); err != nil {
 		return fmt.Errorf("restart %s: %w (%s)", systemdUnitName, err, output)
 	}
-	pid, ok := waitForDaemonPID(before, 15*time.Second)
-	if !ok {
-		return fmt.Errorf("systemd restarted %s but the daemon did not become ready; inspect %s", systemdUnitName, daemon.LogFilePath())
+	pid, err := s.daemonStart(before).wait()
+	if err != nil {
+		return fmt.Errorf("systemd restarted %s but %w", systemdUnitName, err)
 	}
 	fmt.Printf("daemon restarted (pid %d)\n", pid)
 	return nil
@@ -202,9 +201,9 @@ func (s *systemdService) Install() error {
 			return fmt.Errorf("systemctl --user %s: %w (%s)", strings.Join(args, " "), err, output)
 		}
 	}
-	pid, ok := waitForDaemonPID(0, 15*time.Second)
-	if !ok {
-		return fmt.Errorf("systemd started %s but the daemon did not become ready; inspect %s", systemdUnitName, logPath)
+	pid, err := s.daemonStart(0).wait()
+	if err != nil {
+		return fmt.Errorf("systemd started %s but %w", systemdUnitName, err)
 	}
 	fmt.Printf("installed and started systemd user service %s (pid %d)\n", systemdUnitName, pid)
 	s.ensureLinger()
