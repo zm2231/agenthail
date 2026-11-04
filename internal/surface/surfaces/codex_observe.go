@@ -31,6 +31,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		thread.Waiting = codexWaitingKind(value["status"])
 		observation = codexObservation(thread)
 	}
+	observation = dropUnconfirmedTurn(ctx, conn, thread, observation)
 	if path := codexTranscriptPath(sess); path != "" {
 		if info, err := os.Stat(path); err == nil {
 			observation.Plan = c.plan(ctx, path, info)
@@ -38,6 +39,39 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		}
 	}
 	return observation, nil
+}
+
+const codexTurnInterrupted = "turn interrupted"
+
+// A process that hasn't loaded a thread reads its running turn as interrupted,
+// so that status from such a reader says nothing about the turn. Its completed
+// status is reliable.
+func codexThreadNotLoaded(ctx context.Context, conn codexClient, threadID string) bool {
+	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	if err != nil {
+		return true
+	}
+	result, _ := response["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	status, _ := thread["status"].(map[string]any)
+	return str(status, "type") == "notLoaded"
+}
+
+func dropUnconfirmedTurn(ctx context.Context, conn codexClient, thread *codexThread, observation *surface.TurnObservation) *surface.TurnObservation {
+	for index := len(thread.Turns) - 1; index >= 0; index-- {
+		turn := thread.Turns[index]
+		if turn.ID == "" || !turn.Done {
+			continue
+		}
+		if turn.Error != codexTurnInterrupted || !codexThreadNotLoaded(ctx, conn, thread.ID) {
+			return observation
+		}
+		thread.Turns = append(thread.Turns[:index:index], thread.Turns[index+1:]...)
+		observation = codexObservation(thread)
+		observation.TurnUnconfirmed = true
+		return observation
+	}
+	return observation
 }
 
 // activeTurnID returns the thread's running turn, or "" when none runs. A new

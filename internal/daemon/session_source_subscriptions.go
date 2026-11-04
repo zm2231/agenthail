@@ -53,9 +53,6 @@ func (s *sessionSource) stop() {
 		return
 	}
 	s.cancel()
-	if s.manager.sources[s.session.ID] == s {
-		delete(s.manager.sources, s.session.ID)
-	}
 }
 
 func (s *sessionSource) closeFollowers() {

@@ -27,7 +27,13 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	startOptions := func(cwd string) surface.SessionStartOptions {
 		return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
 	}
+	if request.Task && creator == "" {
+		return actionResult{}, invalidRequest("a task needs the session that started it")
+	}
 	if request.Launcher != "" {
+		if request.Task {
+			return actionResult{}, invalidRequest("a session started in a terminal cannot be a task")
+		}
 		return d.launchSession(ctx, request, creator, startOptions)
 	}
 	adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface))
@@ -81,7 +87,23 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	if originErr := d.Registry.RecordSessionOrigin(registry.OriginOf(session.ID, creator)); originErr != nil {
 		return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but who started it could not be recorded: %s; do not retry automatically", originErr), nil)
 	}
-	return d.startedSessionOutcome(session, creator, alias, messageUUID, request.Message, sent, startErr, extra)
+	if request.Task {
+		task, taskErr := d.Registry.CreateTask(creator, session.ID, request.Message, time.Now())
+		if taskErr != nil {
+			return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but its task could not be recorded: %s; do not retry automatically", taskErr), nil)
+		}
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		extra["taskId"] = task.ID
+	}
+	result, err := d.startedSessionOutcome(session, creator, alias, messageUUID, request.Message, sent, startErr, extra)
+	if request.Task && err != nil {
+		if _, settleErr := d.settleTask(session.ID, registry.TaskSettlement{State: registry.TaskFailed, Kind: registry.TaskKindTurn, Result: startErr.Error()}); settleErr != nil {
+			d.log.Printf("settle task %s: %s", d.resolveDisplay(session.ID), settleErr)
+		}
+	}
+	return result, err
 }
 
 func (d *Daemon) launchSession(ctx context.Context, request dashboardActionRequest, creator string, startOptions func(string) surface.SessionStartOptions) (actionResult, error) {
