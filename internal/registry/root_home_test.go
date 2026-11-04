@@ -21,11 +21,11 @@ func ownersOf(owners map[string]uint32) func(string) (uint32, error) {
 
 func TestRootIsRefusedInAPersonsHome(t *testing.T) {
 	const person = uint32(4242)
-	const registryPath = "/home/person/.agenthail/registry.db"
+	const registryPath = "/srv/person/.agenthail/registry.db"
 	for name, owners := range map[string]map[string]uint32{
-		"no state yet":                  {"/": 0, "/home": 0, "/home/person": person},
-		"state left root-owned earlier": {"/": 0, "/home": 0, "/home/person": person, "/home/person/.agenthail": 0},
-		"state belonging to the person": {"/": 0, "/home": 0, "/home/person": person, "/home/person/.agenthail": person},
+		"no state yet":                  {"/": 0, "/srv": 0, "/srv/person": person},
+		"state left root-owned earlier": {"/": 0, "/srv": 0, "/srv/person": person, "/srv/person/.agenthail": 0},
+		"state belonging to the person": {"/": 0, "/srv": 0, "/srv/person": person, "/srv/person/.agenthail": person},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := refuseRootInAnothersHome(registryPath, 0, ownersOf(owners))
@@ -37,7 +37,7 @@ func TestRootIsRefusedInAPersonsHome(t *testing.T) {
 }
 
 func TestRootIsRefusedForARegistryDirectlyInAPersonsHome(t *testing.T) {
-	err := refuseRootInAnothersHome("/home/person/custom.db", 0, ownersOf(map[string]uint32{"/": 0, "/home": 0, "/home/person": 4242}))
+	err := refuseRootInAnothersHome("/srv/person/custom.db", 0, ownersOf(map[string]uint32{"/": 0, "/srv": 0, "/srv/person": 4242}))
 	if err == nil || !strings.Contains(err.Error(), "don't run agenthail with sudo") {
 		t.Fatalf("err=%v", err)
 	}
@@ -75,7 +75,7 @@ func TestRootWithNoAbsoluteHomeCarriesOnWhoeverOwnsTheWorkingDirectory(t *testin
 }
 
 func TestAnOrdinaryUserIsNotAskedWhoOwnsTheHome(t *testing.T) {
-	err := refuseRootInAnothersHome("/home/person/.agenthail/registry.db", 501, func(string) (uint32, error) {
+	err := refuseRootInAnothersHome("/srv/person/.agenthail/registry.db", 501, func(string) (uint32, error) {
 		t.Fatal("an ordinary user's open read an owner")
 		return 0, nil
 	})
@@ -128,7 +128,7 @@ func TestEveryOpenAndARestoreRefuseBeforeCreatingAnything(t *testing.T) {
 
 func TestAnUnreadableOwnerRefuses(t *testing.T) {
 	denied := errors.New("denied")
-	err := refuseRootInAnothersHome("/home/person/.agenthail/registry.db", 0, func(string) (uint32, error) { return 0, denied })
+	err := refuseRootInAnothersHome("/srv/person/.agenthail/registry.db", 0, func(string) (uint32, error) { return 0, denied })
 	if !errors.Is(err, denied) {
 		t.Fatalf("err=%v", err)
 	}
