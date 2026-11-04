@@ -184,6 +184,33 @@ func TestClaudeReportsAnInterruptedTurnAsTerminalWithItsError(t *testing.T) {
 	}
 }
 
+func TestClaudeTurnThatEndedWithNoAssistantRecordIsTerminalOnlyOnceIdleFollowsIt(t *testing.T) {
+	started := time.Now().Add(-time.Minute).UTC().Truncate(time.Millisecond)
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"`+started.Format(time.RFC3339Nano)+`","origin":{"kind":"human"},"message":{"role":"user","content":"one"}}`)
+	pid := os.Getpid()
+	session := func() *surface.Session {
+		return &surface.Session{ID: "conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: pid, Status: surface.StatusIdle, Transcript: path}
+	}
+	for name, test := range map[string]struct {
+		status string
+		at     time.Time
+		want   string
+	}{
+		"idle from before the turn": {"idle", started.Add(-time.Second), ""},
+		"still working":             {"busy", started.Add(time.Second), ""},
+		"idle after the turn":       {"idle", started.Add(time.Second), "u1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation", "status": test.status, "statusUpdatedAt": float64(test.at.UnixMilli()), "updatedAt": float64(test.at.UnixMilli())})
+			observation, err := NewClaude(nil, home).Observe(context.Background(), session())
+			if err != nil || observation.TerminalTurnID != test.want || observation.TerminalError != "" {
+				t.Fatalf("observation=%+v err=%v", observation, err)
+			}
+		})
+	}
+}
+
 func TestClaudeFinishedTurnWithNoTextStillCompletes(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}

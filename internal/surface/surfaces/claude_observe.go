@@ -73,6 +73,13 @@ func claudeTurnActivity(turn claudeTurn) *surface.Activity {
 	return activity
 }
 
+func claudeTurnLastRecord(turn claudeTurn) time.Time {
+	if turn.LastAt.After(turn.StartedAt) {
+		return turn.LastAt
+	}
+	return turn.StartedAt
+}
+
 // observe reads the turn from the transcript and what it waits on from the
 // process record, or for a session the host runs, from the host, which holds
 // its open requests. Claude writes a pending tool call to the transcript only
@@ -183,6 +190,9 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	}
 	if last.Interrupted && !last.Done {
 		observation.TerminalTurnID, observation.TerminalError = last.UserID, "turn interrupted"
+	} else if !last.Done && !last.Closing && c.settledAfter(sess, claudeTurnLastRecord(last)) {
+		// Claude writes no assistant record for a reply that stays empty after its retry.
+		observation.TerminalTurnID = last.UserID
 	}
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
