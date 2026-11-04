@@ -443,6 +443,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/queue" where Self.queueFails: status = 503; body = #"{"error":{"message":"unavailable"}}"#
+        case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-session-queue") && requestQuery.first(where: { $0.name == "sessionId" })?.value == "codex-demo": body = #"{"items":[],"nextBefore":null}"#
         case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-session-queue"): body = SessionPreview.sessionQueueJSON(rows: UserDefaults.standard.integer(forKey: "preview-session-queue-rows"))
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/inbox": body = InboxPreview.nextPage()

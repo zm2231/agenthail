@@ -656,7 +656,7 @@ struct SessionScreen: View {
                 userScrolling = false
             }
         }
-        // Distances, not Bools: a Bool that flips back during landing never delivers its action, leaving atLatest stale.
+        // A distance, not a Bool: a Bool that flips back during landing never delivers its action, leaving atLatest stale.
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentSize.height - geometry.visibleRect.maxY
         } action: { _, distance in
@@ -665,10 +665,10 @@ struct SessionScreen: View {
 #endif
             atLatest = distance < 60
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentSize.height - geometry.visibleRect.height
-        } action: { _, excess in
-            overflows = excess > 0
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height > geometry.visibleRect.height
+        } action: { _, value in
+            overflows = value
         }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }

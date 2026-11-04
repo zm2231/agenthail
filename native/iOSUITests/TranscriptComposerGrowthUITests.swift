@@ -138,6 +138,54 @@ final class TranscriptComposerGrowthUITests: XCTestCase {
         XCTAssertFalse(app.buttons["session-queue-header"].exists)
     }
 
+    private func open(_ row: XCUIElement, in app: XCUIApplication) {
+        if !row.isHittable { app.navigationBars.buttons.element(boundBy: 0).tapWhenReady() }
+        row.tapWhenReady(timeout: 15)
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
+        sleep(3)
+    }
+
+    private func gapAboveComposer(_ app: XCUIApplication) throws -> CGFloat {
+        let composerTop = app.textViews["composer-input"].frame.minY
+        var pending = [try app.scrollViews["session-timeline"].snapshot()]
+        var lowest: CGFloat = 0
+        while let next = pending.popLast() {
+            if next.elementType == .staticText, next.frame.minY < composerTop { lowest = max(lowest, next.frame.maxY) }
+            pending += next.children
+        }
+        return composerTop - lowest
+    }
+
+    func testLeavingATallQueueForAnEmptySessionClearsItsSpace() throws {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-session-queue", "-preview-session-queue-rows", "4", "--preview-theme", "dark", "--preview-reading", "--preview-follow"]
+        app.launch()
+        let queued = app.buttons["session-computer::demo"]
+        let empty = app.buttons["session-computer::codex-demo"]
+        let header = app.buttons["session-queue-header"]
+
+        open(empty, in: app)
+        XCTAssertFalse(header.exists, "the empty session shows a queue")
+        let clear = try gapAboveComposer(app)
+        XCTAssertLessThan(clear, 120, "the empty session is too short to show a leftover margin")
+
+        open(queued, in: app)
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        header.tap()
+        XCTAssertTrue(app.buttons["session-queue-menu-14"].waitForExistence(timeout: 5))
+        settle()
+        XCTAssertGreaterThan(try gapAboveComposer(app), clear + 100, "the open section reserved no space")
+
+        open(empty, in: app)
+        XCTAssertFalse(header.exists, "the queue followed to the empty session")
+        assertAtLatest(app, "after switching to the empty session")
+        XCTAssertEqual(try gapAboveComposer(app), clear, accuracy: 24, "the empty session kept the queue's margin")
+    }
+
     func testTheSectionStaysResponsiveOverAStreamingTranscriptWithAWallpaper() {
         continueAfterFailure = false
         for space in stride(from: 40, through: 280, by: 60) {
