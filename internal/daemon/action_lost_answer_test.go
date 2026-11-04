@@ -9,15 +9,17 @@ import (
 	"testing"
 )
 
-func droppingDashboardProxy(t *testing.T, router http.Handler) (url string, drop *atomic.Bool, kept *atomic.Pointer[string]) {
+func droppingDashboardProxy(t *testing.T, router http.Handler) (url string, drop *atomic.Bool, kept *atomic.Pointer[string], served <-chan struct{}) {
 	t.Helper()
 	drop, kept = &atomic.Bool{}, &atomic.Pointer[string]{}
+	handled := make(chan struct{}, 16)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Host = "example.test"
 		r.Header.Set("Origin", "http://example.test")
 		addBrowserCookie(router, r)
 		answer := httptest.NewRecorder()
 		router.ServeHTTP(answer, r)
+		handled <- struct{}{}
 		if drop.Swap(false) {
 			body := answer.Body.String()
 			kept.Store(&body)
@@ -33,7 +35,7 @@ func droppingDashboardProxy(t *testing.T, router http.Handler) (url string, drop
 		_, _ = w.Write(answer.Body.Bytes())
 	}))
 	t.Cleanup(server.Close)
-	return server.URL, drop, kept
+	return server.URL, drop, kept, handled
 }
 
 func postWithKey(url, key, body string) (int, string, error) {
@@ -55,13 +57,14 @@ func postWithKey(url, key, body string) (int, string, error) {
 
 func TestALostAnswerRetriedUnderItsKeyReturnsTheOriginalResultAndDeliversOnce(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	url, drop, kept := droppingDashboardProxy(t, dashboardRouter(f.d))
+	url, drop, kept, served := droppingDashboardProxy(t, dashboardRouter(f.d))
 	const body = `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"Please inspect the failure."}`
 
 	drop.Store(true)
 	if status, answer, err := postWithKey(url, "lost-answer", body); err == nil {
 		t.Fatalf("the first answer was not lost: status=%d body=%s", status, answer)
 	}
+	<-served
 	if len(f.posts) != 1 {
 		t.Fatalf("the action was not applied before its answer was lost: posts=%q", f.posts)
 	}
@@ -71,6 +74,7 @@ func TestALostAnswerRetriedUnderItsKeyReturnsTheOriginalResultAndDeliversOnce(t 
 	if err != nil || status != http.StatusOK {
 		t.Fatalf("retry: status=%d body=%s err=%v", status, answer, err)
 	}
+	<-served
 	if original := kept.Load(); original == nil || answer != *original {
 		t.Fatalf("retry body=%s, want the original %v", answer, kept.Load())
 	}
@@ -78,24 +82,31 @@ func TestALostAnswerRetriedUnderItsKeyReturnsTheOriginalResultAndDeliversOnce(t 
 		t.Fatalf("the retry delivered again: posts=%q", f.posts)
 	}
 
-	if status, answer, err := postWithKey(url, "a-new-message", body); err != nil || status != http.StatusOK || len(f.posts) != 2 {
-		t.Fatalf("a new key must deliver: status=%d body=%s err=%v posts=%q", status, answer, err, f.posts)
+	status, answer, err = postWithKey(url, "a-new-message", body)
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("a new key must deliver: status=%d body=%s err=%v", status, answer, err)
+	}
+	<-served
+	if len(f.posts) != 2 {
+		t.Fatalf("a new key must deliver: posts=%q", f.posts)
 	}
 }
 
 func TestALostRefusalRetriedUnderItsKeyReplaysTheRefusal(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	url, drop, kept := droppingDashboardProxy(t, dashboardRouter(f.d))
+	url, drop, kept, served := droppingDashboardProxy(t, dashboardRouter(f.d))
 	const body = `{"action":"send","author":"person","sessionId":"no-such-session","message":"hello"}`
 
 	drop.Store(true)
 	if status, answer, err := postWithKey(url, "lost-refusal", body); err == nil {
 		t.Fatalf("the first answer was not lost: status=%d body=%s", status, answer)
 	}
+	<-served
 	status, answer, err := postWithKey(url, "lost-refusal", body)
 	if err != nil || status < 400 {
 		t.Fatalf("retry: status=%d body=%s err=%v", status, answer, err)
 	}
+	<-served
 	if original := kept.Load(); original == nil || answer != *original {
 		t.Fatalf("retry body=%s, want the original %v", answer, kept.Load())
 	}
