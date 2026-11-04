@@ -1,4 +1,4 @@
--- schemaVersion 49
+-- schemaVersion 52
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -28,6 +28,10 @@ CREATE UNIQUE INDEX delivery_intents_provider_key
 -- index delivery_intents_sender_status
 CREATE INDEX delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
+
+-- index delivery_intents_target
+CREATE INDEX delivery_intents_target
+	ON delivery_intents(target_session_id, id DESC);
 
 -- index delivery_intents_uuid
 CREATE UNIQUE INDEX delivery_intents_uuid ON delivery_intents(uuid);

@@ -4,9 +4,33 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
+
+func (h *runningDaemon) inbox(sessionID string) []inboxItem {
+	h.t.Helper()
+	status, payload := h.request(http.MethodGet, "/api/v1/inbox?sessionId="+sessionID, nil)
+	if status != http.StatusOK {
+		h.t.Fatalf("inbox status=%d body=%s", status, payload)
+	}
+	var page inboxPage
+	if err := json.Unmarshal(payload, &page); err != nil {
+		h.t.Fatal(err)
+	}
+	return page.Items
+}
+
+func inboxMessage(items []inboxItem, message string) (inboxItem, bool) {
+	for _, item := range items {
+		if item.Message == message {
+			return item, true
+		}
+	}
+	return inboxItem{}, false
+}
 
 func TestInboxListsACrossSessionMessageDeliveredImmediately(t *testing.T) {
 	agent := newScriptedAgent("sender", "target")
@@ -19,18 +43,24 @@ func TestInboxListsACrossSessionMessageDeliveredImmediately(t *testing.T) {
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
 	}
-	status, payload := h.request(http.MethodGet, "/api/v1/queue?sessionId=target", nil)
-	if status != http.StatusOK {
-		t.Fatalf("inbox status=%d body=%s", status, payload)
+	item, ok := inboxMessage(h.inbox("target"), "build finished, two tests failing")
+	if !ok || item.SourceSessionID != "sender" || item.Pending || item.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("the inbox of the session that received the message does not list it as delivered: %+v ok=%v", item, ok)
 	}
-	var page mobileQueuePage
-	if err := json.Unmarshal(payload, &page); err != nil {
-		t.Fatal(err)
+}
+
+func TestInboxShowsAHeldMessageAsPendingUntilItIsDelivered(t *testing.T) {
+	agent := newScriptedAgent("sender", "target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": "sender", "model": "gpt-test", "message": "after this turn"})
+	settle()
+	if item, ok := inboxMessage(h.inbox("target"), "after this turn"); !ok || !item.Pending || item.QueueID == 0 {
+		t.Fatalf("held message: %+v ok=%v", item, ok)
 	}
-	for _, item := range page.Items {
-		if item.SessionID == "target" && item.SourceSessionID == "sender" && item.Message == "build finished, two tests failing" && item.Historical {
-			return
-		}
-	}
-	t.Fatalf("the inbox of the session that received the message does not list it: %s", payload)
+	agent.setStatus("target", surface.StatusIdle)
+	testkit.Eventually(t, "the held message delivered", 5*time.Second, func() bool {
+		item, ok := inboxMessage(h.inbox("target"), "after this turn")
+		return ok && !item.Pending
+	})
 }
