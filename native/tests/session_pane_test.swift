@@ -340,7 +340,9 @@ struct SessionPaneTest {
         let queueServer = try! StubServer { request, _ in
             guard request.contains("queue-cancel") else { return StubServer.reply("200 OK", "{}") }
             cancels.append(request)
-            return request.contains("\"queueId\":3") ? StubServer.reply("409 Conflict", #"{"error":{"message":"already delivering"}}"#) : StubServer.reply("200 OK", "{}")
+            if request.contains("\"queueId\":5") { return StubServer.reply("200 OK", #"{"ok":true,"result":{"message":"with files","attachments":[{"id":"up-1","name":"shot.png","mediaType":"image/png","bytes":7},{"id":"up-2","name":"gone.txt","mediaType":"text/plain","bytes":1,"missing":true}]}}"#) }
+            if request.contains("\"queueId\":8") { return StubServer.reply("200 OK", #"{"ok":true,"result":{"message":7}}"#) }
+            return request.contains("\"queueId\":3") || request.contains("\"queueId\":7") ? StubServer.reply("409 Conflict", #"{"error":{"message":"already delivering"}}"#) : StubServer.reply("200 OK", "{}")
         }
         let queuePort = await queueServer.ready()
         let queueModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(queuePort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
@@ -356,6 +358,32 @@ struct SessionPaneTest {
         for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
         try? await Task.sleep(for: .milliseconds(200))
         check(queueModel.draft(for: "Q").text == "" && cancels.count == 3 && queueModel.operationError?.contains("already delivering") == true, "a message that can't be cancelled stays queued, and later ones stay behind it: \(queueModel.draft(for: "Q").text.debugDescription) \(cancels.count)")
+        queueModel.operationError = nil
+        queueModel.takeBackQueued([queued(5, "row text")], sessionID: "Q")
+        for _ in 0..<60 where queueModel.draft(for: "Q").attachments.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.draft(for: "Q").text == "with files" && queueModel.draft(for: "Q").attachments.map(\.uploaded?.id) == ["up-1"], "take-back restores the reply's message and attachments")
+        check(queueModel.operationError?.contains("gone.txt") == true, "a missing attachment is named")
+        let cancelsBeforeSteer = cancels.count
+        var attachedRow = queued(6, "with a file")
+        attachedRow.attachments = [QueueAttachment(id: "up-3", name: "a.png", mediaType: "image/png", bytes: 1)]
+        queueModel.steerQueued(attachedRow)
+        try? await Task.sleep(for: .milliseconds(300))
+        check(cancels.count == cancelsBeforeSteer, "a queued message with attachments is never cancelled to steer it")
+        queueModel.draft(for: "Q").text = ""
+        queueModel.draft(for: "Q").attachments = []
+        queueModel.operationError = nil
+        queueModel.takeBackQueued([queued(5, "row text"), queued(7, "then fails")], sessionID: "Q")
+        for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.operationError?.contains("already del") == true && queueModel.operationError?.contains("gone.txt") == true, "a later failure still names a missing attachment: \(queueModel.operationError ?? "")")
+        check(queueModel.draft(for: "Q").text == "with files", "what was cancelled before the failure stays")
+        queueModel.draft(for: "Q").text = ""
+        queueModel.operationError = nil
+        var unreadableRow = queued(8, "kept from the row")
+        unreadableRow.attachments = [QueueAttachment(id: "up-4", name: "row.png", mediaType: "image/png", bytes: 1)]
+        queueModel.draft(for: "Q").attachments = []
+        queueModel.takeBackQueued([unreadableRow], sessionID: "Q")
+        for _ in 0..<60 where queueModel.draft(for: "Q").text.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.draft(for: "Q").text == "kept from the row" && queueModel.draft(for: "Q").attachments.map(\.uploaded?.id) == ["up-4"], "an unreadable result falls back to the row")
         queueServer.stop()
 
         let unreachable = model.openPane()

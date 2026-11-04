@@ -48,6 +48,8 @@ func (d *Daemon) registerMCPTools(server *mcp.Server) {
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."}, d.mcpHistory)
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."}, d.mcpLedgerWrite)
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_create", Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."}, d.mcpCreate)
+	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."}, d.mcpReport)
+	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_result", Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."}, d.mcpResult)
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_send", Description: "Send a message to a session (target) or to a project's coordinator (project). Queued by default; sessions you spawned or lead can also take mode now. A queued message may go up to your spawner or your project's coordinator, attributed to you."}, d.mcpSend)
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."}, d.mcpSteer)
 	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."}, d.mcpInterrupt)
@@ -64,7 +66,7 @@ func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(
 	mcp.AddTool(server, tool, func(ctx context.Context, _ *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
 		caller := mcpCallerFrom(ctx)
 		if caller == nil {
-			return mcpRefused(refuse("unauthenticated", "A valid Agenthail session credential is required.")), nil, nil
+			return mcpRefused(&mcpRefusal{Code: "unauthenticated", Message: "This session is still starting; try again in a moment.", Retryable: true}), nil, nil
 		}
 		ctx, replay := d.replayMCPWrite(ctx, caller, tool.Name, input)
 		var value any

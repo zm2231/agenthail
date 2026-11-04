@@ -131,15 +131,8 @@ func readHead(path string, size int64) ([]byte, error) {
 // Resolve returns the stored upload an id names and restarts its retention, so
 // a send or queued send never hands a runtime a path Sweep is about to remove.
 func (s *Store) Resolve(id string) (surface.Upload, error) {
-	rest, ok := strings.CutPrefix(id, idPrefix)
+	digest, name, ok := parseID(id)
 	if !ok {
-		return surface.Upload{}, ErrNotFound
-	}
-	digest, name, ok := strings.Cut(rest, "/")
-	if !ok || len(digest) != sha256.Size*2 || name != sanitizeName(name, "") {
-		return surface.Upload{}, ErrNotFound
-	}
-	if _, err := hex.DecodeString(digest); err != nil {
 		return surface.Upload{}, ErrNotFound
 	}
 	folder := filepath.Join(s.dir, digest)
@@ -165,9 +158,31 @@ func (s *Store) Resolve(id string) (surface.Upload, error) {
 	return surface.Upload{ID: id, Name: name, Path: path, MediaType: media, Bytes: info.Size(), Width: width, Height: height}, nil
 }
 
-// Sweep removes uploads stored or last resolved longer ago than Retention. A
-// re-upload of the same bytes also refreshes the folder's time.
-func (s *Store) Sweep() error {
+func parseID(id string) (digest, name string, ok bool) {
+	rest, ok := strings.CutPrefix(id, idPrefix)
+	if !ok {
+		return "", "", false
+	}
+	digest, name, ok = strings.Cut(rest, "/")
+	if !ok || len(digest) != sha256.Size*2 || name != sanitizeName(name, "") {
+		return "", "", false
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return "", "", false
+	}
+	return digest, name, true
+}
+
+// Sweep removes uploads stored or last resolved longer ago than Retention,
+// except the ones keep names by id. A re-upload of the same bytes also
+// refreshes the folder's time.
+func (s *Store) Sweep(keep []string) error {
+	kept := map[string]bool{}
+	for _, id := range keep {
+		if digest, _, ok := parseID(id); ok {
+			kept[digest] = true
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, err := os.ReadDir(s.dir)
@@ -184,7 +199,7 @@ func (s *Store) Sweep() error {
 		if err != nil {
 			continue
 		}
-		stale := info.ModTime().Before(cutoff)
+		stale := info.ModTime().Before(cutoff) && !kept[entry.Name()]
 		if strings.HasPrefix(entry.Name(), ".incoming-") {
 			stale = info.ModTime().Before(s.now().Add(-time.Hour))
 		}

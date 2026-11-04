@@ -1029,7 +1029,7 @@ func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	if state := readDashboardState(t, handler); len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
 		t.Fatalf("dead attention=%+v", state.Attention)
 	}
-	if err := registry.CancelMessage(item.ID); err != nil {
+	if _, err := registry.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
 	if state := readDashboardState(t, handler); len(state.Attention) != 0 {

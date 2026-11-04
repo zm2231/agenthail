@@ -33,7 +33,7 @@ struct AttachmentChips: View {
                 .frame(height: 24)
                 .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: DesktopRadius.control))
                 .overlay(RoundedRectangle(cornerRadius: DesktopRadius.control).strokeBorder(DesktopPalette.line))
-                .help("\(attachment.name), \(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))")
+                .help("\(attachment.name), \(ByteCountFormatter.string(fromByteCount: attachment.byteCount,countStyle: .file))")
             }
         }
     }

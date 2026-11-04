@@ -169,6 +169,9 @@ func (r *Registry) ArchiveSession(sessionID string, at time.Time) error {
 	} else if changed == 0 {
 		return sql.ErrNoRows
 	}
+	if err := cancelTaskTx(tx, sessionID, at); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`UPDATE session_credentials SET revoked_at_ms=?,revoked_reason=? WHERE session_id=? AND revoked_at_ms=0`, at.UnixMilli(), RevokedSessionArchive, sessionID); err != nil {
 		return err
 	}

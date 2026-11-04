@@ -14,7 +14,10 @@ import (
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
-const maxUploadsPerSend = 8
+const (
+	maxUploadsPerSend   = 8
+	deadUploadRetention = 30 * 24 * time.Hour
+)
 
 // uploadsDir sits beside the registry, so it is ~/.agenthail/uploads for the
 // installed daemon and private to each test registry.
@@ -30,7 +33,7 @@ func (d *Daemon) sweepUploads(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
-		if err := d.uploads.Sweep(); err != nil {
+		if err := d.sweepUnqueuedUploads(); err != nil {
 			d.log.Printf("sweep uploads: %s", err)
 		}
 		select {
@@ -39,6 +42,14 @@ func (d *Daemon) sweepUploads(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func (d *Daemon) sweepUnqueuedUploads() error {
+	queued, err := d.Registry.QueuedUploadIDs(time.Now().Add(-deadUploadRetention))
+	if err != nil {
+		return err
+	}
+	return d.uploads.Sweep(queued)
 }
 
 // apiUploadHandler stores a file a person attaches to a message for the

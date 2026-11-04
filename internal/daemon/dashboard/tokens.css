@@ -1850,6 +1850,30 @@ select {
   color: var(--quiet);
   font-size: 12px;
 }
+#send-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#send-status[hidden] {
+  display: none;
+}
+#send-status-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#send-status button {
+  flex: none;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 9px;
+}
 .soft-button,
 .primary-button,
 .chat-actions button {

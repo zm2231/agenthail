@@ -527,8 +527,11 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.capturePerson(options.SourceSessionID, session, messageID, message)
 	}
 	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, MessageID: messageID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target), WaitingOn: waiting}
-	if waiting != nil {
+	switch {
+	case waiting != nil:
 		receipt.Detail = fmt.Sprintf("Queued for %s, which is waiting on you; sends after you answer.", target)
+	case len(options.Uploads) > 0:
+		receipt.Detail = fmt.Sprintf("Queued for %s: attached files can't join a running turn; sends when it ends.", target)
 	}
 	return receipt, nil
 }

@@ -10,6 +10,9 @@ import (
 )
 
 func (r *Registry) migrate(allowUpgrade bool) error {
+	if err := r.chooseVacuumForNewFile(); err != nil {
+		return err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -49,6 +52,19 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 		r.migration = &timing
 	}
 	return nil
+}
+
+// An existing file would need a VACUUM to change this, and that stalls writers for longer than busy_timeout on a large registry, so only a new file gets it.
+func (r *Registry) chooseVacuumForNewFile() error {
+	var pages int
+	if err := r.db.QueryRow(`PRAGMA page_count`).Scan(&pages); err != nil {
+		return err
+	}
+	if pages > 0 {
+		return nil
+	}
+	_, err := r.db.Exec(`PRAGMA auto_vacuum=INCREMENTAL`)
+	return err
 }
 
 // Migration is what opening this registry spent upgrading it, if it did.
@@ -102,6 +118,12 @@ func migrateTx(tx *sql.Tx) error {
 		return err
 	}
 	if err := ensureColumn(tx, "session_journal_state", "derived_version", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal_state", "swept_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := ensureColumn(tx, "session_journal", "payload_codec", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {

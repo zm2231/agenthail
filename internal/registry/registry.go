@@ -17,6 +17,7 @@ import (
 type Registry struct {
 	db            *sql.DB
 	read          *sql.DB
+	openLock      *os.File
 	path          string
 	now           func() time.Time
 	busyPolicy    func() (deliverypolicy.Mode, error)
@@ -52,7 +53,7 @@ func (r *Registry) Steers(busyDelivery string) (bool, error) {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 49
+	schemaVersion    = 51
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
@@ -89,6 +90,9 @@ func OpenDefault(allowUpgrade bool) (*Registry, error) {
 }
 
 func open(path string, private, allowUpgrade bool) (*Registry, error) {
+	if err := refuseSudoHomeFor(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
 	}
@@ -124,6 +128,9 @@ func OpenCurrent(path string) (*Registry, error) {
 	if path == "" {
 		path = defaultPath()
 	}
+	if err := refuseSudoHomeFor(path); err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
@@ -156,7 +163,8 @@ func (r *Registry) current() (bool, error) {
 }
 
 func connect(path string) (*Registry, error) {
-	if err := waitForRestore(path); err != nil {
+	openLock, err := holdRegistryOpen(path)
+	if err != nil {
 		return nil, err
 	}
 	sep := "?"
@@ -165,6 +173,7 @@ func connect(path string) (*Registry, error) {
 	}
 	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
+		closeOpenLock(openLock)
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
@@ -172,11 +181,18 @@ func connect(path string) (*Registry, error) {
 	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-65536)")
 	if err != nil {
 		db.Close()
+		closeOpenLock(openLock)
 		return nil, err
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+	return &Registry{db: db, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+}
+
+func closeOpenLock(file *os.File) {
+	if file != nil {
+		_ = file.Close()
+	}
 }
 
 func (r *Registry) Path() string     { return r.path }
@@ -193,5 +209,6 @@ func (r *Registry) Close() error {
 	r.seen.pending = nil
 	r.seen.mu.Unlock()
 	r.writeStamps(pending)
+	defer closeOpenLock(r.openLock)
 	return errors.Join(r.read.Close(), r.db.Close())
 }
