@@ -15,6 +15,14 @@ const openSession = async (page) => {
   await page.waitForSelector("#request-panel:not([hidden])", { visible: true });
 };
 
+const typeFresh = async (page, selector, text) => {
+  await page.$eval(selector, (element) => {
+    element.value = "";
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.type(selector, text);
+};
+
 const projects = async (page) => {
   await press(page, '[data-inbox-mode="projects"]');
   await page.waitForSelector("[data-project-new]", { visible: true });
@@ -26,7 +34,7 @@ const opened = (trigger, shown) => async (page) => {
 };
 
 export const VIEWS = [
-  { name: "slash menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await openSession(page), await page.type("#message", "/")), "#slash-menu") },
+  { name: "slash menu", dashboard: "full", hash: "conversations", act: opened(async (page) => (await openSession(page), await typeFresh(page, "#message", "/")), "#slash-menu") },
   { name: "toast", dashboard: "full", hash: "overview", ready: "#recent-activity > *", act: opened((page) => page.evaluate(async () => { const { toast } = await import("/js/feedback.js"); toast("Sent to review. Its reply appears in Conversations."); }), "#toast") },
   { name: "voice dialog", dashboard: "full", hash: "overview", act: opened((page) => press(page, "#voice-orchestrator"), "#voice-dialog[open]") },
   { name: "project dialog", dashboard: "full", hash: "conversations", act: opened(async (page) => (await projects(page), await press(page, "[data-project-new]")), "#project-dialog[open]") },
