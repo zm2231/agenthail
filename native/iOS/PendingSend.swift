@@ -9,9 +9,10 @@ struct PendingSend: Identifiable, Equatable {
     let turnSettings: TurnSettings
     let idempotencyKey: String
     var uploaded: [String]?
+    var wire: ActionWire?
     var unconfirmed = false
 
-    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, unconfirmed: Bool = false) {
+    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false) {
         self.id = id
         self.sessionID = sessionID
         self.message = message
@@ -19,6 +20,7 @@ struct PendingSend: Identifiable, Equatable {
         self.turnSettings = turnSettings
         self.idempotencyKey = idempotencyKey
         self.uploaded = uploaded
+        self.wire = wire
         self.unconfirmed = unconfirmed
     }
 }

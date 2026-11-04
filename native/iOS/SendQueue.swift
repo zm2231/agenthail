@@ -32,6 +32,11 @@ final class SendQueue {
         changed?()
     }
 
+    func setWire(_ wire: ActionWire, for send: PendingSend) {
+        update(send) { $0.wire = wire }
+        changed?()
+    }
+
     func holds(_ send: PendingSend) -> Bool {
         pending.values.contains { $0.contains { $0.id == send.id } }
     }

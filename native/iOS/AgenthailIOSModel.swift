@@ -109,12 +109,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private let sendQueue = SendQueue()
     @Published private(set) var pendingSends: [String: [PendingSend]] = [:]
     @Published var failedSends: [String: String] = [:]
+    private var lostAttachments: [String: [String]] = [:]
     private var composerStore: ComposerStore?
     private var composerSave: Task<Void, Never>?
     private var draftChanges: AnyCancellable?
-    @Published var composerAttachments: [ComposerAttachment] = []
+    @Published var composerAttachments: [ComposerAttachment] = [] {
+        didSet { saveComposerStateSoon() }
+    }
     @Published var attachmentProblem: String?
-    private var attachmentDrafts: [String: [ComposerAttachment]] = [:]
+    private var attachmentDrafts: [String: [ComposerAttachment]] = [:] {
+        didSet { saveComposerStateSoon() }
+    }
     private var rekeys = SessionRekeys()
     private struct CreationRequestIdentity: Equatable {
         let surface: String
@@ -1040,6 +1045,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             composer = drafts[id] ?? ""
             composerAttachments = attachmentDrafts[id] ?? []
             attachmentProblem = nil
+            announceLostAttachments(for: id)
             let warm = store.open(id)
             sessionMetadata = MetadataOverlay(allClaudeSubagents: warm?.allClaudeSubagents ?? false)
             let live = snapshot?.sessions.first { $0.id == id }
@@ -1395,6 +1401,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         sendQueue.carry(rekeys)
         var failures = failedSends
         if rekeys.carry(&failures) { failedSends = failures }
+        _ = rekeys.carry(&lostAttachments)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
         if let requested = requestedSessionID, rekeys.resolve(requested) != requested {
@@ -1484,7 +1491,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 sendQueue.setUploaded(stored, for: send)
                 uploaded = stored
             }
-            let response = try await api.sendInstruction(action: "send", sessionID: route.sessionID, message: send.message, turnSettings: send.turnSettings, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
+            let wire = try send.wire ?? api.instructionWire(sessionID: route.sessionID, message: send.message, turnSettings: send.turnSettings, author: "person", attachments: uploaded ?? [], idempotencyKey: send.idempotencyKey)
+            if send.wire == nil { sendQueue.setWire(wire, for: send) }
+            let response = try await api.send(wire)
             if sendQueue.holds(send) {
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[send.sessionID] = deliveryID }
                 deliveryStatus[send.sessionID] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
@@ -1548,6 +1557,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let saved = composerStore.load()
         drafts = saved.drafts
         stashes = saved.stashes.mapValues { ComposerStash(text: $0, attachments: []) }
+        lostAttachments = saved.attachmentNames
         for record in saved.sends {
             if let send = record.resumable {
                 sendQueue.add(send)
@@ -1576,7 +1586,25 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         var saved = ComposerStore.Saved(drafts: drafts, stashes: stashes.mapValues(\.text), sends: sendQueue.pending.values.flatMap { $0 }.map(ComposerStore.Saved.Send.init))
         if let selectedSessionID { saved.drafts[selectedSessionID] = composer }
         saved.drafts = saved.drafts.filter { !$0.value.isEmpty }
+        saved.attachmentNames = attachmentNamesToSave()
         composerStore.save(saved)
+    }
+
+    private func attachmentNamesToSave() -> [String: [String]] {
+        var names = lostAttachments
+        func add(_ attachments: [ComposerAttachment], for session: String) {
+            if !attachments.isEmpty { names[session, default: []].append(contentsOf: attachments.map(\.name)) }
+        }
+        for (session, attachments) in attachmentDrafts where session != selectedSessionID { add(attachments, for: session) }
+        for (session, stash) in stashes { add(stash.attachments, for: session) }
+        if let selectedSessionID { add(composerAttachments, for: selectedSessionID) }
+        return names
+    }
+
+    private func announceLostAttachments(for sessionID: String) {
+        guard let names = lostAttachments.removeValue(forKey: sessionID) else { return }
+        attachmentProblem = "Not kept when the app closed: \(names.joined(separator: ", ")). Add again to send."
+        saveComposerStateSoon()
     }
 
     func action(_ action: String, session: SessionState, model: String? = nil, message: String? = nil) {
@@ -1726,6 +1754,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         attachmentDrafts = attachmentDrafts.filter { !owned($0.key) }
         sendQueue.removeAll(where: owned)
         failedSends = failedSends.filter { !owned($0.key) }
+        lostAttachments = lostAttachments.filter { !owned($0.key) }
         store.prune(removing: owned)
         stashes = stashes.filter { !owned($0.key) }
         deliveryStatus = deliveryStatus.filter { !owned($0.key) }

@@ -162,12 +162,88 @@ final class ComposerSendTests: XCTestCase {
 
     func testAKilledSendWhoseAttachmentNeverUploadedComesBackAsADraft() async throws {
         let store = temporaryStore()
-        store.save(.init(sends: [.init(id: UUID(), sessionID: "computer::codex-flow", message: "With a file", turnSettings: TurnSettings(), idempotencyKey: "k", uploaded: nil, hadAttachments: true)]))
+        store.save(.init(sends: [.init(id: UUID(), sessionID: "computer::codex-flow", message: "With a file", turnSettings: TurnSettings(), idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: true)]))
         let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         XCTAssertTrue(model.pendingSends.isEmpty)
         XCTAssertNotNil(model.failedSends["computer::codex-flow"])
         await model.loadSession("computer::codex-flow")
         XCTAssertEqual(model.composer, "With a file")
+    }
+
+    func testARekeyWhileWaitingRetriesTheSameRequest() async throws {
+        ComposerSendProtocol.state.script([.lostResponse, .answer(200, sentReceipt)])
+        let (model, session) = try makeModel()
+        model.composer = "Rekeyed while waiting"
+        model.send(to: session)
+        try await waitUntil { model.pendingSends[session.id]?.first?.unconfirmed == true }
+        model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["codex-flow": "codex-moved"])
+        XCTAssertNotNil(model.pendingSends["computer::codex-moved"])
+        try await waitUntil(seconds: 5) { model.pendingSends.isEmpty }
+        let attempts = ComposerSendProtocol.state.attempts
+        XCTAssertEqual(attempts.count, 2)
+        XCTAssertEqual(attempts[0].key, attempts[1].key)
+        XCTAssertEqual(attempts[0].raw, attempts[1].raw, "a changed body under the same key is refused as a mismatch")
+    }
+
+    func testChangingTheTerminalWhileWaitingRetriesTheFirstRequest() async throws {
+        ComposerSendProtocol.state.script([.lostResponse, .answer(200, sentReceipt)])
+        let (model, session) = try makeModel()
+        let route = "codex-flow"
+        defer { HolderPins.shared.pick(nil, for: route) }
+        HolderPins.shared.pick(HolderPin(SessionHolder(pid: 11, status: "idle")), for: route)
+        model.composer = "To the first terminal"
+        model.send(to: session)
+        try await waitUntil { model.pendingSends[session.id]?.first?.unconfirmed == true }
+        HolderPins.shared.pick(HolderPin(SessionHolder(pid: 22, status: "idle")), for: route)
+        try await waitUntil(seconds: 5) { model.pendingSends.isEmpty }
+        let attempts = ComposerSendProtocol.state.attempts
+        XCTAssertEqual(attempts.count, 2)
+        XCTAssertEqual(attempts[0].body["pid"] as? Int, 11)
+        XCTAssertEqual(attempts[1].body["pid"] as? Int, 11, "a retry never moves to another terminal: the first may already have it")
+        XCTAssertEqual(attempts[0].key, attempts[1].key)
+    }
+
+    func testARetryAfterARefusalPicksUpTheNewTerminal() async throws {
+        ComposerSendProtocol.state.script([.answer(409, #"{"error":{"message":"That terminal is gone"}}"#), .answer(200, sentReceipt)])
+        let (model, session) = try makeModel()
+        let route = "codex-flow"
+        defer { HolderPins.shared.pick(nil, for: route) }
+        HolderPins.shared.pick(HolderPin(SessionHolder(pid: 11, status: "idle")), for: route)
+        model.composer = "Refused"
+        model.send(to: session)
+        try await waitUntil { model.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 1 }
+        HolderPins.shared.pick(HolderPin(SessionHolder(pid: 22, status: "idle")), for: route)
+        model.send(to: session)
+        try await waitUntil { model.pendingSends.isEmpty && ComposerSendProtocol.state.attempts.count == 2 }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts[1].body["pid"] as? Int, 22)
+    }
+
+    func testAttachmentsLostWithTheAppAreNamedOnReturn() async throws {
+        let store = temporaryStore()
+        let (model, session) = try makeModel(store: store)
+        model.composer = "With a file"
+        model.composerAttachments = [ComposerAttachment(name: "plan.pdf", data: Data([1]), mediaType: "application/pdf")]
+        model.saveComposerState()
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        await reopened.loadSession(session.id)
+        XCTAssertEqual(reopened.composer, "With a file")
+        XCTAssertEqual(reopened.composerAttachments, [])
+        XCTAssertTrue(reopened.attachmentProblem?.contains("plan.pdf") == true, "\(String(describing: reopened.attachmentProblem))")
+    }
+
+    func testAStashedAttachmentLostWithTheAppIsNamedOnReturn() async throws {
+        let store = temporaryStore()
+        let (model, session) = try makeModel(store: store)
+        model.composer = "Stashed"
+        model.composerAttachments = [ComposerAttachment(name: "stashed.png", data: Data([1]), mediaType: "image/png")]
+        model.toggleStash()
+        model.saveComposerState()
+
+        let reopened = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertEqual(reopened.stashes[session.id]?.text, "Stashed")
+        await reopened.loadSession(session.id)
+        XCTAssertTrue(reopened.attachmentProblem?.contains("stashed.png") == true, "\(String(describing: reopened.attachmentProblem))")
     }
 
     func testAMessageFollowsItsSessionToANewID() async throws {
@@ -273,7 +349,8 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
 
     struct Attempt {
         let key: String?
-        let body: [String: Any]
+        let raw: Data
+        var body: [String: Any] { (try? JSONSerialization.jsonObject(with: raw) as? [String: Any]) ?? [:] }
     }
 
     final class State: @unchecked Sendable {
@@ -302,8 +379,7 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         guard request.url?.path == "/api/v1/actions" else { return respond(200, "{}") }
-        let body = requestBody().flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-        switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), body: body)) {
+        switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), raw: requestBody() ?? Data())) {
         case .answer(let status, let text): respond(status, text)
         case .lostResponse: client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
         case .offline: client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
