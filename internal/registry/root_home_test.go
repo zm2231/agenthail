@@ -57,6 +57,23 @@ func TestRootIsAllowedInItsOwnHome(t *testing.T) {
 	}
 }
 
+func TestRootWithNoAbsoluteHomeCarriesOnWhoeverOwnsTheWorkingDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("this runner's temp directory belongs to root")
+	}
+	effectiveUID = func() int { return 0 }
+	t.Cleanup(func() { effectiveUID = os.Geteuid })
+	t.Chdir(t.TempDir())
+	for name, home := range map[string]string{"empty": "", "relative": "some/home"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", home)
+			if err := RefuseSudoHome(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestAnOrdinaryUserIsNotAskedWhoOwnsTheHome(t *testing.T) {
 	err := refuseRootInAnothersHome("/home/person/.agenthail/registry.db", 501, func(string) (uint32, error) {
 		t.Fatal("an ordinary user's open read an owner")

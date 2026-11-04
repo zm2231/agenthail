@@ -28,6 +28,9 @@ func refuseRootInAnothersHome(path string, euid int, ownerOf func(string) (uint3
 		return nil
 	}
 	disk, _, _ := strings.Cut(path, "?")
+	if !filepath.IsAbs(disk) {
+		return nil
+	}
 	checked := 0
 	for directory := filepath.Dir(disk); checked < 2; directory = filepath.Dir(directory) {
 		owner, err := ownerOf(directory)
