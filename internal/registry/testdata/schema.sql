@@ -96,6 +96,12 @@ CREATE INDEX session_moves_conversation ON session_moves(conversation, role, sta
 -- index sessions_recent
 CREATE INDEX sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id);
 
+-- index tasks_parent
+CREATE INDEX tasks_parent ON tasks(parent_session_id);
+
+-- index tasks_running
+CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
 -- table action_receipts
 CREATE TABLE action_receipts (
 	idempotency_key TEXT PRIMARY KEY,
@@ -595,7 +601,8 @@ CREATE TABLE session_journal (
 	payload BLOB NOT NULL,
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
-	body_ref TEXT NOT NULL DEFAULT '', payload_role TEXT GENERATED ALWAYS AS (json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.role')) VIRTUAL, payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
+	body_ref TEXT NOT NULL DEFAULT '',
+	payload_codec INTEGER NOT NULL DEFAULT 0, payload_role TEXT GENERATED ALWAYS AS (json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.role')) VIRTUAL, payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
 	PRIMARY KEY (session_id, seq)
 );
 
@@ -620,7 +627,8 @@ CREATE TABLE session_journal_state (
 	seed_identity TEXT NOT NULL DEFAULT '',
 	history_before INTEGER NOT NULL DEFAULT -1,
 	derived_version INTEGER NOT NULL DEFAULT 0,
-	transcript_checkpoint TEXT NOT NULL DEFAULT ''
+	transcript_checkpoint TEXT NOT NULL DEFAULT '',
+	swept_seq INTEGER NOT NULL DEFAULT 0
 );
 
 -- table session_moves
@@ -709,6 +717,28 @@ CREATE TABLE signin_profiles (
 	profile TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	UNIQUE(browser, profile)
+);
+
+-- table tasks
+CREATE TABLE tasks (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	child_session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+	task TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'running',
+	result TEXT NOT NULL DEFAULT '',
+	result_kind TEXT NOT NULL DEFAULT '',
+	result_turn_id TEXT NOT NULL DEFAULT '',
+	latest TEXT NOT NULL DEFAULT '',
+	latest_turn_id TEXT NOT NULL DEFAULT '',
+	latest_at_ms INTEGER NOT NULL DEFAULT 0,
+	last_turn_id TEXT NOT NULL DEFAULT '',
+	last_state TEXT NOT NULL DEFAULT '',
+	last_text TEXT NOT NULL DEFAULT '',
+	stalled INTEGER NOT NULL DEFAULT 0,
+	wake INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- trigger catalog_retired_version_archived

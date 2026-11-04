@@ -310,7 +310,15 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONDecoder().decode(ActionReceipt.self, from: data)
     }
 
+    func cancelQueued(_ item: QueueState, host: String? = nil) async throws -> CancelledQueueItem {
+        var body: [String: Any] = ["action": "queue-cancel", "queueId": item.id]
+        if let host { body["host"] = host }
+        let response: CancelQueuedResponse = try await post("/api/v1/actions", body: body)
+        return CancelledQueueItem(message: response.result?.message ?? item.message, attachments: response.result?.attachments ?? item.attachments)
+    }
+
     func upload(_ attachment: ComposerAttachment, sessionID: String) async throws -> UploadedAttachment {
+        if let uploaded = attachment.uploaded { return uploaded }
         var components = URLComponents()
         components.path = "/api/v1/uploads"
         components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "name", value: attachment.name)]
@@ -978,6 +986,17 @@ private struct EmptyResponse: Decodable {}
 
 private struct UploadResponse: Decodable {
     let upload: UploadedAttachment
+}
+
+// The row is already cancelled by the time this decodes, so an unreadable result falls back to the row itself.
+private struct CancelQueuedResponse: Decodable {
+    var result: CancelledQueueItem? = nil
+
+    private enum CodingKeys: String, CodingKey { case result }
+
+    init(from decoder: Decoder) throws {
+        result = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(CancelledQueueItem.self, forKey: .result)
+    }
 }
 
 private struct ProjectAddResponse: Decodable {

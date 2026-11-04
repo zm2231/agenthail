@@ -17,7 +17,7 @@ struct LocalSend: Identifiable, Equatable {
     static let clockSkew: TimeInterval = 5
 
     var files: [AttachedFile] {
-        attachments.map { AttachedFile(name: $0.name, bytes: Int64($0.data.count)) }
+        attachments.map { AttachedFile(name: $0.name, bytes: $0.byteCount) }
     }
 
     static func label(for status: String?, waitingOnYou: Bool = false, steer: Bool = false) -> String {

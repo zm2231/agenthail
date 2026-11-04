@@ -233,6 +233,13 @@ struct QueueListView: View {
             }.buttonStyle(.plain).accessibilityIdentifier("inbox-session-\(item.id)")
             if let sender = envelope.sender { Text("From \(sender)").font(.footnote).foregroundStyle(PhonePalette.muted) }
             Text(envelope.body).font(.body).lineLimit(4).textSelection(.enabled)
+            if let attachments = item.attachments, !attachments.isEmpty {
+                Label(attachments.map(\.name).joined(separator: ", "), systemImage: "paperclip")
+                    .font(.footnote)
+                    .foregroundStyle(PhonePalette.muted)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-attachments-\(item.listID)")
+            }
             if let reason = item.lastError, !reason.isEmpty {
                 Text(reason).font(.footnote).foregroundStyle(PhonePalette.muted)
             }

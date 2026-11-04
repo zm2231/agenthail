@@ -1129,8 +1129,10 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let historical: Bool?
     let evidence: String
     var hostID: String? = nil
+    var attachments: [QueueAttachment]? = nil
 
     var listID: String { "\(hostID ?? "")/\(id)" }
+    var hasAttachments: Bool { !(attachments ?? []).isEmpty }
 
     var isHistorical: Bool {
         historical == true || status == "delivered" || status == "canceled"
@@ -2041,11 +2043,28 @@ struct SessionSearchItem: Decodable, Identifiable {
     let snippet: String?
 }
 
-struct UploadedAttachment: Decodable, Equatable {
+struct UploadedAttachment: Codable, Hashable, Sendable {
     let id: String
     let name: String
     let mediaType: String
     let bytes: Int64
+}
+
+struct QueueAttachment: Decodable, Equatable {
+    let id: String
+    let name: String
+    let mediaType: String
+    let bytes: Int64
+    var width: Int? = nil
+    var height: Int? = nil
+    var missing: Bool? = nil
+
+    var upload: UploadedAttachment { UploadedAttachment(id: id, name: name, mediaType: mediaType, bytes: bytes) }
+}
+
+struct CancelledQueueItem: Decodable, Equatable {
+    var message: String? = nil
+    var attachments: [QueueAttachment]? = nil
 }
 
 /// A tool approval, questions, or an MCP server's request for input that an

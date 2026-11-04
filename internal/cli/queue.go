@@ -97,7 +97,7 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
 		}
-		if err := a.registry().CancelMessage(id); err != nil {
+		if _, err := a.registry().CancelMessage(id); err != nil {
 			return err
 		}
 		fmt.Printf("queue item #%d canceled\n", id)

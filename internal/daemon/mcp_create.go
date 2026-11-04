@@ -22,6 +22,7 @@ type mcpCreateInput struct {
 	Model          string `json:"model,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"Claude: plan, default, acceptEdits, auto or bypassPermissions. Codex: untrusted, on-request or never. It cannot exceed your own ceiling; omitted, the session gets your ceiling's level."`
 	Alias          string `json:"alias,omitempty" jsonschema:"A name to reach the session by, without @."`
+	Task           bool   `json:"task,omitempty" jsonschema:"Claude and Codex: record this as a task with a result you read with agenthail_result. The reply has its taskId. It settles when the child reports with agenthail_report, or at its last turn or goal, and it holds one of your running-session slots until then."`
 }
 
 func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
@@ -33,6 +34,9 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refuse("invalid", "message is required.")
 	}
 	if kind == surface.KindNotion {
+		if input.Task {
+			return nil, refuse("invalid", "A Notion thread cannot be a task.")
+		}
 		if !caller.has("control.all") {
 			return nil, &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; starting one is for the person's voice operator.", Detail: map[string]any{"axis": "surface"}}
 		}
@@ -75,6 +79,6 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
 		Action: "session-create", Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 		PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias),
-		SourceSessionID: caller.session.ID, Ceiling: start.ceiling.encode(),
+		SourceSessionID: caller.session.ID, Ceiling: start.ceiling.encode(), Task: input.Task,
 	})
 }

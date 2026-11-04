@@ -8,6 +8,7 @@ import { app } from "./state.js";
 import { renderSettings } from "./settings.js";
 import { loadTools } from "./tool-loader.js";
 import { responseError } from "./http.js";
+import { retryPendingSends } from "./pending-send.js";
 import { applyRekeys } from "./rekeys.js";
 import { stopLiveStream } from "./session-stream.js";
 import { selectSession } from "./session-selection.js";
@@ -73,6 +74,7 @@ export async function load(fresh = false, selectDefault = true) {
     app.hasState = true;
     const rekeyed = state.rekeyed || {};
     applyRekeys(rekeyed);
+    retryPendingSends();
     let followSelection = null;
     if (app.selected) {
       const replacement = app.state.sessions.find(

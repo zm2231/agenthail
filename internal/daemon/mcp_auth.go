@@ -57,7 +57,19 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			writeAPIError(w, http.StatusForbidden, "remote_refused", "Session credentials are accepted only from this machine.")
 			return
 		}
-		credential, err := d.Registry.AuthenticateSessionToken(bearerToken(r), time.Now())
+		token := bearerToken(r)
+		credential, err := d.Registry.AuthenticateSessionToken(token, time.Now())
+		if errors.Is(err, registry.ErrCredentialUnknown) {
+			// Codex connects during thread/start, before its token can bind; with no caller every tool call is refused.
+			live, liveErr := d.Registry.PendingCredentialLive(token, time.Now())
+			if liveErr == nil && live {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if liveErr != nil {
+				err = liveErr
+			}
+		}
 		if err != nil {
 			writeMCPAuthError(w, err)
 			return
