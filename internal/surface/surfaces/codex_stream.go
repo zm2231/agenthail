@@ -23,9 +23,10 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 	if sess.Transport == codexTransportManaged {
 		stateContext, stopState := context.WithCancel(ctx)
 		watched := make(chan struct{})
+		stateSession := *sess
 		go func() {
 			defer close(watched)
-			c.watchManagedState(stateContext, *sess, onEvent, commands)
+			c.watchManagedState(stateContext, stateSession, onEvent, commands)
 		}()
 		defer func() {
 			stopState()
