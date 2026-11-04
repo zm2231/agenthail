@@ -1,6 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { movePendingSends } from "./pending-send.js";
+import { moveHeldAttachments } from "./composer-attachments.js";
 
 export function currentSessionID(id) {
   return app.rekeyed[id] || id;
@@ -9,6 +10,7 @@ export function currentSessionID(id) {
 export function applyRekeys(rekeyed) {
   app.rekeyed = rekeyed;
   movePendingSends(rekeyed);
+  moveHeldAttachments(rekeyed);
   for (const [retired, current] of Object.entries(rekeyed)) {
     if (!app.drafts.has(retired)) continue;
     if (!app.drafts.has(current)) app.drafts.set(current, app.drafts.get(retired));

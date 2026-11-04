@@ -10,6 +10,9 @@ import { selectSession } from "./session-selection.js";
 import { deliveryStatusLabel } from "./delivery-labels.js";
 import { escape } from "./format.js";
 import { rememberToolRow } from "./tool-view.js";
+import { bindAttachmentEvents, releaseAttachments, renderAttachments, sendableAttachments } from "./composer-attachments.js";
+
+const attachmentsCannotSteer = "Attached files can't join a running turn. Send queues them for next.";
 
 export function resizeComposer() {
   const input = $("#message");
@@ -27,7 +30,8 @@ export function syncComposerAction() {
   const steerButton = $("#steer-message");
   const capabilities = app.history?.capabilities || {};
   const busy = app.selected?.status === "busy";
-  const hasMessage = Boolean(input.value.trim());
+  const attached = Boolean(app.selected && sendableAttachments(app.selected.id).length);
+  const hasMessage = Boolean(input.value.trim()) || attached;
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
   const turnNotice = (app.history ? capabilities.turnNotice : app.selected?.capabilities?.turnNotice) || "";
   const stopping = busy && capabilities.interrupt && !hasMessage && !readOnly;
@@ -35,17 +39,20 @@ export function syncComposerAction() {
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
   sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
   sendButton.disabled = readOnly || (!hasMessage && !stopping);
-  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !readOnly);
+  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !attached && !readOnly);
   steerButton.disabled = steerButton.hidden;
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
   renderHolderPicker();
   renderSendStatus();
+  renderAttachments();
   if (readOnly) return;
   $("#composer-note").textContent = app.selected?.waitingOn
     ? "This agent is waiting on you. Messages queue until you answer it."
     : turnNotice
     ? turnNotice
+    : busy && attached
+    ? attachmentsCannotSteer
     : busy
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
@@ -70,10 +77,11 @@ export async function send(requestedAction = "send") {
     }
     return;
   }
-  if (!message) return;
+  const sessionId = app.selected?.id;
+  const attachments = sessionId ? sendableAttachments(sessionId) : [];
+  if (!message && !attachments.length) return;
   $("#send").disabled = true;
   $("#steer-message").disabled = true;
-  const sessionId = app.selected?.id;
   try {
     const [command, ...rest] = message.split(/\s+/);
     const argument = rest.join(" ");
@@ -89,18 +97,21 @@ export async function send(requestedAction = "send") {
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
     const steering = composerAction === "steer" || command.toLowerCase() === "/steer";
+    if (steering && attachments.length) throw Error(attachmentsCannotSteer);
+    if (commandAction && !steering && attachments.length) throw Error("Send the attached files as a message, or remove them before running a command.");
     if (steering || !commandAction) {
+      const sent = steering ? [] : attachments;
       const payload = steering
         ? { message: composerAction === "steer" ? message : argument, author: "person" }
-        : { message, author: "person", ...selectedTurnOptions() };
+        : { message, author: "person", ...selectedTurnOptions(), ...(sent.length ? { attachments: sent.map((attachment) => attachment.id) } : {}) };
       if (!sessionId) throw Error("Choose a conversation first");
       const wire = { action: steering ? "steer" : "send", sessionId, ...withHolder(sessionId, payload) };
-      if (enqueueSend(sessionId, wire, message)) {
-        clearComposer(sessionId, message);
+      if (enqueueSend(sessionId, wire, message, sent)) {
+        clearComposer(sessionId, message, sent);
         return;
       }
       const unstored = await logicalAction(wire.action, wire.action, payload);
-      clearComposer(sessionId, message);
+      clearComposer(sessionId, message, sent);
       await sendAnswered({ sessionId, wire }, unstored);
       return;
     }
@@ -122,7 +133,8 @@ export async function send(requestedAction = "send") {
   }
 }
 
-function clearComposer(sessionId, message) {
+function clearComposer(sessionId, message, sent = []) {
+  if (sent.length) releaseAttachments(sessionId, sent);
   if (app.selected?.id === sessionId) {
     if ($("#message").value.trim() === message) $("#message").value = "";
     app.drafts.delete(sessionId);
@@ -191,6 +203,7 @@ export function selectedTurnOptions() {
 export function bindComposerEvents() {
   configurePendingSends({ answered: sendAnswered, refused: sendRefused, changed: renderSendStatus });
   bindSendStatus();
+  bindAttachmentEvents(syncComposerAction);
   $("#message").addEventListener("input", () => {
     resizeComposer();
     renderSlashMenu();

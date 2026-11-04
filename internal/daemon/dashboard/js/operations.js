@@ -39,6 +39,11 @@ export function queueReason(item) {
   );
 }
 
+function queuedAttachments(item) {
+  if (!item.attachments?.length) return "";
+  return `<br><span class="queue-attachments">${item.attachments.map((attachment) => escape(attachment.name)).join(", ")}</span>`;
+}
+
 export function renderOperations() {
   const { queue, channels, relays, history = [] } = app.state;
   $("#operations-queue-count").textContent = queue.length;
@@ -48,7 +53,7 @@ export function renderOperations() {
     queue
       .map(
         (item) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail queue-message">${escape(item.message)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${statusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail queue-message">${escape(item.message)}${queuedAttachments(item)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${statusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" && ["", "message"].includes(item.operation || "") ? `<button class="button quiet" data-take-back="${item.id}" data-session="${escape(item.sessionId)}" type="button">Take back</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
       )
       .join("") ||
     '<div class="empty-card">Nothing is waiting to be delivered.</div>';

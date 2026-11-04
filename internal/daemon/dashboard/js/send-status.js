@@ -2,9 +2,11 @@ import { $ } from "./dom.js";
 import { app } from "./state.js";
 import { resizeComposer, syncComposerAction } from "./composer.js";
 import { toast } from "./feedback.js";
+import { holdAttachments } from "./composer-attachments.js";
 import { isPendingSendStorage, keepSend, retrySend, takeBackSend, unconfirmedSends, unconfirmedSendsOutside } from "./pending-send.js";
 
 function joined(older, newer) {
+  if (!older.trim()) return newer;
   return newer.trim() ? `${older}\n\n${newer}` : older;
 }
 
@@ -18,9 +20,11 @@ export function returnToComposer(item) {
   if (app.selected?.id === item.sessionId || (app.selected && !listed(item.sessionId))) {
     const input = $("#message");
     input.value = joined(item.text, input.value);
+    holdAttachments(app.selected.id, item.attachments);
     resizeComposer();
   } else if (listed(item.sessionId)) {
     app.drafts.set(item.sessionId, joined(item.text, app.drafts.get(item.sessionId) || ""));
+    holdAttachments(item.sessionId, item.attachments);
   } else {
     keepSend(item);
   }
