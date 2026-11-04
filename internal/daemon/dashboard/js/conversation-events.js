@@ -203,7 +203,7 @@ export function bindConversationEvents() {
     if (takeBack) {
       takeBack.disabled = true;
       try {
-        const missing = await takeBackQueued(Number(takeBack.dataset.takeBack), takeBack.dataset.session);
+        const missing = await takeBackQueued(Number(takeBack.dataset.takeBack));
         toast(missing.length ? `Back in the composer. ${missing.map((attachment) => attachment.name).join(", ")} ${missing.length > 1 ? "are" : "is"} no longer stored; attach again.` : "Back in the composer.");
         await load();
       } catch (error) {

@@ -47,17 +47,6 @@ function drop(sessionId, attachmentId) {
   } catch {}
 }
 
-export function canKeepAttachments() {
-  const probe = `${storagePrefix}probe`;
-  try {
-    globalThis.localStorage.setItem(probe, "1");
-    globalThis.localStorage.removeItem(probe);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function heldAttachments(sessionId) {
   return records()
     .filter((record) => record.sessionId === sessionId)
@@ -69,7 +58,7 @@ export function sendableAttachments(sessionId) {
   return heldAttachments(sessionId).filter((attachment) => !attachment.missing);
 }
 
-export function holdAttachments(sessionId, attachments = []) {
+export function holdAttachments(sessionId, attachments = [], { warn = true } = {}) {
   const known = new Set(heldAttachments(sessionId).map((attachment) => attachment.id));
   const heldAt = Date.now();
   let saved = true;
@@ -77,7 +66,7 @@ export function holdAttachments(sessionId, attachments = []) {
     if (!known.has(attachment.id)) saved = save({ sessionId, attachment, heldAt, order: ++order }) && saved;
   }
   renderAttachments();
-  if (!saved) toast("This browser couldn't save the attached files. They stay in this tab only; send them before you reload.");
+  if (!saved && warn) toast("This browser couldn't save the attached files. They stay in this tab only; send them before you reload.");
   return saved;
 }
 
@@ -87,12 +76,14 @@ export function releaseAttachments(sessionId, sent = heldAttachments(sessionId))
 }
 
 export function moveHeldAttachments(rekeyed) {
+  let stranded = false;
   for (const record of records()) {
     const current = rekeyed[record.sessionId];
     if (!current || current === record.sessionId) continue;
-    save({ ...record, sessionId: current });
-    drop(record.sessionId, record.attachment.id);
+    if (save({ ...record, sessionId: current })) drop(record.sessionId, record.attachment.id);
+    else stranded = true;
   }
+  if (stranded) toast("This browser couldn't save the attached files for the renamed conversation. They stay in this tab only; send them before you reload.");
 }
 
 export function renderAttachments() {

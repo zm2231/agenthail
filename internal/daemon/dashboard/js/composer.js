@@ -138,7 +138,7 @@ function clearComposer(sessionId, message, sent = []) {
   if (sent.length) releaseAttachments(sessionId, sent);
   if (app.selected?.id === sessionId) {
     if ($("#message").value.trim() === message) $("#message").value = "";
-    app.drafts.delete(sessionId);
+    app.drafts.set(sessionId, $("#message").value);
   } else if (app.drafts.get(sessionId)?.trim() === message) {
     app.drafts.delete(sessionId);
   }
@@ -206,6 +206,7 @@ export function bindComposerEvents() {
   bindSendStatus();
   bindAttachmentEvents(syncComposerAction);
   $("#message").addEventListener("input", () => {
+    if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
     resizeComposer();
     renderSlashMenu();
     syncComposerAction();

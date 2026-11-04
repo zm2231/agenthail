@@ -16,15 +16,17 @@ function listed(sessionId) {
   return app.state.sessions.some(isIt) || Boolean(app.codexSearch?.results?.some(isIt));
 }
 
-export function returnToSession(sessionId, text, attachments = []) {
+export function returnToSession(sessionId, text, attachments = [], { warn = true } = {}) {
+  let draftSaved;
   if (app.selected?.id === sessionId) {
     const input = $("#message");
     input.value = joined(text, input.value);
+    draftSaved = app.drafts.set(sessionId, input.value);
     resizeComposer();
   } else {
-    app.drafts.set(sessionId, joined(text, app.drafts.get(sessionId) || ""));
+    draftSaved = app.drafts.set(sessionId, joined(text, app.drafts.get(sessionId) || ""));
   }
-  holdAttachments(sessionId, attachments);
+  return holdAttachments(sessionId, attachments, { warn }) && draftSaved !== false;
 }
 
 export function returnToComposer(item) {

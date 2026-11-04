@@ -12,7 +12,12 @@ function element() {
   };
 }
 
-async function loaded({ status = "busy", values = new Map(), storageFull = false } = {}) {
+const shot = { id: "upload:aa/shot.png", name: "shot.png", mediaType: "image/png", bytes: 138 };
+const old = { id: "upload:bb/old.png", name: "old.png", mediaType: "image/png", bytes: 90 };
+const gone = { ...old, missing: true };
+const queuedImage = { id: 7, sessionId: "a", status: "pending", operation: "message", message: "look at this", attachments: [shot, old] };
+
+async function loaded({ status = "busy", values = new Map(), refuses = () => false, selected = "a", queue = [queuedImage] } = {}) {
   const elements = new Map();
   const $ = (selector) => {
     if (!elements.has(selector)) elements.set(selector, element());
@@ -21,14 +26,16 @@ async function loaded({ status = "busy", values = new Map(), storageFull = false
   const requests = [];
   const answers = [];
   const toasts = [];
+  const storage = { full: false };
   let ids = 0;
+  const sessions = [{ id: "a", alias: "a", status }, { id: "b", alias: "b", status }];
   const context = {
     $,
     app: {
-      selected: { id: "a", alias: "a", status },
-      state: { sessions: [{ id: "a", alias: "a" }, { id: "b", alias: "b" }] },
+      selected: sessions.find((session) => session.id === selected) || null,
+      state: { sessions, queue },
       history: { capabilities: { steer: true, interrupt: true } },
-      drafts: new Map(),
+      drafts: null,
       pendingIdempotency: new Map(),
       slashCommands: [],
       rekeyed: {},
@@ -39,7 +46,7 @@ async function loaded({ status = "busy", values = new Map(), storageFull = false
       key: (index) => [...values.keys()][index] ?? null,
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => {
-        if (storageFull) throw new Error("quota");
+        if (storage.full || refuses(key)) throw new Error("quota");
         values.set(key, value);
       },
       removeItem: (key) => values.delete(key),
@@ -55,7 +62,11 @@ async function loaded({ status = "busy", values = new Map(), storageFull = false
     },
     toast: (text) => toasts.push(text),
     load: async () => {},
-    selectSession: async () => {},
+    selectSession: async (id) => {
+      if (context.app.selected) context.app.drafts.set(context.app.selected.id, $("#message").value);
+      context.app.selected = context.app.state.sessions.find((session) => session.id === id);
+      $("#message").value = context.app.drafts.get(id) || "";
+    },
     renderHolderPicker() {},
     chosenHolder: () => undefined,
     sharedHolders: () => [],
@@ -64,23 +75,27 @@ async function loaded({ status = "busy", values = new Map(), storageFull = false
     escape: (text) => String(text),
     rememberToolRow() {},
   };
-  await dashboardModules(["composer", "send-status", "pending-send", "composer-attachments", "queue-take-back", "rekeys"], context);
+  await dashboardModules(["draft-store", "composer", "send-status", "pending-send", "composer-attachments", "queue-take-back", "rekeys"], context);
+  context.app.drafts = context.persistentDrafts();
+  if (context.app.selected) $("#message").value = context.app.drafts.get(context.app.selected.id) || "";
   context.bindComposerEvents();
-  return { context, $, requests, answers, toasts, values };
+  return { context, $, requests, answers, toasts, values, storage };
 }
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 5));
 const answered = (body) => () => ({ ok: true, json: async () => body });
 const refused = (message) => () => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: { message } }) });
 const lost = () => { throw new TypeError("network lost"); };
-const shot = { id: "upload:aa/shot.png", name: "shot.png", mediaType: "image/png", bytes: 138 };
-const gone = { id: "upload:bb/old.png", name: "old.png", mediaType: "image/png", bytes: 90, missing: true };
 const canceled = answered({ ok: true, result: { message: "look at this", attachments: [shot, gone] } });
+const chips = (tab) => tab.$("#composer-attachments").innerHTML;
+const pendingSends = (tab) => [...tab.values].filter(([key]) => key.startsWith("agenthail.pendingSend.")).map(([, raw]) => JSON.parse(raw));
+const drafts = (tab) => [...tab.values].filter(([key]) => key.startsWith("agenthail.draft.")).map(([, raw]) => JSON.parse(raw));
 
-async function takenBack(tab) {
+async function takenBack(tab, queueId = 7) {
   tab.answers.push(canceled);
-  const missing = await tab.context.takeBackQueued(7, "a");
-  assert.deepEqual(tab.requests.at(-1), { action: "queue-cancel", sessionId: "a", queueId: 7 });
+  const missing = await tab.context.takeBackQueued(queueId);
+  assert.equal(tab.requests.at(-1).action, "queue-cancel");
+  assert.equal(tab.requests.at(-1).queueId, queueId);
   return missing;
 }
 
@@ -89,11 +104,67 @@ async function takenBack(tab) {
   const missing = await takenBack(tab);
   assert.equal(tab.$("#message").value, "look at this", "take back puts the text in the composer");
   assert.equal(tab.$("#composer-attachments").hidden, false, "and shows its attachments");
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/);
-  assert.match(tab.$("#composer-attachments").innerHTML, /old\.png · no longer stored, attach it again/, "a swept file is shown, not dropped");
+  assert.match(chips(tab), /shot\.png/);
+  assert.match(chips(tab), /old\.png · no longer stored, attach it again/, "a file the daemon reports swept is shown, not dropped");
   assert.deepEqual(missing.map((attachment) => attachment.name), ["old.png"], "the caller hears which file is gone");
   assert.equal(tab.$("#steer-message").hidden, true, "a busy turn offers no steer for attached files");
   assert.equal(tab.$("#composer-note").textContent, "Attached files can't join a running turn. Send queues them for next.");
+}
+
+{
+  const tab = await loaded({ selected: "b" });
+  tab.$("#message").value = "for b";
+  tab.$("#message").listeners.input();
+  await takenBack(tab);
+  assert.equal(tab.context.app.selected.id, "a", "take back for a listed conversation opens it");
+  assert.equal(tab.$("#message").value, "look at this", "and lands there");
+  assert.equal(tab.context.app.drafts.get("b"), "for b", "the other conversation's draft is left alone");
+}
+
+{
+  const tab = await loaded({ queue: [{ ...queuedImage, sessionId: "gone" }] });
+  assert.equal(tab.context.canTakeBack(tab.context.app.state.queue[0]), false, "an unlisted conversation offers Cancel only");
+  await assert.rejects(tab.context.takeBackQueued(7), /Open this conversation/);
+  assert.equal(tab.requests.length, 0, "and nothing is canceled");
+}
+
+{
+  const values = new Map();
+  const tab = await loaded({ values });
+  await takenBack(tab);
+  const keys = [...values.keys()];
+  assert.ok(keys.some((key) => key.startsWith("agenthail.draft.")), "the taken-back text is saved as the conversation's draft");
+  const reloaded = await loaded({ values });
+  reloaded.context.syncComposerAction();
+  assert.equal(reloaded.$("#message").value, "look at this", "a reload brings the text back");
+  assert.match(chips(reloaded), /shot\.png/, "and the files");
+  reloaded.$("#message").value = "look at this, edited";
+  reloaded.$("#message").listeners.input();
+  const again = await loaded({ values });
+  assert.equal(again.$("#message").value, "look at this, edited", "an edit survives the next reload");
+  again.context.applyRekeys({ a: "a2" });
+  assert.equal(again.context.app.drafts.get("a2"), "look at this, edited", "the draft follows the conversation when its id changes");
+  again.context.app.selected = { id: "a2", alias: "a", status: "busy" };
+  again.context.syncComposerAction();
+  assert.match(chips(again), /shot\.png/, "and so do its files");
+}
+
+{
+  const values = new Map();
+  const tab = await loaded({ values });
+  await takenBack(tab);
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(lost);
+  await tab.context.send();
+  await settled();
+  assert.equal(drafts(tab).length, 0, "the draft goes once the pending send holds the message");
+  assert.equal(pendingSends(tab).length, 1, "so one stored copy always exists");
+  assert.deepEqual(pendingSends(tab)[0].attachments, [shot], "an unconfirmed send keeps its attachments in the stored send");
+  tab.$("#send-status-put-back").listeners.click();
+  assert.equal(tab.$("#message").value, "look at this", "Put back restores the text");
+  assert.match(chips(tab), /shot\.png/, "and its attachments");
+  assert.equal(pendingSends(tab).length, 0);
+  assert.equal(drafts(tab)[0]?.text, "look at this", "and saves them as the draft again");
 }
 
 {
@@ -105,48 +176,8 @@ async function takenBack(tab) {
   const sent = tab.requests.at(-1);
   assert.equal(sent.action, "send");
   assert.deepEqual(sent.attachments, [shot.id], "the send carries every stored attachment and no swept one");
-  assert.doesNotMatch(tab.$("#composer-attachments").innerHTML, /shot\.png/, "a sent attachment leaves the composer");
-  assert.match(tab.$("#composer-attachments").innerHTML, /old\.png/, "a swept one stays until the person removes it");
-}
-
-{
-  const tab = await loaded();
-  await takenBack(tab);
-  tab.$("#message").value = "now";
-  await tab.context.send("steer");
-  await settled();
-  assert.equal(tab.requests.at(-1).action, "queue-cancel", "a steer with attached files is never sent");
-  assert.ok(tab.toasts.includes("Attached files can't join a running turn. Send queues them for next."));
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "and the attachments stay");
-}
-
-{
-  const tab = await loaded();
-  await takenBack(tab);
-  tab.$("#send").dataset.mode = "send";
-  tab.answers.push(lost);
-  await tab.context.send();
-  await settled();
-  const pendingSends = () => [...tab.values].filter(([key]) => key.startsWith("agenthail.pendingSend.")).map(([, raw]) => JSON.parse(raw));
-  const [stored] = pendingSends();
-  assert.deepEqual(stored.attachments, [shot], "an unconfirmed send keeps its attachments in the stored send");
-  assert.equal(tab.$("#message").value, "");
-  tab.$("#send-status-put-back").listeners.click();
-  assert.equal(tab.$("#message").value, "look at this", "Put back restores the text");
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "and its attachments");
-  assert.equal(pendingSends().length, 0);
-}
-
-{
-  const values = new Map();
-  await takenBack(await loaded({ values }));
-  const reloaded = await loaded({ values });
-  reloaded.context.syncComposerAction();
-  assert.match(reloaded.$("#composer-attachments").innerHTML, /shot\.png/, "taken-back files survive a reload, since the dashboard cannot attach them again");
-  reloaded.context.applyRekeys({ a: "a2" });
-  reloaded.context.app.selected = { id: "a2", alias: "a", status: "busy" };
-  reloaded.context.syncComposerAction();
-  assert.match(reloaded.$("#composer-attachments").innerHTML, /shot\.png/, "and follow the conversation when its id changes");
+  assert.doesNotMatch(chips(tab), /shot\.png/, "a sent attachment leaves the composer");
+  assert.match(chips(tab), /old\.png/, "a swept one stays until the person removes it");
 }
 
 {
@@ -157,32 +188,25 @@ async function takenBack(tab) {
   await tab.context.send();
   await settled();
   assert.equal(tab.$("#message").value, "look at this", "a refused send comes back");
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "with its attachments");
+  assert.match(chips(tab), /shot\.png/, "with its attachments");
   assert.ok(tab.toasts.includes("This session has ended."));
 }
 
 {
-  const tab = await loaded({ storageFull: true });
-  tab.context.app.state.queue = [{ id: 7, sessionId: "a", status: "pending", attachments: [shot] }];
-  await assert.rejects(tab.context.takeBackQueued(7, "a"), /can't save the attached files/, "full storage refuses a take back that could lose files");
-  assert.equal(tab.requests.length, 0, "and leaves the message queued");
-}
-
-{
-  const tab = await loaded({ storageFull: true });
-  await takenBack(tab);
-  assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png/, "files that storage refuses stay in this tab");
-  assert.ok(tab.toasts.some((text) => /stay in this tab only; send them before you reload/.test(text)), "and the person is told they won't survive a reload");
-  tab.$("#send").dataset.mode = "send";
-  await tab.context.send();
-  await settled();
-  assert.deepEqual(tab.requests.at(-1).attachments, [shot.id], "and sends them");
-}
-
-{
   const tab = await loaded();
+  await takenBack(tab);
+  tab.$("#message").value = "now";
+  await tab.context.send("steer");
+  await settled();
+  assert.equal(tab.requests.at(-1).action, "queue-cancel", "a steer with attached files is never sent");
+  assert.ok(tab.toasts.includes("Attached files can't join a running turn. Send queues them for next."));
+  assert.match(chips(tab), /shot\.png/, "and the attachments stay");
+}
+
+{
+  const tab = await loaded({ queue: [{ ...queuedImage, id: 8, message: "", attachments: [old] }] });
   tab.answers.push(answered({ ok: true, result: { message: "", attachments: [gone] } }));
-  await tab.context.takeBackQueued(8, "a");
+  await tab.context.takeBackQueued(8);
   tab.$("#message").value = "";
   tab.context.syncComposerAction();
   assert.equal(tab.$("#steer-message").hidden, true, "a missing file alone still hides Steer");
@@ -194,7 +218,48 @@ async function takenBack(tab) {
     await tab.context.send(mode);
   }
   assert.equal(tab.requests.length, before, "no steer or command goes out while a file is held");
-  assert.match(tab.$("#composer-attachments").innerHTML, /old\.png/, "and the chip stays");
+  assert.match(chips(tab), /old\.png/, "and the chip stays");
+}
+
+{
+  const tab = await loaded();
+  tab.storage.full = true;
+  tab.$("#message").value = "typed";
+  await assert.rejects(tab.context.takeBackQueued(7), /stays queued/, "full storage refuses a take back it could not keep");
+  assert.equal(tab.requests.length, 0, "and leaves the message queued");
+  assert.equal(tab.$("#message").value, "typed", "the composer is as it was");
+  assert.equal(tab.$("#composer-attachments").hidden, true);
+}
+
+{
+  const tab = await loaded();
+  tab.$("#message").value = "typed";
+  tab.answers.push(refused("queue item 7 is not pending or dead-lettered"));
+  await assert.rejects(tab.context.takeBackQueued(7), /not pending/);
+  assert.equal(tab.$("#message").value, "typed", "a refused cancel undoes the take back");
+  assert.equal(tab.$("#composer-attachments").hidden, true, "including its files");
+}
+
+{
+  const tab = await loaded();
+  tab.answers.push(lost);
+  await assert.rejects(tab.context.takeBackQueued(7), /wasn't confirmed/);
+  assert.equal(tab.$("#message").value, "look at this", "an unconfirmed cancel keeps the copy in the composer");
+  assert.match(chips(tab), /shot\.png/);
+}
+
+{
+  const tab = await loaded();
+  await takenBack(tab);
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(() => {
+    tab.storage.full = true;
+    return refused("Not now.")();
+  });
+  await tab.context.send();
+  await settled();
+  assert.match(chips(tab), /shot\.png/, "files that storage refuses on a refusal stay in this tab");
+  assert.ok(tab.toasts.some((text) => /stay in this tab only; send them before you reload/.test(text)), "and the person is told they won't survive a reload");
 }
 
 {
@@ -211,36 +276,48 @@ async function takenBack(tab) {
   assert.equal(tab.$("#message").value, "", "Put back for an unlisted conversation leaves the selected one alone");
   tab.context.syncComposerAction();
   assert.equal(tab.$("#composer-attachments").hidden, true, "and puts no files into it");
-  const kept = [...tab.values].filter(([key]) => key.startsWith("agenthail.pendingSend.")).map(([, raw]) => JSON.parse(raw));
-  assert.equal(kept.length, 1, "the send stays stored for its own conversation");
-  assert.equal(kept[0].sessionId, "a");
-  assert.deepEqual(kept[0].attachments, [shot]);
+  assert.equal(pendingSends(tab).length, 1, "the send stays stored for its own conversation");
+  assert.equal(pendingSends(tab)[0].sessionId, "a");
+  assert.deepEqual(pendingSends(tab)[0].attachments, [shot]);
 }
 
 {
   const values = new Map();
-  const first = await loaded({ values });
-  const second = await loaded({ values });
-  first.answers.push(answered({ ok: true, result: { message: "", attachments: [shot] } }));
-  second.answers.push(answered({ ok: true, result: { message: "", attachments: [gone] } }));
-  await first.context.takeBackQueued(7, "a");
-  await second.context.takeBackQueued(8, "a");
-  first.context.syncComposerAction();
+  const queue = [queuedImage, { ...queuedImage, id: 8, message: "", attachments: [old] }];
+  const first = await loaded({ values, queue });
+  const second = await loaded({ values, queue });
+  first.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [shot] } }));
+  second.answers.push(answered({ ok: true, result: { message: "", attachments: [old] } }));
+  await first.context.takeBackQueued(7);
+  await second.context.takeBackQueued(8);
   for (const tab of [first, second]) {
     tab.context.syncComposerAction();
-    assert.match(tab.$("#composer-attachments").innerHTML, /shot\.png[\s\S]*old\.png/, "two tabs taking back files for one conversation keep both");
+    assert.match(chips(tab), /shot\.png[\s\S]*old\.png/, "two tabs taking back files for one conversation keep both");
   }
+}
+
+{
+  const values = new Map();
+  await takenBack(await loaded({ values }));
+  const moving = await loaded({ values, refuses: (key) => key.includes('"a2"') });
+  moving.context.applyRekeys({ a: "a2" });
+  assert.ok(moving.toasts.some((text) => /renamed conversation/.test(text)), "a file move storage refuses is reported");
+  const reloaded = await loaded({ values });
+  reloaded.context.syncComposerAction();
+  assert.match(chips(reloaded), /shot\.png/, "and the stored file is not dropped");
 }
 
 {
   const tab = await loaded({ status: "idle" });
   await takenBack(tab);
   tab.$("#composer-attachments").listeners.click({ target: { closest: () => ({ dataset: { removeAttachment: shot.id } }) } });
-  tab.$("#composer-attachments").listeners.click({ target: { closest: () => ({ dataset: { removeAttachment: gone.id } }) } });
+  tab.$("#composer-attachments").listeners.click({ target: { closest: () => ({ dataset: { removeAttachment: old.id } }) } });
   assert.equal(tab.$("#composer-attachments").hidden, true, "removing every chip hides the row");
   tab.$("#message").value = "";
+  tab.$("#message").listeners.input();
   tab.context.syncComposerAction();
   assert.equal(tab.$("#send").disabled, true, "nothing left to send");
+  assert.equal(drafts(tab).length, 0, "an empty composer keeps no draft");
 }
 
 console.log("queued attachments: ok");
