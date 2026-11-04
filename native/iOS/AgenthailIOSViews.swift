@@ -887,6 +887,8 @@ struct IOSComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
+                SessionQueueSection(model: model, session: session, capabilities: detail.capabilities, readOnly: detail.readOnly)
+                    .id(session.id)
                 if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
                     ComposerReceipt(model: model, sessionID: session.id, status: status)
                 }

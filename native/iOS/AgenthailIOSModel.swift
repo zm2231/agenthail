@@ -546,16 +546,50 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         defer { pendingControls.remove(key) }
         let cancelled = try await connection.api.cancelQueued(item)
         await connection.refresh(fresh: true)
+        returnToDraft(cancelled.message ?? item.message, attachments: cancelled.attachments ?? [], id: draftKey(for: item))
+    }
+
+    func sessionQueue(_ sessionID: String) async throws -> [QueueState] {
+        let (api, route) = try resolve(sessionID)
+        let page = try await api.queuePage(sessionID: route.sessionID, timeout: InboxPage.hostTimeout)
+        return QueueSteer.waiting(page.items.map { InboxPage.qualified($0, host: route.hostID) })
+    }
+
+    func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
+        guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
+        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
+            throw AgenthailAPIError.unavailable("Connect to your computer first.")
+        }
         let id = draftKey(for: item)
+        let route = try resolve(id).route
+        let key = "queue:\(item.listID)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        let cancelled = try await connection.api.cancelQueued(item)
         let message = cancelled.message ?? item.message
+        let attachments = cancelled.attachments ?? []
+        do {
+            let receipt = try await connection.api.steerQueued(message: message, attachments: attachments, sessionID: route.sessionID)
+            deliveryStatus[id] = deliveryLabel(receipt.result?.evidence, detail: receipt.result?.detail)
+        } catch {
+            returnToDraft(message, attachments: attachments, id: id)
+            await connection.refresh(fresh: true)
+            throw AgenthailAPIError.unavailable("Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))")
+        }
+        await connection.refresh(fresh: true)
+        await refreshSession(id)
+    }
+
+    private func returnToDraft(_ message: String, attachments: [QueueAttachment], id: String) {
         if selectedSessionID == id {
             composer = QueueTakeBack.text(queued: [message], draft: composer)
-            let taken = ComposerAttachments.takingBack(cancelled.attachments ?? [], to: composerAttachments)
+            let taken = ComposerAttachments.takingBack(attachments, to: composerAttachments)
             composerAttachments = taken.attachments
             attachmentProblem = ComposerAttachments.lostNotice(taken.lost) ?? attachmentProblem
         } else {
             drafts[id] = QueueTakeBack.text(queued: [message], draft: drafts[id] ?? "")
-            let taken = ComposerAttachments.takingBack(cancelled.attachments ?? [], to: attachmentDrafts[id] ?? [])
+            let taken = ComposerAttachments.takingBack(attachments, to: attachmentDrafts[id] ?? [])
             attachmentDrafts[id] = taken.attachments
             operationError = ComposerAttachments.lostNotice(taken.lost) ?? operationError
         }

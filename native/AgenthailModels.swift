@@ -430,6 +430,8 @@ struct Capabilities: Codable, Hashable {
     var model = false
     var interrupt = false
     var steer = false
+    /// Missing on an older computer, whose steer takes no attachments at all.
+    var steerImages: Bool? = nil
     var attach = false
     var commands = false
     var respond = false
@@ -457,6 +459,7 @@ struct Capabilities: Codable, Hashable {
         model = try container.decode(Bool.self, forKey: .model)
         interrupt = try container.decode(Bool.self, forKey: .interrupt)
         steer = try container.decode(Bool.self, forKey: .steer)
+        steerImages = try container.decodeIfPresent(Bool.self, forKey: .steerImages)
         attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
         commands = try container.decodeIfPresent(Bool.self, forKey: .commands) ?? false
         respond = try container.decodeIfPresent(Bool.self, forKey: .respond) ?? false

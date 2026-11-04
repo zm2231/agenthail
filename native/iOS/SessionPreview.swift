@@ -311,11 +311,13 @@ struct SessionPreview: View {
 
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
 
+    nonisolated static let sessionQueueJSON = #"{"items":[{"id":11,"sessionId":"demo","target":"Make the build reliable","message":"This is the failing screen, match the spacing.","status":"pending","heldBy":"busy","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]},{"id":12,"sessionId":"demo","target":"Make the build reliable","message":"Then rerun the suite with the larger model.","model":"gpt-5.6-sol","status":"pending","heldBy":"busy","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:01:00.000000000Z"}],"nextBefore":null}"#
+
     nonisolated static let detailJSON = #"""
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
       "journalSeq":2048,
-      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"attach":true},
+      "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"goalSet":true,"goalStatus":true,"compact":true,"model":true,"interrupt":true,"steer":true,"steerImages":true,"attach":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
       "context":{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400},
@@ -414,6 +416,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-session-queue"): body = SessionPreview.sessionQueueJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-terminal-question"): body = SessionPreview.previewTerminalQuestionJSON

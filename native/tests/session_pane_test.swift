@@ -337,7 +337,12 @@ struct SessionPaneTest {
         archiveModel.closePane(archivePane)
         archive.stop()
         var cancels: [String] = []
+        var steerSends: [String] = []
         let queueServer = try! StubServer { request, _ in
+            if request.contains("\"action\":\"send\"") {
+                steerSends.append(request)
+                return request.contains("will not arrive") ? StubServer.reply("500 Internal Server Error", #"{"error":{"message":"no route"}}"#) : StubServer.reply("200 OK", "{}")
+            }
             guard request.contains("queue-cancel") else { return StubServer.reply("200 OK", "{}") }
             cancels.append(request)
             if request.contains("\"queueId\":5") { return StubServer.reply("200 OK", #"{"ok":true,"result":{"message":"with files","attachments":[{"id":"up-1","name":"shot.png","mediaType":"image/png","bytes":7},{"id":"up-2","name":"gone.txt","mediaType":"text/plain","bytes":1,"missing":true}]}}"#) }
@@ -366,9 +371,22 @@ struct SessionPaneTest {
         let cancelsBeforeSteer = cancels.count
         var attachedRow = queued(6, "with a file")
         attachedRow.attachments = [QueueAttachment(id: "up-3", name: "a.png", mediaType: "image/png", bytes: 1)]
-        queueModel.steerQueued(attachedRow)
+        queueModel.steerQueued(attachedRow, capabilities: Capabilities(steer: true))
         try? await Task.sleep(for: .milliseconds(300))
-        check(cancels.count == cancelsBeforeSteer, "a queued message with attachments is never cancelled to steer it")
+        check(cancels.count == cancelsBeforeSteer, "an older computer's queued attachments are never cancelled to steer them")
+        var takesImages = Capabilities(steer: true)
+        takesImages.steerImages = true
+        queueModel.steerQueued(attachedRow, capabilities: takesImages)
+        for _ in 0..<60 where steerSends.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
+        check(cancels.count == cancelsBeforeSteer + 1 && steerSends.first?.contains("\"busyDelivery\":\"steer\"") == true && steerSends.first?.contains("up-3") == true, "a queued image steers as a send that names its upload")
+        var unsentRow = queued(9, "will not arrive")
+        unsentRow.attachments = [QueueAttachment(id: "up-5", name: "b.png", mediaType: "image/png", bytes: 1)]
+        queueModel.draft(for: "Q").text = ""
+        queueModel.draft(for: "Q").attachments = []
+        queueModel.operationError = nil
+        queueModel.steerQueued(unsentRow, capabilities: takesImages)
+        for _ in 0..<60 where queueModel.operationError == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        check(queueModel.draft(for: "Q").text == "will not arrive" && queueModel.draft(for: "Q").attachments.map(\.uploaded?.id) == ["up-5"] && queueModel.operationError?.contains("may not have reached") == true, "a steer that fails comes back with its attachments")
         queueModel.draft(for: "Q").text = ""
         queueModel.draft(for: "Q").attachments = []
         queueModel.operationError = nil

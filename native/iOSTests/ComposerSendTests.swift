@@ -179,6 +179,57 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-3"])
     }
 
+    private var takesImages: Capabilities {
+        var capabilities = Capabilities(steer: true)
+        capabilities.steerImages = true
+        return capabilities
+    }
+
+    private let rowImage = #","attachments":[{"id":"up-3","name":"row.png","mediaType":"image/png","bytes":1}]"#
+
+    func testSteeringAQueuedImageSendsItIntoTheTurnByItsUpload() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(200, sentReceipt)])
+        try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+        let attempts = ComposerSendProtocol.state.attempts
+        XCTAssertEqual(attempts.compactMap { $0.body["action"] as? String }.prefix(2), ["queue-cancel", "send"])
+        XCTAssertEqual(attempts[1].body["busyDelivery"] as? String, "steer")
+        XCTAssertEqual(attempts[1].body["attachments"] as? [String], ["up-3"])
+        XCTAssertEqual(attempts[1].body["message"] as? String, "from the row")
+        XCTAssertEqual(model.composer, "")
+    }
+
+    func testAQueuedRowTheSessionCantSteerIsNotCancelled() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#)])
+        try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: Capabilities(steer: true))
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
+    }
+
+    func testASteerThatFailsReturnsTheMessageAndAttachmentsToTheComposer() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(500, #"{"error":{"message":"no route"}}"#)])
+        do {
+            try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+            XCTFail("the failure must reach the row")
+        } catch {
+            XCTAssertTrue(AgenthailAPIError.userMessage(error).contains("may not have reached"), String(describing: error))
+        }
+        XCTAssertEqual(model.composer, "from the row")
+        XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-3"])
+    }
+
+    func testTheSessionQueueShowsOnlyMessagesStillWaitingOldestFirst() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        func row(_ id: Int, _ status: String, operation: String = "message") -> String {
+            #"{"id":\#(id),"sessionId":"\#(session.id)","target":"t","message":"m\#(id)","operation":"\#(operation)","status":"\#(status)","attempts":0,"evidence":"queued","queuedAt":"2026-09-12T04:00:00.000000000Z"}"#
+        }
+        ComposerSendProtocol.state.queueBody = #"{"items":[\#(row(5, "pending")),\#(row(4, "dead")),\#(row(3, "pending")),\#(row(2, "pending", operation: "goal-set"))]}"#
+        let items = try await model.sessionQueue(session.id)
+        XCTAssertEqual(items.map(\.id), [3, 5])
+        XCTAssertEqual(items.first?.hostID, "computer")
+    }
+
     func testATakenBackAttachmentSurvivesTheAppBeingKilled() async throws {
         let store = temporaryStore()
         let (model, session) = try makeModel(store: store)
@@ -616,10 +667,16 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var steps: [Step] = []
         private var recorded: [Attempt] = []
+        private var queue = "{}"
 
         var attempts: [Attempt] { lock.withLock { recorded } }
 
-        func reset() { lock.withLock { steps = []; recorded = [] } }
+        var queueBody: String {
+            get { lock.withLock { queue } }
+            set { lock.withLock { queue = newValue } }
+        }
+
+        func reset() { lock.withLock { steps = []; recorded = []; queue = "{}" } }
         func script(_ steps: [Step]) { lock.withLock { self.steps = steps } }
 
         func next(_ attempt: Attempt) -> Step {
@@ -637,6 +694,7 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 
     override func startLoading() {
+        if request.url?.path == "/api/v1/queue" { return respond(200, Self.state.queueBody) }
         guard request.url?.path == "/api/v1/actions" else { return respond(200, "{}") }
         switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), raw: requestBody() ?? Data())) {
         case .answer(let status, let text): respond(status, text)

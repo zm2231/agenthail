@@ -29,6 +29,8 @@ targets:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
+      - path: QueueSteer.swift
+      - path: iOS/SessionQueueSection.swift
       - path: TaggedResponses.swift
       - path: UIConfig.swift
       - path: SurfaceMode.swift
