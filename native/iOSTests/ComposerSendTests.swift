@@ -560,6 +560,143 @@ final class ComposerSendTests: XCTestCase {
         try await waitUntil { queue.pending.isEmpty }
     }
 
+    private func stoppedSend(_ session: String = "a", _ message: String = "old") -> PendingSend {
+        PendingSend(sessionID: session, message: message, attachments: [], turnSettings: TurnSettings(), unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))
+    }
+
+    private func recentSend(_ session: String = "a", _ message: String = "new") -> PendingSend {
+        PendingSend(sessionID: session, message: message, attachments: [], turnSettings: TurnSettings())
+    }
+
+    func testATapDuringAnotherSendsBackoffGoesAtOnce() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        queue.deliver = { send in
+            delivered.append(send.message)
+            return send.message == "old" ? .answered : .unconfirmed
+        }
+        queue.restore([stoppedSend()])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        queue.add(recentSend())
+        queue.wake()
+        try await waitUntil { delivered.count >= 2 }
+        delivered = []
+
+        queue.retry(try XCTUnwrap(queue.pending["a"]?.first { $0.message == "old" }))
+        try await waitUntil(seconds: 1.5) { delivered.first == "old" }
+        try await waitUntil { queue.pending["a"]?.map(\.message) == ["new"] }
+    }
+
+    func testATapDuringAnotherSendsAttemptWaitsForItsTurn() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        var release = false
+        queue.deliver = { send in
+            delivered.append(send.message)
+            while send.message == "new" && !release { try? await Task.sleep(for: .milliseconds(10)) }
+            return .answered
+        }
+        queue.restore([stoppedSend()])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        queue.add(recentSend())
+        try await waitUntil { delivered == ["new"] }
+
+        queue.retry(try XCTUnwrap(queue.pending["a"]?.first { $0.message == "old" }))
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(delivered, ["new"], "one attempt at a time in a session")
+        release = true
+        try await waitUntil { queue.pending.isEmpty }
+        XCTAssertEqual(delivered, ["new", "old"])
+    }
+
+    func testARefusedTapIsReportedOnce() async throws {
+        let queue = SendQueue()
+        var refusals: [String] = []
+        queue.refused = { send, reason in refusals.append("\(send.message): \(reason)") }
+        queue.deliver = { _ in .refused("Ended") }
+        queue.restore([stoppedSend()])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        queue.retry(try XCTUnwrap(queue.pending["a"]?.first))
+        try await waitUntil { queue.pending.isEmpty }
+        XCTAssertEqual(refusals, ["old: Ended"])
+    }
+
+    func testAQueueWithOnlyStoppedSendsMakesNoAttemptsAndRestartsWhenAsked() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        queue.deliver = { send in
+            delivered.append(send.message)
+            return .answered
+        }
+        queue.restore([stoppedSend()])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        queue.wake()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(delivered, [], "nothing to send and nothing spinning")
+
+        queue.add(recentSend())
+        try await waitUntil { delivered == ["new"] }
+        queue.restore([recentSend("a", "restored")])
+        try await waitUntil { delivered == ["new", "restored"] }
+        queue.retry(try XCTUnwrap(queue.pending["a"]?.first))
+        try await waitUntil { queue.pending.isEmpty }
+        XCTAssertEqual(delivered, ["new", "restored", "old"])
+    }
+
+    func testAStoppedSendStaysStoppedWhenItsSessionMovesAndCanStillBeRetried() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        queue.deliver = { send in
+            delivered.append(send.sessionID)
+            return .answered
+        }
+        queue.restore([stoppedSend("old-id")])
+        try await waitUntil { queue.pending["old-id"]?.first?.retryStopped == true }
+        var rekeys = SessionRekeys()
+        rekeys.record(["old-id": "new-id"])
+        queue.carry(rekeys)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(queue.pending["new-id"]?.first?.retryStopped, true)
+        XCTAssertEqual(delivered, [])
+
+        var stale = try XCTUnwrap(queue.pending["new-id"]?.first)
+        stale.sessionID = "old-id"
+        queue.retry(stale)
+        try await waitUntil { queue.pending.isEmpty }
+        XCTAssertEqual(delivered, ["new-id"], "a tap from a row drawn before the move reaches the moved send")
+    }
+
+    func testASessionMovingDuringATapStopsTheSendUnderItsNewID() async throws {
+        let queue = SendQueue()
+        var release = false
+        var attempts = 0
+        queue.deliver = { _ in
+            attempts += 1
+            while !release { try? await Task.sleep(for: .milliseconds(10)) }
+            return .unconfirmed
+        }
+        queue.restore([stoppedSend("old-id")])
+        try await waitUntil { queue.pending["old-id"]?.first?.retryStopped == true }
+        queue.retry(try XCTUnwrap(queue.pending["old-id"]?.first))
+        try await waitUntil { attempts == 1 }
+        var rekeys = SessionRekeys()
+        rekeys.record(["old-id": "new-id"])
+        queue.carry(rekeys)
+        release = true
+        try await waitUntil { queue.pending["new-id"]?.first?.retryStopped == true }
+        XCTAssertEqual(queue.pending["new-id"]?.first?.retryingOnTap, false)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(attempts, 1)
+    }
+
+    func testAPendingSendPreviewsItsFirstLine() {
+        func preview(_ message: String) -> String {
+            PendingSend(sessionID: "a", message: message, attachments: [], turnSettings: TurnSettings()).previewLine
+        }
+        XCTAssertEqual(preview("\n  First line  \nSecond"), "First line")
+        XCTAssertEqual(preview(""), "Message with attachments")
+    }
+
     func testAStoppedSendDoesNotHoldANewerOne() async throws {
         let queue = SendQueue()
         var delivered: [String] = []

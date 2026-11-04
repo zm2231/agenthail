@@ -15,7 +15,7 @@ struct ComposerSendStatus: View {
                     .accessibilityIdentifier("send-retry")
             }
         } else if let waiting {
-            row(waiting.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying", color: PhonePalette.muted, identifier: "send-unconfirmed") {
+            row(waiting.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying", detail: waiting.previewLine, color: PhonePalette.muted, identifier: "send-unconfirmed") {
                 if waiting.retryStopped {
                     Button("Retry") { model.retrySend(waiting) }
                         .accessibilityIdentifier("send-unconfirmed-retry")
@@ -34,13 +34,21 @@ struct ComposerSendStatus: View {
             }
     }
 
-    private func row(_ text: String, color: some ShapeStyle, identifier: String, @ViewBuilder action: () -> some View) -> some View {
+    private func row(_ text: String, detail: String? = nil, color: some ShapeStyle, identifier: String, @ViewBuilder action: () -> some View) -> some View {
         HStack(spacing: 8) {
-            Text(text)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .foregroundStyle(color)
-                .accessibilityIdentifier(identifier)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(color)
+                    .accessibilityIdentifier(identifier)
+                if let detail {
+                    Text(detail)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .accessibilityIdentifier("\(identifier)-message")
+                }
+            }
             Spacer(minLength: 0)
             action().buttonStyle(.bordered).controlSize(.small).frame(minHeight: 44)
         }

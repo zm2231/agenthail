@@ -9,7 +9,7 @@ struct SessionPreview: View {
 
     private static var storeWithASendPastItsHour: ComposerStore {
         let store = ComposerStore(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("composer.json"))
-        store.save(ComposerStore.Saved(sends: [.init(id: UUID(), sessionID: "computer::demo", message: "Keep the regression check with the fix.", turnSettings: TurnSettings(), idempotencyKey: UUID().uuidString, uploaded: nil, wire: nil, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))]))
+        store.save(ComposerStore.Saved(sends: [.init(id: UUID(), sessionID: "computer::demo", message: "Check the signing step before the next release, then tell me what changed.", turnSettings: TurnSettings(), idempotencyKey: UUID().uuidString, uploaded: nil, wire: nil, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))]))
         return store
     }
 

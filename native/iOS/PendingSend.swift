@@ -7,6 +7,11 @@ struct PendingSend: Identifiable, Equatable {
         return !attachments.isEmpty && ids.count == attachments.count ? ids : nil
     }
 
+    var previewLine: String {
+        let line = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return line.isEmpty ? "Message with attachments" : line
+    }
+
     let id: UUID
     var sessionID: String
     let message: String

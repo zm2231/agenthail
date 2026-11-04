@@ -47,7 +47,7 @@ final class SendQueue {
         }
         changed?()
         wake()
-        start(send.sessionID)
+        if let session = pending.first(where: { $0.value.contains { $0.id == send.id } })?.key { start(session) }
     }
 
     func setUploaded(_ uploaded: [String], for send: PendingSend) {
