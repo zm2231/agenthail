@@ -58,6 +58,15 @@ export function sendableAttachments(sessionId) {
   return heldAttachments(sessionId).filter((attachment) => !attachment.missing);
 }
 
+export function attachmentSteerRefusal(attachments, capabilities) {
+  if (!attachments.length) return "";
+  if (attachments.some((attachment) => attachment.missing)) return "An attached file is gone. Remove it to steer.";
+  if (capabilities?.steerImages === undefined) return "Update Agenthail on this computer to steer attachments. Send queues them for next.";
+  const images = attachments.some((attachment) => ["image/png", "image/jpeg", "image/gif"].includes(attachment.mediaType));
+  if (!capabilities.steerImages && images) return "Attached images can't join a running turn on this session. Send queues them for next.";
+  return "";
+}
+
 export function holdAttachments(sessionId, attachments = [], { warn = true } = {}) {
   const known = new Set(heldAttachments(sessionId).map((attachment) => attachment.id));
   const heldAt = Date.now();

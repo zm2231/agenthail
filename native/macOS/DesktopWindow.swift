@@ -1829,6 +1829,7 @@ struct QueueDock: View {
         VStack(spacing: 0) {
             ForEach(items) { item in
                 let envelope = PeerEnvelope(item.message)
+                let steerRefusal = QueueSteer.refusal(item, capabilities: target.capabilities)
                 HStack(spacing: 10) {
                     Image(systemName: "text.line.last.and.arrowtriangle.forward")
                         .font(.system(size: DesktopType.caption))
@@ -1859,14 +1860,14 @@ struct QueueDock: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if canSteer {
                         Button {
-                            model.steerQueued(item)
+                            model.steerQueued(item, capabilities: target.capabilities)
                         } label: {
                             Label("Steer", systemImage: "arrow.turn.down.right")
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.text2)
-                        .disabled(item.hasAttachments)
-                        .help(item.hasAttachments ? QueueFacts.noSteerWithAttachments : "Steer into the current turn")
+                        .disabled(steerRefusal != nil)
+                        .help(steerRefusal ?? "Steer into the current turn")
                     }
                     Button {
                         model.removeQueued(item)
@@ -1878,9 +1879,9 @@ struct QueueDock: View {
                     .accessibilityLabel("Remove queued message")
                     Menu {
                         if canSteer {
-                            Button("Steer into current turn") { model.steerQueued(item) }
-                                .disabled(item.hasAttachments)
-                                .help(item.hasAttachments ? QueueFacts.noSteerWithAttachments : "")
+                            Button("Steer into current turn") { model.steerQueued(item, capabilities: target.capabilities) }
+                                .disabled(steerRefusal != nil)
+                                .help(steerRefusal ?? "")
                         }
                         Button("Send after this turn (current)") {}
                             .disabled(true)

@@ -179,6 +179,90 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-3"])
     }
 
+    private var takesImages: Capabilities {
+        var capabilities = Capabilities(steer: true)
+        capabilities.steerImages = true
+        return capabilities
+    }
+
+    private let rowImage = #","attachments":[{"id":"up-3","name":"row.png","mediaType":"image/png","bytes":1}]"#
+
+    func testSteeringAQueuedImageSendsItIntoTheTurnByItsUpload() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(200, sentReceipt)])
+        try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+        let attempts = ComposerSendProtocol.state.attempts
+        XCTAssertEqual(attempts.compactMap { $0.body["action"] as? String }.prefix(2), ["queue-cancel", "send"])
+        XCTAssertEqual(attempts[1].body["busyDelivery"] as? String, "steer")
+        XCTAssertEqual(attempts[1].body["attachments"] as? [String], ["up-3"])
+        XCTAssertEqual(attempts[1].body["message"] as? String, "from the row")
+        XCTAssertEqual(model.composer, "")
+    }
+
+    func testAQueuedRowTheSessionCantSteerIsNotCancelled() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#)])
+        try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: Capabilities(steer: true))
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
+    }
+
+    func testARowAnotherSessionSentIsNotCancelledToSteerIt() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#)])
+        try await model.steerQueued(queuedItem(session, attachments: #","author":"""# + rowImage), capabilities: takesImages)
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 0)
+    }
+
+    func testACancelThatFailsSendsNothing() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(409, #"{"error":{"message":"already delivering"}}"#)])
+        do {
+            try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+            XCTFail("the failure must reach the row")
+        } catch {
+            XCTAssertTrue(AgenthailAPIError.userMessage(error).contains("already delivering"), String(describing: error))
+        }
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, 1)
+        XCTAssertEqual(model.composer, "")
+    }
+
+    func testASteerThatFailsReturnsTheMessageAndAttachmentsToTheComposer() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(500, #"{"error":{"message":"no route"}}"#)])
+        do {
+            try await model.steerQueued(queuedItem(session, attachments: rowImage), capabilities: takesImages)
+            XCTFail("the failure must reach the row")
+        } catch {
+            XCTAssertTrue(AgenthailAPIError.userMessage(error).contains("may not have reached"), String(describing: error))
+        }
+        XCTAssertEqual(model.composer, "from the row")
+        XCTAssertEqual(model.composerAttachments.map(\.uploaded?.id), ["up-3"])
+    }
+
+    func testTheInboxOffersSteerOnlyWhileTheSessionRuns() throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        XCTAssertNil(model.queueSteer(try queuedItem(session)), "an idle session has no turn to steer")
+        model.selectedDetail = try makeDetail(status: "busy")
+        let offer = try XCTUnwrap(model.queueSteer(try queuedItem(session)))
+        XCTAssertNil(offer.refusal)
+    }
+
+    func testTheInboxGivesTheReasonARowCantSteer() throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        model.selectedDetail = try makeDetail(status: "busy")
+        let image = try queuedItem(session, attachments: rowImage)
+        let offer = try XCTUnwrap(model.queueSteer(image))
+        XCTAssertNotNil(offer.refusal, "this computer's capabilities don't say it takes images")
+    }
+
+    func testOnlyAWaitingMessageRowOffersSteer() throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        model.selectedDetail = try makeDetail(status: "busy")
+        let goal = try queuedItem(session, attachments: #","operation":"goal-set""#)
+        XCTAssertNil(model.queueSteer(goal))
+        XCTAssertNotNil(model.queueSteer(try queuedItem(session)))
+    }
+
     func testATakenBackAttachmentSurvivesTheAppBeingKilled() async throws {
         let store = temporaryStore()
         let (model, session) = try makeModel(store: store)
@@ -763,12 +847,12 @@ final class ComposerSendTests: XCTestCase {
         return AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
     }
 
-    private func makeDetail() throws -> SessionDetail {
+    private func makeDetail(status: String = "idle") throws -> SessionDetail {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as? [String: Any])
         var session = try XCTUnwrap(object["session"] as? [String: Any])
         session["id"] = "codex-flow"
         session["surface"] = "codex"
-        session["status"] = "idle"
+        session["status"] = status
         object["session"] = session
         var capabilities = try XCTUnwrap(object["capabilities"] as? [String: Any])
         capabilities["send"] = true

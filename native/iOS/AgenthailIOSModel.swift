@@ -561,16 +561,52 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         defer { pendingControls.remove(key) }
         let cancelled = try await api.cancelQueued(item, host: target.remote)
         await connections[target.hostID]?.refresh(fresh: true)
+        returnToDraft(cancelled.message ?? item.message, attachments: cancelled.attachments ?? [], id: draftKey(for: item))
+    }
+
+    func queueSteer(_ item: QueueState) -> (capabilities: Capabilities, refusal: String?)? {
+        guard !item.isHistorical, !QueueSteer.waiting([item]).isEmpty else { return nil }
+        let id = item.sessionId
+        let known = snapshot?.sessions.first { $0.id == id }
+            ?? selectedDetail.flatMap { $0.session.id == id ? $0.sessionState(open: false, host: snapshot?.daemon.pairedHost(owning: id)) : nil }
+        guard let session = known, session.status == "busy", session.waitingOn == nil, session.capabilities.steer, !session.isReadOnly else { return nil }
+        return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
+    }
+
+    func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
+        guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
+        guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (ownerAPI, target) = try reach(hostID)
         let id = draftKey(for: item)
+        let (api, route) = try resolve(id)
+        let key = "queue:\(item.listID)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        let cancelled = try await ownerAPI.cancelQueued(item, host: target.remote)
         let message = cancelled.message ?? item.message
+        let attachments = cancelled.attachments ?? []
+        do {
+            let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: route.sessionID)
+            deliveryStatus[id] = deliveryLabel(receipt.result?.evidence, detail: receipt.result?.detail)
+        } catch {
+            returnToDraft(message, attachments: attachments, id: id)
+            await connections[route.hostID]?.refresh(fresh: true)
+            throw AgenthailAPIError.unavailable("Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))")
+        }
+        await connections[route.hostID]?.refresh(fresh: true)
+        await refreshSession(id)
+    }
+
+    private func returnToDraft(_ message: String, attachments: [QueueAttachment], id: String) {
         if selectedSessionID == id {
             composer = QueueTakeBack.text(queued: [message], draft: composer)
-            let taken = ComposerAttachments.takingBack(cancelled.attachments ?? [], to: composerAttachments)
+            let taken = ComposerAttachments.takingBack(attachments, to: composerAttachments)
             composerAttachments = taken.attachments
             attachmentProblem = ComposerAttachments.lostNotice(taken.lost) ?? attachmentProblem
         } else {
             drafts[id] = QueueTakeBack.text(queued: [message], draft: drafts[id] ?? "")
-            let taken = ComposerAttachments.takingBack(cancelled.attachments ?? [], to: attachmentDrafts[id] ?? [])
+            let taken = ComposerAttachments.takingBack(attachments, to: attachmentDrafts[id] ?? [])
             attachmentDrafts[id] = taken.attachments
             operationError = ComposerAttachments.lostNotice(taken.lost) ?? operationError
         }

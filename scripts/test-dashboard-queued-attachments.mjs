@@ -17,7 +17,7 @@ const old = { id: "upload:bb/old.png", name: "old.png", mediaType: "image/png", 
 const gone = { ...old, missing: true };
 const queuedImage = { id: 7, sessionId: "a", status: "pending", operation: "message", message: "look at this", attachments: [shot, old] };
 
-async function loaded({ status = "busy", values = new Map(), refuses = () => false, selected = "a", queue = [queuedImage] } = {}) {
+async function loaded({ status = "busy", values = new Map(), refuses = () => false, selected = "a", queue = [queuedImage], capabilities = { steerImages: true } } = {}) {
   const elements = new Map();
   const $ = (selector) => {
     if (!elements.has(selector)) elements.set(selector, element());
@@ -34,7 +34,7 @@ async function loaded({ status = "busy", values = new Map(), refuses = () => fal
     app: {
       selected: sessions.find((session) => session.id === selected) || null,
       state: { sessions, queue },
-      history: { capabilities: { steer: true, interrupt: true } },
+      history: { capabilities: { steer: true, interrupt: true, ...capabilities } },
       drafts: null,
       pendingIdempotency: new Map(),
       slashCommands: [],
@@ -111,8 +111,71 @@ async function takenBack(tab, queueId = 7) {
   assert.match(chips(tab), /shot\.png/);
   assert.match(chips(tab), /old\.png · no longer stored, attach it again/, "a file the daemon reports swept is shown, not dropped");
   assert.deepEqual(missing.map((attachment) => attachment.name), ["old.png"], "the caller hears which file is gone");
-  assert.equal(tab.$("#steer-message").hidden, true, "a busy turn offers no steer for attached files");
-  assert.equal(tab.$("#composer-note").textContent, "Attached files can't join a running turn. Send queues them for next.");
+  assert.equal(tab.$("#steer-message").hidden, true, "a row whose file is gone can't steer");
+  assert.equal(tab.$("#composer-note").textContent, "An attached file is gone. Remove it to steer.");
+}
+
+{
+  const stored = { ...queuedImage, id: 9, attachments: [shot] };
+  const tab = await loaded({ queue: [stored] });
+  tab.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [shot] } }));
+  await tab.context.takeBackQueued(9);
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, false, "an image can steer where the session's steer takes images");
+  tab.answers.push(answered({ ok: true, result: { evidence: "delivered" } }));
+  await tab.context.send("steer");
+  await settled();
+  const sent = tab.requests.at(-1);
+  assert.equal(sent.action, "send", "the steer action takes text only");
+  assert.equal(sent.busyDelivery, "steer");
+  assert.deepEqual(sent.attachments, [shot.id]);
+  assert.equal(chips(tab).includes("shot.png"), false, "and the chip leaves the composer");
+}
+
+{
+  const tab = await loaded({ queue: [{ ...queuedImage, id: 9, attachments: [shot] }] });
+  tab.context.app.selected.capabilities = { steer: true, interrupt: true, steerImages: true };
+  tab.context.app.history = null;
+  tab.$("#message").value = "";
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#send").dataset.mode, "interrupt", "without history the session's own capabilities still offer Stop");
+  tab.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [shot] } }));
+  await tab.context.takeBackQueued(9);
+  tab.context.app.history = null;
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, false, "and Steer for a held image");
+  tab.$("#message").value = "/steer text";
+  tab.$("#send").dataset.mode = "send";
+  tab.answers.push(answered({ ok: true, result: { evidence: "delivered" } }));
+  await tab.context.send("send");
+  await settled();
+  const sent = tab.requests.at(-1);
+  assert.equal(sent.action, "send");
+  assert.equal(sent.busyDelivery, "steer");
+  assert.deepEqual(sent.attachments, [shot.id]);
+  assert.equal(sent.message, "text");
+}
+
+for (const [capabilities, note] of [
+  [{ steerImages: false }, "Attached images can't join a running turn on this session. Send queues them for next."],
+  [{}, "Update Agenthail on this computer to steer attachments. Send queues them for next."],
+]) {
+  const stored = { ...queuedImage, id: 9, attachments: [shot] };
+  const tab = await loaded({ queue: [stored], capabilities });
+  tab.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [shot] } }));
+  await tab.context.takeBackQueued(9);
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, true, "no steer where the attachment would only wait");
+  assert.equal(tab.$("#composer-note").textContent, note);
+}
+
+{
+  const notes = { id: "upload:cc/notes.txt", name: "notes.txt", mediaType: "text/plain", bytes: 9 };
+  const tab = await loaded({ queue: [{ ...queuedImage, id: 9, attachments: [notes] }], capabilities: { steerImages: false } });
+  tab.answers.push(answered({ ok: true, result: { message: "look at this", attachments: [notes] } }));
+  await tab.context.takeBackQueued(9);
+  tab.context.syncComposerAction();
+  assert.equal(tab.$("#steer-message").hidden, false, "a file steers as its path even where images can't");
 }
 
 {
@@ -203,7 +266,7 @@ async function takenBack(tab, queueId = 7) {
   await tab.context.send("steer");
   await settled();
   assert.equal(tab.requests.at(-1).action, "queue-cancel", "a steer with attached files is never sent");
-  assert.ok(tab.toasts.includes("Attached files can't join a running turn. Send queues them for next."));
+  assert.ok(tab.toasts.includes("An attached file is gone. Remove it to steer."));
   assert.match(chips(tab), /shot\.png/, "and the attachments stay");
 }
 

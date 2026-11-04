@@ -28,6 +28,7 @@ let package = Package(
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
+                "QueueSteer.swift",
                 "InboxMessage.swift",
                 "PeerEnvelope.swift",
                 "TaggedResponses.swift",

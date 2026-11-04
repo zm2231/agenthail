@@ -1003,25 +1003,29 @@ final class AgenthailModel: ObservableObject {
     }
 
     func queuedItems(for sessionID: String) -> [QueueState] {
-        (snapshot?.queue ?? []).filter { $0.sessionId == sessionID && $0.status == "pending" && ["", "message"].contains($0.operation ?? "") }
+        QueueSteer.waiting((snapshot?.queue ?? []).filter { $0.sessionId == sessionID })
     }
 
-    func steerQueued(_ item: QueueState) {
-        guard let api, !item.hasAttachments else { return }
+    func steerQueued(_ item: QueueState, capabilities: Capabilities) {
+        guard let api, QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
         Task {
+            let cancelled: CancelledQueueItem
             do {
-                try await api.action("queue-cancel", queueID: item.id)
+                cancelled = try await api.cancelQueued(item)
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
                 return
             }
+            let message = cancelled.message ?? item.message
+            let attachments = cancelled.attachments ?? []
             do {
-                let receipt = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message, author: "person")
-                localSends[item.sessionId, default: []].append(LocalSend(text: item.message, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, steer: true)))
+                let receipt = try await api.steerQueued(message: message, attachments: attachments, sessionID: item.sessionId)
+                localSends[item.sessionId, default: []].append(LocalSend(text: message, attachments: attachments.map { ComposerAttachment(uploaded: $0.upload) }, sentAt: Date(), status: LocalSend.label(for: receipt.result?.status, steer: true)))
                 operationError = nil
             } catch {
-                restoreToComposer(item.message, sessionID: item.sessionId)
-                operationError = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))"
+                let lost = draft(for: item.sessionId).takeBack([message], attachments: attachments)
+                let problem = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))"
+                operationError = [problem, ComposerAttachments.lostNotice(lost)].compactMap { $0 }.joined(separator: " ")
             }
             _ = await refresh(fresh: true)
         }

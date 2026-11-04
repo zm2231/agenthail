@@ -168,6 +168,25 @@ final class HostCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.hosts.first { $0.id == "hbuild" }?.state, "unreachable")
     }
 
+    func testAHeldComputerIsReachedThroughAMirrorWhenOneIsConnected() {
+        var laptop = Self.snapshot([])
+        laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
+        let mirrored = HostCatalog(hosts: [
+            PairedHostView(id: "hserver", name: "server", reachable: false, holding: true, snapshot: Self.snapshot([])),
+            PairedHostView(id: "hlaptop", name: "laptop", reachable: true, snapshot: laptop),
+        ])
+        XCTAssertEqual(mirrored.target(forHost: "hserver"), HostTarget(hostID: "hlaptop", remote: "hserver"))
+
+        let alone = HostCatalog(hosts: [PairedHostView(id: "hserver", name: "server", reachable: false, holding: true, snapshot: Self.snapshot([]))])
+        XCTAssertEqual(alone.target(forHost: "hserver"), HostTarget(hostID: "hserver", remote: nil), "with no mirror it keeps the held connection")
+
+        let owner = HostCatalog(hosts: [
+            PairedHostView(id: "hserver", name: "server", reachable: true, snapshot: Self.snapshot([])),
+            PairedHostView(id: "hlaptop", name: "laptop", reachable: true, snapshot: laptop),
+        ])
+        XCTAssertEqual(owner.target(forHost: "hserver"), HostTarget(hostID: "hserver", remote: nil), "a reachable owner is asked directly")
+    }
+
     func testASessionNoComputerListsIsRoutedToItsOwnerByItsID() {
         var laptop = Self.snapshot([])
         laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
@@ -213,7 +232,7 @@ final class HostCatalogTests: XCTestCase {
         return row
     }
 
-    private static func row(_ id: String, name: String) -> SessionState {
+    static func row(_ id: String, name: String) -> SessionState {
         SessionState(id: id, surface: "claude", name: name, alias: nil, status: "idle", lastActive: nil, queueCount: 0,
                      open: true, current: true, currentReason: nil, capabilities: Capabilities(send: true, steer: true), readOnly: false, readOnlyReason: nil)
     }

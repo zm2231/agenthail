@@ -67,6 +67,7 @@ SOURCES=(
   TimelineEventLabel.swift
   TurnNoticePreference.swift
   TurnSettings.swift
+  QueueSteer.swift
   UIConfig.swift
   SurfaceMode.swift
   PaletteTokens.swift

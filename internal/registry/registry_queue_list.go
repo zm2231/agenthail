@@ -30,6 +30,7 @@ type QueueRow struct {
 	Operation       QueueOperation           `json:"operation"`
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 	Uploads         surface.Uploads          `json:"-"`
+	Author          surface.Author           `json:"-"`
 }
 
 type AttentionItem struct {
@@ -103,7 +104,7 @@ func queueHoldCase(canSteer bool, mode deliverypolicy.Mode) string {
 }
 
 func queueRowSelect(mode deliverypolicy.Mode) string {
-	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,q.uploads,
+	return `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,q.uploads,q.author,
 	` + queueHoldCase(true, mode) + `,
 	` + queueHoldCase(false, mode) + `,
 	COALESCE(s.surface,''),COALESCE(s.transport,''),COALESCE(s.bridge,''),COALESCE(s.runtime_kind,'')
@@ -114,7 +115,7 @@ func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) 
 	var row QueueRow
 	var evidence, targetSurface, transport, bridge, runtimeKind string
 	var steerHold, otherHold QueueHold
-	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.Uploads, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
+	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.Uploads, &row.Author, &steerHold, &otherHold, &targetSurface, &transport, &bridge, &runtimeKind); err != nil {
 		return QueueRow{}, err
 	}
 	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge, RuntimeKind: surface.RuntimeKind(runtimeKind)}

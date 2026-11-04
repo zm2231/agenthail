@@ -232,7 +232,7 @@ struct SessionPreview: View {
     }
 
     nonisolated static var snapshotJSON: String {
-        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true, "attach": true]
+        let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "goalSet": true, "goalStatus": true, "compact": true, "model": true, "interrupt": true, "steer": true, "steerImages": true, "attach": true]
         let sessions: [[String: Any]] = [
             ["id": "demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities, "plan": ["done": 3, "total": 5, "current": "Running the regression suite"]],
             ["id": "codex-demo", "project": ["id": "project-fieldnotes", "displayName": "fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "kind": "git"], "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
@@ -316,6 +316,11 @@ struct SessionPreview: View {
     nonisolated static let projectActivityJSON = #"{"projects":[]}"#
     nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11T18:20:00.000000000Z"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"canceled","evidence":"canceled","attempts":0,"queuedAt":"2026-09-09T11:00:00.000000000Z"}]}"#
 
+    private nonisolated static let steerRowCommon = #""sessionId":"demo","target":"Make the build reliable","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z","heldBy":"busy""#
+    private nonisolated static let refusedSteerRow = #"{"id":12,\#(steerRowCommon),"message":"Then rerun the suite with the larger model.","model":"gpt-5.6-sol"}"#
+    nonisolated static let steerRowsJSON = #"{"items":[{"id":11,\#(steerRowCommon),"message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]},\#(refusedSteerRow)],"nextBefore":null}"#
+    nonisolated static let steerRowsAfterSteerJSON = #"{"items":[\#(refusedSteerRow)],"nextBefore":null}"#
+
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
 
     nonisolated static let detailJSON = #"""
@@ -342,6 +347,21 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     private let feed = PreviewStreamFeed()
+
+    nonisolated(unsafe) private static var steered = false
+
+    private static func actionBody(_ request: URLRequest) -> [String: Any] {
+        var data = request.httpBody
+        if data == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var read = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while case let count = stream.read(&buffer, maxLength: buffer.count), count > 0 { read.append(buffer, count: count) }
+            data = read
+        }
+        return data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    }
 
     override func startLoading() {
         if request.url?.path == "/api/v1/actions" {
@@ -422,6 +442,17 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-steer-rows"):
+            let action = Self.actionBody(request)
+            if action["action"] as? String == "queue-cancel" {
+                body = #"{"ok":true,"result":{"message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]}}"#
+            } else if action["action"] as? String == "send", action["busyDelivery"] as? String == "steer" {
+                Self.steered = true
+                body = #"{"ok":true,"result":{"evidence":"submitted"}}"#
+            } else {
+                status = 400; body = #"{"error":{"message":"Not a steer."}}"#
+            }
+        case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-steer-rows"): body = Self.steered ? SessionPreview.steerRowsAfterSteerJSON : SessionPreview.steerRowsJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/inbox": body = InboxPreview.nextPage()
         case "/api/v1/requests" where ProcessInfo.processInfo.arguments.contains("--preview-questions"): body = SessionPreview.previewQuestionsJSON

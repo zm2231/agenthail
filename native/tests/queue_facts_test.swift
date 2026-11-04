@@ -62,6 +62,25 @@ struct QueueFactsTest {
         let attached = try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":3,"sessionId":"s1","target":"@builder","message":"see these","status":"pending","attempts":0,"queuedAt":"2026-10-18T06:00:00Z","evidence":"queued","attachments":[{"id":"a","name":"shot.png","mediaType":"image/png","bytes":3,"width":1,"height":1},{"id":"b","name":"log.txt","mediaType":"text/plain","bytes":4}]}"#.utf8))
         expect(QueueFacts.attachmentNames(attached) == "shot.png, log.txt" && attached.hasAttachments, "a queued message names its attachments")
         expect(QueueFacts.attachmentNames(queue(1, status: "pending")) == nil, "a queued message without attachments names none")
+        func steerCaps(_ images: Bool?) -> Capabilities {
+            var capabilities = Capabilities(steer: true)
+            capabilities.steerImages = images
+            return capabilities
+        }
+        func row(_ fields: String) -> QueueState {
+            try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":3,"sessionId":"s1","target":"@builder","message":"see these","status":"pending","attempts":0,"queuedAt":"2026-10-18T06:00:00Z","evidence":"queued"\#(fields)}"#.utf8))
+        }
+        expect(QueueSteer.refusal(row(#","author":"""#), capabilities: steerCaps(true))?.contains("another session") == true, "a row another session sent can't steer as the person")
+        expect(QueueSteer.refusal(row(#","author":"person","attachments":[{"id":"a","name":"shot.png","mediaType":"image/png","bytes":3}]"#), capabilities: steerCaps(true)) == nil, "the person's own row steers")
+        let fileOnly = row(#","attachments":[{"id":"b","name":"log.txt","mediaType":"text/plain","bytes":4}]"#)
+        expect(QueueSteer.refusal(queue(1, status: "pending"), capabilities: steerCaps(nil)) == nil, "a text row steers on any computer")
+        expect(QueueSteer.refusal(attached, capabilities: steerCaps(true)) == nil, "an image steers where the session's steer takes images")
+        expect(QueueSteer.refusal(attached, capabilities: steerCaps(false))?.contains("images can't join") == true, "an image waits where the steer takes none")
+        expect(QueueSteer.refusal(fileOnly, capabilities: steerCaps(false)) == nil, "a file steers as its path even where images can't")
+        expect(QueueSteer.refusal(fileOnly, capabilities: steerCaps(nil))?.contains("Update Agenthail") == true, "an older computer's attachments wait")
+        expect(QueueSteer.refusal(row(#","effort":"high""#), capabilities: steerCaps(true))?.contains("turn settings") == true, "steer can't carry turn settings")
+        expect(QueueSteer.refusal(row(#","model":"m""#), capabilities: steerCaps(true))?.contains("model") == true, "steer can't carry a model")
+        expect(QueueSteer.refusal(row(#","attachments":[{"id":"b","name":"log.txt","mediaType":"text/plain","bytes":4,"missing":true}]"#), capabilities: steerCaps(true))?.contains("gone") == true, "a row whose file is gone can't steer")
         expect(queue(1, status: "pending", heldBy: "waiting").queuedReceipt == "Queued for @builder, which is waiting on you; sends after you answer.", "a refreshed receipt keeps that the target is waiting on you")
         expect(queue(1, status: "pending", heldBy: "busy").queuedReceipt == "Queued for @builder; sends when current turn ends.", "a refreshed receipt for a busy target sends after the turn")
         expect(QueueFacts.attention(attention, for: "s1").count == 1 && QueueFacts.attention(attention, for: "s2").isEmpty, "attention filters by session")

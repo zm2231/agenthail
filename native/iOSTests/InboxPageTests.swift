@@ -197,6 +197,57 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(refreshed.refreshed(with: back).unreachable, [])
     }
 
+    private func modelWithTheOwnerHeld() throws -> AgenthailIOSModel {
+        KeychainStore.removeAll()
+        addTeardownBlock { KeychainStore.removeAll(); InboxHostProtocol.failing = [] }
+        try AgenthailIOSTests.pair("hlaptop", "https://fast.invalid", name: "laptop")
+        try AgenthailIOSTests.pair("hserver", "https://older.invalid", name: "server")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InboxHostProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        var row = HostCatalogTests.row("hserver::s", name: "s")
+        row.host = SessionHost(id: "hserver", name: "server", state: "connected")
+        var laptop = HostCatalogTests.snapshot([row])
+        laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
+        model.setHostSnapshot(laptop, host: "hlaptop")
+        model.setHostSnapshot(HostCatalogTests.snapshot([]), host: "hserver")
+        let owner = try XCTUnwrap(model.connection("hserver"))
+        owner.grace.contact()
+        InboxHostProtocol.failing = ["older.invalid"]
+        owner.recordStreamInterruption(probeError: URLError(.timedOut))
+        XCTAssertTrue(owner.holding, "the owner is shown connected during its grace")
+        InboxHostProtocol.actions = []
+        return model
+    }
+
+    func testEditCancelsThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
+        try await model.takeBack(InboxPage.qualified(queueRow(id: 9), host: "hserver"))
+        XCTAssertEqual(InboxHostProtocol.actions.first?["to"] as? String, "fast.invalid")
+        XCTAssertEqual(InboxHostProtocol.actions.first?["host"] as? String, "hserver")
+        XCTAssertEqual(InboxHostProtocol.actions.first?["action"] as? String, "queue-cancel")
+    }
+
+    func testRetryAndCancelGoThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
+        try await model.updateQueue(id: 9, hostID: "hserver", retry: true)
+        try await model.updateQueue(InboxPage.qualified(queueRow(id: 10), host: "hserver"), retry: false)
+        let actions = InboxHostProtocol.actions
+        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-retry", "queue-cancel"])
+        XCTAssertEqual(actions.compactMap { $0["to"] as? String }, ["fast.invalid", "fast.invalid"])
+        XCTAssertEqual(actions.compactMap { $0["host"] as? String }, ["hserver", "hserver"])
+    }
+
+    func testSteerWorksThroughAMirrorWhileTheOwnerIsHeld() async throws {
+        let model = try modelWithTheOwnerHeld()
+        try await model.steerQueued(InboxPage.qualified(queueRow(id: 9), host: "hserver"), capabilities: Capabilities(steer: true))
+        let actions = InboxHostProtocol.actions
+        XCTAssertEqual(actions.compactMap { $0["action"] as? String }, ["queue-cancel", "steer"])
+        XCTAssertEqual(actions.compactMap { $0["to"] as? String }, ["fast.invalid", "fast.invalid"], "both go through the computer that can reach the session")
+        XCTAssertEqual(actions.first?["host"] as? String, "hserver", "the row is cancelled on the computer that holds it")
+        XCTAssertEqual(actions.last?["sessionId"] as? String, "hserver::s")
+    }
+
     func testTheInboxAsksEveryComputerAndReachesOneThroughAnother() async throws {
         KeychainStore.removeAll()
         defer { KeychainStore.removeAll() }
