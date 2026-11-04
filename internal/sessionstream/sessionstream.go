@@ -20,6 +20,7 @@ type Event struct {
 	CallID           string
 	Role             string
 	Status           string
+	Phase            string
 	ResetsAt         string
 	Body             string
 	Reason           string
@@ -47,6 +48,7 @@ func DecodePayload(seq uint64, payload []byte) (Event, error) {
 		CallID           string `json:"callId"`
 		Role             string `json:"role"`
 		Status           string `json:"status"`
+		Phase            string `json:"phase"`
 		ResetsAt         string `json:"resetsAt"`
 		Body             string `json:"body"`
 		Reason           string `json:"reason"`
@@ -58,7 +60,7 @@ func DecodePayload(seq uint64, payload []byte) (Event, error) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return Event{}, fmt.Errorf("decode session journal event: %w", err)
 	}
-	return Event{Seq: seq, ItemID: event.ItemID, ProviderKey: event.ProviderKey, Version: event.Version, Operation: event.Operation, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, CallID: event.CallID, Role: event.Role, Status: event.Status, ResetsAt: event.ResetsAt, Body: event.Body, Reason: event.Reason, Final: event.Final, Truncated: event.Truncated, TruncationReason: event.TruncationReason, BodyRef: event.BodyRef}, nil
+	return Event{Seq: seq, ItemID: event.ItemID, ProviderKey: event.ProviderKey, Version: event.Version, Operation: event.Operation, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, CallID: event.CallID, Role: event.Role, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Body: event.Body, Reason: event.Reason, Final: event.Final, Truncated: event.Truncated, TruncationReason: event.TruncationReason, BodyRef: event.BodyRef}, nil
 }
 
 func (e Event) Terminal() bool {
@@ -86,6 +88,10 @@ func (e Event) FailureReason() string {
 		}
 	}
 	return "terminal failure"
+}
+
+func (e Event) Commentary() bool {
+	return e.Phase == "commentary"
 }
 
 func (e Event) SpokenAssistantContent() bool {

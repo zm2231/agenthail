@@ -133,7 +133,7 @@ func (s *Service) subscribe(ctx context.Context, f *follower) (sessionstream.Sub
 }
 
 func (s *Service) followVoiceTurn(ctx context.Context, f *follower, messages []string, event sessionstream.Event, previous string) {
-	if event.SpokenAssistantContent() {
+	if event.SpokenAssistantContent() && !event.Commentary() {
 		delta := event.Body
 		if strings.HasPrefix(event.Body, previous) {
 			delta = strings.TrimPrefix(event.Body, previous)

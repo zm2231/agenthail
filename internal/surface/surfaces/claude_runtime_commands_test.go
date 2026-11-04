@@ -215,7 +215,8 @@ func TestACodexStreamRelistsSkillsWhenTheAppServerSaysTheyChanged(t *testing.T) 
 	})
 	fake.AddThread(codextest.Thread{ID: "thread"})
 	fake.Load("thread")
-	sess := managedSession()
+	sess := managedRolloutSession(t, `{"type":"session_meta","payload":{"id":"thread"}}`)
+	sess.TranscriptOffsetSet = true
 	sess.Cwd = "/w"
 	events := make(chan surface.StreamEvent, 64)
 	ctx, cancel := context.WithCancel(context.Background())

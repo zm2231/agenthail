@@ -17,8 +17,28 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) { return c.Commands(ctx, &listed) }, onEvent)
 		defer commands.Stop()
 	}
+	if sess.Transport == codexTransportManaged && uuid != "" {
+		return c.followManagedTurn(ctx, sess, uuid, onEvent, timeout)
+	}
 	if sess.Transport == codexTransportManaged {
-		return c.streamManaged(ctx, sess, uuid, onEvent, commands, timeout)
+		stateContext, stopState := context.WithCancel(ctx)
+		watched := make(chan struct{})
+		stateSession := *sess
+		go func() {
+			defer close(watched)
+			c.watchManagedState(stateContext, stateSession, onEvent, commands)
+		}()
+		defer func() {
+			stopState()
+			<-watched
+		}()
+	}
+	if !sess.TranscriptOffsetSet && sess.TranscriptFromStart {
+		if err := awaitCodexRollout(ctx, sess, timeout); err != nil {
+			return err
+		}
+		sess.TranscriptOffset = 0
+		sess.TranscriptOffsetSet = true
 	}
 	if !sess.TranscriptOffsetSet {
 		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: timelineItemLimit})
@@ -35,6 +55,25 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		sess.CodexCurrentTurnID = read.CodexCurrentTurnID
 	}
 	return c.streamTranscript(ctx, sess, uuid, onEvent, timeout)
+}
+
+// awaitCodexRollout waits for a thread's rollout, which Codex writes only
+// once the thread's first turn starts.
+func awaitCodexRollout(ctx context.Context, sess *surface.Session, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if path := codexTranscriptPath(sess); path != "" && fileExists(path) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("Codex rollout was not created within %s: %w", timeout, surface.ErrStreamWindow)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(transcriptPollInterval):
+		}
+	}
 }
 
 func codexDesktopStreamKey(turnID, kind, itemID string) string {
@@ -60,15 +99,6 @@ func codexDesktopKeyKind(kind string) string {
 	default:
 		return kind
 	}
-}
-
-func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), commands *commandsWatch, timeout time.Duration) error {
-	client, err := c.openReader(ctx, sess)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, commands, timeout)
 }
 
 func codexManagedAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
