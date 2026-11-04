@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,29 +10,51 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
-	local, remote, record := pairedFederationWithGrace(t, time.Hour)
-	remote.gate.proxyDown.Store(true)
-	remote.server.CloseClientConnections()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, row := range sessionsOf(local.snapshot(t), record.ID) {
+func assertRowsAvailableFor(t *testing.T, local *federationNode, hostID string, span time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(span)
+	for {
+		for _, row := range sessionsOf(local.snapshot(t), hostID) {
 			if row.UnavailableReason != "" || row.Host.State != hostStateConnected {
 				t.Fatalf("a host outage inside the grace marked %s %s: %q", row.ID, row.Host.State, row.UnavailableReason)
 			}
 		}
+		if !time.Now().Before(deadline) {
+			return
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	before := remote.gate.beyondVersion.Load()
-	remote.gate.proxyDown.Store(false)
-	testkit.Eventually(t, "the mirror to reconnect", 10*time.Second, func() bool {
-		return remote.gate.beyondVersion.Load() > before
-	})
-	for _, row := range sessionsOf(local.snapshot(t), record.ID) {
-		if row.UnavailableReason != "" || row.Host.State != hostStateConnected {
-			t.Fatalf("after recovery %s is %s: %q", row.ID, row.Host.State, row.UnavailableReason)
+}
+
+func awaitMirroredName(t *testing.T, local, remote *federationNode, hostID, name string) {
+	t.Helper()
+	remote.fake.mu.Lock()
+	session := remote.fake.sessions["remote-a"]
+	session.Name, session.LastActive = name, time.Now()
+	remote.fake.sessions["remote-a"] = session
+	remote.fake.mu.Unlock()
+	remote.daemon.discoverCatalog(context.Background())
+	testkit.Eventually(t, "the mirror to follow the host again", 10*time.Second, func() bool {
+		for _, row := range sessionsOf(local.snapshot(t), hostID) {
+			if row.Name == name {
+				return true
+			}
 		}
-	}
+		return false
+	})
+}
+
+func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
+	local, remote, record := pairedFederationWithGrace(t, time.Hour)
+	remote.gate.proxyDown.Store(true)
+	remote.server.CloseClientConnections()
+	assertRowsAvailableFor(t, local, record.ID, 3*time.Second)
+	remote.gate.proxyDown.Store(false)
+	awaitMirroredName(t, local, remote, record.ID, "after the first drop")
+	remote.server.CloseClientConnections()
+	assertRowsAvailableFor(t, local, record.ID, 2*time.Second)
+	awaitMirroredName(t, local, remote, record.ID, "after the second drop")
+	assertRowsAvailableFor(t, local, record.ID, 0)
 }
 
 func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
