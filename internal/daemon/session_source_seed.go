@@ -20,7 +20,7 @@ var (
 )
 
 func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
-	source, release, err := m.holdSource(session, adapter, "page-seed")
+	source, release, err := m.holdSource(ctx, session, adapter, "page-seed")
 	if err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Sessio
 }
 
 func (m *sessionSourceManager) readHistory(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
-	source, release, err := m.holdSource(session, adapter, "history-read")
+	source, release, err := m.holdSource(ctx, session, adapter, "history-read")
 	if err != nil {
 		return nil, err
 	}

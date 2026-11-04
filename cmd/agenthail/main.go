@@ -21,6 +21,10 @@ var (
 )
 
 func main() {
+	if err := registry.RefuseSudoHome(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if len(os.Args) == 3 && (os.Args[1] == "claude-peer-worker" || os.Args[1] == "claude-peer-relay") {
 		var config claudepeer.Config
 		if err := json.NewDecoder(os.Stdin).Decode(&config); err != nil {
