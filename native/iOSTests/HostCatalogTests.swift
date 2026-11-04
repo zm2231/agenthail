@@ -213,7 +213,7 @@ final class HostCatalogTests: XCTestCase {
         return row
     }
 
-    private static func row(_ id: String, name: String) -> SessionState {
+    static func row(_ id: String, name: String) -> SessionState {
         SessionState(id: id, surface: "claude", name: name, alias: nil, status: "idle", lastActive: nil, queueCount: 0,
                      open: true, current: true, currentReason: nil, capabilities: Capabilities(send: true, steer: true), readOnly: false, readOnlyReason: nil)
     }

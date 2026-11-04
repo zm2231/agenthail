@@ -574,14 +574,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
         guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
         guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        let (api, target) = try reach(hostID)
         let id = draftKey(for: item)
-        let route = try resolve(id).route
+        let (api, route) = try resolve(id)
         let key = "queue:\(item.listID)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        let cancelled = try await api.cancelQueued(item, host: target.remote)
+        let cancelled = try await api.cancelQueued(item, host: route.hostID == hostID ? nil : hostID)
         let message = cancelled.message ?? item.message
         let attachments = cancelled.attachments ?? []
         do {
@@ -589,10 +588,10 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             deliveryStatus[id] = deliveryLabel(receipt.result?.evidence, detail: receipt.result?.detail)
         } catch {
             returnToDraft(message, attachments: attachments, id: id)
-            await connections[target.hostID]?.refresh(fresh: true)
+            await connections[route.hostID]?.refresh(fresh: true)
             throw AgenthailAPIError.unavailable("Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))")
         }
-        await connections[target.hostID]?.refresh(fresh: true)
+        await connections[route.hostID]?.refresh(fresh: true)
         await refreshSession(id)
     }
 
