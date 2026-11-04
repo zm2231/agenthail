@@ -22,6 +22,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	testkit.StopGitAtTempDir()
 	if os.Getenv("AGENTHAIL_TEST_RUN_MAIN") == "1" {
 		os.Args = append([]string{"agenthail"}, os.Args[1:]...)
 		os.Exit(testkit.RunAwayFromLiveDashboard(func() int {
