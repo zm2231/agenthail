@@ -394,13 +394,22 @@ final class AgenthailAPI: @unchecked Sendable {
         throw AgenthailAPIError.invalidResponse
     }
 
-    func queuePage(sessionID: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> QueuePage {
+    func activeQueue(sessionID: String? = nil, host: String? = nil, timeout: TimeInterval = 25) async throws -> [QueueState] {
+        let page: QueuePage = try await request(try Self.listPath("/api/v1/queue", ["sessionId": sessionID, "host": host]), method: "GET", body: nil, timeout: timeout)
+        return page.items
+    }
+
+    func inbox(sessionID: String? = nil, host: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> InboxMessagePage {
+        try await request(try Self.listPath("/api/v1/inbox", ["sessionId": sessionID, "host": host, "before": before.map(String.init)]), method: "GET", body: nil, timeout: timeout)
+    }
+
+    private static func listPath(_ path: String, _ values: [String: String?]) throws -> String {
         var components = URLComponents()
-        components.path = "/api/v1/queue"
-        let items = [sessionID.map { URLQueryItem(name: "sessionId", value: $0) }, before.map { URLQueryItem(name: "before", value: String($0)) }].compactMap { $0 }
+        components.path = path
+        let items = values.compactMap { name, value in value.map { URLQueryItem(name: name, value: $0) } }.sorted { $0.name < $1.name }
         components.queryItems = items.isEmpty ? nil : items
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
-        return try await request(path, method: "GET", body: nil, timeout: timeout)
+        return path
     }
 
     func queueItem(id: Int64, timeout: TimeInterval = 25) async throws -> QueueState? {
@@ -596,8 +605,9 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, author: String? = nil, idempotencyKey: String? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, author: String? = nil, host: String? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
+        if let host { body["host"] = host }
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
         if let model { body["model"] = model }

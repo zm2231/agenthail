@@ -4,16 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"sort"
 	"strconv"
-
-	"github.com/zm2231/agenthail/internal/hosts"
-	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type mobileQueuePage struct {
-	Items      []dashboardQueue `json:"items"`
-	NextBefore int64            `json:"nextBefore,omitempty"`
+	Items []dashboardQueue `json:"items"`
 }
 
 func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,36 +17,25 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	numbers := map[string]int64{}
-	for _, name := range []string{"id", "before", "limit"} {
-		if raw := query.Get(name); raw != "" {
-			value, err := strconv.ParseInt(raw, 10, 64)
-			if err != nil || value <= 0 {
-				writeAPIError(w, http.StatusBadRequest, "invalid_request", name+" must be a positive integer.")
-				return
-			}
-			numbers[name] = value
+	if raw := query.Get("id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "id must be a positive integer.")
+			return
 		}
-	}
-	if id := numbers["id"]; id != 0 {
 		d.mobileQueueItem(w, id)
 		return
 	}
-	_, sessionID, _ := hosts.Split(query.Get("sessionId"))
-	page, err := d.Registry.QueuePage(registry.QueuePageRequest{SessionID: sessionID, Before: numbers["before"], Limit: int(numbers["limit"])}, d.adapters())
+	rows, err := d.Registry.ActiveQueue(query.Get("sessionId"), d.adapters())
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "Queued instructions are unavailable.")
 		return
 	}
-	items := make([]dashboardQueue, 0, len(page.Active)+len(page.History))
-	for _, row := range page.Active {
+	items := make([]dashboardQueue, 0, len(rows))
+	for _, row := range rows {
 		items = append(items, d.dashboardQueueItem(row))
 	}
-	for _, row := range page.History {
-		items = append(items, d.dashboardQueueItem(row))
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
-	writeDashboardJSON(w, http.StatusOK, mobileQueuePage{Items: items, NextBefore: page.NextBefore})
+	writeDashboardJSON(w, http.StatusOK, mobileQueuePage{Items: items})
 }
 
 func (d *Daemon) mobileQueueItem(w http.ResponseWriter, id int64) {

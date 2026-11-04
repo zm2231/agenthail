@@ -5,7 +5,7 @@ A session's inbox is every message sent to it, whether it was delivered at once 
 | Table | One row per | Read by |
 | --- | --- | --- |
 | `delivery_intents` | message, sender to target, with its delivery status | `GET /api/v1/inbox` |
-| `message_queue` | message or command still waiting, or recently finished, with its retry state | `GET /api/v1/queue`, Settings > Delivery, retry and cancel |
+| `message_queue` | message or command still waiting or finished, with its retry state | `GET /api/v1/queue` (rows that can still be acted on), Settings > Delivery, retry and cancel |
 | `delivery_history` | delivery attempt or outcome, capped at 2000 rows | `GET /api/v1/history`, Audit |
 
 ## Recording
@@ -25,6 +25,8 @@ Failure, refusal and held notices go only to agent senders (`readsNotices`), so 
 ## Reading
 
 `GET /api/v1/inbox[?sessionId=<id>][&before=<id>][&limit=<n>]` lists intents newest first: 50 by default, at most 200. `nextBefore` is the cursor for the next page. A `sessionId` routes to the host that owns the session. Without one the list covers this host's sessions only, so a client with several hosts asks each.
+
+The iPhone inbox has two tabs. Current reads `GET /api/v1/queue`, which lists what can still be acted on and needs no paging. History reads this endpoint, reloads its first page every 5 seconds while it is on screen, and leaves out what Current shows. A host too old to serve this endpoint is named in the tab, and the other hosts still list.
 
 An item is `pending` while its intent is `submitted`, `queued` or `held`. A message that waited carries its `queueId`, `attempts` and `lastError`, and its full text from the queue row. Otherwise the text is the intent's copy, which keeps the first 16 KiB; past that `truncated` is true, and the whole message is the turn in the target session's transcript.
 

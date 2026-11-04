@@ -502,9 +502,22 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        let hosts = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        if let sessionID {
+            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
+                throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
+            }
+            let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+            let name = catalog.hosts.first { $0.id == owner }?.name ?? connection.name
+            return try await InboxPage.load(from: [InboxPage.Host(id: owner, name: name, api: connection.api)], sessionID: route.sessionID, before: cursors, partial: partial)
+        }
+        let direct = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
+        let remote = catalog.hosts.compactMap { host -> InboxPage.Host? in
+            guard let target = catalog.target(forHost: host.id), let peer = target.remote, let connection = connections[target.hostID] else { return nil }
+            return InboxPage.Host(id: host.id, name: host.name, api: connection.api, remote: peer)
+        }
+        let hosts = direct + remote
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await InboxPage.load(from: hosts, sessionID: sessionID, before: cursors, partial: partial)
+        return try await InboxPage.load(from: hosts, sessionID: nil, before: cursors, partial: partial)
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {
@@ -524,15 +537,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func updateQueue(_ item: QueueState, retry: Bool) async throws {
-        guard let hostID = item.hostID, let connection = connections[hostID], connection.shownReachable else {
-            throw AgenthailAPIError.unavailable("Connect to your computer first.")
-        }
-        let key = "queue:\(item.listID)"
+        try await updateQueue(id: item.id, hostID: item.hostID, retry: retry)
+    }
+
+    func updateQueue(id: Int64, hostID: String?, retry: Bool) async throws {
+        guard let hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
+        let (api, target) = try reach(hostID)
+        let key = "queue:\(hostID)/\(id)"
         guard !pendingControls.contains(key) else { return }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
-        try await connection.api.action(retry ? "queue-retry" : "queue-cancel", queueID: item.id)
-        await connection.refresh(fresh: true)
+        try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: id, host: target.remote)
+        await connections[target.hostID]?.refresh(fresh: true)
     }
 
     /// Cancels a queued message and puts it back ahead of its session's draft.

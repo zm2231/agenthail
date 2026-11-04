@@ -4,6 +4,7 @@ import XCTest
 private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requests: [String] = []
     nonisolated(unsafe) static var failing: Set<String> = []
+    nonisolated(unsafe) static var actions: [[String: Any]] = []
     private static let lock = NSLock()
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -12,7 +13,8 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let url = request.url!
-        Self.lock.withLock { Self.requests.append(url.host! + "?" + (url.query ?? "")) }
+        Self.lock.withLock { Self.requests.append(url.host! + url.path + "?" + (url.query ?? "")) }
+        if url.path == "/api/v1/actions" { Self.recordAction(request, host: url.host!) }
         if url.host == "slow.invalid" { return }
         if Self.lock.withLock({ Self.failing.contains(url.host!) }) {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
@@ -20,30 +22,64 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
         }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let before = query.first { $0.name == "before" }?.value
-        let body: String
-        if url.host == "older.invalid" {
-            body = before == nil
-                ? #"{"items":[\#(Self.item(9, session: "s1", status: "pending", at: "2026-11-02 10:00:00")),\#(Self.item(8, session: "s1", status: "delivered", at: "2026-11-01 10:00:00")),\#(Self.item(7, session: "s2", status: "delivered", at: "2026-11-01 09:00:00"))],"nextBefore":8}"#
-                : #"{"items":[\#(Self.item(3, session: "s1", status: "delivered", at: "2026-08-01 10:00:00"))]}"#
-        } else {
-            body = #"{"items":[\#(Self.item(5, session: "s1", status: "delivered", at: "2026-11-02 08:00:00"))]}"#
-        }
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        let (status, body) = Self.answer(host: url.host!, path: url.path, before: before)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    static func item(_ id: Int, session: String, status: String, at: String) -> String {
-        #"{"id":\#(id),"sessionId":"\#(session)","target":"@\#(session)","message":"m\#(id)","status":"\#(status)","attempts":1,"queuedAt":"\#(at)","historical":\#(status == "delivered"),"evidence":"\#(status == "delivered" ? "delivered" : "queued")"}"#
+    private static func recordAction(_ request: URLRequest, host: String) {
+        var data = request.httpBody ?? Data()
+        if let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer[0..<count])
+            }
+        }
+        var action = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        action["to"] = host
+        lock.withLock { actions.append(action) }
+    }
+
+    private static func answer(host: String, path: String, before: String?) -> (Int, String) {
+        if path == "/api/v1/queue" {
+            let rows = host == "older.invalid" || host == "dated.invalid"
+                ? [queued(9, at: "2026-11-02 10:00:00"), #"{"id":2,"sessionId":"s1","target":"@s1","message":"done","status":"delivered","attempts":1,"queuedAt":"2026-11-01 10:00:00","historical":true,"evidence":"delivered"}"#]
+                : []
+            return (200, #"{"items":[\#(rows.joined(separator: ","))]}"#)
+        }
+        switch host {
+        case "dated.invalid":
+            return (404, #"{"error":{"code":"unknown_route","message":"This Agenthail has no /api/v1/inbox; it runs an older version."}}"#)
+        case "older.invalid":
+            return (200, before == nil
+                ? #"{"items":[\#(message(20, queue: 9, pending: true, at: "2026-11-02T10:00:00Z")),\#(message(19, at: "2026-11-02T09:00:00Z")),\#(message(18, at: "2026-11-01T10:00:00Z"))],"nextBefore":18}"#
+                : #"{"items":[\#(message(3, at: "2026-08-01T10:00:00Z"))]}"#)
+        default:
+            return (200, #"{"items":[\#(message(5, at: "2026-11-02T08:00:00Z"))]}"#)
+        }
+    }
+
+    private static func queued(_ id: Int, at: String) -> String {
+        #"{"id":\#(id),"sessionId":"s1","target":"@s1","message":"m\#(id)","status":"pending","attempts":0,"queuedAt":"\#(at)","historical":false,"evidence":"queued"}"#
+    }
+
+    private static func message(_ id: Int, queue: Int? = nil, pending: Bool = false, at: String) -> String {
+        let queued = queue.map { #""queueId":\#($0),"queueStatus":"pending","# } ?? ""
+        return #"{"id":\#(id),"sessionId":"s1","target":"@s1","message":"m\#(id)","status":"\#(pending ? "queued" : "delivered")","evidence":"\#(pending ? "queued" : "delivered")","pending":\#(pending),\#(queued)"createdAt":"\#(at)"}"#
     }
 }
 
 @MainActor
 final class InboxPageTests: XCTestCase {
-    private func host(_ name: String) -> InboxPage.Host {
+    private func host(_ name: String, remote: String? = nil) -> InboxPage.Host {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InboxHostProtocol.self]
-        return InboxPage.Host(id: name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: URLSession(configuration: configuration)))
+        return InboxPage.Host(id: name, name: name, api: AgenthailAPI(baseURL: URL(string: "https://\(name).invalid")!, token: "t", session: URLSession(configuration: configuration)), remote: remote)
     }
 
     func testAnUnreachableHostDoesNotHoldTheOthersPastItsShortTimeout() async throws {
@@ -51,7 +87,7 @@ final class InboxPageTests: XCTestCase {
         let started = Date()
         var partials: [(TimeInterval, Int)] = []
         let page = try await InboxPage.load(from: [host("slow"), host("older"), host("fast")], sessionID: nil) { partial in
-            partials.append((Date().timeIntervalSince(started), partial.items.count))
+            partials.append((Date().timeIntervalSince(started), partial.messages.count))
         }
         let elapsed = Date().timeIntervalSince(started)
         XCTAssertLessThan(elapsed, InboxPage.hostTimeout + 3)
@@ -59,40 +95,78 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(partials.last?.1, 4)
         XCTAssertLessThan(try XCTUnwrap(partials.last).0, 2, "the reachable hosts show before the unreachable one times out")
         XCTAssertEqual(page.unreachable, ["slow"])
-        XCTAssertEqual(page.items.map(\.listID), ["older/9", "fast/5", "older/8", "older/7"])
-        XCTAssertEqual(page.cursors, ["older": 8])
+        XCTAssertEqual(page.messages.map(\.listID), ["older/20", "older/19", "fast/5", "older/18"])
+        XCTAssertEqual(page.cursors, ["older": 18])
+    }
+
+    func testCurrentIsTheActiveQueueAndHistoryLeavesOutWhatCurrentShows() async throws {
+        let page = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        XCTAssertEqual(page.active.map(\.listID), ["older/9"], "a finished row an older computer still sends is not current")
+        XCTAssertEqual(page.history.map(\.listID), ["older/19", "fast/5", "older/18"])
+    }
+
+    func testHistoryKeepsAMessageWhoseQueueIDMatchesARowOnAnotherHost() {
+        let message = InboxMessage(id: 1, sessionId: "s", target: "@s", sourceSessionId: nil, source: nil, message: "m", status: "delivered", evidence: "delivered", pending: false, queueId: 9, createdAt: "2026-11-02T08:00:00Z", hostID: "fast")
+        var page = InboxPage(messages: [message])
+        page.active = [InboxPage.qualified(queueRow(id: 9), host: "older")]
+        XCTAssertEqual(page.history.map(\.listID), ["fast/1"])
+    }
+
+    private func queueRow(id: Int) -> QueueState {
+        try! JSONDecoder().decode(QueueState.self, from: Data(#"{"id":\#(id),"sessionId":"s","target":"@s","message":"m","status":"pending","attempts":0,"queuedAt":"2026-11-02 10:00:00","evidence":"queued"}"#.utf8))
+    }
+
+    func testAComputerTooOldForTheInboxIsNamedAndOthersStillList() async throws {
+        let page = try await InboxPage.load(from: [host("dated"), host("fast")], sessionID: nil)
+        XCTAssertEqual(page.outdated, ["dated"])
+        XCTAssertEqual(page.unreachable, [])
+        XCTAssertEqual(page.messages.map(\.listID), ["fast/5"])
+        XCTAssertEqual(page.active.map(\.listID), ["dated/9"], "its waiting rows are still its own")
+
+        let alone = try await InboxPage.load(from: [host("dated")], sessionID: nil)
+        XCTAssertEqual(alone.outdated, ["dated"], "being the only computer is not a failure")
+    }
+
+    func testARemoteHostBehindAnOlderComputerShowsNoneOfThatComputersRows() async throws {
+        InboxHostProtocol.requests = []
+        let page = try await InboxPage.load(from: [host("dated", remote: "peer")], sessionID: nil)
+        XCTAssertEqual(page.outdated, ["dated"])
+        XCTAssertEqual(page.active, [])
+        XCTAssertEqual(Set(InboxHostProtocol.requests), ["dated.invalid/api/v1/queue?host=peer", "dated.invalid/api/v1/inbox?host=peer"])
     }
 
     func testASessionInboxAsksForThatSessionAndPagesOlderHistory() async throws {
         InboxHostProtocol.requests = []
-        let first = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: "older::s1")
-        XCTAssertTrue(InboxHostProtocol.requests.allSatisfy { $0.contains("sessionId=older::s1") })
-        XCTAssertEqual(first.items.map(\.listID), ["older/9", "older/8"])
+        let first = try await InboxPage.load(from: [host("older")], sessionID: "s1")
+        XCTAssertEqual(Set(InboxHostProtocol.requests), ["older.invalid/api/v1/queue?sessionId=s1", "older.invalid/api/v1/inbox?sessionId=s1"])
+        XCTAssertEqual(first.messages.map(\.sessionId), ["older::s1", "older::s1", "older::s1"])
         XCTAssertTrue(first.hasOlder)
 
         InboxHostProtocol.requests = []
-        let older = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: "older::s1", before: first.cursors)
-        XCTAssertEqual(InboxHostProtocol.requests, ["older.invalid?sessionId=older::s1&before=8"])
+        let older = try await InboxPage.load(from: [host("older")], sessionID: "s1", before: first.cursors)
+        XCTAssertEqual(InboxHostProtocol.requests, ["older.invalid/api/v1/inbox?before=18&sessionId=s1"])
         let merged = first.appending(older)
-        XCTAssertEqual(merged.items.map(\.listID), ["older/9", "older/8", "older/3"])
+        XCTAssertEqual(merged.messages.map(\.listID), ["older/20", "older/19", "older/18", "older/3"])
         XCTAssertFalse(merged.hasOlder)
+        XCTAssertEqual(merged.active.map(\.listID), ["older/9"], "an older page leaves the current rows alone")
 
         let refreshed = merged.refreshed(with: first)
-        XCTAssertEqual(refreshed.items.map(\.listID), ["older/9", "older/8", "older/3"])
+        XCTAssertEqual(refreshed.messages.map(\.listID), ["older/20", "older/19", "older/18", "older/3"], "reloading the first page keeps what was paged in")
         XCTAssertFalse(refreshed.hasOlder)
     }
 
     func testAHostThatFailsKeepsItsLoadedRowsAndCursor() async throws {
         defer { InboxHostProtocol.failing = [] }
         let first = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
-        XCTAssertEqual(first.cursors, ["older": 8])
+        XCTAssertEqual(first.cursors, ["older": 18])
 
         InboxHostProtocol.failing = ["older.invalid"]
         let refresh = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
         XCTAssertEqual(refresh.unreachable, ["older"])
         let refreshed = first.refreshed(with: refresh)
-        XCTAssertEqual(refreshed.items.map(\.listID), ["older/9", "fast/5", "older/8", "older/7"])
-        XCTAssertEqual(refreshed.cursors, ["older": 8], "the failed host can still load older history once it answers")
+        XCTAssertEqual(refreshed.messages.map(\.listID), ["older/20", "older/19", "fast/5", "older/18"])
+        XCTAssertEqual(refreshed.active.map(\.listID), ["older/9"])
+        XCTAssertEqual(refreshed.cursors, ["older": 18], "the failed host can still load older history once it answers")
         XCTAssertEqual(refreshed.unreachable, ["older"])
 
         do {
@@ -101,12 +175,55 @@ final class InboxPageTests: XCTestCase {
         } catch {}
 
         var twoHosts = first
-        twoHosts.cursors = ["older": 8, "fast": 5]
-        let partlyFailed = InboxPage(items: [], cursors: ["older": 8], unreachable: ["older"], answered: ["fast"])
-        XCTAssertEqual(twoHosts.appending(partlyFailed).cursors, ["older": 8], "a host that failed keeps its cursor; one that answered with no more pages drops it")
+        twoHosts.cursors = ["older": 18, "fast": 5]
+        let partlyFailed = InboxPage(cursors: ["older": 18], unreachable: ["older"], answered: ["fast"])
+        XCTAssertEqual(twoHosts.appending(partlyFailed).cursors, ["older": 18], "a host that failed keeps its cursor; one that answered with no more pages drops it")
 
         InboxHostProtocol.failing = []
         let back = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
         XCTAssertEqual(refreshed.refreshed(with: back).unreachable, [])
+    }
+
+    func testTheInboxAsksEveryComputerAndReachesOneThroughAnother() async throws {
+        KeychainStore.removeAll()
+        defer { KeychainStore.removeAll() }
+        try AgenthailIOSTests.pair("hlaptop", "https://fast.invalid", name: "laptop")
+        try AgenthailIOSTests.pair("hdesk", "https://older.invalid", name: "desk")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InboxHostProtocol.self]
+        let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration))
+        var laptop = HostCatalogTests.snapshot([])
+        laptop.daemonHosts([HostHealth(id: "hserver", name: "server", state: "connected")])
+        model.setHostSnapshot(laptop, host: "hlaptop")
+        model.setHostSnapshot(HostCatalogTests.snapshot([]), host: "hdesk")
+
+        InboxHostProtocol.requests = []
+        let all = try await model.inboxPage(sessionID: nil)
+        XCTAssertEqual(Set(InboxHostProtocol.requests.filter { $0.contains("/inbox") }), ["fast.invalid/api/v1/inbox?", "older.invalid/api/v1/inbox?", "fast.invalid/api/v1/inbox?host=hserver"])
+        XCTAssertTrue(Set(all.messages.map(\.listID)).isSuperset(of: ["hlaptop/5", "hserver/5", "hdesk/19"]))
+        XCTAssertTrue(all.messages.contains { $0.sessionId == "hserver::s1" })
+
+        InboxHostProtocol.requests = []
+        _ = try await model.inboxPage(sessionID: "hdesk::s1")
+        XCTAssertEqual(Set(InboxHostProtocol.requests), ["older.invalid/api/v1/queue?sessionId=s1", "older.invalid/api/v1/inbox?sessionId=s1"], "a session's inbox asks only its owner, by its own id")
+
+        InboxHostProtocol.requests = []
+        let remote = try await model.inboxPage(sessionID: "hserver::s1")
+        XCTAssertEqual(Set(InboxHostProtocol.requests), ["fast.invalid/api/v1/queue?sessionId=hserver::s1", "fast.invalid/api/v1/inbox?sessionId=hserver::s1"])
+        XCTAssertEqual(remote.messages.map(\.listID), ["hserver/5"])
+
+        InboxHostProtocol.actions = []
+        try await model.updateQueue(id: 9, hostID: "hserver", retry: true)
+        let action = try XCTUnwrap(InboxHostProtocol.actions.first)
+        XCTAssertEqual(action["to"] as? String, "fast.invalid")
+        XCTAssertEqual(action["host"] as? String, "hserver")
+        XCTAssertEqual(action["action"] as? String, "queue-retry")
+        XCTAssertEqual(action["queueId"] as? Int, 9)
+    }
+
+    func testAPeerEnvelopeReadsAsItsSenderAndBody() {
+        let envelope = PeerEnvelope(#"<cross-session-message from="uds:/run/x.sock" from-name="@reviewer" hop-chain="ab">Check the signing step.</cross-session-message>"#)
+        XCTAssertEqual(envelope.sender, "@reviewer")
+        XCTAssertEqual(envelope.body, "Check the signing step.")
     }
 }
