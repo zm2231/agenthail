@@ -382,4 +382,21 @@ async function takenBack(tab, queueId = 7) {
   assert.equal(watching.$("#message").value, "newer", "nor does a late clear");
 }
 
+{
+  const values = new Map();
+  const local = await loaded({ values });
+  const other = await loaded({ values });
+  local.storage.full = true;
+  local.$("#message").value = "unsaved local edit";
+  local.$("#message").listeners.input();
+  local.storage.full = false;
+  other.$("#message").value = "other tab edit";
+  other.$("#message").listeners.input();
+  const key = [...values.keys()].find((name) => name.startsWith("agenthail.draft."));
+  for (const listener of local.context.window.listeners.storage) listener({ key, newValue: values.get(key) });
+  assert.equal(local.$("#message").value, "unsaved local edit", "another tab's draft never replaces an edit this tab could not save");
+  local.$("#message").listeners.input();
+  assert.equal((await loaded({ values })).context.app.drafts.get("a"), "unsaved local edit", "and the edit saves once storage has room");
+}
+
 console.log("queued attachments: ok");

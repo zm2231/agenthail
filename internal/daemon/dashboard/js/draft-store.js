@@ -69,7 +69,7 @@ export function persistentDrafts() {
     watch(adopt) {
       globalThis.window?.addEventListener?.("storage", (event) => {
         const sessionId = sessionOf(event.key);
-        if (sessionId === undefined) return;
+        if (sessionId === undefined || unsaved.has(sessionId)) return;
         const text = stored(sessionId) || "";
         const previous = synced.get(sessionId) ?? "";
         if (text !== previous && adopt(sessionId, text, previous)) synced.set(sessionId, text);
