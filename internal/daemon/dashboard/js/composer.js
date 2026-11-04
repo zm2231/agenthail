@@ -10,9 +10,7 @@ import { selectSession } from "./session-selection.js";
 import { deliveryStatusLabel } from "./delivery-labels.js";
 import { escape } from "./format.js";
 import { rememberToolRow } from "./tool-view.js";
-import { bindAttachmentEvents, heldAttachments, releaseAttachments, renderAttachments, sendableAttachments } from "./composer-attachments.js";
-
-const attachmentsCannotSteer = "Attached files can't join a running turn. Send queues them for next.";
+import { attachmentSteerRefusal, bindAttachmentEvents, heldAttachments, releaseAttachments, renderAttachments, sendableAttachments } from "./composer-attachments.js";
 
 export function resizeComposer() {
   const input = $("#message");
@@ -30,7 +28,9 @@ export function syncComposerAction() {
   const steerButton = $("#steer-message");
   const capabilities = app.history?.capabilities || {};
   const busy = app.selected?.status === "busy";
-  const attached = Boolean(app.selected && heldAttachments(app.selected.id).length);
+  const held = app.selected ? heldAttachments(app.selected.id) : [];
+  const attached = held.length > 0;
+  const steerRefusal = attachmentSteerRefusal(held, capabilities);
   const hasMessage = Boolean(input.value.trim()) || Boolean(app.selected && sendableAttachments(app.selected.id).length);
   const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
   const turnNotice = (app.history ? capabilities.turnNotice : app.selected?.capabilities?.turnNotice) || "";
@@ -39,7 +39,7 @@ export function syncComposerAction() {
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
   sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
   sendButton.disabled = readOnly || (!hasMessage && !stopping);
-  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !attached && !readOnly);
+  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !steerRefusal && !readOnly);
   steerButton.disabled = steerButton.hidden;
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
@@ -51,8 +51,8 @@ export function syncComposerAction() {
     ? "This agent is waiting on you. Messages queue until you answer it."
     : turnNotice
     ? turnNotice
-    : busy && attached
-    ? attachmentsCannotSteer
+    : busy && steerRefusal
+    ? steerRefusal
     : busy
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
@@ -98,15 +98,17 @@ export async function send(requestedAction = "send") {
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
     const steering = composerAction === "steer" || command.toLowerCase() === "/steer";
-    if (steering && holding) throw Error(attachmentsCannotSteer);
+    const steerRefusal = steering ? attachmentSteerRefusal(heldAttachments(sessionId), app.history?.capabilities) : "";
+    if (steerRefusal) throw Error(steerRefusal);
     if (commandAction && !steering && holding) throw Error("Send the attached files as a message, or remove them before running a command.");
     if (steering || !commandAction) {
-      const sent = steering ? [] : attachments;
+      const sent = attachments;
+      const ids = sent.length ? { attachments: sent.map((attachment) => attachment.id) } : {};
       const payload = steering
-        ? { message: composerAction === "steer" ? message : argument, author: "person" }
-        : { message, author: "person", ...selectedTurnOptions(), ...(sent.length ? { attachments: sent.map((attachment) => attachment.id) } : {}) };
+        ? { message: composerAction === "steer" ? message : argument, author: "person", ...(sent.length ? { busyDelivery: "steer", ...ids } : {}) }
+        : { message, author: "person", ...selectedTurnOptions(), ...ids };
       if (!sessionId) throw Error("Choose a conversation first");
-      const wire = { action: steering ? "steer" : "send", sessionId, ...withHolder(sessionId, payload) };
+      const wire = { action: steering && !sent.length ? "steer" : "send", sessionId, ...withHolder(sessionId, payload) };
       if (enqueueSend(sessionId, wire, message, sent)) {
         clearComposer(sessionId, message, sent);
         return;
@@ -159,7 +161,7 @@ async function sendAnswered(item, result) {
   toast(
     result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"
       ? result.result.detail
-      : item.wire.action === "steer"
+      : item.wire.action === "steer" || (item.wire.busyDelivery === "steer" && result?.result?.evidence !== "queued")
       ? "Current turn redirected."
       : result?.result?.notice
       ? `${status} to ${target}. ${result.result.notice}`
