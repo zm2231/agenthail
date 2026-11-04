@@ -22,10 +22,23 @@ private final class InboxHostProtocol: URLProtocol, @unchecked Sendable {
         }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let before = query.first { $0.name == "before" }?.value
+        if url.path == "/api/v1/queue", let id = query.first(where: { $0.name == "id" })?.value, let row = Self.lookup(id: id, on: url.host!, via: query.first { $0.name == "host" }?.value) {
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(row.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         let (status, body) = Self.answer(host: url.host!, path: url.path, before: before)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func lookup(id: String, on host: String, via remote: String?) -> String? {
+        if id == "9" && remote == "hserver" { return #"{"items":[\#(queued(9, at: "2026-11-02 10:00:00"))]}"# }
+        if id == "10" && remote == nil { return #"{"items":[\#(queued(10, at: "2026-11-02 10:00:00").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"hserver::s1""#))]}"# }
+        if id == "11" && remote == nil { return #"{"items":[\#(queued(11, at: "2026-11-02 10:00:00").replacingOccurrences(of: #""sessionId":"s1""#, with: #""sessionId":"laptop-own""#))]}"# }
+        return #"{"items":[]}"#
     }
 
     private static func recordAction(_ request: URLRequest, host: String) {
@@ -219,6 +232,17 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(action["host"] as? String, "hserver")
         XCTAssertEqual(action["action"] as? String, "queue-retry")
         XCTAssertEqual(action["queueId"] as? Int, 9)
+
+        InboxHostProtocol.requests = []
+        let owned = await model.queuedDelivery(id: 9, sessionID: "hserver::s1")
+        XCTAssertEqual(InboxHostProtocol.requests, ["fast.invalid/api/v1/queue?host=hserver&id=9"], "a receipt reads the owner's queue")
+        XCTAssertEqual(owned?.listID, "hserver/9")
+
+        let held = await model.queuedDelivery(id: 10, sessionID: "hserver::s1")
+        XCTAssertEqual(held?.sessionId, "hserver::s1", "a send held for a down owner is on the computer holding it")
+
+        let other = await model.queuedDelivery(id: 11, sessionID: "hserver::s1")
+        XCTAssertNil(other, "a row with the same id for another session is not this receipt")
     }
 
     func testAPageAsTheComputerSendsItDecodes() throws {

@@ -412,8 +412,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return path
     }
 
-    func queueItem(id: Int64, timeout: TimeInterval = 25) async throws -> QueueState? {
-        let page: QueuePage = try await request("/api/v1/queue?id=\(id)", method: "GET", body: nil, timeout: timeout)
+    func queueItem(id: Int64, host: String? = nil, timeout: TimeInterval = 25) async throws -> QueueState? {
+        let page: QueuePage = try await request(try Self.listPath("/api/v1/queue", ["id": String(id), "host": host]), method: "GET", body: nil, timeout: timeout)
         return page.items.first
     }
 

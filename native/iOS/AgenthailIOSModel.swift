@@ -1284,17 +1284,25 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await fetchRequests(sessionID, key: sessionRequestsKey)
     }
 
+    // A send to a computer reached through another is queued on the owner, or on the other computer while the owner is down.
+    func queuedDelivery(id: Int64, sessionID: String) async -> QueueState? {
+        guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { return nil }
+        let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+        let expected = HostCatalog.qualify(route.hostID, route.sessionID)
+        for host in owner == route.hostID ? [nil] : [owner, nil] {
+            let found = try? await connection.api.queueItem(id: id, host: host, timeout: InboxPage.hostTimeout)
+            if let item = found.flatMap({ $0 }).map({ InboxPage.qualified($0, host: owner) }), item.sessionId == expected { return item }
+        }
+        return nil
+    }
+
     private func refreshDeliveries() async {
         guard !deliveryQueueIDs.isEmpty, !refreshingDeliveries else { return }
         refreshingDeliveries = true
         defer { refreshingDeliveries = false }
         let expected = deliveryQueueIDs
         for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else { continue }
-            let found: QueueState?
-            do { found = try await connection.api.queueItem(id: queueID, timeout: InboxPage.hostTimeout).map { InboxPage.qualified($0, host: route.hostID) } }
-            catch { continue }
-            guard let item = found, item.sessionId == HostCatalog.qualify(route.hostID, route.sessionID) else { continue }
+            guard let item = await queuedDelivery(id: queueID, sessionID: sessionID) else { continue }
             switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
             case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
             case "queued": deliveryStatus[sessionID] = item.queuedReceipt
