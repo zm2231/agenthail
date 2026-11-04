@@ -123,6 +123,9 @@ func (s *sessionSource) loadSeed() error {
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
 	if seeded && transcriptBacked {
+		if rebuilt, err := s.rebuildStaleCodexJournal(ctx); err != nil || rebuilt {
+			return err
+		}
 		caughtUp, err := s.catchUpFromCheckpoint(ctx, trustedIdentity)
 		if err == nil && !caughtUp {
 			err = s.catchUpLocalTranscript(ctx, trustedIdentity, "")

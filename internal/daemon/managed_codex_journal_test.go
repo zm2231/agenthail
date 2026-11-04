@@ -201,7 +201,7 @@ func TestAManagedCodexJournalWithAppServerRowsIsReadOnceFromItsRollout(t *testin
 			t.Fatal(err)
 		}
 	}
-	if err := reg.MarkSessionJournalDerivation(session.ID, 0); err != nil {
+	if err := reg.MarkSessionJournalDerivation(session.ID, 1); err != nil {
 		t.Fatal(err)
 	}
 	second, err := manager.prepareStream(context.Background(), &session, adapter)

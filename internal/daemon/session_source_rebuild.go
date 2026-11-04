@@ -112,7 +112,7 @@ const journalRederives = 2
 func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	reader, ok := s.adapter.(surface.TranscriptItemReader)
 	if !ok {
-		return s.rederiveCodexJournal(ctx)
+		return nil
 	}
 	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
 	if err != nil || version >= transcriptJournalDerivation {
