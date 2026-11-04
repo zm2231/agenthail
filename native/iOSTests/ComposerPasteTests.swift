@@ -24,6 +24,20 @@ final class ComposerPasteTests: XCTestCase {
         return view
     }
 
+    func testThePlaceholderShowsOnlyWhileTheComposerIsEmpty() throws {
+        let view = makeTextView()
+        XCTAssertNotNil(view.textLayoutManager, "the composer uses TextKit 2")
+        view.placeholder = "Message this agent…"
+        view.layoutIfNeeded()
+        let label = try XCTUnwrap(view.subviews.compactMap { $0 as? UILabel }.first { $0.text == "Message this agent…" })
+        XCTAssertFalse(label.isHidden)
+        XCTAssertGreaterThan(label.frame.height, 0)
+        view.text = "draft"
+        XCTAssertTrue(label.isHidden)
+        view.text = ""
+        XCTAssertFalse(label.isHidden)
+    }
+
     override func tearDown() {
         window?.isHidden = true
         window = nil
