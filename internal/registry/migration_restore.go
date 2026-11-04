@@ -86,6 +86,7 @@ func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 		return RestoredRegistry{}, fmt.Errorf("restore %s: %w", file, err)
 	}
 	restoreStep("verified")
+	checkpointBeforeRestore(path)
 	aside, sidecars, err := linkRegistryAside(path)
 	if err != nil {
 		return RestoredRegistry{}, fmt.Errorf("set the current registry aside: %w", err)
@@ -157,8 +158,20 @@ func verifyRestoredCopy(path string, schema int) error {
 	return nil
 }
 
+// A WAL with nothing in it leaves nothing to lose if a kill lands between unlinking it and the swap. Failing here changes nothing: the WAL is then linked aside with the rest.
+func checkpointBeforeRestore(path string) {
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(1000)")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+}
+
 // Links keep every original reachable and the registry path present, because an opener would create an empty registry at a missing path.
-// Opening the registry to learn its schema could remove its WAL, so this reads the header.
 func linkRegistryAside(path string) (string, []string, error) {
 	current, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -203,7 +216,7 @@ func reattachSidecars(path, aside string, sidecars []string) error {
 		return nil
 	}
 	for _, suffix := range sidecars {
-		if err := os.Link(aside+suffix, path+suffix); err != nil && !os.IsExist(err) {
+		if err := os.Link(aside+suffix, path+suffix); err != nil {
 			return fmt.Errorf("the registry's previous files are still at %s: %w", aside, err)
 		}
 	}
@@ -229,4 +242,3 @@ func registryAsidePath(path string, schema int, now time.Time) string {
 	}
 	return fmt.Sprintf("%s-%d.db", strings.TrimSuffix(name, ".db"), now.UnixMilli())
 }
-

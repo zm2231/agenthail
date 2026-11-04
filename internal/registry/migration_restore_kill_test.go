@@ -39,16 +39,19 @@ func TestRestoreProcessThatIsKilled(t *testing.T) {
 
 func TestKillingARestoreAtAnyStepLeavesAnOpenableRegistry(t *testing.T) {
 	for _, test := range []struct {
-		step string
-		// where the rows only the WAL holds can be read after the kill
+		step            string
+		checkpointFails bool
+		// where the rows the WAL held can be read after the kill
 		walRowsInRegistry, walRowsAside bool
 	}{
 		{step: "verified", walRowsInRegistry: true},
 		{step: "linked", walRowsInRegistry: true, walRowsAside: true},
-		{step: "detached -wal", walRowsAside: true},
 		{step: "swapped", walRowsAside: true},
+		{step: "linked", checkpointFails: true, walRowsInRegistry: true, walRowsAside: true},
+		{step: "detached -wal", checkpointFails: true, walRowsAside: true},
+		{step: "swapped", checkpointFails: true, walRowsAside: true},
 	} {
-		t.Run(test.step, func(t *testing.T) {
+		t.Run(test.step+" checkpoint fails "+strconv.FormatBool(test.checkpointFails), func(t *testing.T) {
 			live := filepath.Join(t.TempDir(), "registry.db")
 			registryAtSchema(t, live, schemaVersion)
 			holder, err := connect(live)
@@ -89,6 +92,11 @@ func TestKillingARestoreAtAnyStepLeavesAnOpenableRegistry(t *testing.T) {
 				t.Fatal(err)
 			}
 			aside := filepath.Join(filepath.Dir(path), "registry-v"+strconv.Itoa(schemaVersion)+".db")
+			if test.checkpointFails {
+				if err := os.Chmod(path, 0400); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			helper := exec.Command(os.Args[0], "-test.run=^TestRestoreProcessThatIsKilled$")
 			helper.Env = append(os.Environ(), killStepEnv+"="+test.step, killPathEnv+"="+path, killTargetEnv+"="+strconv.Itoa(target))
@@ -96,6 +104,16 @@ func TestKillingARestoreAtAnyStepLeavesAnOpenableRegistry(t *testing.T) {
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || !strings.Contains(exit.String(), "killed") {
 				t.Fatalf("the restore was not killed: %v\n%s", err, output)
+			}
+			if test.checkpointFails {
+				if err := os.Chmod(path, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if test.walRowsAside {
+					if err := os.Chmod(aside, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
 
 			began := time.Now()
@@ -162,6 +180,78 @@ func TestAnOpenGivesUpWhenARestoreNeverFinishes(t *testing.T) {
 	defer func() { restoreWait = previous }()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "still being restored") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestAReattachThatFindsASidecarThereKeepsTheSetAside(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	for _, file := range []string{path, path + "-wal"} {
+		if err := os.WriteFile(file, []byte("original"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aside, sidecars, err := linkRegistryAside(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := detachSidecars(path, sidecars); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+"-wal", []byte("recreated"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err = reattachSidecars(path, aside, sidecars)
+	if err == nil || !strings.Contains(err.Error(), aside) {
+		t.Fatalf("err=%v, want it to name %s", err, aside)
+	}
+	if data, _ := os.ReadFile(aside + "-wal"); string(data) != "original" {
+		t.Fatalf("the original WAL was lost: %q", data)
+	}
+	if _, err := os.Stat(aside); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestACheckpointLeavesNothingInTheWALAndTheRowsInTheFile(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "registry.db")
+	registryAtSchema(t, live, schemaVersion)
+	holder, err := connect(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	if _, err := holder.db.Exec(`PRAGMA wal_autocheckpoint=0`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.db.Exec(`CREATE TABLE only_in_wal(id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "registry.db")
+	for _, suffix := range []string{"", "-wal"} {
+		data, err := os.ReadFile(live + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+suffix, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkpointBeforeRestore(path)
+	if info, err := os.Stat(path + "-wal"); err == nil && info.Size() > 0 {
+		t.Fatalf("the WAL still holds %d bytes", info.Size())
+	}
+	checkpointed, err := connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkpointed.Close()
+	if !hasWALRows(t, checkpointed) {
+		t.Fatal("the rows did not reach the file")
+	}
+	missing := filepath.Join(t.TempDir(), "absent.db")
+	checkpointBeforeRestore(missing)
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("the checkpoint created a registry: %v", err)
 	}
 }
 

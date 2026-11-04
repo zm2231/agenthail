@@ -244,23 +244,6 @@ func TestARestoreWorksFromEitherFormOnARegistryNewerThanThisBuild(t *testing.T) 
 	}
 }
 
-func TestARestoreKeepsTheWALWithTheRegistryItReplaces(t *testing.T) {
-	path, newer := registryNewerThanBuildWithBackup(t, true)
-	if err := os.WriteFile(path+"-wal", []byte("rows"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	restored, err := restoreMigrationBackup(path, newer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(restored.Aside + "-wal"); err != nil || string(data) != "rows" {
-		t.Fatalf("wal=%q err=%v", data, err)
-	}
-	if _, err := os.Stat(path + "-wal"); !os.IsNotExist(err) {
-		t.Fatalf("the old WAL would apply to the restored file: %v", err)
-	}
-}
-
 func TestRowsOnlyInTheWALSurviveInTheSetAsideRegistry(t *testing.T) {
 	live := filepath.Join(t.TempDir(), "registry.db")
 	registryAtSchema(t, live, schemaVersion)
