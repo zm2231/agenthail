@@ -16,8 +16,12 @@ struct PendingSend: Identifiable, Equatable {
     var uploaded: [String]?
     var wire: ActionWire?
     var unconfirmed = false
+    let sentAt: Date
+    var retryStopped = false
+    var retryingOnTap = false
 
-    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false) {
+    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date()) {
+        self.sentAt = sentAt
         self.id = id
         self.sessionID = sessionID
         self.message = message

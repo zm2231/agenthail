@@ -7,6 +7,12 @@ struct SessionPreview: View {
     private let session: SessionState
     private let detail: SessionDetail
 
+    private static var storeWithASendPastItsHour: ComposerStore {
+        let store = ComposerStore(file: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("composer.json"))
+        store.save(ComposerStore.Saved(sends: [.init(id: UUID(), sessionID: "computer::demo", message: "Keep the regression check with the fix.", turnSettings: TurnSettings(), idempotencyKey: UUID().uuidString, uploaded: nil, wire: nil, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))]))
+        return store
+    }
+
     init() {
         let decoder = JSONDecoder()
         let capture = SessionCapture.current
@@ -23,7 +29,8 @@ struct SessionPreview: View {
         let model = AgenthailIOSModel(
             api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
             paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry"),
-            hostName: "studio-mac"
+            hostName: "studio-mac",
+            composerStore: ProcessInfo.processInfo.arguments.contains("--preview-send-past-its-hour") ? Self.storeWithASendPastItsHour : nil
         )
         model.setHostSnapshot(snapshot)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)

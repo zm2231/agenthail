@@ -15,15 +15,23 @@ struct ComposerSendStatus: View {
                     .accessibilityIdentifier("send-retry")
             }
         } else if let waiting {
-            row("Not confirmed yet · retrying", color: PhonePalette.muted, identifier: "send-unconfirmed") {
-                Button("Put back") { confirmingPutBack = true }
-                    .accessibilityIdentifier("send-put-back")
-                    .confirmationDialog("It may already have arrived. Put it back in the composer?", isPresented: $confirmingPutBack, titleVisibility: .visible) {
-                        Button("Put back") { model.putBack(waiting) }
-                        Button("Keep retrying", role: .cancel) {}
-                    }
+            row(waiting.retryStopped ? "Not confirmed" : "Not confirmed yet · retrying", color: PhonePalette.muted, identifier: "send-unconfirmed") {
+                if waiting.retryStopped {
+                    Button("Retry") { model.retrySend(waiting) }
+                        .accessibilityIdentifier("send-unconfirmed-retry")
+                }
+                putBack(waiting)
             }
         }
+    }
+
+    private func putBack(_ send: PendingSend) -> some View {
+        Button("Put back") { confirmingPutBack = true }
+            .accessibilityIdentifier("send-put-back")
+            .confirmationDialog("It may already have arrived. Put it back in the composer?", isPresented: $confirmingPutBack, titleVisibility: .visible) {
+                Button("Put back") { model.putBack(send) }
+                Button(send.retryStopped ? "Keep it here" : "Keep retrying", role: .cancel) {}
+            }
     }
 
     private func row(_ text: String, color: some ShapeStyle, identifier: String, @ViewBuilder action: () -> some View) -> some View {

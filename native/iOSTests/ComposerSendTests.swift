@@ -526,6 +526,71 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(delivered, ["old", "new"], "one worker keeps delivering, under the new id")
     }
 
+    func testASendStopsRetryingAnHourAfterItWasSentAndATapTriesOnce() async throws {
+        let queue = SendQueue()
+        var clock = Date()
+        queue.now = { clock }
+        var attempts = 0
+        var online = false
+        queue.deliver = { _ in
+            attempts += 1
+            return online ? .answered : .unconfirmed
+        }
+        queue.add(PendingSend(sessionID: "a", message: "m", attachments: [], turnSettings: TurnSettings(), sentAt: clock))
+        try await waitUntil { queue.pending["a"]?.first?.unconfirmed == true }
+        queue.wake()
+        try await waitUntil { attempts == 2 }
+
+        clock = clock.addingTimeInterval(SendQueue.retryWindow)
+        queue.wake()
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        let stopped = attempts
+        queue.wake()
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(attempts, stopped, "past the hour only a tap sends it")
+
+        let send = try XCTUnwrap(queue.pending["a"]?.first)
+        queue.retry(send)
+        try await waitUntil { attempts == stopped + 1 && queue.pending["a"]?.first?.retryStopped == true }
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(attempts, stopped + 1, "a tap is one attempt")
+
+        online = true
+        queue.retry(try XCTUnwrap(queue.pending["a"]?.first))
+        try await waitUntil { queue.pending.isEmpty }
+    }
+
+    func testAStoppedSendDoesNotHoldANewerOne() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        queue.deliver = { send in
+            delivered.append(send.message)
+            return .answered
+        }
+        queue.restore([PendingSend(sessionID: "a", message: "old", attachments: [], turnSettings: TurnSettings(), unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow))])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        queue.add(PendingSend(sessionID: "a", message: "new", attachments: [], turnSettings: TurnSettings()))
+        try await waitUntil { delivered == ["new"] }
+        XCTAssertEqual(queue.pending["a"]?.map(\.message), ["old"])
+    }
+
+    func testAnOldSavedSendComesBackStoppedAndKeepsItsSentTime() async throws {
+        let store = temporaryStore()
+        let sent = Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow)
+        store.save(ComposerStore.Saved(sends: [.init(PendingSend(sessionID: "computer::demo", message: "Days old", attachments: [], turnSettings: TurnSettings(), sentAt: sent))]))
+        XCTAssertEqual(store.load().saved.sends.first?.sentAt?.timeIntervalSince1970 ?? 0, sent.timeIntervalSince1970, accuracy: 0.01)
+
+        let before = ComposerSendProtocol.state.attempts.count
+        let model = try makeModel(store: store).model
+        try await waitUntil { model.pendingSends["computer::demo"]?.first?.retryStopped == true }
+        XCTAssertEqual(model.deliveryStatus["computer::demo"], "Not confirmed")
+        XCTAssertEqual(ComposerSendProtocol.state.attempts.count, before, "opening the app does not send it")
+
+        let older = ComposerStore.Saved.Send(id: UUID(), sessionID: "s", message: "m", turnSettings: TurnSettings(), idempotencyKey: "k", uploaded: nil, wire: nil, hadAttachments: false)
+        let decoded = try JSONDecoder().decode(ComposerStore.Saved.Send.self, from: JSONEncoder().encode(older))
+        XCTAssertEqual(decoded.resumable?.sentAt, .distantPast, "a send saved with no time never arrives late by itself")
+    }
+
     func testAReleasedQueueStopsRetrying() async throws {
         var attempts = 0
         var queue: SendQueue? = SendQueue()

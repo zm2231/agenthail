@@ -31,6 +31,15 @@ final class ComposerSendUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["send-failure"].waitForExistence(timeout: 5))
     }
 
+    func testASendPastItsHourWaitsForARetryOrPutBack() {
+        let app = launch("--preview-send-past-its-hour")
+        XCTAssertTrue(app.staticTexts["send-unconfirmed"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["send-unconfirmed"].label, "Not confirmed")
+        XCTAssertTrue(app.buttons["send-unconfirmed-retry"].exists)
+        XCTAssertTrue(app.buttons["send-put-back"].exists)
+        attachScreenshot(app, "past-its-hour")
+    }
+
     func testALostResponseClearsTheComposerAndCanBePutBack() {
         let app = launch("--preview-send-lost")
         let composer = app.textViews["composer-input"]
