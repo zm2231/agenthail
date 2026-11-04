@@ -112,6 +112,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var failedSends: [String: String] = [:]
     private var lostAttachments: [String: [String]] = [:]
     private var composerStore: ComposerStore?
+    private var waitingComposerStore: ComposerStore?
+    private var protectedDataObserver: NSObjectProtocol?
+    private static let composerFileKeptNotice = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
+    private static let composerUnreadNotice = "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes."
+    private var composerWaitAnnounced = false
     private var composerSave: Task<Void, Never>?
     private var draftChanges: AnyCancellable?
     @Published var composerAttachments: [ComposerAttachment] = [] {
@@ -960,6 +965,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func resumeConnection() {
+        retryComposerStore()
         guard isPaired else {
             refreshNotificationRegistration()
             return
@@ -1555,28 +1561,79 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     private func restoreComposerState() {
         guard let composerStore else { return }
-        let loaded = composerStore.load()
-        if loaded.unreadable {
-            Self.composerLog.error("composer file unreadable; \(loaded.setAside.map { "set aside as \($0.lastPathComponent)" } ?? "left in place, not saving this launch", privacy: .public)")
-            operationError = loaded.setAside == nil
-                ? "Saved drafts couldn’t be read yet. New drafts won’t be saved until you reopen Agenthail."
-                : "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
-            if loaded.setAside == nil { self.composerStore = nil }
+        openComposerStore(composerStore)
+        draftChanges = draft.$text.dropFirst().sink { [weak self] _ in self?.saveComposerStateSoon() }
+    }
+
+    private func openComposerStore(_ store: ComposerStore) {
+        let loaded = store.load()
+        if loaded.unreadable, loaded.setAside == nil {
+            Self.composerLog.error("composer file could not be read; left in place, not saving until it can be")
+            composerStore = nil
+            waitForComposerStore(store, announce: !loaded.locked)
+            return
         }
-        let saved = loaded.saved
-        drafts = saved.drafts
-        stashes = saved.stashes.mapValues { ComposerStash(text: $0, attachments: []) }
-        lostAttachments = saved.attachmentNames
-        for record in saved.sends {
-            if let send = record.resumable {
-                sendQueue.add(send)
+        if loaded.unreadable {
+            Self.composerLog.error("composer file unreadable; set aside as \(loaded.setAside?.lastPathComponent ?? "", privacy: .public)")
+            operationError = Self.composerFileKeptNotice
+        }
+        let waited = waitingComposerStore != nil
+        stopWaitingForComposerStore()
+        composerStore = store
+        mergeSavedComposerState(loaded.saved)
+        if waited { saveComposerState() }
+    }
+
+    private func waitForComposerStore(_ store: ComposerStore, announce: Bool) {
+        if announce, !composerWaitAnnounced {
+            composerWaitAnnounced = true
+            operationError = Self.composerUnreadNotice
+        }
+        waitingComposerStore = store
+        guard protectedDataObserver == nil else { return }
+        protectedDataObserver = NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.retryComposerStore() }
+        }
+    }
+
+    private func stopWaitingForComposerStore() {
+        waitingComposerStore = nil
+        if let protectedDataObserver { NotificationCenter.default.removeObserver(protectedDataObserver) }
+        protectedDataObserver = nil
+        if operationError == Self.composerUnreadNotice { operationError = nil }
+    }
+
+    private func retryComposerStore() {
+        guard let waitingComposerStore else { return }
+        openComposerStore(waitingComposerStore)
+    }
+
+    private func mergeSavedComposerState(_ saved: ComposerStore.Saved) {
+        func joined(_ earlier: String, _ later: String) -> String {
+            if later.isEmpty || later == earlier { return earlier }
+            return earlier.isEmpty ? later : earlier + "\n\n" + later
+        }
+        func addToDraft(_ text: String, for session: String) {
+            if session == selectedSessionID {
+                composer = joined(text, composer)
             } else {
-                let newer = drafts[record.sessionID] ?? ""
-                drafts[record.sessionID] = newer.isEmpty ? record.message : record.message + "\n\n" + newer
-                failedSends[record.sessionID] = "Not sent: the app closed before its attachment uploaded. Add it again."
+                drafts[session] = joined(text, drafts[session] ?? "")
             }
         }
-        draftChanges = draft.$text.dropFirst().sink { [weak self] _ in self?.saveComposerStateSoon() }
+        for (session, text) in saved.drafts { addToDraft(text, for: session) }
+        for (session, text) in saved.stashes {
+            if stashes[session] == nil {
+                stashes[session] = ComposerStash(text: text, attachments: [])
+            } else {
+                addToDraft(text, for: session)
+            }
+        }
+        lostAttachments.merge(saved.attachmentNames) { $0 + $1 }
+        sendQueue.restore(saved.sends.compactMap(\.resumable))
+        for record in saved.sends where record.resumable == nil {
+            addToDraft(record.message, for: record.sessionID)
+            failedSends[record.sessionID] = "Not sent: the app closed before its attachment uploaded. Add it again."
+        }
     }
 
     private func saveComposerStateSoon() {

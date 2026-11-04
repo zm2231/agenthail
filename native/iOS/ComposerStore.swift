@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 /// What typed or sent text must outlive the app. Attachment bytes stay in memory.
 struct ComposerStore {
@@ -21,23 +21,28 @@ struct ComposerStore {
     }
 
     let file: URL
+    var protectedDataIsAvailable: @MainActor () -> Bool = { true }
 
     static var standard: ComposerStore? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            .map { ComposerStore(file: $0.appendingPathComponent("composer.json")) }
+            .map { ComposerStore(file: $0.appendingPathComponent("composer.json"), protectedDataIsAvailable: { UIApplication.shared.isProtectedDataAvailable }) }
     }
 
     struct Loaded {
         var saved = Saved()
         var unreadable = false
         var setAside: URL?
+        var locked = false
     }
 
-    // A failed read can be temporary, such as a launch before first unlock, so only a file that was read and makes no sense moves.
+    // Before first unlock a read fails while a rename can still succeed, so availability is taken before the read and a locked file stays put.
+    @MainActor
     func load(now: Date = Date()) -> Loaded {
         guard FileManager.default.fileExists(atPath: file.path) else { return Loaded() }
-        guard let data = try? Data(contentsOf: file) else { return Loaded(unreadable: true) }
-        if let saved = try? JSONDecoder().decode(Saved.self, from: data) { return Loaded(saved: saved) }
+        let available = protectedDataIsAvailable()
+        let data = try? Data(contentsOf: file)
+        if data == nil, !available { return Loaded(unreadable: true, locked: true) }
+        if let data, let saved = try? JSONDecoder().decode(Saved.self, from: data) { return Loaded(saved: saved) }
         let aside = file.deletingLastPathComponent().appendingPathComponent("\(file.lastPathComponent).unreadable-\(Int64(now.timeIntervalSince1970 * 1000))")
         let moved = (try? FileManager.default.moveItem(at: file, to: aside)) != nil
         return Loaded(unreadable: true, setAside: moved ? aside : nil)

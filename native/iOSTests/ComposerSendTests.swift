@@ -1,6 +1,12 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import Agenthail
+
+@MainActor
+private final class ProtectedData {
+    var locked = true
+}
 
 @MainActor
 final class ComposerSendTests: XCTestCase {
@@ -244,8 +250,40 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix("composer.json.unreadable-") }, [aside])
     }
 
-    func testAFileThatCannotBeReadYetIsLeftAloneAndRestoredLater() throws {
+    func testAFileThatCannotBeReadOnAnUnlockedPhoneMovesAsideSoNewSendsAreSaved() async throws {
+        ComposerSendProtocol.state.script(Array(repeating: .offline, count: 40))
         let store = temporaryStore()
+        store.save(.init(drafts: ["computer::other": "Kept in the file"]))
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.file.path)
+        try XCTSkipIf(FileManager.default.isReadableFile(atPath: store.file.path), "this runner can read any file")
+        let directory = store.file.deletingLastPathComponent()
+
+        var first: AgenthailIOSModel? = try makeModel(store: store).model
+        XCTAssertEqual(first?.operationError, "Saved drafts couldn’t be loaded. Their file was kept on this iPhone.")
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        let aside = try XCTUnwrap(names.first { $0.hasPrefix("composer.json.unreadable-") })
+        XCTAssertFalse(names.contains("composer.json"))
+
+        let session = try makeSession()
+        first?.composer = "Sent after"
+        first?.send(to: session)
+        try await waitUntil { ComposerSendProtocol.state.attempts.count >= 1 }
+        let key = ComposerSendProtocol.state.attempts[0].key
+        first = nil
+
+        let saved = store.load().saved
+        XCTAssertEqual(saved.sends.map(\.message), ["Sent after"], "an unconfirmed send outlives the app")
+        XCTAssertEqual(saved.sends.first?.idempotencyKey, key)
+        let keptAside = directory.appendingPathComponent(aside)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keptAside.path)
+        XCTAssertEqual(ComposerStore(file: keptAside).load().saved.drafts["computer::other"], "Kept in the file")
+    }
+
+    func testAFileThatCannotBeReadYetIsLeftAloneAndRestoredLater() async throws {
+        let lock = ProtectedData()
+        var store = temporaryStore()
+        store.protectedDataIsAvailable = { !lock.locked }
+        lock.locked = false
         let first = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         first.selectedSessionID = "computer::codex-flow"
         first.composer = "Typed before the lock"
@@ -255,20 +293,84 @@ final class ComposerSendTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path) }
         try XCTSkipIf(FileManager.default.isReadableFile(atPath: store.file.path), "this runner can read any file")
 
+        lock.locked = true
         let locked = AgenthailIOSModel(api: makeAPI(), composerStore: store)
-        XCTAssertNotNil(locked.operationError)
+        XCTAssertNil(locked.operationError, "a locked phone heals itself, so there is nothing to tell the person")
         locked.selectedSessionID = "computer::codex-flow"
         locked.composer = "Typed while locked"
         locked.saveComposerState()
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["composer.json"], "a file that may be fine is not moved")
 
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path)
+        lock.locked = false
         XCTAssertEqual(store.load().saved.drafts["computer::codex-flow"], "Typed before the lock", "nothing overwrote it")
         let unlocked = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         XCTAssertNil(unlocked.operationError)
+        await unlocked.loadSession("computer::codex-flow")
+        XCTAssertEqual(unlocked.composer, "Typed before the lock", "the restored draft reaches the composer")
     }
 
-    func testAFileThatCannotBeMovedAsideIsNeverOverwritten() throws {
+    func testUnlockingMidLaunchMergesWhatThisLaunchHeldOverWhatWasSaved() async throws {
+        ComposerSendProtocol.state.script(Array(repeating: .offline, count: 40))
+        let lock = ProtectedData()
+        var store = temporaryStore()
+        store.protectedDataIsAvailable = { !lock.locked }
+        let session = try makeSession()
+        store.save(.init(
+            drafts: [session.id: "Saved draft", "computer::other": "Saved elsewhere"],
+            stashes: ["computer::stashed": "Saved stash"],
+            sends: [.init(id: UUID(), sessionID: session.id, message: "Saved send", turnSettings: TurnSettings(), idempotencyKey: "saved-key", uploaded: [], wire: nil, hadAttachments: false)]
+        ))
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: store.file.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path) }
+        try XCTSkipIf(FileManager.default.isReadableFile(atPath: store.file.path), "this runner can read any file")
+
+        let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
+        XCTAssertNil(model.operationError)
+        XCTAssertTrue(model.pendingSends.isEmpty)
+        model.selectedSessionID = session.id
+        model.selectedDetail = try makeDetail()
+        model.composer = "Sent while locked"
+        model.send(to: session)
+        model.composer = "Typed while locked"
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: store.file.path)
+        lock.locked = false
+        NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+
+        XCTAssertNil(model.operationError)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.file.deletingLastPathComponent().path), ["composer.json"], "the file did not move")
+        XCTAssertEqual(model.composer, "Saved draft\n\nTyped while locked")
+        XCTAssertEqual(model.pendingSends[session.id]?.map(\.message).sorted(), ["Saved send", "Sent while locked"])
+        XCTAssertEqual(model.stashes["computer::stashed"]?.text, "Saved stash")
+        let saved = store.load().saved
+        XCTAssertEqual(saved.drafts[session.id], "Saved draft\n\nTyped while locked", "what was held in memory is on disk now")
+        XCTAssertEqual(saved.drafts["computer::other"], "Saved elsewhere")
+        XCTAssertEqual(Set(saved.sends.map(\.message)), ["Saved send", "Sent while locked"])
+        model.composer = "Typed after"
+        model.saveComposerState()
+        XCTAssertEqual(store.load().saved.drafts[session.id], "Typed after", "saving is on again")
+    }
+
+    func testSavedMessagesGoAheadOfOnesQueuedThisLaunch() async throws {
+        let queue = SendQueue()
+        var delivered: [String] = []
+        var release = false
+        queue.deliver = { send in
+            delivered.append(send.message)
+            return release ? .answered : .unconfirmed
+        }
+        queue.add(PendingSend(sessionID: "a", message: "New", attachments: [], turnSettings: TurnSettings()))
+        try await waitUntil { delivered.count == 1 }
+        queue.restore([PendingSend(sessionID: "a", message: "Saved", attachments: [], turnSettings: TurnSettings())])
+        XCTAssertEqual(queue.pending["a"]?.map(\.message), ["Saved", "New"])
+        release = true
+        queue.wake()
+        try await waitUntil(seconds: 5) { queue.pending.isEmpty }
+        XCTAssertEqual(delivered, ["New", "Saved", "New"])
+    }
+
+    func testAFileThatCannotBeMovedAsideIsNeverOverwrittenAndThePersonIsTold() throws {
         let store = temporaryStore()
         let directory = store.file.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -279,7 +381,7 @@ final class ComposerSendTests: XCTestCase {
         try XCTSkipIf(FileManager.default.isWritableFile(atPath: directory.path), "this runner can write any directory")
 
         let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
-        XCTAssertNotNil(model.operationError)
+        XCTAssertEqual(model.operationError, "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes.")
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         model.selectedSessionID = "computer::codex-flow"
         model.composer = "Typed after"

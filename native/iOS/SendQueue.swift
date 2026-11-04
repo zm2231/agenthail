@@ -23,6 +23,16 @@ final class SendQueue {
         start(send.sessionID)
     }
 
+    /// Saved messages are older than anything queued this launch, so they go first.
+    func restore(_ sends: [PendingSend]) {
+        guard !sends.isEmpty else { return }
+        for (session, saved) in Dictionary(grouping: sends, by: \.sessionID) {
+            pending[session] = saved + (pending[session] ?? [])
+        }
+        changed?()
+        for session in Set(sends.map(\.sessionID)) { start(session) }
+    }
+
     func wake() {
         waits.values.forEach { $0.cancel() }
     }
