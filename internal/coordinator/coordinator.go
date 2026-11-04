@@ -141,10 +141,7 @@ func (s Sender) send(ctx context.Context, adapter surface.Surface, session *surf
 		return nil, err
 	}
 	*session = *outcome.Session
-	if route.Moved {
-		outcome.Receipt.MovedTo = "@" + spec.Name
-		outcome.Receipt.Detail = strings.TrimSpace(fmt.Sprintf("Sent to @%s instead: %s. %s", spec.Name, route.Reason, outcome.Receipt.Detail))
-	}
+	route.Annotate(outcome.Receipt, spec.Name)
 	return outcome.Receipt, nil
 }
 

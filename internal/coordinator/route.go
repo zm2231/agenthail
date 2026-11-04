@@ -3,8 +3,10 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -13,6 +15,14 @@ type Route struct {
 	Moved    bool
 	Current  string
 	Reason   string
+}
+
+func (r Route) Annotate(receipt *delivery.Receipt, lead string) {
+	if !r.Moved || receipt == nil {
+		return
+	}
+	receipt.MovedTo = "@" + lead
+	receipt.Detail = strings.TrimSpace(fmt.Sprintf("Sent to @%s instead: %s. %s", lead, r.Reason, receipt.Detail))
 }
 
 func FromAgent(author surface.Author, sourceSessionID string) bool {

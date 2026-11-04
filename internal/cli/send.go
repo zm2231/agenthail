@@ -154,6 +154,7 @@ func (a *App) cmdSend(args []string) error {
 	} else if coordinated {
 		var answer coordinatorSendAnswer
 		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
+			route.Annotate(&answer.Result, spec.Name)
 			receipt = &answer.Result
 			ref := target
 			if !byName && answer.Started {
