@@ -28,6 +28,8 @@ let package = Package(
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
+                "InboxMessage.swift",
+                "PeerEnvelope.swift",
                 "TaggedResponses.swift",
                 "UIConfig.swift",
                 "SurfaceMode.swift",
