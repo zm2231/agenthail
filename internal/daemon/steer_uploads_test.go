@@ -34,7 +34,7 @@ func steerImageFixture(t *testing.T, takesImages bool) (*Daemon, *imageSteerSurf
 	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: deliverypolicy.Steer}); err != nil {
 		t.Fatal(err)
 	}
-	d.Registry.SetBusyPolicy(deliverypolicy.Load)
+	d.Registry.SetBusyPolicy(d.busyPolicy)
 	return d, steering, d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
 }
 

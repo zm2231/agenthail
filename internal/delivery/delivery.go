@@ -625,7 +625,7 @@ func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, 
 	if options.BusyDelivery != "" {
 		return deliverypolicy.Normalize(options.BusyDelivery)
 	}
-	return deliverypolicy.Load()
+	return deliverypolicy.Current(), nil
 }
 
 func (d Dispatcher) record(entry registry.HistoryEntry) {
