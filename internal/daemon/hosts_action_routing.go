@@ -14,6 +14,7 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 	var host *pairedHost
 	local := false
 	rewritten := false
+	var named *pairedHost
 	assign := func(candidate *pairedHost) error {
 		if candidate == nil {
 			local = true
@@ -31,7 +32,6 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		delete(request, "host")
 		rewritten = true
 		if hostRef = strings.TrimSpace(hostRef); hostRef != "" {
-			var named *pairedHost
 			if !d.isLocalHostRef(hostRef) {
 				found, exists := d.pairedHost(hostRef)
 				if !exists {
@@ -86,7 +86,8 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 		if action == "session-focus" {
 			return nil, false, fmt.Errorf("opening the terminal is not available for sessions on another host yet; this session runs on host %s", host.record.Name)
 		}
-		if strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
+		queueRowOnNamedHost := named == host && (action == "queue-retry" || action == "queue-cancel")
+		if strings.HasPrefix(action, "queue-") && !queueRowOnNamedHost || action == "delivery-dismiss" {
 			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
 	}

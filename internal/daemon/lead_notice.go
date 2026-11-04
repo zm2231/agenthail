@@ -98,6 +98,11 @@ func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting,
 		return
 	}
 	message := waitingNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), waiting, session.RuntimeKind, request, open)
+	d.taskNoticeMu.Lock()
+	defer d.taskNoticeMu.Unlock()
+	if d.taskRequestsRead[session.ID] == (taskRequestRead{waitingID: waiting.ID, reader: to.sessionID}) {
+		return
+	}
 	if _, err := d.sendNotice(to, session, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
 		d.log.Printf("tell the %s that %s is waiting: %s", to.role, d.resolveDisplay(session.ID), err)
 	}
