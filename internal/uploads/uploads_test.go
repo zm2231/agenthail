@@ -51,14 +51,14 @@ func TestResolvedUploadOutlivesTheSweepThatFollows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Sweep(); err != nil {
+	if err := store.Sweep(nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(resolved.Path); err != nil {
 		t.Fatalf("a just-resolved upload was swept: %v", err)
 	}
 	clock = clock.Add(Retention + time.Hour)
-	if err := store.Sweep(); err != nil {
+	if err := store.Sweep(nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Resolve(stored.ID); !errors.Is(err, ErrNotFound) {
