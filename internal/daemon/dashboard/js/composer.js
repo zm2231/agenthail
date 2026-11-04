@@ -154,7 +154,7 @@ function refusalNotice(sessionId, error) {
 
 async function sendAnswered(item, result) {
   const session = app.state?.sessions?.find((candidate) => candidate.id === item.sessionId) || app.selected;
-  const target = sessionTarget(session);
+  const target = result?.result?.movedTo || sessionTarget(session);
   const status = deliveryStatusLabel(result);
   toast(
     result?.result?.waitingOn || result?.result?.evidence === "transport_accepted"

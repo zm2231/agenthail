@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -76,10 +77,21 @@ func (a *App) cmdSend(args []string) error {
 		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
-	if current, replaced := coord.ReplacedBy(sess.ID); replaced {
-		if sess, surf, _, err = a.resolveAnyTarget(ctx, current); err != nil {
+	source, err := a.sourceSessionID(ctx, fromLabel)
+	if err != nil {
+		return err
+	}
+	route, unreadable := coord.RouteOf(ctx, sess.ID, coordinator.FromAgent("", source))
+	if unreadable != nil && (!surface.IsDeliveryUnavailable(unreadable) || hasFlag(args, "--no-queue")) {
+		return unreadable
+	}
+	if route.Moved {
+		fmt.Fprintf(os.Stderr, "Sending to @%s instead: %s.\n", spec.Name, route.Reason)
+		if sess, surf, _, err = a.resolveAnyTarget(ctx, route.Current); err != nil {
 			return err
 		}
+	} else if route.Replaced {
+		coordinated = false
 	}
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
@@ -120,11 +132,7 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	options := surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions}
-	options.SourceSessionID, err = a.sourceSessionID(ctx, fromLabel)
-	if err != nil {
-		return err
-	}
+	options := surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions, SourceSessionID: source}
 	addressed := *sess
 	followsJournal := false
 	dispatcher := delivery.Dispatcher{Registry: a.registry()}
@@ -141,9 +149,12 @@ func (a *App) cmdSend(args []string) error {
 			defer func() { _ = a.registry().ReleaseAliasReservation(notionName) }()
 		}
 	}
-	if coordinated {
+	if unreadable != nil {
+		receipt, err = coord.Hold(sess, message, options, unreadable)
+	} else if coordinated {
 		var answer coordinatorSendAnswer
 		if answer, err = a.coordinatorSend(ctx, spec, message, options, hasFlag(args, "--no-queue")); err == nil {
+			route.Annotate(&answer.Result, spec.Name)
 			receipt = &answer.Result
 			ref := target
 			if !byName && answer.Started {
