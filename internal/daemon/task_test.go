@@ -278,10 +278,11 @@ func TestOnlyTheParentOrAReaderOfTheChildSeesAResult(t *testing.T) {
 
 func TestReadingASettledResultClearsWake(t *testing.T) {
 	f := newTaskFixture(t)
-	f.turn("t1", done("text"))
-	if err := f.r.SetTaskWake(f.task.ID); err != nil {
+	if err := f.r.ArmTaskWake(f.task.ID); err != nil {
 		t.Fatal(err)
 	}
+	f.surface.observations[f.session.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "t1", Reply: done("text")}
+	f.d.settleTaskFromObservation(context.Background(), f.surface, &f.session, f.surface.observations[f.session.ID])
 	if _, refused := callMCP(t, f.child, "agenthail_result", map[string]any{"taskId": f.task.ID}); refused {
 		t.Fatal("a child can read its own task")
 	}
