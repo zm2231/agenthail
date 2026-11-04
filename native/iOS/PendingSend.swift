@@ -7,6 +7,11 @@ struct PendingSend: Identifiable, Equatable {
         return !attachments.isEmpty && ids.count == attachments.count ? ids : nil
     }
 
+    var previewLine: String {
+        let line = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return line.isEmpty ? "Message with attachments" : line
+    }
+
     let id: UUID
     var sessionID: String
     let message: String
@@ -16,8 +21,12 @@ struct PendingSend: Identifiable, Equatable {
     var uploaded: [String]?
     var wire: ActionWire?
     var unconfirmed = false
+    let sentAt: Date
+    var retryStopped = false
+    var retryingOnTap = false
 
-    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false) {
+    init(id: UUID = UUID(), sessionID: String, message: String, attachments: [ComposerAttachment], turnSettings: TurnSettings, idempotencyKey: String = UUID().uuidString, uploaded: [String]? = nil, wire: ActionWire? = nil, unconfirmed: Bool = false, sentAt: Date = Date()) {
+        self.sentAt = sentAt
         self.id = id
         self.sessionID = sessionID
         self.message = message

@@ -11,6 +11,7 @@ import (
 
 func TestMain(m *testing.M) {
 	testkit.ClearAgentEnv()
+	testkit.StopGitAtTempDir()
 	daemonStartBound = 20 * time.Second
 	os.Exit(testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
 }

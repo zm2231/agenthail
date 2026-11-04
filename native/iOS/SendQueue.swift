@@ -3,7 +3,10 @@ import Foundation
 /// Delivers each session's messages in order, one at a time, until each has an answer.
 @MainActor
 final class SendQueue {
+    static let retryWindow: TimeInterval = 60 * 60
+
     private(set) var pending: [String: [PendingSend]] = [:]
+    var now: () -> Date = { Date() }
     var deliver: ((PendingSend) async -> SendOutcome)?
     var changed: (() -> Void)?
     var refused: ((PendingSend, String) -> Void)?
@@ -35,6 +38,16 @@ final class SendQueue {
 
     func wake() {
         waits.values.forEach { $0.cancel() }
+    }
+
+    func retry(_ send: PendingSend) {
+        update(send) {
+            $0.retryStopped = false
+            $0.retryingOnTap = true
+        }
+        changed?()
+        wake()
+        if let session = pending.first(where: { $0.value.contains { $0.id == send.id } })?.key { start(session) }
     }
 
     func setUploaded(_ uploaded: [String], for send: PendingSend) {
@@ -117,8 +130,21 @@ final class SendQueue {
         changed?()
     }
 
+    private func stopRetrying(_ send: PendingSend) {
+        update(send) {
+            $0.unconfirmed = true
+            $0.retryStopped = true
+            $0.retryingOnTap = false
+        }
+        changed?()
+        if let stopped = pending.values.joined().first(where: { $0.id == send.id }) { unconfirmed?(stopped) }
+    }
+
     private func deliverNext(_ session: String, backoff: EventRetryBackoff) async -> Bool {
-        guard let send = pending[current(session)]?.first, let deliver else { return false }
+        for send in pending[current(session)] ?? [] where !send.retryStopped && !send.retryingOnTap && now().timeIntervalSince(send.sentAt) >= Self.retryWindow {
+            stopRetrying(send)
+        }
+        guard let send = pending[current(session)]?.first(where: { !$0.retryStopped }), let deliver else { return false }
         let outcome = await deliver(send)
         guard !Task.isCancelled else { return false }
         await settle(send, outcome, backoff: backoff, session: session)
@@ -136,6 +162,10 @@ final class SendQueue {
             remove(send)
             refused?(send, reason)
         case .unconfirmed:
+            if send.retryingOnTap {
+                stopRetrying(send)
+                return
+            }
             update(send) { $0.unconfirmed = true }
             changed?()
             unconfirmed?(send)
