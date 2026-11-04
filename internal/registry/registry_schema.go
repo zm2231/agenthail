@@ -330,6 +330,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
+	payload_codec INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -346,7 +347,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	seed_identity TEXT NOT NULL DEFAULT '',
 	history_before INTEGER NOT NULL DEFAULT -1,
 	derived_version INTEGER NOT NULL DEFAULT 0,
-	transcript_checkpoint TEXT NOT NULL DEFAULT ''
+	transcript_checkpoint TEXT NOT NULL DEFAULT '',
+	swept_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
