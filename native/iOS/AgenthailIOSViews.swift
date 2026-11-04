@@ -663,6 +663,10 @@ struct SessionScreen: View {
         } action: { _, value in
             overflows = value
         }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.height } action: { old, new in
+            guard new < old, followingLatest, !userScrolling else { return }
+            scrollToLatest()
+        }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
