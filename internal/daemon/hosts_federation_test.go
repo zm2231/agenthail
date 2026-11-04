@@ -159,6 +159,7 @@ type actionGate struct {
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
 	older     atomic.Bool
+	streams   atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
 	rootlessPrepare atomic.Bool
 	// legacyMetadata, when set, is the session metadata body a host from
@@ -250,6 +251,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path != "/api/v1/version" {
 			n.gate.beyondVersion.Add(1)
+		}
+		if r.URL.Path == "/api/v1/catalog-events" {
+			n.gate.streams.Add(1)
 		}
 		if hold := n.gate.versions.Load(); hold != nil && r.URL.Path == "/api/v1/version" {
 			hold.waiting.Add(1)

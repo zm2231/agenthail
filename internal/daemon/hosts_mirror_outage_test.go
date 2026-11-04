@@ -49,12 +49,23 @@ func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
 	remote.gate.proxyDown.Store(true)
 	remote.server.CloseClientConnections()
 	assertRowsAvailableFor(t, local, record.ID, 3*time.Second)
+	streams := remote.gate.streams.Load()
 	remote.gate.proxyDown.Store(false)
+	awaitNewStream(t, remote, streams)
 	awaitMirroredName(t, local, remote, record.ID, "after the first drop")
+	streams = remote.gate.streams.Load()
 	remote.server.CloseClientConnections()
 	assertRowsAvailableFor(t, local, record.ID, 2*time.Second)
+	awaitNewStream(t, remote, streams)
 	awaitMirroredName(t, local, remote, record.ID, "after the second drop")
 	assertRowsAvailableFor(t, local, record.ID, 0)
+}
+
+func awaitNewStream(t *testing.T, remote *federationNode, after int64) {
+	t.Helper()
+	testkit.Eventually(t, "the mirror to open a new catalog stream", 10*time.Second, func() bool {
+		return remote.gate.streams.Load() > after
+	})
 }
 
 func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
