@@ -84,8 +84,11 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 	if ref == "" {
 		return
 	}
+	body := payload.Body
 	if ledger.IsPromptRef(ref) && payload.MessageID != "" {
-		if delivered := ledger.DeliveryRef(payload.MessageID); d.recordedFor(session, delivered) {
+		if uuid, words, held := d.delivered.claim(session.ID, payload.PromptID, payload.MessageID, "", time.Now()); held {
+			ref, body = ledger.DeliveryRef(uuid), words
+		} else if delivered := ledger.DeliveryRef(payload.MessageID); d.recordedFor(session, delivered) {
 			ref = delivered
 		}
 	}
@@ -94,7 +97,7 @@ func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalP
 		d.log.Printf("ledger backfill: prompt %s in %s has no time: %s", ref, session.ID, err)
 		return
 	}
-	if _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: payload.Body, At: at, CapturedBy: ledger.CapturedByJournal}); err != nil {
+	if _, err := d.recordPersonWords(session, ledger.Utterance{Ref: ref, Surface: string(session.Surface), Text: body, At: at, CapturedBy: ledger.CapturedByJournal}); err != nil {
 		d.log.Printf("ledger backfill: record %s for %s: %s", ref, session.ID, err)
 	}
 }
