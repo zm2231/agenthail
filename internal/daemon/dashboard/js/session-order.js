@@ -57,7 +57,7 @@ export async function loadSessionOrder(fresh = false) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const keys = neededOrderScopes();
     const [base, listings] = await Promise.all([readBase(fresh), Promise.all(keys.map((key) => readListing(listingSpec(key))))]);
-    if (!listings.every((listing) => listing.hostEpoch === base.hostEpoch)) continue;
+    if (!listings.every((listing) => !listing.mixed && listing.hostEpoch === base.hostEpoch)) continue;
     app.sessionOrder = Object.fromEntries(keys.map((key, index) => [key, listings[index]]));
     const refreshAt = listings.map((listing) => listing.view.refreshAt).filter(Boolean).map(Date.parse).reduce((first, at) => Math.min(first, at), Infinity);
     return { base, refreshAt };

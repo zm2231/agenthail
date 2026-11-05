@@ -122,6 +122,13 @@ await context.loadSessionOrder();
 assert.equal(flips, 2, "a restart between reads is read again");
 context.fetch = flipping;
 serve();
+app.sessionLimit = 4;
+pages[path({ scope: "all", members: "1", limit: "4", cursor: "next" })].hostEpoch = "e2";
+await assert.rejects(context.loadSessionOrder(), /restarted/, "a listing whose later page comes from another daemon run is never used");
+serve();
+await context.loadSessionOrder();
+assert.equal(ids("all"), "b,a,c");
+app.sessionLimit = 2;
 
 context.fetch = async () => ({ ok: false, status: 500 });
 await assert.rejects(context.loadSessionOrder(), /refused/, "a refused view fails the load rather than showing a partial order");

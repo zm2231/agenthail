@@ -23,6 +23,7 @@ export async function readListing({ scope, params, wanted = Infinity }) {
   do {
     const page = await readJSON(viewPath(scope, { ...params, limit, ...(listing.cursor ? { cursor: listing.cursor } : {}) }));
     if (!listing.view) Object.assign(listing, { view: page.view, counts: page.counts || {}, hostEpoch: page.hostEpoch || "" });
+    else if ((page.hostEpoch || "") !== listing.hostEpoch) listing.mixed = true;
     for (const family of page.view.families) {
       if (seen.has(family.id)) continue;
       seen.add(family.id);
