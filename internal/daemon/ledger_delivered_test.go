@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -140,5 +141,24 @@ func TestEveryHookCopyOfATypedPromptIsOneUtterance(t *testing.T) {
 	}
 	if events := p.events(t); len(events) != 1 {
 		t.Fatalf("one typed prompt recorded %d utterances", len(events))
+	}
+}
+
+func TestDeliveredWordsAreForgottenOnceNoHookCanStillAsk(t *testing.T) {
+	var w deliveredWords
+	start := time.Now()
+	for i := range 1000 {
+		w.add(fmt.Sprintf("s-%d", i), uuid.NewString(), "never seen", start)
+	}
+	w.add("hosted", "u-1", "ship it", start)
+	if got, _, ok := w.claim("hosted", "prompt", "", "ship it", start.Add(time.Second)); !ok || got != "u-1" {
+		t.Fatalf("claim = %q %v", got, ok)
+	}
+	if got, _, ok := w.claim("hosted", "prompt", "u-1", "ship it", start.Add(deliveredTextWindow)); !ok || got != "u-1" {
+		t.Fatalf("another copy of the hook within the window = %q %v", got, ok)
+	}
+	w.add("later", uuid.NewString(), "new", start.Add(deliveredRetention+time.Minute))
+	if len(w.bySession) != 1 {
+		t.Fatalf("kept %d sessions' deliveries past the time any hook could claim them", len(w.bySession))
 	}
 }
