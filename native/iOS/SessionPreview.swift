@@ -374,6 +374,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
 
     nonisolated(unsafe) private static var steered = false
     nonisolated(unsafe) private static var tailCleared = false
+    nonisolated(unsafe) private static var sessionFetches = 0
+    private var reopenDelayed = false
 
     private static func actionBody(_ request: URLRequest) -> [String: Any] {
         var data = request.httpBody
@@ -389,6 +391,14 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
+        if request.url?.path == "/api/v1/session", ProcessInfo.processInfo.arguments.contains("--preview-reopen-slow"), !reopenDelayed {
+            Self.sessionFetches += 1
+            if Self.sessionFetches > 1 {
+                reopenDelayed = true
+                DispatchQueue.global().asyncAfter(deadline: .now() + 6) { [self] in startLoading() }
+                return
+            }
+        }
         if request.url?.path == "/api/v1/queue", ProcessInfo.processInfo.arguments.contains("--preview-tail-slow") {
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
             DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [self] in

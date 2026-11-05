@@ -86,6 +86,27 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertTrue(row(21, app).waitForExistence(timeout: 5), "the row did arrive")
     }
 
+    func testScrollingUpWhileAReopenedSessionLoadsIsNotUndone() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-theme", "dark", "--preview-reading", "--preview-follow", "--preview-reopen-slow"]
+        app.launch()
+        let session = app.buttons["session-computer::demo"]
+        session.tapWhenReady(timeout: 15)
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
+        sleep(2)
+        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        session.tapWhenReady()
+        let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5), "the cached transcript shows while it reloads")
+        timeline.swipeDown(velocity: .slow)
+        XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2))
+        let label = try midScreenText(app)
+        let before = timeline.staticTexts[label].frame.minY
+        sleep(8)
+        XCTAssertEqual(timeline.staticTexts[label].frame.minY, before, accuracy: 2, "the landing undid the reader's scroll")
+        XCTAssertTrue(app.buttons["Jump to latest"].exists)
+    }
+
     func testTheCapShowsThreeAndOpensTheRest() {
         let app = launch("many")
         let more = app.buttons["queue-tail-more"]

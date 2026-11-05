@@ -760,7 +760,7 @@ struct SessionScreen: View {
             await model.loadSession(session.id)
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
-            } else {
+            } else if followingLatest {
                 scrollToLatest()
             }
             landed = true
