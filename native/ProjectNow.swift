@@ -43,13 +43,21 @@ struct ProjectNow: Equatable {
     private static func before(_ left: SessionState, _ right: SessionState) -> Bool {
         let (leftRank, rightRank) = (rank(left), rank(right))
         if leftRank != rightRank { return leftRank < rightRank }
-        let (leftActive, rightActive) = (active(left), active(right))
-        if leftActive != rightActive { return leftActive > rightActive }
+        let (leftKey, rightKey) = (sortKey(left, rank: leftRank), sortKey(right, rank: rightRank))
+        if leftKey != rightKey { return leftKey < rightKey }
         return left.id < right.id
     }
 
-    private static func active(_ session: SessionState) -> Int64 {
-        guard let at = session.lastActive.map(toMilliseconds).flatMap(SessionTree.parseTimestamp), at.timeIntervalSince1970 >= knownSince else { return 0 }
+    private static func sortKey(_ session: SessionState, rank: Int) -> Int64 {
+        switch rank {
+        case 0: return milliseconds(session.waitingOn?.since) ?? .max
+        case 1: return -(milliseconds(session.registeredAt) ?? 0)
+        default: return -(milliseconds(session.lastActive) ?? 0)
+        }
+    }
+
+    private static func milliseconds(_ timestamp: String?) -> Int64? {
+        guard let at = timestamp.map(toMilliseconds).flatMap(SessionTree.parseTimestamp), at.timeIntervalSince1970 >= knownSince else { return nil }
         return Int64((at.timeIntervalSince1970 * 1000).rounded())
     }
 

@@ -12,13 +12,21 @@ function rank(session) {
   return running(session) ? 1 : 2;
 }
 
-function active(session) {
-  const at = Date.parse(session.lastActive || "");
-  return at >= knownSince ? at : 0;
+function milliseconds(timestamp) {
+  const at = Date.parse(timestamp || "");
+  return at >= knownSince ? at : null;
+}
+
+function sortKey(session, rank) {
+  if (rank === 0) return milliseconds(session.waitingOn?.since) ?? Number.MAX_SAFE_INTEGER;
+  if (rank === 1) return -(milliseconds(session.registeredAt) ?? 0);
+  return -(milliseconds(session.lastActive) ?? 0);
 }
 
 function before(left, right) {
-  return rank(left) - rank(right) || active(right) - active(left) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const leftRank = rank(left);
+  const rightRank = rank(right);
+  return leftRank - rightRank || sortKey(left, leftRank) - sortKey(right, rightRank) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }
 
 const key = (session) => session.checkout?.id ?? `${session.host?.id || ""}|${session.cwd || ""}`;

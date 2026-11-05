@@ -463,6 +463,189 @@
           ]
         }
       ]
+    },
+    {
+      "name": "running rows sort by when they started, newest first, not by their last write",
+      "computers": 1,
+      "sessions": [
+        {
+          "id": "run-old",
+          "status": "busy",
+          "registeredAt": "2026-11-05T08:00:00Z",
+          "lastActive": "2026-11-05T12:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "run-new",
+          "status": "busy",
+          "registeredAt": "2026-11-05T09:00:00Z",
+          "lastActive": "2026-11-05T10:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "run-unknown",
+          "status": "busy",
+          "lastActive": "2026-11-05T13:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
+      ],
+      "showsGroups": false,
+      "groups": [
+        {
+          "id": "checkout-one",
+          "title": "main",
+          "sessions": [
+            "run-new",
+            "run-old",
+            "run-unknown"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a running row that writes again keeps its place",
+      "computers": 1,
+      "sessions": [
+        {
+          "id": "run-old",
+          "status": "busy",
+          "registeredAt": "2026-11-05T08:00:00Z",
+          "lastActive": "2026-11-05T09:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "run-new",
+          "status": "busy",
+          "registeredAt": "2026-11-05T09:00:00Z",
+          "lastActive": "2026-11-05T14:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "run-unknown",
+          "status": "busy",
+          "lastActive": "2026-11-05T08:30:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
+      ],
+      "showsGroups": false,
+      "groups": [
+        {
+          "id": "checkout-one",
+          "title": "main",
+          "sessions": [
+            "run-new",
+            "run-old",
+            "run-unknown"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "what needs the person sorts by the oldest wait first",
+      "computers": 1,
+      "sessions": [
+        {
+          "id": "wait-new",
+          "status": "busy",
+          "lastActive": "2026-11-05T08:00:00Z",
+          "waitingOn": {
+            "id": "w-new",
+            "kind": "question",
+            "since": "2026-11-05T10:00:00Z",
+            "answerable": true
+          },
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "wait-unknown",
+          "status": "busy",
+          "lastActive": "2026-11-05T12:00:00Z",
+          "waitingOn": {
+            "id": "w-unknown",
+            "kind": "question",
+            "answerable": true
+          },
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "wait-old",
+          "status": "busy",
+          "lastActive": "2026-11-05T11:00:00Z",
+          "waitingOn": {
+            "id": "w-old",
+            "kind": "approval",
+            "since": "2026-11-05T09:00:00Z",
+            "answerable": true
+          },
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
+      ],
+      "showsGroups": false,
+      "groups": [
+        {
+          "id": "checkout-one",
+          "title": "main",
+          "sessions": [
+            "wait-old",
+            "wait-new",
+            "wait-unknown"
+          ]
+        }
+      ]
     }
   ]
 }
