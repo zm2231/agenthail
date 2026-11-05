@@ -20,7 +20,7 @@ func TestPresentationScopesCountsAndCollapse(t *testing.T) {
 	project := &CatalogProject{ID: "project", DisplayName: "Project"}
 	rows := []dashboardSession{}
 	for i := range 7 {
-		rows = append(rows, dashboardSession{ID: fmt.Sprint(i), Status: surface.StatusIdle, Project: project, LastActive: now.Add(-time.Duration(i) * time.Minute)})
+		rows = append(rows, dashboardSession{ID: fmt.Sprint(i), Status: surface.StatusIdle, Project: project, LastActive: now.Add(-time.Hour - time.Duration(i)*time.Minute)})
 	}
 	rows = append(rows, dashboardSession{ID: "old-working", Status: surface.StatusBusy, Project: project, LastActive: now.Add(-48 * time.Hour)}, dashboardSession{ID: "old-queue", Status: surface.StatusIdle, QueueCount: 1, Project: project}, dashboardSession{ID: "waiting-child", Status: surface.StatusIdle, WaitingOn: &surface.Waiting{ID: "q"}, Subagent: &surface.Subagent{ParentID: "6", RootID: "6"}}, dashboardSession{ID: "archived-child", Archived: true, Subagent: &surface.Subagent{ParentID: "6", RootID: "6"}}, dashboardSession{ID: "orphan", Status: surface.StatusBusy, Subagent: &surface.Subagent{ParentID: "missing"}})
 	plan := newSessionViewPlan(rows, "recent", SessionViewFilters{}, now)
@@ -28,7 +28,7 @@ func TestPresentationScopesCountsAndCollapse(t *testing.T) {
 		t.Fatalf("counts=%+v", got)
 	}
 	got := plan.view.Projects[0].CollapsedFamilyIDs
-	want := []string{"6", "old-working", "old-queue", "0", "1", "2", "3", "4"}
+	want := []string{"6", "old-queue", "old-working", "0", "1", "2", "3", "4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collapsed=%v want=%v", got, want)
 	}
@@ -165,7 +165,7 @@ func TestPresentationFiltersAndSelectionUseMatchingMembers(t *testing.T) {
 	}
 	rows = nil
 	for i := 0; i < 8; i++ {
-		rows = append(rows, dashboardSession{ID: fmt.Sprint(i), LastActive: now.Add(-time.Duration(i) * time.Minute)})
+		rows = append(rows, dashboardSession{ID: fmt.Sprint(i), LastActive: now.Add(-time.Hour - time.Duration(i)*time.Minute)})
 	}
 	plan = newSessionViewPlan(rows, "all", SessionViewFilters{SelectedID: "7"}, now)
 	if got := plan.view.Projects[0].CollapsedFamilyIDs; !reflect.DeepEqual(got, []string{"0", "1", "2", "3", "4", "7"}) {

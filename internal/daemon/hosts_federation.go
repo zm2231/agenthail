@@ -746,13 +746,14 @@ func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
 }
 
 func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session, projection dashboardSession, project, checkout json.RawMessage) error {
-	projection.ObservedAt = time.Time{}
+	registered := projection.RegisteredAt
+	projection.ObservedAt, projection.RegisteredAt = time.Time{}, time.Time{}
 	projection.Freshness = nil
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		return err
 	}
-	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, Project: project, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
+	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, Project: project, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), RegisteredAt: registered, QueueCount: projection.QueueCount})
 }
 
 func (d *Daemon) refreshHostQueueCounts() {
