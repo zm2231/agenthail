@@ -22,9 +22,13 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 		if err != nil {
 			return nil, ledgerAccess{}, err
 		}
-		if project != nil && project.Key != "" {
-			targets = append(targets, ledgerTarget{key: project.Key, projectID: project.ID})
-			listed[project.Key] = true
+		key, err := LedgerKey(d.Registry, project)
+		if err != nil {
+			return nil, ledgerAccess{}, err
+		}
+		if key != "" {
+			targets = append(targets, ledgerTarget{key: key, projectID: project.ID})
+			listed[key] = true
 		}
 	}
 	ancestors, err := d.Registry.ForkAncestors(session.ID)

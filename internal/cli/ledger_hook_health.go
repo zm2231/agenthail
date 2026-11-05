@@ -117,8 +117,8 @@ func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []su
 			project, err := resolveSessionProject(ctx, r, place.Cwd)
 			if err != nil {
 				resolveErrs[place.Cwd] = fmt.Errorf("project of %s: %w", place.Cwd, err)
-			} else if project != nil {
-				key = project.Key
+			} else if key, err = daemon.LedgerKey(r, project); err != nil {
+				resolveErrs[place.Cwd] = fmt.Errorf("ledger of %s: %w", place.Cwd, err)
 			}
 			keys[place.Cwd] = key
 		}

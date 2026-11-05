@@ -164,8 +164,9 @@ func (r *Registry) ProjectHistory(id string) ([]string, error) {
 			{"a lead", `SELECT COUNT(*) FROM coordinators WHERE project_id=?`},
 		},
 		{
-			{"a ledger board", `SELECT COUNT(*) FROM ledger_events WHERE project_key=?`},
-			{"ledger grants", `SELECT COUNT(*) FROM ledger_grants WHERE project_key=?`},
+			{"a ledger board", `SELECT COUNT(*) FROM ledger_events WHERE project_key=?1 OR project_key IN (SELECT 'project:' || id FROM projects WHERE added=1 AND (id=?1 OR project_key=?1))`},
+			{"ledger grants", `SELECT COUNT(*) FROM ledger_grants WHERE project_key=?1 OR project_key IN (SELECT 'project:' || id FROM projects WHERE added=1 AND (id=?1 OR project_key=?1))`},
+			{"a ledger owner", `SELECT COUNT(*) FROM ledger_state WHERE owner_host_id!='' AND (project_key=?1 OR project_key IN (SELECT 'project:' || id FROM projects WHERE added=1 AND (id=?1 OR project_key=?1)))`},
 		},
 	} {
 		for _, c := range group {
