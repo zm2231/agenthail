@@ -32,7 +32,8 @@ The folder can be anywhere, including a folder inside a Git repository, such as
   `project_not_added`; a host with only an implicit checkout of it is skipped.
 - Project actions refuse with a typed error (`{"error":{"code","message"}}`):
   `invalid_request`, `folder_not_found`, `project_not_found`,
-  `project_not_added`, `project_ambiguous`.
+  `project_not_added`, `project_ambiguous`, `project_linked`,
+  `project_not_linked`, `project_history`.
 
 ## Which project a session belongs to
 
@@ -90,6 +91,44 @@ channel cannot be created or renamed to a project's name. See
 [hosts](hosts.md#relays-and-channels-across-hosts).
 
 A changed remote moves a project to its new key on the next catalog pass.
+
+## Linked projects
+
+A link joins one project into another, so a fork and its upstream, or a
+repository and a folder that belongs with it, are one project with one lead and
+one ledger:
+
+- `project-link` (`agenthail project link <joined> <into>`) takes `projectId`
+  (the project joined) and `survivor` (the project it joins). The resolver
+  answers the survivor wherever it would have answered the joined project, so
+  rows, the project list, `@lead` and ledger capture all follow the link.
+  The joined checkout keeps its folder and carries `linkedFrom`, its own
+  project before the link; the survivor lists it under `linked`.
+- `project-unlink` (`agenthail project unlink <joined>`) makes the joined
+  project its own again.
+- Links are stored in `project_links`, one record per joined project. An
+  unlink stays as a tombstone so a host that still holds the link takes the
+  unlink instead of reviving it. Of two records for one project the later
+  `changedAt` wins, the origin host id breaking a tie; a host writing a record
+  dates it past the one it replaces even when its clock is behind.
+- A link between two keyed projects reaches every paired host: the snapshot
+  carries `projectLinks` and the `project.linked` catalog event carries each
+  change, and a host adopts a record newer than its own. A link naming a
+  host's own folder stays on that host. For a keyed project, a host's own
+  record of the link decides over the `linkedFrom` a paired host's row
+  arrived with, so a host that has not yet taken an unlink cannot keep the
+  projects joined.
+- A project that already has a lead, past leads, a ledger board (enabling
+  the ledger starts one) or ledger grants is refused as the joined side
+  (`409 project_history`):
+  when only it has that, the message names the link the other way round, and
+  when both do, merging them is not supported. A host that adopts a link onto
+  such a project holds it: the project stays its own, with `linkHeld` naming
+  why, and `agenthail doctor` fails until it is resolved. Chains are refused
+  (`409 project_linked`) and held when they arrive.
+- Two unlinked projects whose repositories share a root commit are named in
+  `sameHistory` on the one with fewer sessions, and `project list` and
+  `doctor` print the link command that would join them.
 
 ## Scopes
 

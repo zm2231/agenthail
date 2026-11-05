@@ -525,6 +525,13 @@ CREATE TABLE IF NOT EXISTS projects (
 	created_at_ms INTEGER NOT NULL DEFAULT 0,
 	archived_at_ms INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS project_links (
+	joined TEXT PRIMARY KEY,
+	survivor TEXT NOT NULL,
+	linked INTEGER NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL
@@ -585,11 +592,9 @@ CREATE TABLE IF NOT EXISTS ledger_grants (
 CREATE INDEX IF NOT EXISTS ledger_grants_session ON ledger_grants(session_id);
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
-	enabled INTEGER NOT NULL DEFAULT 0,
 	owner_host_id TEXT NOT NULL DEFAULT '',
 	owner_cursor INTEGER NOT NULL DEFAULT 0,
 	deadline_ms INTEGER NOT NULL DEFAULT 0,
-	freeze_version TEXT NOT NULL DEFAULT '',
-	since_ms INTEGER NOT NULL DEFAULT 0
+	freeze_version TEXT NOT NULL DEFAULT ''
 );
 `

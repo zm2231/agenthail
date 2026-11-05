@@ -189,6 +189,9 @@ func (a *App) cmdDoctor(args []string) error {
 	var pushErr error
 	var connection connectionHealth
 	var connectionErr error
+	hostCtx, cancelHosts := context.WithTimeout(ctx, 15*time.Second)
+	hostProblems, hostsErr := a.hostPairingProblems(hostCtx)
+	cancelHosts()
 	if r := a.registry(); r != nil {
 		push, pushErr = pushHealthOf(r, time.Now())
 		connection, connectionErr = connectionHealthOf(r, time.Now())
@@ -226,8 +229,11 @@ func (a *App) cmdDoctor(args []string) error {
 	if pushErr != nil {
 		pushFailures++
 	}
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	projectNotes, heldLinks, projectsErr := a.doctorProjectNotes(callCtx)
+	cancel()
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(hostProblems) == 0, "projectLinks": projectNotes, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -237,7 +243,13 @@ func (a *App) cmdDoctor(args []string) error {
 		if pushErr != nil {
 			report["pushError"] = pushErr.Error()
 		}
+		if hostsErr != nil {
+			report["hostPairingError"] = hostsErr.Error()
+		}
 		report["connection"] = connection
+		if projectsErr != nil {
+			report["projectLinksError"] = projectsErr.Error()
+		}
 		if settingsErr != nil {
 			report["settingsError"] = settingsErr.Error()
 		}
@@ -296,6 +308,12 @@ func (a *App) cmdDoctor(args []string) error {
 		if syncErr != nil {
 			fmt.Printf("ledger sync: unknown (%s)\n", syncErr)
 		}
+		for _, problem := range hostProblems {
+			fmt.Println(problem)
+		}
+		if hostsErr != nil {
+			fmt.Printf("[host] pairings: unknown (%s)\n", hostsErr)
+		}
 		if pushErr != nil {
 			fmt.Printf("push: unknown (%s)\n", pushErr)
 		} else {
@@ -305,6 +323,12 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("connection: unknown (%s)\n", connectionErr)
 		} else {
 			fmt.Println(connection)
+		}
+		if projectsErr != nil {
+			fmt.Printf("project links: unknown (%s)\n", projectsErr)
+		}
+		for _, note := range projectNotes {
+			fmt.Printf("project %s\n", note)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
@@ -391,6 +415,12 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	if syncFailures > 0 {
 		return fmt.Errorf("doctor found %d ledger(s) not syncing with their owner, or could not check them", syncFailures)
+	}
+	if heldLinks > 0 {
+		return fmt.Errorf("doctor found %d project link(s) this host holds without applying", heldLinks)
+	}
+	if len(hostProblems) > 0 {
+		return fmt.Errorf("doctor found %d paired host(s) that don't know this host as a paired host", len(hostProblems))
 	}
 	if ledgerFailures > 0 {
 		return fmt.Errorf("doctor found %d Claude config root(s) where the enabled ledger captures no terminal words, or could not check them", ledgerFailures)

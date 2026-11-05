@@ -50,6 +50,7 @@ type dashboardActionRequest struct {
 	Project         string                     `json:"project"`
 	Path            string                     `json:"path"`
 	Title           string                     `json:"title"`
+	Survivor        string                     `json:"survivor"`
 	Attachments     []string                   `json:"attachments"`
 	RequestID       string                     `json:"requestId"`
 	Decision        surface.Decision           `json:"decision"`

@@ -35,6 +35,7 @@ const (
 	EventWorkLog       EventType = "work_item.log"
 	EventCutWithdrawn  EventType = "cut.withdrawn"
 	EventReclassified  EventType = "utterance.reclassified"
+	EventCapture       EventType = "capture"
 )
 
 const (

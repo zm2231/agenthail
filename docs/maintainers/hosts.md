@@ -32,13 +32,34 @@ Pairing reuses the device-token model the phone uses.
    access (Tailscale Serve), which is what gives the link an HTTPS endpoint.
    The `host` scope gives the catalog stream every row, so the pairing mirrors
    subagents the session list hides; a device token without it streams the
-   session list. A host paired without it must be paired again.
+   session list.
 2. On the local host: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
    daemon redeems the secret, sending its own host id, receives an `ahd_`
    device token, checks the protocol version and host id, and stores the
    pairing in `hosts`. The remote binds the token to the host id it was
    redeemed with (`paired_devices.host_id`), so a request on that token speaks
    for that host and no other.
+
+Only a token with the `host` scope and a bound host id speaks for a host.
+Every host-only request (a relay leg, ledger sync, a session move in, a
+forwarded proxy preference, a sender named as a host's session) on any other
+device token is refused with `403` and `error.code` `host_unproven`, whose
+message names the fix: `Host X doesn't know this host as a paired host. On X
+run 'agenthail hosts invite', then here run 'agenthail hosts add
+<pairing-link>'`. A held send refused that way is dead-lettered once, with
+that sentence as its attention reason and fix. Each time a daemon connects to
+a paired host it reads its own token there (`GET /api/v1/device`) and, if the
+token does not speak for it, puts the same text in the host's `problem` in
+`agenthail hosts`, `GET /api/v1/hosts`, the snapshot's `daemon.hosts`, and
+`agenthail doctor`.
+
+Running `agenthail hosts add` with a link from a host that is already paired
+pairs it again in place. The `hosts` row keeps its host id, name and catalog
+position; only the endpoint, address and token change, so mirrored sessions,
+aliases, relays, held sends and ledger sync carry on. The daemon restarts only
+that host's mirror, delivery and ledger loops, then revokes the token it
+replaced on the host. If that revoke fails, the response names the device to
+remove there. `--name` must be the name the host already has.
 
 The daemon always dials the tailnet IP and verifies TLS against the endpoint's
 DNS name, so it works where MagicDNS does not resolve. The address must be in

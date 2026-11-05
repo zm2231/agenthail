@@ -19,7 +19,7 @@ type captureCall struct {
 	MessageUUID string `json:"messageUuid"`
 }
 
-func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall) {
+func ledgerHookFixture(t *testing.T, captured, attach bool) (*App, func() []captureCall) {
 	t.Helper()
 	withoutSessionContextLimit(t)
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
@@ -44,7 +44,7 @@ func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall)
 		mu.Lock()
 		calls = append(calls, call)
 		mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID, "unattached": []string{"claude-prompt:earlier"}})
+		json.NewEncoder(w).Encode(map[string]any{"captured": captured, "attach": attach, "projectKey": "test-key", "ref": "claude-prompt:" + call.PromptID, "unattached": []string{"claude-prompt:earlier"}})
 	}))
 	t.Cleanup(server.Close)
 	app.daemonAPIOverride = func() (*daemonAPIClient, error) {
@@ -59,7 +59,7 @@ func ledgerHookFixture(t *testing.T, captured bool) (*App, func() []captureCall)
 }
 
 func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
-	app, calls := ledgerHookFixture(t, true)
+	app, calls := ledgerHookFixture(t, true, true)
 	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"yes","prompt_id":"bb6af0fd"}`), surface.KindClaude, 4242, time.Now())
 	got := calls()
 	if len(got) != 1 || got[0] != (captureCall{SessionID: "s1", PromptID: "bb6af0fd", Prompt: "yes"}) {
@@ -86,7 +86,7 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 }
 
 func TestTerminalPromptWithoutAPromptIDIsLeftToTheJournal(t *testing.T) {
-	app, calls := ledgerHookFixture(t, true)
+	app, calls := ledgerHookFixture(t, true, true)
 	app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"yes"}`), surface.KindClaude, 4242, time.Now())
 	if got := calls(); len(got) != 0 {
 		t.Fatalf("hook captured a prompt it cannot identify: %+v", got)
@@ -94,12 +94,23 @@ func TestTerminalPromptWithoutAPromptIDIsLeftToTheJournal(t *testing.T) {
 }
 
 func TestTerminalPromptAddsNoLedgerContextWhenNotCaptured(t *testing.T) {
-	app, calls := ledgerHookFixture(t, false)
+	app, calls := ledgerHookFixture(t, false, false)
 	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"hello","prompt_id":"p-hello"}`), surface.KindClaude, 4242, time.Now())
 	if len(calls()) != 1 {
 		t.Fatalf("want 1 capture call, got %d", len(calls()))
 	}
 	if output != nil && strings.Contains(output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string), "intent ledger") {
 		t.Fatalf("uncaptured prompt reported as captured: %v", output)
+	}
+}
+
+func TestTerminalPromptAddsNoLedgerContextWhenOnlyCaptured(t *testing.T) {
+	app, calls := ledgerHookFixture(t, true, false)
+	output := app.sessionContext(strings.NewReader(`{"session_id":"s1","hook_event_name":"UserPromptSubmit","prompt":"hello","prompt_id":"p-hello"}`), surface.KindClaude, 4242, time.Now())
+	if len(calls()) != 1 {
+		t.Fatalf("want 1 capture call, got %d", len(calls()))
+	}
+	if output != nil && strings.Contains(output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string), "intent ledger") {
+		t.Fatalf("a lead whose words are only captured was asked to attach: %v", output)
 	}
 }

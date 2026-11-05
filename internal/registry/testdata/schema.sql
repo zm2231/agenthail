@@ -1,4 +1,4 @@
--- schemaVersion 52
+-- schemaVersion 54
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -404,12 +404,10 @@ CREATE TABLE ledger_grants (
 -- table ledger_state
 CREATE TABLE ledger_state (
 	project_key TEXT PRIMARY KEY,
-	enabled INTEGER NOT NULL DEFAULT 0,
 	owner_host_id TEXT NOT NULL DEFAULT '',
 	owner_cursor INTEGER NOT NULL DEFAULT 0,
 	deadline_ms INTEGER NOT NULL DEFAULT 0,
-	freeze_version TEXT NOT NULL DEFAULT '',
-	since_ms INTEGER NOT NULL DEFAULT 0
+	freeze_version TEXT NOT NULL DEFAULT ''
 );
 
 -- table limit_resumes
@@ -468,6 +466,15 @@ CREATE TABLE paired_devices (
 CREATE TABLE pending_ceilings (
 	credential_id INTEGER PRIMARY KEY REFERENCES session_credentials(id) ON DELETE CASCADE,
 	ceiling TEXT NOT NULL
+);
+
+-- table project_links
+CREATE TABLE project_links (
+	joined TEXT PRIMARY KEY,
+	survivor TEXT NOT NULL,
+	linked INTEGER NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
 );
 
 -- table projects

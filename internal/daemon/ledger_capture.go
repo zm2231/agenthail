@@ -13,7 +13,7 @@ func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
 		return
 	}
 	now := time.Now()
-	key, captured, err := d.recordPersonWords(capture.Target, ledger.Utterance{
+	record, err := d.recordPersonWords(capture.Target, ledger.Utterance{
 		Ref:        ledger.DeliveryRef(capture.IntentUUID),
 		Surface:    string(capture.Target.Surface),
 		Text:       capture.Message,
@@ -21,14 +21,16 @@ func (d *Daemon) personCapture(capture delivery.PersonCaptureContext) {
 		CapturedBy: ledger.CapturedByDelivery,
 	})
 	if err != nil {
-		d.log.Printf("ledger capture: record delivery %s to %s in project %s: %s", capture.IntentUUID, capture.Target.ID, key, err)
+		d.log.Printf("ledger capture: record delivery %s to %s in project %s: %s", capture.IntentUUID, capture.Target.ID, record.key, err)
 		return
 	}
-	if !captured {
+	if !record.captured {
 		return
 	}
 	d.delivered.add(capture.Target.ID, capture.IntentUUID, capture.Message, now)
-	d.queueReadback(capture.Target, key, ledger.DeliveryRef(capture.IntentUUID))
+	if record.attach {
+		d.queueReadback(capture.Target, record.key, ledger.DeliveryRef(capture.IntentUUID))
+	}
 }
 
 // Codex's prompt hook carries no prompt id, so it cannot hand the session its readback.

@@ -69,6 +69,7 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	events = withoutCapture(events)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 ledger event, got %d", len(events))
 	}
@@ -207,6 +208,7 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	innerEvents = withoutCapture(innerEvents)
 	if len(innerEvents) != 1 {
 		t.Fatalf("expected 1 event for inner project, got %d", len(innerEvents))
 	}
@@ -215,6 +217,7 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	outerEvents = withoutCapture(outerEvents)
 	if len(outerEvents) != 0 {
 		t.Fatalf("expected 0 events for outer project, got %d", len(outerEvents))
 	}

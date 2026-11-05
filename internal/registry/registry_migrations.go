@@ -410,6 +410,11 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if version < 54 {
+		if err := moveLedgerCaptureIntoTheLog(tx); err != nil {
+			return err
+		}
+	}
 	if version == schemaVersion {
 		return nil
 	}
@@ -543,4 +548,31 @@ func ensureColumn(tx *sql.Tx, table, name, declaration string) error {
 	}
 	_, err = tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + declaration)
 	return err
+}
+
+// moveLedgerCaptureIntoTheLog turns this host's own enable or disable of a
+// project's ledger into a capture event, which replays to the ledger's owner
+// like any other event this host wrote.
+func moveLedgerCaptureIntoTheLog(tx *sql.Tx) error {
+	exists, err := columnExists(tx, "ledger_state", "enabled")
+	if err != nil || !exists {
+		return err
+	}
+	for _, step := range []string{
+		`INSERT INTO ledger_events(project_key,type,payload,actor_session_id,actor_host_id,owner_seq,origin_seq,ref,created_at)
+		SELECT project_key,'capture',
+			json_object('state',CASE enabled WHEN 1 THEN 'enabled' ELSE 'disabled' END,
+				'at',strftime('%Y-%m-%dT%H:%M:%fZ',CASE WHEN enabled=1 AND since_ms>0 THEN since_ms ELSE CAST(strftime('%s','now') AS INTEGER)*1000 END/1000.0,'unixepoch')),
+			'',COALESCE((SELECT host_id FROM host_identity WHERE id=1),''),0,0,'',
+			strftime('%Y-%m-%dT%H:%M:%SZ',CASE WHEN enabled=1 AND since_ms>0 THEN since_ms ELSE CAST(strftime('%s','now') AS INTEGER)*1000 END/1000,'unixepoch')
+		FROM ledger_state WHERE enabled IN (1,2) ORDER BY project_key`,
+		`UPDATE ledger_events SET origin_seq=seq WHERE type='capture' AND origin_seq=0`,
+		`ALTER TABLE ledger_state DROP COLUMN enabled`,
+		`ALTER TABLE ledger_state DROP COLUMN since_ms`,
+	} {
+		if _, err := tx.Exec(step); err != nil {
+			return err
+		}
+	}
+	return nil
 }

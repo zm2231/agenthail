@@ -28,13 +28,26 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 		return out
 	}
 
-	if out := board(); !strings.Contains(out, "coordinator's prompts only") {
+	for i := range 7 {
+		u := ledger.Utterance{ProjectKey: "board-key", Ref: "claude-prompt:" + string(rune('a'+i)), SpeakerID: "person", TargetID: "lead", Text: "word " + string(rune('a'+i)), CapturedBy: ledger.CapturedByHook}
+		if _, _, err := ls.RecordUtterance(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := board()
+	if !strings.Contains(out, "to the project's lead; nothing asks it to attach them") || strings.Contains(out, "G2:") {
 		t.Fatalf("unset project board %q", out)
+	}
+	if !strings.Contains(out, "captured words not attached (7), newest 5") || strings.Contains(out, "word b") || !strings.Contains(out, "word g") {
+		t.Fatalf("an unset project lists more than the newest words %q", out)
+	}
+	if out := board("--all"); !strings.Contains(out, "word a") {
+		t.Fatalf("--all leaves words out %q", out)
 	}
 	if err := ls.Enable("board-key"); err != nil {
 		t.Fatal(err)
 	}
-	if out := board(); !strings.Contains(out, "capturing since") || !strings.Contains(out, "not in the ledger") {
+	if out := board(); !strings.Contains(out, "capturing since") || !strings.Contains(out, "not in the ledger") || !strings.Contains(out, "G2:") || !strings.Contains(out, "unattached (7):") {
 		t.Fatalf("enabled project board %q", out)
 	}
 	var enabled struct {

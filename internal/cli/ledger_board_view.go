@@ -106,7 +106,7 @@ func cutStatus(cut ledger.Cut) string {
 	return "pending the person's ack"
 }
 
-func (v boardView) print(attachment ledger.Attachment) {
+func (v boardView) print(attachment ledger.Attachment, shown int) {
 	empty := len(v.goals) == 0 && len(v.asks) == 0 && len(v.decisions) == 0 && len(v.constraints) == 0 && len(v.questions) == 0
 	for _, g := range v.goals {
 		fmt.Printf("%s %s", g.ID, g.Name)
@@ -152,16 +152,22 @@ func (v boardView) print(attachment ledger.Attachment) {
 	for _, r := range v.retractions {
 		fmt.Println(r)
 	}
-	printAttachment(attachment)
+	printAttachment(attachment, shown)
 	if empty && len(attachment.Unattached) == 0 && len(attachment.Elsewhere) == 0 {
 		fmt.Println("no goals, asks, decisions or captured words yet")
 	}
 }
 
-func printAttachment(attachment ledger.Attachment) {
+func printAttachment(attachment ledger.Attachment, shown int) {
 	if n := len(attachment.Unattached); n > 0 {
-		fmt.Printf("unattached (%d):\n", n)
-		for _, u := range attachment.Unattached {
+		words := attachment.Unattached
+		if shown > 0 && n > shown {
+			words = words[n-shown:]
+			fmt.Printf("captured words not attached (%d), newest %d; --all lists every one:\n", n, shown)
+		} else {
+			fmt.Printf("unattached (%d):\n", n)
+		}
+		for _, u := range words {
 			text := strings.Join(strings.Fields(u.Text), " ")
 			if len(text) > 80 {
 				text = text[:77] + "..."

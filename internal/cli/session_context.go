@@ -118,11 +118,12 @@ func (a *App) captureTerminalUtterance(ctx context.Context, session *surface.Ses
 	}
 	var result struct {
 		Captured   bool     `json:"captured"`
+		Attach     bool     `json:"attach"`
 		ProjectKey string   `json:"projectKey"`
 		Ref        string   `json:"ref"`
 		Unattached []string `json:"unattached"`
 	}
-	if json.Unmarshal(body, &result) != nil || !result.Captured {
+	if json.Unmarshal(body, &result) != nil || !result.Captured || !result.Attach {
 		return ""
 	}
 	return ledger.ReadbackInstruction(result.Ref, result.ProjectKey, result.Unattached)

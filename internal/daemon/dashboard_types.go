@@ -102,6 +102,7 @@ type dashboardState struct {
 	Signin             []signin.Status             `json:"signin"`
 	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
 	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
+	ProjectLinks       []registry.ProjectLink      `json:"projectLinks"`
 	LeadReplacements   []dashboardLeadReplacement  `json:"leadReplacements"`
 	Person             dashboardPerson             `json:"person"`
 	catalogPageApplied bool
