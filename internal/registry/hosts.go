@@ -162,7 +162,36 @@ func (r *Registry) AddHost(host PairedHost) (PairedHost, error) {
 	return host, nil
 }
 
-const pairedHostColumns = `host_id,name,endpoint,address,token,state,last_error,last_contact_at,created_at,catalog_epoch,catalog_seq`
+// RepairHost moves an already-paired host onto a new pairing's token and
+// returns the record it replaced. Rows keyed by the host id are untouched.
+func (r *Registry) RepairHost(host PairedHost) (PairedHost, PairedHost, error) {
+	if host.Endpoint == "" || host.Address == "" || host.Token == "" {
+		return PairedHost{}, PairedHost{}, fmt.Errorf("host endpoint, address and token are required")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return PairedHost{}, PairedHost{}, err
+	}
+	defer tx.Rollback()
+	previous, err := scanPairedHost(tx.QueryRow(`SELECT `+pairedHostColumns+` FROM hosts WHERE host_id=?`, host.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return PairedHost{}, PairedHost{}, fmt.Errorf("%w: %s", ErrHostNotFound, host.ID)
+	}
+	if err != nil {
+		return PairedHost{}, PairedHost{}, err
+	}
+	if _, err := tx.Exec(`UPDATE hosts SET endpoint=?,address=?,token=?,state='connecting',last_error='' WHERE host_id=?`, host.Endpoint, host.Address, host.Token, host.ID); err != nil {
+		return PairedHost{}, PairedHost{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PairedHost{}, PairedHost{}, err
+	}
+	repaired := previous
+	repaired.Endpoint, repaired.Address, repaired.Token, repaired.State, repaired.LastError = host.Endpoint, host.Address, host.Token, "connecting", ""
+	return repaired, previous, nil
+}
+
+const pairedHostColumns =`host_id,name,endpoint,address,token,state,last_error,last_contact_at,created_at,catalog_epoch,catalog_seq`
 
 func scanPairedHost(row rowScanner) (PairedHost, error) {
 	var host PairedHost

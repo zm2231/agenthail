@@ -530,6 +530,7 @@ const (
 	DeliverySigninOff            DeliveryTerminalKind = "signin_off"
 	DeliverySigninUnreadable     DeliveryTerminalKind = "signin_unreadable"
 	DeliverySigninUnavailable    DeliveryTerminalKind = "signin_unavailable"
+	DeliveryHostUnproven         DeliveryTerminalKind = "host_unproven"
 )
 
 type DeliveryTerminalError struct {
@@ -562,6 +563,8 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "browser sign-in unreadable"
 	case DeliverySigninUnavailable:
 		return "no browser on this computer"
+	case DeliveryHostUnproven:
+		return "host not paired back"
 	default:
 		return "delivery rejected"
 	}

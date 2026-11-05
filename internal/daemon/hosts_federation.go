@@ -67,6 +67,9 @@ type pairedHost struct {
 	build  buildinfo.Identity
 	drain  sync.Mutex
 	wake   chan struct{}
+	// tokenProblem, guarded by mu, says how to pair again when this daemon's
+	// token on the host does not speak for this host.
+	tokenProblem string
 
 	ledgerMu        sync.Mutex
 	ledgerWake      chan struct{}
@@ -84,6 +87,33 @@ func (h *pairedHost) status() (string, string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.state, h.detail
+}
+
+func (h *pairedHost) pairingProblem() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.tokenProblem
+}
+
+func (d *Daemon) checkHostToken(ctx context.Context, host *pairedHost) {
+	device, known, err := host.client.TokenDevice(ctx)
+	if err != nil {
+		return
+	}
+	problem := ""
+	if known && (!registry.Device{Scopes: device.Scopes}.IsHost() || device.HostID != d.hostIdentity().ID) {
+		problem = hosts.Unproven(host.record.Name)
+	}
+	host.mu.Lock()
+	changed := host.tokenProblem != problem
+	host.tokenProblem = problem
+	host.mu.Unlock()
+	if changed && problem != "" {
+		d.log.Printf("host %s: %s", host.record.Name, problem)
+	}
+	if changed && d.dashboard != nil {
+		d.dashboard.invalidate()
+	}
 }
 
 func (h *pairedHost) setBuild(build buildinfo.Identity) {
@@ -462,6 +492,7 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 	}
 	host.setBuild(version.Identity)
 	d.hostAnswered(host, outage)
+	d.checkHostToken(ctx, host)
 	for ctx.Err() == nil {
 		seq, err := d.reconcileHost(ctx, host)
 		if err != nil {
@@ -908,6 +939,8 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	switch {
 	case errors.As(readErr, &status) && status.Code == "action_idempotency_mismatch":
 		_ = d.Registry.DeadLetterUnknown(item.ID, readErr)
+	case errors.As(readErr, &status) && status.Code == hosts.UnprovenCode:
+		_, _ = d.Registry.DeadLetterMessage(item.ID, surface.DeliveryTerminal(errors.New(hosts.Unproven(host.record.Name)), surface.DeliveryHostUnproven))
 	case errors.As(readErr, &status):
 		_, _ = d.Registry.DeadLetterMessage(item.ID, fmt.Errorf("host %s refused the message: %s", host.record.Name, status.Error()))
 	case readErr != nil:
@@ -950,9 +983,10 @@ func (d *Daemon) publicSessionID(sessionID string) string {
 
 type dashboardHostHealth struct {
 	dashboardHost
-	Detail string              `json:"detail,omitempty"`
-	Notice string              `json:"notice,omitempty"`
-	Build  *buildinfo.Identity `json:"build,omitempty"`
+	Detail  string              `json:"detail,omitempty"`
+	Notice  string              `json:"notice,omitempty"`
+	Problem string              `json:"problem,omitempty"`
+	Build   *buildinfo.Identity `json:"build,omitempty"`
 }
 
 func (d *Daemon) hostSummaries() []dashboardHostHealth {
@@ -960,7 +994,7 @@ func (d *Daemon) hostSummaries() []dashboardHostHealth {
 	result := make([]dashboardHostHealth, 0, len(paired))
 	for _, host := range paired {
 		state, detail := host.status()
-		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail, Notice: host.notice(), Build: host.reportedBuild()})
+		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail, Notice: host.notice(), Problem: host.pairingProblem(), Build: host.reportedBuild()})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result

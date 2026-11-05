@@ -126,11 +126,12 @@ func TestFederationTrustsASenderOnlyFromItsOwnHost(t *testing.T) {
 	bound := tokenFor(laptopRecord.ID)
 	for _, test := range []struct {
 		token, source, reason string
+		status                int
 	}{
-		{bound, "h0000000000ff::elsewhere", "host_mismatch"},
-		{bound, "vps-b", "host_mismatch"},
-		{tokenFor(""), hosts.Qualify(laptopRecord.ID, "laptop-a"), "agenthail hosts invite"},
-		{bound, hosts.Qualify(laptopRecord.ID, "laptop-a"), ""},
+		{bound, "h0000000000ff::elsewhere", "host_mismatch", http.StatusBadRequest},
+		{bound, "vps-b", "host_mismatch", http.StatusBadRequest},
+		{tokenFor(""), hosts.Qualify(laptopRecord.ID, "laptop-a"), hosts.UnprovenCode, http.StatusForbidden},
+		{bound, hosts.Qualify(laptopRecord.ID, "laptop-a"), "", http.StatusOK},
 	} {
 		response := post(test.token, map[string]any{"action": "send", "sessionId": "vps-a", "sourceSessionId": test.source, "message": "forged"})
 		if test.reason == "" {
@@ -139,7 +140,7 @@ func TestFederationTrustsASenderOnlyFromItsOwnHost(t *testing.T) {
 			}
 			continue
 		}
-		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.reason) {
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.reason) {
 			t.Fatalf("source %s status=%d body=%s", test.source, response.Code, response.Body.String())
 		}
 	}
@@ -226,7 +227,7 @@ func TestFederationRelayLegKeepsItsHopCountOnTheOtherHost(t *testing.T) {
 		t.Fatalf("queued leg=%+v", item)
 	}
 	refused := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": "laptop-a", "message": "fake relay", "relayHops": 2})
-	if refused.Code != http.StatusBadRequest || !strings.Contains(refused.Body.String(), "relayHops") {
+	if refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), "Only a paired host") {
 		t.Fatalf("a person's relayHops status=%d body=%s", refused.Code, refused.Body.String())
 	}
 }

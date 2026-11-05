@@ -206,6 +206,14 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 
 const queueRefusedRow = `refused=1 AND status IN ('pending','inflight')`
 
+// A host's refusal of an unproven token reads "<prefix>Host X doesn't know
+// this host as a paired host. <fix>": the card's reason and action.
+const (
+	hostUnprovenPrefix = `delivery rejected [host not paired back]: `
+	hostUnprovenBreak  = `. `
+	hostUnprovenRow    = `last_error LIKE '` + hostUnprovenPrefix + `%' AND instr(last_error, '` + hostUnprovenBreak + `') > 0`
+)
+
 func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead' OR ` + queueRefusedRow + `) OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
 		return err
@@ -227,6 +235,7 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Claude needs to reconnect'
 				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Claude denied this delivery'
 				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Delivery request needs correction'
+				WHEN `+hostUnprovenRow+` THEN substr(last_error, length('`+hostUnprovenPrefix+`') + 1, instr(last_error, '`+hostUnprovenBreak+`') - length('`+hostUnprovenPrefix+`') - 1)
 				ELSE 'Delivery failed and needs a decision'
 			END,
 			CASE
@@ -238,6 +247,7 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Reconnect Claude, then retry or cancel this message'
 				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Check Claude access, then retry or cancel this message'
 				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Correct this message, then retry or cancel it'
+				WHEN `+hostUnprovenRow+` THEN substr(last_error, instr(last_error, '`+hostUnprovenBreak+`') + length('`+hostUnprovenBreak+`')) || ', then retry this message'
 				ELSE 'Retry or cancel this message'
 			END
 		FROM message_queue WHERE status='dead' AND dead_at_ms>?

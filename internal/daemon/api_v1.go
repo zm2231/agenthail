@@ -52,6 +52,29 @@ func requestingHost(ctx context.Context) (string, bool) {
 	return principal.hostID, principal.host
 }
 
+// boundHost is the paired host a host-only request speaks for. Every
+// host-only path refuses a device token that names no host with the same fix.
+func (d *Daemon) boundHost(ctx context.Context) (string, error) {
+	principal, device := ctx.Value(apiHostPrincipalContextKey{}).(apiHostPrincipal)
+	if principal.host && principal.hostID != "" {
+		return principal.hostID, nil
+	}
+	if !device {
+		return "", actionFailed(http.StatusForbidden, "forbidden", "Only a paired host can make this request.")
+	}
+	return "", actionFailed(http.StatusForbidden, hosts.UnprovenCode, hosts.Unproven(d.hostIdentity().Name))
+}
+
+func (d *Daemon) hostOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := d.boundHost(r.Context()); err != nil {
+			writeActionResult(w, actionResult{}, err)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // requestingHostName is the device name a paired host registered with, its
 // host name at pairing time.
 func requestingHostName(ctx context.Context) string {
@@ -366,13 +389,17 @@ func (d *Daemon) apiDevicePushHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) apiDeviceSelfHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use DELETE to revoke this device.")
+	if r.Method != http.MethodDelete && r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET to describe this device or DELETE to revoke it.")
 		return
 	}
 	device, err := d.Registry.AuthenticateDevice(bearerToken(r), "read")
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, "device_unauthorized", "A paired device token is required.")
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"device": device})
 		return
 	}
 	if err := d.Registry.RevokeDevice(device.ID); err != nil {

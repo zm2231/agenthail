@@ -515,7 +515,11 @@ func (a *App) cmdHosts(args []string) error {
 			return errors.New(hostsUsage)
 		}
 		var added struct {
-			Host registry.PairedHost `json:"host"`
+			Host struct {
+				registry.PairedHost
+				Notice string `json:"notice"`
+			} `json:"host"`
+			Repaired bool `json:"repaired"`
 		}
 		data, _, err := client.call(ctx, http.MethodPost, "/api/v1/hosts", nil, map[string]string{"pairingUrl": positional[0], "address": flagVal(args, "--address"), "name": flagVal(args, "--name")}, nil)
 		if err != nil {
@@ -524,7 +528,14 @@ func (a *App) cmdHosts(args []string) error {
 		if err := json.Unmarshal(data, &added); err != nil {
 			return err
 		}
-		fmt.Printf("paired %s (%s) at %s; target its sessions as %s::<target>\n", added.Host.Name, added.Host.ID, added.Host.Address, added.Host.Name)
+		if added.Repaired {
+			fmt.Printf("paired %s (%s) again at %s; its sessions, held sends and ledger sync carry on\n", added.Host.Name, added.Host.ID, added.Host.Address)
+		} else {
+			fmt.Printf("paired %s (%s) at %s; target its sessions as %s::<target>\n", added.Host.Name, added.Host.ID, added.Host.Address, added.Host.Name)
+		}
+		if added.Host.Notice != "" {
+			fmt.Println(added.Host.Notice)
+		}
 		return nil
 	case "remove", "rm":
 		if len(positional) != 1 {
@@ -568,6 +579,7 @@ func hostsList(ctx context.Context, client *daemonAPIClient, jsonOut bool) error
 			registry.PairedHost
 			Detail       string `json:"detail"`
 			Notice       string `json:"notice"`
+			Problem      string `json:"problem"`
 			SessionCount int    `json:"sessionCount"`
 		} `json:"hosts"`
 	}
@@ -601,6 +613,9 @@ func hostsList(ctx context.Context, client *daemonAPIClient, jsonOut bool) error
 		}
 		if host.Notice != "" {
 			fmt.Printf("  %s\n", host.Notice)
+		}
+		if host.Problem != "" {
+			fmt.Printf("  problem: %s\n", host.Problem)
 		}
 	}
 	return nil

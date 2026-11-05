@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/proxyacct"
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -25,7 +24,7 @@ const proxyPreferTimeout = 30 * time.Second
 func (d *Daemon) proxyPreferGuard(dashboard *dashboardServer) http.HandlerFunc {
 	handler := apiV1JSONHandler(d.proxyPreferHandler)
 	fromClient := d.apiV1Guard(dashboard, "settings", handler)
-	fromHost := d.apiV1Guard(dashboard, registry.HostScope, handler)
+	fromHost := d.apiV1Guard(dashboard, "control", d.hostOnly(handler))
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("forwarded") == "1" {
 			fromHost(w, r)
