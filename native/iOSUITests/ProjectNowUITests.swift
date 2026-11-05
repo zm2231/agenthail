@@ -16,11 +16,13 @@ final class ProjectNowUITests: XCTestCase {
 
     func testNowComesBeforeTheLeadWhenItHasRows() {
         let app = launch("single")
+        XCTAssertTrue(app.staticTexts["Lead"].waitForExistence(timeout: 5))
         XCTAssertLessThan(top(now(app)), top(app.staticTexts["Lead"]), "what needs you is the first thing on the screen")
     }
 
     func testTheLeadStaysFirstWithNothingInNow() {
         let app = launch("empty")
+        XCTAssertTrue(app.staticTexts["Lead"].waitForExistence(timeout: 5))
         XCTAssertLessThan(top(app.staticTexts["Lead"]), top(now(app)))
         XCTAssertTrue(app.staticTexts["Nothing in the last day"].exists)
     }
@@ -29,6 +31,8 @@ final class ProjectNowUITests: XCTestCase {
         let app = launch("multi")
         let line = app.staticTexts["feat/export"]
         let title = app.staticTexts["Add CSV export"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
         XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
     }
 

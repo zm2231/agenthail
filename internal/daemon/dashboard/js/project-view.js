@@ -4,7 +4,7 @@ import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 import { projectSessions } from "./session-order.js";
 import { projectNow } from "./project-now.js";
-import { hostDown } from "./presence.js";
+import { hostDown, presenceLabel, unavailable } from "./presence.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -94,8 +94,9 @@ function leadCard(project, contents) {
     return card("Lead", `<p class="project-lead-name">@${escape(lead.name)}</p><p class="project-note">${escape(labels[lead.surface] || lead.surface)} · ${leadNote(lead)}</p>`);
   }
   const where = leadSession.host && leadSession.host.state !== "local" ? shortHostName(leadSession.host.name) : "";
-  const working = sessionWorking(leadSession);
-  const status = working ? `Working ${rowTime(leadSession, Date.now(), true)}` : ["Idle", idleFor(leadSession)].filter(Boolean).join(" · ");
+  const blocked = leadSession.waitingOn || unavailable(leadSession);
+  const working = sessionWorking(leadSession) && !blocked;
+  const status = working ? `Working ${rowTime(leadSession, Date.now(), true)}` : [blocked ? presenceLabel(leadSession) : "Idle", idleFor(leadSession)].filter(Boolean).join(" · ");
   const id = escape(leadSession.id);
   const buttons = leadActions(leadSession).map((action, index) => {
     const style = index === 0 ? "primary-button" : "soft-button";

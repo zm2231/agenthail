@@ -113,6 +113,12 @@ assert.equal(pinned.leadSession.id, "lead");
 assert(!nowIDs(pinned.now).split(",").includes("lead"), "a working lead stays pinned and is not repeated in Now");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Working 12m</);
+const blockedLead = (patch) => {
+  context.app.state.sessions = [{ ...workingLead, lastActive: at(30), ...patch }, ...sessions.slice(1)];
+  return run("renderProjectView(app.state.projects[0])");
+};
+assert.match(blockedLead({ waitingOn: { kind: "question", id: "q", answerable: true } }), /data-project-lead-status>Codex · Waiting on you · 30 min ago</, "a lead waiting on you says so, with its last activity");
+assert.match(blockedLead({ host: { ...buildbox, state: "unreachable" }, unavailableReason: "buildbox can't be reached" }), /data-project-lead-status>Codex · [^<]*Unavailable · 30 min ago</, "a lead on an unreachable computer doesn't claim to work");
 const delegating = { ...sessions[0], subagents: { count: 1, working: 1 } };
 context.app.state.sessions = [delegating, ...sessions.slice(1)];
 const delegated = run("projectContents(app.state.projects[0], app.state.sessions)");

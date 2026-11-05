@@ -102,7 +102,7 @@ export function hostDown(session) {
   return downHostStates.has(session.host?.state || "");
 }
 
-const unavailable = (session) => hostDown(session) || ["unknown", "notLoaded"].includes(session.status);
+export const unavailable = (session) => hostDown(session) || ["unknown", "notLoaded"].includes(session.status);
 
 export function presenceLabel(session, now = Date.now()) {
   if (unavailable(session)) return "Unavailable";
