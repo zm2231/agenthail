@@ -11,8 +11,6 @@ import (
 // added project without one, the key of its own id. A ledger already kept
 // under an added project's id stays there once the project gains a
 // repository, for every checkout and link that resolves to that project.
-// A folder whose removed project kept a ledger has none until it is added
-// again, rather than a new one under its repository.
 func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 	if found == nil {
 		return "", nil
@@ -40,9 +38,6 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 		}
 		return addedLedgerKey(reg, record)
 	}
-	if _, kept, err := reg.RemovedProjectLedger(found.RootPath); err != nil || kept {
-		return "", err
-	}
 	return found.Key, nil
 }
 
@@ -57,23 +52,28 @@ func addedLedgerKey(reg *registry.Registry, record registry.ProjectRecord) (stri
 	return own, nil
 }
 
+// ResolvePathLedgerKey is the ledger the person means in path. A folder
+// whose removed project kept a ledger names that ledger until it is added
+// again, unless an added project lies deeper.
 func ResolvePathLedgerKey(ctx context.Context, reg *registry.Registry, path string) (string, error) {
 	project, err := ResolvePathProject(ctx, reg, path)
 	if err != nil {
 		return "", err
 	}
+	folder, err := catalogSessionPath(path)
+	if err != nil {
+		return "", err
+	}
+	removedRoot, removedID, kept, err := reg.RemovedProjectLedgerAt(folder)
+	if err != nil {
+		return "", err
+	}
+	if kept && (project == nil || !project.Added || !catalogWithin(removedRoot, project.RootPath) || project.RootPath == removedRoot) {
+		return "", fmt.Errorf("%s is no longer an added project; its ledger (%s) comes back when you add it again with 'agenthail project add'", removedRoot, registry.LedgerProjectKey(removedID))
+	}
 	key, err := LedgerKey(reg, project)
 	if err != nil || key != "" {
 		return key, err
-	}
-	root := path
-	if project != nil {
-		root = project.RootPath
-	}
-	if id, kept, err := reg.RemovedProjectLedger(root); err != nil {
-		return "", err
-	} else if kept {
-		return "", fmt.Errorf("%s is no longer an added project; its ledger (%s) comes back when you add it again with 'agenthail project add'", root, registry.LedgerProjectKey(id))
 	}
 	return "", fmt.Errorf("no project found for %s; add it with 'agenthail project add'", path)
 }

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/workspace"
 )
 
 // LedgerProjectKey names the ledger of an added project that has no
@@ -38,6 +40,27 @@ func (r *Registry) RemovedProjectLedger(workspaceRoot string) (string, bool, err
 		return "", false, nil
 	}
 	return id, err == nil, err
+}
+
+// RemovedProjectLedgerAt is the deepest removed project's kept ledger whose
+// folder holds path.
+func (r *Registry) RemovedProjectLedgerAt(path string) (string, string, bool, error) {
+	rows, err := r.read.Query(`SELECT workspace_root, project_id FROM removed_project_ledgers`)
+	if err != nil {
+		return "", "", false, err
+	}
+	defer rows.Close()
+	var root, id string
+	for rows.Next() {
+		var candidate, candidateID string
+		if err := rows.Scan(&candidate, &candidateID); err != nil {
+			return "", "", false, err
+		}
+		if within, err := workspace.IsWithin(candidate, path); err == nil && within && len(candidate) > len(root) {
+			root, id = candidate, candidateID
+		}
+	}
+	return root, id, root != "", rows.Err()
 }
 
 func keepRemovedProjectLedger(tx *sql.Tx, id string, at time.Time) error {

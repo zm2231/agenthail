@@ -276,3 +276,70 @@ func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
 		t.Fatalf("grants = %+v %v", grants, err)
 	}
 }
+
+func gainRemote(t *testing.T, d *Daemon, r *registry.Registry, repo string) {
+	t.Helper()
+	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	records, err := r.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.refreshProjectRepositories(context.Background(), records, time.Now())
+}
+
+func TestARemovedSubfolderOfARepositoryNamesItsKeptLedger(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
+	sub := filepath.Join(repo, "docs")
+	if err := os.MkdirAll(sub, 0700); err != nil {
+		t.Fatal(err)
+	}
+	id := addFolderProject(t, d, sub)
+	key := ledgerKeyAt(t, r, sub)
+	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	gainRemote(t, d, r, repo)
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", response.Code, response.Body)
+	}
+	if _, err := ResolvePathLedgerKey(context.Background(), r, sub); err == nil || !strings.Contains(err.Error(), key) {
+		t.Fatalf("the removed subfolder resolves without naming its kept ledger: %v", err)
+	}
+	if again := addFolderProject(t, d, sub); again != id || ledgerKeyAt(t, r, sub) != key {
+		t.Fatalf("adding the subfolder again made project %s", again)
+	}
+}
+
+func TestRemovingAProjectLeavesItsRepositorysOtherCheckoutsTheirLedger(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	repo := catalogTestRepo(t)
+	gitRun(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
+	id := addFolderProject(t, d, repo)
+	key := ledgerKeyAt(t, r, repo)
+	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
+	if err := store.Enable(key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	gainRemote(t, d, r, repo)
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", response.Code, response.Body)
+	}
+	checkout := filepath.Join(t.TempDir(), "other")
+	gitRun(t, repo, "worktree", "add", "-q", checkout)
+	checkout, err := canonicalCatalogPath(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ledgerKeyAt(t, r, checkout); got != "repo:github.com/example/notes" {
+		t.Fatalf("another checkout resolves to %q, want its repository's ledger", got)
+	}
+	targets, _, err := d.ledgerTargets(store, folderSession(t, r, "elsewhere", checkout))
+	if err != nil || len(targets) != 1 || targets[0].key != "repo:github.com/example/notes" {
+		t.Fatalf("another checkout's session writes to %+v %v", targets, err)
+	}
+	if _, err := ResolvePathLedgerKey(context.Background(), r, repo); err == nil || !strings.Contains(err.Error(), key) {
+		t.Fatalf("the removed checkout does not name its kept ledger: %v", err)
+	}
+}
