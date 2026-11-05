@@ -83,7 +83,8 @@ final class ProjectNowUITests: XCTestCase {
         XCTAssertLessThan(top(app.staticTexts["notes"]), top(app.staticTexts["scans"]))
     }
 
-    func testShots() {
+    func testShots() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["NOW_SHOTS"] == "1", "eight launches, too slow for every run")
         for scenario in ["multi", "single", "unreachable", "plain"] {
             for theme in ["dark", "light"] {
                 let app = launch(scenario, theme: theme)
