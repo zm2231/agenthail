@@ -39,7 +39,7 @@ export function renderAll() {
 }
 
 export function ensureSessionOrder() {
-  if (orderIsMissing()) load(false, false);
+  if (app.hasState && orderIsMissing()) load();
 }
 
 export async function load(fresh = false, selectDefault = true) {

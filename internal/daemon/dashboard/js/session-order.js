@@ -1,16 +1,27 @@
 import { app } from "./state.js";
 import { responseError } from "./http.js";
 
+export function listOrderScopes() {
+  if (app.inboxMode === "current") return ["current"];
+  if (app.inboxMode === "projects") return ["all", "archived"];
+  return app.showArchived ? ["all", "archived"] : ["all"];
+}
+
 export function neededOrderScopes() {
-  const listing = app.inboxMode !== "current";
-  const scopes = ["current"];
-  if (listing || app.selectedProject) scopes.push("all");
-  if (app.inboxMode === "projects" || (listing && app.showArchived)) scopes.push("archived");
-  return scopes;
+  const scopes = new Set(["current"]);
+  if (app.view === "conversations") {
+    listOrderScopes().forEach((scope) => scopes.add(scope));
+    if (app.selectedProject) scopes.add("all");
+  }
+  return [...scopes];
+}
+
+export function orderReady(scopes) {
+  return scopes.every((scope) => app.sessionOrderRead?.includes(scope));
 }
 
 export function orderIsMissing() {
-  return neededOrderScopes().some((scope) => !app.sessionOrderRead?.includes(scope));
+  return !orderReady(neededOrderScopes());
 }
 
 async function readScope(scope) {

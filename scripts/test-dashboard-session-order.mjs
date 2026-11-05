@@ -10,7 +10,7 @@ const pages = {
 };
 let requested = [];
 const context = {
-  app: { inboxMode: "current", showArchived: false, selectedProject: null, state: { sessions: [{ id: "a" }, { id: "b" }] } },
+  app: { view: "conversations", inboxMode: "current", showArchived: false, selectedProject: null, state: { sessions: [{ id: "a" }, { id: "b" }] } },
   fetch: async (path) => {
     requested.push(path);
     return { ok: true, json: async () => pages[path] };
@@ -27,6 +27,12 @@ assert.equal(context.orderIsMissing(), false);
 
 app.inboxMode = "all";
 assert.equal(context.orderIsMissing(), true, "a list that shows All needs All read");
+assert.equal(context.orderReady(["all"]), false, "a list whose order was never read is not ready to render");
+for (const view of ["overview", "operations"]) {
+  app.view = view;
+  assert.deepEqual([...context.neededOrderScopes()], ["current"], `a hidden list in All mode is not walked while ${view} is shown`);
+}
+app.view = "conversations";
 requested = [];
 refreshAt = await context.loadSessionOrder();
 assert.deepEqual(requested.sort(), Object.keys(pages).filter((path) => !path.includes("archived")).sort(), "All is read to its last page once it is shown");
@@ -42,7 +48,10 @@ app.inboxMode = "projects";
 assert.deepEqual([...context.neededOrderScopes()],["current", "all", "archived"], "the projects list reads All and Archived for its archived section");
 app.inboxMode = "current";
 app.selectedProject = "p";
-assert.deepEqual([...context.neededOrderScopes()],["current", "all"], "an open project page reads All");
+assert.deepEqual([...context.neededOrderScopes()], ["current", "all"], "an open project page reads All");
+app.view = "overview";
+assert.deepEqual([...context.neededOrderScopes()], ["current"], "a project left open behind Overview is not walked");
+app.view = "conversations";
 
 app.selectedProject = null;
 requested = [];
