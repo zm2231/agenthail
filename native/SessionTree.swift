@@ -62,8 +62,8 @@ struct SessionTree: Equatable {
 
         func moreLabel(expanded: Bool, keeping selectedID: String?) -> String? {
             let count = shown(expanded: expanded, keeping: selectedID).sessionCount
-            if expanded { return familyTotal > collapsed.count ? "Show less" : nil }
-            return familyTotal > count ? "Show \(familyTotal - count) more" : nil
+            guard familyTotal > count || expanded && familyTotal > collapsed.count else { return nil }
+            return expanded ? "Show less" : "Show \(familyTotal - count) more"
         }
 
         /// The daemon's collapsed families, and the family holding the selection in its place.

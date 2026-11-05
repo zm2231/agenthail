@@ -54,6 +54,11 @@ struct SessionTreeTest {
         expect(five.shown(expanded: true, keeping: nil).sessionCount == 8, "an expanded project shows every family")
         let small = SessionTree.ordered(list: view([family("a", project: "small"), family("b", project: "small")], projects: [("small", ["a", "b"])]), current: nil, rows: rows([session("a", project: "small"), session("b", project: "small")]), attention: [:]).projects[0]
         expect(small.moreLabel(expanded: false, keeping: nil) == nil && small.moreLabel(expanded: true, keeping: nil) == nil, "a project within five has no more row")
+        let pinnedIDs = (0..<250).map { "p\($0)" }
+        let pagedView = ScopePage.View(counts: [:], surfaces: [], projects: [ViewProject(id: "paged", name: "paged", counts: ScopePage.Count(families: 250, sessions: 250), collapsedFamilyIds: pinnedIDs)], families: pinnedIDs.prefix(50).map { family($0, project: "paged", pinned: true) })
+        let paged = SessionTree.ordered(list: pagedView, current: nil, rows: rows(pinnedIDs.prefix(50).map { session($0, project: "paged") }), attention: [:]).projects[0]
+        expect(paged.moreLabel(expanded: true, keeping: nil) == "Show less", "an expanded project with pages still to load can fold back")
+        expect(paged.moreLabel(expanded: false, keeping: nil) == "Show 200 more" && paged.shown(expanded: false, keeping: nil).sessionCount == 50, "a collapsed paged project shows its loaded collapsed families: \(String(describing: paged.moreLabel(expanded: false, keeping: nil)))")
         let collapsed = tree.projects[1].collapsed(keeping: nil)
         expect(collapsed.checkouts.flatMap(\.families).map(\.id) == ["old"], "collapse shows exactly the daemon's collapsed families")
         expect(tree.projects[1].collapsed(keeping: "busy").checkouts.flatMap(\.families).map(\.id) == ["old", "busy"], "the selected family stays visible in its daemon place")
