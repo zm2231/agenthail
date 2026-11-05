@@ -45,6 +45,7 @@ type claudeSubagentFile struct {
 	stamp     surface.FileStamp
 	cursor    transcriptCursor
 	done      bool
+	started   time.Time
 }
 
 type claudeSubagentMeta struct {
@@ -58,6 +59,7 @@ type claudeSubagentRecord struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId"`
 	AgentID   string `json:"agentId"`
+	Timestamp string `json:"timestamp"`
 	Message   struct {
 		StopReason string `json:"stop_reason"`
 	} `json:"message"`
@@ -266,6 +268,7 @@ func (f *claudeSubagentFile) validate(transcriptID string) error {
 			return false, fmt.Errorf("Claude subagent transcript %s does not match its path", f.path)
 		}
 		f.validated = true
+		f.started, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 		return true, nil
 	})
 	if err != nil {
@@ -302,6 +305,7 @@ func (f *claudeSubagentFile) link(parentSessionID string, now time.Time) surface
 		Description:     f.meta.Description,
 		ToolUseID:       f.meta.ToolUseID,
 		Depth:           depth,
+		StartedAt:       f.started,
 		TranscriptPath:  f.path,
 	}
 	if !f.stamp.Modified.IsZero() {

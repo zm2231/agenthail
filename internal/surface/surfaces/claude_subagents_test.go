@@ -97,6 +97,34 @@ func TestClaudeSubagentsAreReadFromTheSessionTranscriptDirectory(t *testing.T) {
 	}
 }
 
+func TestAClaudeSubagentStartsAtItsFirstRecord(t *testing.T) {
+	fixture := newClaudeSubagentFixture(t, "transcript-1")
+	path := fixture.write(t, "a1", "", `{"type":"user","sessionId":"transcript-1","agentId":"a1","timestamp":"2026-11-05T09:00:00.250Z"}`)
+	observer := newClaudeSubagentObserver()
+	session := &surface.Session{ID: "transcript-1", Transcript: fixture.transcript}
+	started := time.Date(2026, 11, 5, 9, 0, 0, 250_000_000, time.UTC)
+	links, err := observer.observeSession(context.Background(), session)
+	if err != nil || len(links) != 1 || !links[0].StartedAt.Equal(started) {
+		t.Fatalf("initial = %+v, %v", links, err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"assistant","sessionId":"transcript-1","agentId":"a1","timestamp":"2026-11-05T09:05:00Z","message":{"stop_reason":"tool_use"}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	later := time.Now().Add(time.Second)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	links, err = observer.observeSession(context.Background(), session)
+	if err != nil || len(links) != 1 || !links[0].StartedAt.Equal(started) || !links[0].LastActive.Equal(later) {
+		t.Fatalf("after a later record = %+v, %v", links, err)
+	}
+}
+
 func TestClaudeSubagentStateFollowsAppendedRecordsAndNewFiles(t *testing.T) {
 	fixture := newClaudeSubagentFixture(t, "transcript-1")
 	path := fixture.write(t, "a1", "", subagentRecord("transcript-1", "a1", "user", ""))

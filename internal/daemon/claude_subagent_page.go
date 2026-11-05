@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -24,7 +25,14 @@ func newClaudeSubagentPage(links []surface.ClaudeSubagentLink, all bool) claudeS
 			}
 			return 1
 		}
-		return b.LastActive.Compare(a.LastActive)
+		if a.Working {
+			if order := b.StartedAt.Compare(a.StartedAt); order != 0 {
+				return order
+			}
+		} else if order := b.LastActive.Compare(a.LastActive); order != 0 {
+			return order
+		}
+		return strings.Compare(a.AgentID, b.AgentID)
 	})
 	page := claudeSubagentPage{links: ordered, total: len(ordered)}
 	if all {
