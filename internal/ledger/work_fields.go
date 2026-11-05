@@ -22,6 +22,8 @@ var workPriorities = []string{"P0", "P1", "P2", "P3"}
 
 const defaultWorkPriority = "P2"
 
+const workCloseDone = "done"
+
 var workCloseReasons = []string{"duplicate", "wontfix", "obsolete"}
 
 const maxWorkFieldRunes = 8000
@@ -110,9 +112,13 @@ func priorityRank(p string) int {
 	return slices.Index(workPriorities, defaultWorkPriority)
 }
 
-func closeReason(reason string) bool {
-	word, _, _ := strings.Cut(strings.ToLower(reason), " ")
-	return slices.Contains(workCloseReasons, strings.TrimRight(word, ":,"))
+func closeReason(reason string) (word, rest string) {
+	reason = strings.TrimSpace(reason)
+	end := strings.IndexAny(reason, " :,")
+	if end < 0 {
+		return strings.ToLower(reason), ""
+	}
+	return strings.ToLower(reason[:end]), strings.TrimLeft(reason[end:], " :,")
 }
 
 func (item *WorkItem) origin() string {

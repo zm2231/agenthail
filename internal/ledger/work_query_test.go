@@ -67,11 +67,11 @@ func TestWorkQueriesFindItemsByWordsFieldsAndNotes(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"td-50b9b1", "td:td-50b9b1"} {
-		if item, ok := b.WorkItemByOrigin(name); !ok || item.ID != "widget-W5" {
+		if item, ok := b.WorkItem(name); !ok || item.ID != "widget-W5" {
 			t.Errorf("by origin %s: %+v %v", name, item, ok)
 		}
 	}
-	if _, ok := b.WorkItemByOrigin("td-5"); ok {
+	if _, ok := b.WorkItem("td-5"); ok {
 		t.Error("a prefix of a td id found an item")
 	}
 }

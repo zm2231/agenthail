@@ -45,7 +45,7 @@ type FoundRef struct {
 func (b *Board) WorkContext(id string) (WorkContext, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	item := b.workItems[id]
+	item := b.workItem(id)
 	if item == nil {
 		return WorkContext{}, false
 	}
@@ -63,7 +63,7 @@ func (b *Board) WorkContext(id string) (WorkContext, bool) {
 		}
 	}
 	for _, other := range b.workItems {
-		if slices.Contains(other.DependsOn, id) {
+		if slices.Contains(other.DependsOn, item.ID) {
 			ctx.Dependents = append(ctx.Dependents, WorkRef{ID: other.ID, State: other.State, Text: other.Text})
 		}
 	}

@@ -23,7 +23,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        agenthail ledger work comment <item_id> "<text>"
        agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
        agenthail ledger work <claim|block|unblock|submit|reopen|restore> <item_id> [--reason "..."]
-       agenthail ledger work close <item_id> --reason "duplicate|wontfix|obsolete ..."
+       agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
        agenthail ledger work dep <item_id> --on <item_id>

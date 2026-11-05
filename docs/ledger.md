@@ -121,7 +121,7 @@ agenthail ledger work handoff <item> --done "..." --remaining "..."
 
 Every `ledger work <command>` can also be written without `work`, as in td: `ledger list`, `ledger show <item>`, `ledger add` (or `create`, `new`), `ledger edit` (or `update`), `ledger start` (claim), `ledger review` (submit), `ledger close`, `ledger delete`, `ledger reopen` and the rest. `agenthail ledger help` lists them all, and so does an unknown command. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from.
 
-An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
+An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). Work nobody holds that was finished elsewhere, such as an imported issue that already shipped, is closed as done with what finished it: `agenthail ledger close <item> --reason "done: PR #12"` takes an open or blocked item with no assignee straight to `done`. Claimed work is finished through `submit` and review. `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
 
 Two kinds of notes attach to an item:
 
@@ -135,7 +135,7 @@ Two kinds of notes attach to an item:
 - `--assignee <session>` or `--mine`, `--clause <id>`, and `--found` for found work only.
 - `--sort id|priority|created|updated` (newest first for the dates) and `--limit <n>`.
 
-`agenthail ledger show` also takes an imported item's td id (`ledger show td-1a2b3c`).
+Every command that takes an item also takes an imported item's td id, with or without the `td:` prefix: `ledger show td-1a2b3c`, `ledger close td-1a2b3c --reason "done: PR #12"`, `ledger dep td-1a2b3c --on td-4d5e6f`. Only the whole id matches.
 
 Comments and logs stay on the item when the clause above it is cut, and they survive a rebuild. When the person's words behind a clause are retracted, asked work added under that clause goes with them, notes included, and the board lists it among the retractions; found work that was linked to the clause goes back to found.
 
