@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,12 +59,8 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	if err := json.Unmarshal([]byte(board("--json")), &enabled); err != nil || enabled.Capture != "enabled" || enabled.CaptureSince == "" {
 		t.Fatalf("enabled board json %+v err %v", enabled, err)
 	}
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"enable", "--attach", "whenever"}) }); err == nil {
-		t.Fatal("an unknown attach mode was accepted")
-	}
-	board("enable", "--attach", "checkpoints")
-	if scope, err := ls.Scope("board-key"); err != nil || scope.Attach != ledger.AttachAtCheckpoints || scope.State != ledger.LedgerEnabled {
-		t.Fatalf("enable --attach checkpoints: %+v %v", scope, err)
+	if err := ls.Enable("board-key", ledger.AttachAtCheckpoints); err != nil {
+		t.Fatal(err)
 	}
 	if out := board(); !strings.Contains(out, "attach the person's words at checkpoints") || !strings.Contains(out, "attach your own in one call") {
 		t.Fatalf("checkpoint board %q", out)
@@ -182,35 +180,57 @@ func TestLedgerBoardKeepsWithdrawnCutsAndMarksDefaultedDecisions(t *testing.T) {
 	}
 }
 
-func TestLedgerEnableAndDisableASession(t *testing.T) {
-	elsewhere := surface.Session{ID: "elsewhere", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: t.TempDir()}
-	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"elsewhere": elsewhere}})
+func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
+	app, calls := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
+		return http.StatusOK, body
+	})
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := captureStdout(t, func() error { return app.cmdLedger(args) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	key := "repo:github.com/acme/widget"
+	if out := run("enable", "--attach", "checkpoints"); !strings.Contains(out, "at checkpoints") {
+		t.Fatalf("enable output %q", out)
+	}
+	run("enable", "s1")
+	run("disable", "s1")
+	run("disable")
+	want := []map[string]any{
+		{"path": "/api/v1/ledger/scope", "projectKey": key, "enabled": true, "attach": "checkpoints"},
+		{"path": "/api/v1/ledger/scope", "projectKey": key, "enabled": true, "sessionId": "s1"},
+		{"path": "/api/v1/ledger/scope", "projectKey": key, "enabled": false, "sessionId": "s1"},
+		{"path": "/api/v1/ledger/scope", "projectKey": key, "enabled": false},
+	}
+	if !reflect.DeepEqual(*calls, want) {
+		t.Fatalf("requests %v, want %v", *calls, want)
+	}
+	for _, args := range [][]string{{"enable", "--attach", "whenever"}, {"enable", "s1", "--attach", "checkpoints"}} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil {
+			t.Fatalf("%v was accepted", args)
+		}
+	}
+	if len(*calls) != len(want) {
+		t.Fatalf("a refused enable reached the daemon: %v", *calls)
+	}
+}
+
+func TestLedgerEnableFailsWhenTheDaemonIsDown(t *testing.T) {
+	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "grant-key"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.RegisterSession(elsewhere); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetAlias("helper", "elsewhere"); err != nil {
+	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "down-key"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	ls := ledger.NewStore(store.WriteDB(), store.ReadDB())
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"enable", "@helper"}) }); err != nil {
-		t.Fatal(err)
+	for _, args := range [][]string{{"enable"}, {"disable"}} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil || !strings.Contains(err.Error(), "daemon is not running") {
+			t.Fatalf("%v with no daemon: %v", args, err)
+		}
 	}
-	grants, err := ls.SessionGrants("elsewhere")
-	if err != nil || len(grants) != 1 || grants[0].ProjectKey != "grant-key" {
-		t.Fatalf("grants %+v err %v", grants, err)
-	}
-	if scope, _ := ls.Scope("grant-key"); scope.State != ledger.LedgerUnset {
-		t.Fatalf("enabling a session changed the project's own state: %+v", scope)
-	}
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"disable", "@helper"}) }); err != nil {
-		t.Fatal(err)
-	}
-	if grants, _ := ls.SessionGrants("elsewhere"); len(grants) != 0 {
-		t.Fatalf("disable kept the grant: %+v", grants)
+	if scope, err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Scope("down-key"); err != nil || scope.State != ledger.LedgerUnset {
+		t.Fatalf("the ledger changed with no daemon: %+v %v", scope, err)
 	}
 }
