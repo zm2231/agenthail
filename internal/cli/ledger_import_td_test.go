@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -227,5 +228,36 @@ func TestLedgerImportTDReadsAWALDatabaseWhileTDHoldsItOpen(t *testing.T) {
 	}
 	if _, err := td.Exec(`INSERT INTO issues (id, title, created_at) VALUES ('td-later', 'td keeps writing', '2026-07-14T00:01:00-04:00')`); err != nil {
 		t.Fatalf("td cannot write after the import: %v", err)
+	}
+}
+
+func TestLedgerImportTDDryRunLeavesOutWhatIsAlreadyImported(t *testing.T) {
+	app, calls := ledgerWriteFixture(t, func(string, map[string]any) (int, any) { return http.StatusOK, ledger.WorkImportResult{} })
+	path, _ := tdFixture(t, t.TempDir())
+	store := ledger.NewStore(app.registry().WriteDB(), app.registry().ReadDB())
+	if _, err := store.ImportWork(ledger.WorkImportRequest{ProjectKey: "repo:github.com/acme/widget", SessionID: "s1",
+		Items: []ledger.WorkImport{{ImportedFrom: "td:td-epic", Text: "search"}, {ImportedFrom: "td:td-leak", Text: "index leaks a handle"}},
+		Deps:  []ledger.WorkImportDep{{Item: "td:td-epic", On: "td:td-leak"}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run"}) })
+	if err != nil || !strings.Contains(out, "would import 1 items and 1 dependencies from "+path+" (2 already imported)") {
+		t.Fatalf("dry run printed %q, err %v", out, err)
+	}
+	out, err = captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run", "--json"}) })
+	var plan struct {
+		Items   []ledger.WorkImport    `json:"items"`
+		Deps    []ledger.WorkImportDep `json:"deps"`
+		Present []ledger.WorkImported  `json:"present"`
+	}
+	if err != nil || json.Unmarshal([]byte(out), &plan) != nil {
+		t.Fatalf("dry run json %q, err %v", out, err)
+	}
+	if len(plan.Items) != 1 || plan.Items[0].ImportedFrom != "td:td-schema" || len(plan.Present) != 2 ||
+		len(plan.Deps) != 1 || plan.Deps[0] != (ledger.WorkImportDep{Item: "td:td-leak", On: "td:td-schema"}) {
+		t.Fatalf("dry run plan = %+v", plan)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a dry run sent %d requests", len(*calls))
 	}
 }

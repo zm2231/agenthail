@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -14,7 +15,7 @@ const ledgerImportUsage = `usage: agenthail ledger import td [<path to .todos/is
 
 const importBatchBytes = 96 << 10
 
-func (a *App) ledgerImport(args []string) error {
+func (a *App) ledgerImport(store *ledger.Store, args []string) error {
 	w, err := parseLedgerWrite(args)
 	if err != nil {
 		return err
@@ -38,10 +39,15 @@ func (a *App) ledgerImport(args []string) error {
 		return fmt.Errorf("read td database %s: %w", path, err)
 	}
 	if w.bools["--dry-run"] {
-		if w.bools["--json"] {
-			return emit(map[string]any{"items": export.items, "deps": export.deps, "notCarriedOver": export.leftOver})
+		board, err := a.workBoard(store, w)
+		if err != nil {
+			return err
 		}
-		fmt.Printf("would import %d items and %d dependencies from %s\n", len(export.items), len(export.deps), path)
+		plan := planTDImport(board, export)
+		if w.bools["--json"] {
+			return emit(map[string]any{"items": plan.items, "deps": plan.deps, "present": plan.present, "notCarriedOver": export.leftOver})
+		}
+		fmt.Printf("would import %d items and %d dependencies from %s (%d already imported)\n", len(plan.items), len(plan.deps), path, len(plan.present))
 		printLeftOver(export.leftOver)
 		return nil
 	}
@@ -150,4 +156,36 @@ func findTD() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+type tdImportPlan struct {
+	items   []ledger.WorkImport
+	deps    []ledger.WorkImportDep
+	present []ledger.WorkImported
+}
+
+func planTDImport(board *ledger.Board, export tdExport) tdImportPlan {
+	imported := map[string]ledger.WorkItem{}
+	for _, item := range board.WorkItems() {
+		if item.ImportedFrom != "" {
+			imported[item.ImportedFrom] = item
+		}
+	}
+	var plan tdImportPlan
+	for _, item := range export.items {
+		if have, ok := imported[item.ImportedFrom]; ok {
+			plan.present = append(plan.present, ledger.WorkImported{ImportedFrom: item.ImportedFrom, ItemID: have.ID})
+			continue
+		}
+		plan.items = append(plan.items, item)
+	}
+	for _, dep := range export.deps {
+		item, itemOK := imported[dep.Item]
+		on, onOK := imported[dep.On]
+		if itemOK && onOK && slices.Contains(item.DependsOn, on.ID) {
+			continue
+		}
+		plan.deps = append(plan.deps, dep)
+	}
+	return plan
 }
