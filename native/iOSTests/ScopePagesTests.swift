@@ -33,6 +33,21 @@ final class ScopePagesTests: XCTestCase {
         try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"\#(type)","data":\#(data)}"#.utf8))
     }
 
+    func testThePreviewRunningScopeListsWhatTheDaemonCallsWorking() throws {
+        let rows: [[String: Any]] = [
+            ["id": "busy", "status": "busy"],
+            ["id": "background", "status": "idle", "backgroundTasks": ["running": true, "source": "claude"]],
+            ["id": "subagents", "status": "idle", "observedSubagents": ["count": 2, "working": 1]],
+            ["id": "queued", "status": "idle", "queueCount": 1],
+            ["id": "waiting", "status": "idle", "waitingOn": ["kind": "question", "id": "q"]],
+        ]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["sessions": rows]), as: UTF8.self)
+        let running = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PreviewOrder.scoped(json, "running").utf8)) as? [String: Any])
+        XCTAssertEqual((running["sessions"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["busy", "background", "subagents"])
+        let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PreviewOrder.scoped(json, "all").utf8)) as? [String: Any])
+        XCTAssertEqual((all["sessions"] as? [[String: Any]])?.count, rows.count)
+    }
+
     func testAllIsReadPageByPageFromEveryComputer() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live", name: "fresh")], scopes: ["all": [[ScopeServer.row("live", name: "stale"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         ScopeServer.state.set("two", current: [], scopes: ["all": [[ScopeServer.row("c")]]])

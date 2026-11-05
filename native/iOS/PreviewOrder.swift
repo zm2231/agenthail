@@ -7,10 +7,15 @@ enum PreviewOrder {
         row["status"] as? String == "busy" || (row["queueCount"] as? Int ?? 0) > 0 || row["waitingOn"] != nil
     }
 
+    static func working(_ row: [String: Any]) -> Bool {
+        row["status"] as? String == "busy" || (row["backgroundTasks"] as? [String: Any])?["running"] as? Bool == true
+            || ((row["observedSubagents"] as? [String: Any])?["working"] as? Int ?? 0) > 0
+    }
+
     static func scoped(_ json: String, _ scope: String?) -> String {
         guard scope == "running", var object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
               let sessions = object["sessions"] as? [[String: Any]] else { return withView(json) }
-        object["sessions"] = sessions.filter(pinned)
+        object["sessions"] = sessions.filter(working)
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return withView(json) }
         return withView(String(decoding: data, as: UTF8.self))
     }
