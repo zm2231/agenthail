@@ -46,7 +46,7 @@ func (s *Store) writeEvents(projectKey, actor string, now time.Time, plan func(*
 }
 
 func (s *Store) commitEvents(board *Board, projectKey, actor string, now time.Time, plan func(*Board, *idIssuer) ([]plannedWrite, error)) error {
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return err
 	}

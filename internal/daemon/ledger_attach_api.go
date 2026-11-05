@@ -21,7 +21,11 @@ type ledgerGoalResponse struct {
 }
 
 func (d *Daemon) ledgerStore() *ledger.Store {
-	d.ledgerOnce.Do(func() { d.ledger = ledger.NewCachedStore(d.Registry.WriteDB(), d.Registry.ReadDB()) })
+	d.ledgerOnce.Do(func() {
+		d.ledger = ledger.NewCachedStore(d.Registry.WriteDB(), d.Registry.ReadDB())
+		d.ledgerHub = newLedgerChangeHub(ledgerChangeWait, d.ledgerVersion, d.log.Printf)
+		d.ledger.OnChange(d.ledgerHub.changed)
+	})
 	return d.ledger
 }
 

@@ -93,7 +93,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_sessions` | Visible sessions with a `mine`, `project` or `all-visible` filter, paged with `cursor` |
 | `agenthail_read` | Timeline items of one visible session: the latest page; older pages through `before`; newer journal items through `since` (pass back `latestSeq`); a clipped item's full body through `bodyRef` and `offset` |
 | `agenthail_requests` | The visible sessions that are waiting on a prompt or question, or the open requests of one session, in one call without a cursor; `requestId` for one request's longer prompt |
-| `agenthail_ledger_read` | The caller's project ledger: the board (counts and goals), one list paged with `cursor` (`goals`, `asks`, `decisions`, `questions`, `work`), or the top of the ranked `ready` queue |
+| `agenthail_ledger_read` | The caller's project ledger, read by the same code as `GET /api/v1/ledger`: the board (capture, sync, counts, goals, newest unattached words), one list paged with `cursor` (`goals`, `asks`, `decisions`, `questions`, `work`), the top of the ranked `ready` queue, or one work item or ask by `id` (`item`) |
 
 `agenthail_read` and `/api/v1/session` share `readSessionPage`, and `agenthail_requests` and `/api/v1/requests` share `openRequests`.
 
