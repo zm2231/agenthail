@@ -8,7 +8,7 @@ Labels don't start runs. CI and iOS run when a pull request is opened, reopened 
 
 - If the latest run's gate is still deciding, it picks the label up by itself.
 - If the gate already skipped the full jobs, the run is rerun, cancelled first if it is still going.
-- If the run already has the full jobs, it is left alone, and so is an iOS run with no iOS changes.
+- If the run already has the full jobs, it is left alone. So is a cancelled run, such as one a merge train cancelled, and an iOS run with no iOS changes.
 
 Any other label changes nothing. Adding `full-ci` to a pull request from a fork reruns nothing, because its token cannot rerun workflows; rerun CI by hand after adding the label. `scripts/test-ci-full-label.sh` checks these decisions against a stub `gh`.
 

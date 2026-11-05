@@ -8,12 +8,12 @@ set -euo pipefail
 
 full=false
 if [[ "$HEAD_REF" == train/* ]]; then
-  full=true
+	full=true
 else
-  labels="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name')"
-  if grep -qx 'full-ci' <<<"$labels"; then
-    full=true
-  fi
+	labels="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name')"
+	if grep -qx 'full-ci' <<<"$labels"; then
+		full=true
+	fi
 fi
 echo "full=$full" >>"$GITHUB_OUTPUT"
 echo "full CI: $full"
