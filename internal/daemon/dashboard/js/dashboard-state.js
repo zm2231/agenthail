@@ -7,8 +7,7 @@ import { renderOperations } from "./operations.js";
 import { app } from "./state.js";
 import { renderSettings } from "./settings.js";
 import { loadTools } from "./tool-loader.js";
-import { responseError } from "./http.js";
-import { retryPendingSends } from "./pending-send.js";
+import { retryPendingSends, unconfirmedSendsOutside } from "./pending-send.js";
 import { applyRekeys } from "./rekeys.js";
 import { stopLiveStream } from "./session-stream.js";
 import { selectSession } from "./session-selection.js";
@@ -16,7 +15,8 @@ import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
 import { scopedSessions } from "./session-scope.js";
-import { loadSessionOrder, orderIsMissing } from "./session-order.js";
+import { listedRows, loadSessionOrder, orderIsMissing } from "./session-order.js";
+import { findSessions, readHistory } from "./session-pages.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 
@@ -56,23 +56,26 @@ export async function load(fresh = false, selectDefault = true) {
     }
   }, 2000);
   try {
-    const [, response, refreshAt] = await Promise.all([
+    const [, { base: state, refreshAt }, history] = await Promise.all([
       loadTools(),
-      fetch(`/api/state${fresh ? "?fresh=1" : ""}`),
-      loadSessionOrder(),
+      loadSessionOrder(fresh),
+      readHistory(),
     ]);
-    if (!response.ok) throw await responseError(response);
     clearTimeout(app.orderRefresh);
     if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => load(false, false), Math.max(0, refreshAt - Date.now()));
-    const state = await response.json();
+    const rows = listedRows();
+    const kept = [app.selected?.id, ...unconfirmedSendsOutside((id) => rows.has(id)).map((item) => item.sessionId), ...(state.deliveryProblems || []).map((item) => item.sessionId)];
+    const missing = [...new Set(kept)].filter((id) => id && !rows.has(id) && !state.rekeyed?.[id]);
+    if (missing.length) for (const [id, row] of await findSessions(missing).catch(() => new Map())) rows.set(id, row);
     app.state = {
       ...state,
+      counts: app.sessionOrder.current.counts,
+      history,
       surfaces: state.surfaces || [],
-      sessions: state.sessions || [],
+      sessions: [...rows.values()],
       queue: state.queue || [],
       channels: state.channels || [],
       relays: state.relays || [],
-      history: state.history || [],
       attention: state.attention || [],
       deliveryProblems: state.deliveryProblems || [],
       leadReplacements: state.leadReplacements || [],
