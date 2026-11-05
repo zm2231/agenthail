@@ -38,9 +38,11 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 	}
 	owned := board.ClausesOwnedBy(sessionID)
 	sort.Slice(owned, func(i, j int) bool { return idNumber(owned[i].ID) < idNumber(owned[j].ID) })
-	pending, err := attachment(tx, projectKey, board, sessionID)
-	if err != nil {
-		return GateResult{}, err
+	var pending Attachment
+	if board.capture.Attach != AttachAtCheckpoints {
+		if pending, err = attachment(tx, projectKey, board, sessionID); err != nil {
+			return GateResult{}, err
+		}
 	}
 	if len(owned) == 0 && len(pending.Unattached) == 0 {
 		return result, nil

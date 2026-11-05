@@ -29,7 +29,7 @@ func liveEvent(item surface.TimelineItem) surface.StreamEvent {
 func TestDashboardSendAndItsJournalEntryAreOneUtterance(t *testing.T) {
 	r := openLedgerRegistry(t)
 	p := addLedgerProject(t, r, "proj-send", "send-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	target := p.session(t, r, "target")
@@ -49,7 +49,7 @@ func TestDashboardSendAndItsJournalEntryAreOneUtterance(t *testing.T) {
 func TestPersonSteersAreCapturedUnderTheirIntentOnEveryBranch(t *testing.T) {
 	r := openLedgerRegistry(t)
 	p := addLedgerProject(t, r, "proj-steer", "steer-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	waiting := p.session(t, r, "waiting")
@@ -77,7 +77,7 @@ func TestPersonSteersAreCapturedUnderTheirIntentOnEveryBranch(t *testing.T) {
 func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-missed", "missed-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "s-missed")
@@ -152,7 +152,7 @@ func TestBackfillNotesPromptsTheHookMissed(t *testing.T) {
 func TestLedgerAPIReportsAFailedWrite(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-fail", "fail-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s-fail")
@@ -186,7 +186,7 @@ func TestPersonSendToTheCoordinatorIsCapturedInUnsetProject(t *testing.T) {
 func TestTypedPromptHookAndJournalAreOneUtterancePerSubmission(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-typed", "typed-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "s-typed")
@@ -205,7 +205,7 @@ func TestTypedPromptHookAndJournalAreOneUtterancePerSubmission(t *testing.T) {
 func TestBackfillSkipsInjectedAndAgentMessages(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-agent", "agent-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "s-agent")
@@ -225,7 +225,7 @@ func TestBackfillHonoursTheProjectGrant(t *testing.T) {
 	s := p.session(t, r, "s-grant")
 	source := journalSource(d, s, nil)
 	before := time.Now().Add(-time.Hour)
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	enabledAt := time.Now()
@@ -239,7 +239,7 @@ func TestBackfillHonoursTheProjectGrant(t *testing.T) {
 	}
 	gap := time.Now()
 	time.Sleep(5 * time.Millisecond)
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	source.appendSeedItems([]surface.TimelineItem{typedPrompt("gap", "p-gap", "while disabled", gap)})

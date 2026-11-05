@@ -45,7 +45,7 @@ func TestAProjectWhoseLedgerWasEnabledHoldsHistoryALinkWouldStrand(t *testing.T)
 	if held, err := r.ProjectHistory(fork); err != nil || len(held) != 0 {
 		t.Fatalf("a fresh project holds %v (err %v)", held, err)
 	}
-	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(fork); err != nil {
+	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(fork, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if held, err := r.ProjectHistory(fork); err != nil || !slices.Equal(held, []string{"a ledger board"}) {

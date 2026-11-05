@@ -32,7 +32,7 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 	}
 
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
-	if err := store.Enable(projectKey); err != nil {
+	if err := store.Enable(projectKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 	}
 
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
-	if err := store.Enable("inner-key"); err != nil {
+	if err := store.Enable("inner-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 

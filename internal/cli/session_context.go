@@ -63,10 +63,12 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		return nil
 	}
 	text := ""
+	var ledgerContext string
 	if hook.Event == claudehooks.Start.Event {
 		claimed, err := store.ClaimSessionStart(session.ID, fmt.Sprintf("%s:%d", hook.Source, parent), card.Fingerprint(), now)
 		if err == nil && claimed {
 			text = agentcard.Render(card)
+			ledgerContext = a.ledgerCheckpoint(ctx, session.ID)
 		}
 	} else {
 		change, err := store.ClaimContextChange(session.ID, card.Fingerprint(), now)
@@ -78,7 +80,6 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 			text = agentcard.RenderChange(card)
 		}
 	}
-	var ledgerContext string
 	if hook.Event == claudehooks.PromptSubmit.Event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
 		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)
 	}

@@ -10,6 +10,7 @@ Every project with a lead captures the person's words to that lead, from the mom
 
 ```
 agenthail ledger enable              # capture the person's words to every session in this project, and ask each to attach them
+agenthail ledger enable --attach checkpoints   # the same, but ask at checkpoints instead of with each message
 agenthail ledger enable @session     # the same for one session, and the forks made from it afterwards
 agenthail ledger disable             # capture nothing in this project, not even the lead's words
 agenthail ledger disable @session    # take back a session's grant
@@ -33,6 +34,22 @@ In an enabled project, or for a granted session, the session the person spoke to
 agenthail ledger goal "Search"                                   # create a goal, or show it
 agenthail ledger attach <utterance> --as new-ask --to <goal> --clause "build search"
 ```
+
+A message that carries several intents is attached in one call, one fragment per intent, with `--and` between them. Each fragment is recorded on its own: a refused fragment prints why and leaves the others attached, and the command fails so the session sees it.
+
+```
+agenthail ledger attach <utterance> --as extends --to <ask> --clause "and the docs" --and <utterance> --as decides --to project --clause "use sqlite"
+```
+
+### When a session is asked to attach
+
+`agenthail ledger enable` asks each session to attach every message before it replies, and the turn gate below holds it for words it left unattached. `agenthail ledger enable --attach checkpoints` asks nothing per message. Instead, the words a session has not attached yet are shown at points it reaches anyway:
+
+- adding, claiming or submitting a work item (`ledger add`, `start`, `review`, and the same writes over MCP, whose result carries them as `ledgerCheckpoint`);
+- the start of a session, a resume and a compaction;
+- `agenthail ledger`, which lists the project's unattached words.
+
+The session then attaches them with one `--and` call. In this mode the turn gate still holds a session for clauses it owns without progress, but not for unattached words. Running `enable` again with the other `--attach` value switches the mode without changing when capture began.
 
 `--as` says how the message relates to what is already on the board:
 
@@ -72,7 +89,7 @@ The bare `agenthail ledger` command shows goals, open asks, decisions and words 
 
 ### The turn gate
 
-At the end of a turn, a session that owns clauses or has unattached words in a project that asks it to attach (enabled, or granted to the session) is held until it does one of these:
+At the end of a turn, a session that owns clauses, or has unattached words in a project that asks it to attach each message (enabled, or granted to the session), is held until it does one of these:
 
 - attaches the words;
 - reports progress on its clauses;

@@ -62,9 +62,10 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 
 // ledgerScope is when the person's words to a session start counting in a project, and whether the session is asked to attach them.
 type ledgerScope struct {
-	since   time.Time
-	inScope bool
-	attach  bool
+	since       time.Time
+	inScope     bool
+	attach      bool
+	checkpoints bool
 }
 
 // ledgerSince is the earliest grant that puts sessionID in the project's ledger scope. Enabling the project or granting the session asks it to attach;
@@ -84,6 +85,9 @@ func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID
 	if at, ok := access.grants[target.key]; ok {
 		consider(at)
 		scope.attach = true
+	}
+	if captured.Attach == ledger.AttachAtCheckpoints {
+		scope.attach, scope.checkpoints = false, scope.attach
 	}
 	if target.projectID == "" {
 		return scope, nil

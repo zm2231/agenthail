@@ -100,10 +100,20 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	if err := a.ledgerPost(ctx, "/api/v1/ledger/work", req, &result); err != nil {
 		return err
 	}
+	var checkpoint string
+	if req.Action.AttachCheckpoint() {
+		checkpoint = a.ledgerCheckpoint(ctx, req.SessionID)
+	}
 	if w.bools["--json"] {
-		return emit(result)
+		return emit(struct {
+			ledger.WorkResult
+			LedgerCheckpoint string `json:"ledgerCheckpoint,omitempty"`
+		}{result, checkpoint})
 	}
 	fmt.Println(result.Readback)
+	if checkpoint != "" {
+		fmt.Println("\n" + checkpoint)
+	}
 	return nil
 }
 

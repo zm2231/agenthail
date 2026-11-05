@@ -78,7 +78,7 @@ func newCheckerFixture(t *testing.T) checkerFixture {
 	fake := &checkerSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	p := addLedgerProject(t, r, "proj-check", "repo:github.com/acme/widget")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	return checkerFixture{d: d, r: r, fake: fake, project: p, worker: p.session(t, r, "worker")}

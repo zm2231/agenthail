@@ -38,7 +38,7 @@ func gateFixtureIn(t *testing.T, via registry.OriginVia, runtime surface.Runtime
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	p := addLedgerProject(t, r, "proj-g2", "repo:github.com/acme/widget")
 	if enabled {
-		if err := p.store.Enable(p.key); err != nil {
+		if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 			t.Fatal(err)
 		}
 	}

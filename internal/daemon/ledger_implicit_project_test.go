@@ -33,7 +33,7 @@ func TestAnImplicitProjectsCapturedWordsCanBeAttached(t *testing.T) {
 		t.Fatalf("the fixture must have no project rows: %+v %v", records, err)
 	}
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
-	if err := store.Enable(key); err != nil {
+	if err := store.Enable(key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	resp := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: session.ID, PromptID: "p-implicit", Prompt: "keep the importer"})

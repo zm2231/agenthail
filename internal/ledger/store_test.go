@@ -3,6 +3,7 @@ package ledger_test
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -28,7 +29,7 @@ func TestEnableDisable(t *testing.T) {
 		t.Fatalf("expected disabled, got enabled=%v err=%v", enabled, err)
 	}
 
-	if err := s.Enable("proj-1"); err != nil {
+	if err := s.Enable("proj-1", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	enabled, err = s.Enabled("proj-1")
@@ -111,5 +112,34 @@ func TestLatestSeq(t *testing.T) {
 	seq, err = s.LatestSeq("proj-1")
 	if err != nil || seq != 2 {
 		t.Fatalf("expected 2, got %d err=%v", seq, err)
+	}
+}
+
+func TestSwitchingWhenAProjectAttachesKeepsWhenCaptureBegan(t *testing.T) {
+	db := openTestDB(t)
+	s := ledger.NewStore(db, db)
+	if err := s.Enable("proj-1", ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Scope("proj-1")
+	time.Sleep(20 * time.Millisecond)
+	for range 2 {
+		if err := s.Enable("proj-1", ledger.AttachAtCheckpoints); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, _ := s.Scope("proj-1")
+	if after.Attach != ledger.AttachAtCheckpoints || !after.Since.Equal(before.Since) || after.State != ledger.LedgerEnabled {
+		t.Fatalf("switching to checkpoints: before %+v after %+v", before, after)
+	}
+	if events, _ := s.Events("proj-1", 0, 10); len(events) != 2 {
+		t.Fatalf("want one capture event per change, got %d", len(events))
+	}
+	rebuilt, _ := ledger.NewStore(db, db).Scope("proj-1")
+	if rebuilt != after {
+		t.Fatalf("a rebuilt board reads %+v, want %+v", rebuilt, after)
+	}
+	if err := s.Enable("proj-1", "whenever"); err == nil {
+		t.Fatal("an unknown attach mode was accepted")
 	}
 }

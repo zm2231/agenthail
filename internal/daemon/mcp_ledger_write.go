@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type mcpLedgerWriteInput struct {
 	mcpWrite
 	Op      string         `json:"op" jsonschema:"attach, clause, question or work: the same operations as agenthail ledger attach, clause, question and work."`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {
@@ -55,5 +58,26 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if refusal != nil {
 		return nil, refusal
 	}
+	if action, _ := request["action"].(string); op == "work" && ledger.WorkAction(action).AttachCheckpoint() {
+		return d.withLedgerCheckpoint(caller.session, result), nil
+	}
 	return result, nil
+}
+
+func (d *Daemon) withLedgerCheckpoint(session surface.Session, result json.RawMessage) json.RawMessage {
+	text, err := d.ledgerCheckpoint(session)
+	if err != nil {
+		d.log.Printf("ledger checkpoint for %s: %s", session.ID, err)
+		return result
+	}
+	var fields map[string]any
+	if text == "" || json.Unmarshal(result, &fields) != nil {
+		return result
+	}
+	fields["ledgerCheckpoint"] = text
+	merged, err := json.Marshal(fields)
+	if err != nil {
+		return result
+	}
+	return merged
 }
