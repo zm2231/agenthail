@@ -266,3 +266,55 @@ func TestARefusedOwnerAssignmentLeavesNeitherHostOwning(t *testing.T) {
 		}
 	}
 }
+
+func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachAtCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	words := capturePrompt(t, mac, "local-a", "p-1", "build search for the docs")
+	checkpoint := func() string {
+		t.Helper()
+		var out ledgerCheckpointResponse
+		mustLedger(t, mac, "/api/v1/ledger/checkpoint", ledgerCheckpointRequest{SessionID: "local-a"}, &out)
+		return out.Instruction
+	}
+	var added ledger.WorkResult
+	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkAdd, Text: "index the docs"}, &added)
+	if added.Item.ID != "widget-W1" || countEvents(t, owner.reg, ledger.EventWorkItem, "") != 1 {
+		t.Fatalf("the add did not go through the owner: %+v", added)
+	}
+	if text := checkpoint(); !strings.Contains(text, words+": build search for the docs") {
+		t.Fatalf("the replica's checkpoint after a proxied add = %q", text)
+	}
+	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Search"}, nil)
+	var batch ledger.AttachEachResult
+	mustLedger(t, mac, "/api/v1/ledger/attach", map[string]any{"projectKey": widgetKey, "sessionId": "local-a", "fragments": []ledger.AttachRequest{
+		{UtteranceID: words, As: ledger.AsNewAsk, To: "widget-G1", Clauses: []string{"build search for the docs"}}}}, &batch)
+	if len(batch.Fragments) != 1 || batch.Fragments[0].Refused != "" || countEvents(t, owner.reg, ledger.EventAttach, "") != 1 {
+		t.Fatalf("the batched attach did not go through the owner: %+v", batch)
+	}
+	if text := checkpoint(); text != "" {
+		t.Fatalf("the replica still shows words the owner has attached: %q", text)
+	}
+	sameLedgerOnBothHosts(t, mac, owner)
+	written := func(node *federationNode) (bySelf, byOthers int) {
+		t.Helper()
+		var self string
+		if err := node.reg.ReadDB().QueryRow(`SELECT host_id FROM host_identity WHERE id=1`).Scan(&self); err != nil || self == "" {
+			t.Fatalf("host identity %q: %v", self, err)
+		}
+		if err := node.reg.ReadDB().QueryRow(`SELECT COALESCE(SUM(actor_host_id=?),0), COALESCE(SUM(actor_host_id<>?),0) FROM ledger_events WHERE project_key=? AND type IN (?,?)`,
+			self, self, widgetKey, string(ledger.EventWorkItem), string(ledger.EventAttach)).Scan(&bySelf, &byOthers); err != nil {
+			t.Fatal(err)
+		}
+		return bySelf, byOthers
+	}
+	if bySelf, byOthers := written(owner); bySelf != 2 || byOthers != 0 {
+		t.Fatalf("the owner holds %d work item and attach events it wrote and %d another host wrote; want 2 and 0", bySelf, byOthers)
+	}
+	if bySelf, byOthers := written(mac); bySelf != 0 || byOthers != 2 {
+		t.Fatalf("the replica holds %d work item and attach events it wrote and %d from the owner; want 0 and 2", bySelf, byOthers)
+	}
+}
