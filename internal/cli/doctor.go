@@ -226,8 +226,11 @@ func (a *App) cmdDoctor(args []string) error {
 	if pushErr != nil {
 		pushFailures++
 	}
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	projectNotes, heldLinks, projectsErr := a.doctorProjectNotes(callCtx)
+	cancel()
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0, "projectLinks": projectNotes, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -238,6 +241,9 @@ func (a *App) cmdDoctor(args []string) error {
 			report["pushError"] = pushErr.Error()
 		}
 		report["connection"] = connection
+		if projectsErr != nil {
+			report["projectLinksError"] = projectsErr.Error()
+		}
 		if settingsErr != nil {
 			report["settingsError"] = settingsErr.Error()
 		}
@@ -305,6 +311,12 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("connection: unknown (%s)\n", connectionErr)
 		} else {
 			fmt.Println(connection)
+		}
+		if projectsErr != nil {
+			fmt.Printf("project links: unknown (%s)\n", projectsErr)
+		}
+		for _, note := range projectNotes {
+			fmt.Printf("project %s\n", note)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
@@ -391,6 +403,9 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	if syncFailures > 0 {
 		return fmt.Errorf("doctor found %d ledger(s) not syncing with their owner, or could not check them", syncFailures)
+	}
+	if heldLinks > 0 {
+		return fmt.Errorf("doctor found %d project link(s) this host holds without applying", heldLinks)
 	}
 	if ledgerFailures > 0 {
 		return fmt.Errorf("doctor found %d Claude config root(s) where the enabled ledger captures no terminal words, or could not check them", ledgerFailures)

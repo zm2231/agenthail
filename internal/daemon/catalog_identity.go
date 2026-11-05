@@ -40,6 +40,15 @@ type CatalogProject struct {
 	Key         string              `json:"key,omitempty"`
 	Repository  *project.Repository `json:"repository,omitempty"`
 	Archived    bool                `json:"archived,omitempty"`
+	RootCommits []string            `json:"rootCommits,omitempty"`
+	// LinkedFrom is the project this checkout belongs to before a link joins
+	// it into ID.
+	LinkedFrom *CatalogProjectRef `json:"linkedFrom,omitempty"`
+}
+
+type CatalogProjectRef struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
 type catalogCheckout struct {
@@ -79,6 +88,7 @@ type catalogIdentityCache struct {
 	// failure that is not "not a repository" never moves a session.
 	known        map[string]*CatalogProject
 	projects     []registry.ProjectRecord
+	links        projectLinkSet
 	generation   uint64
 	repositories *catalogRepositoryCache
 	roots        map[string]catalogRootEntry
@@ -134,6 +144,19 @@ func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
 	c.projects = added
 	c.generation++
 	c.entries = map[string]catalogIdentityEntry{}
+}
+
+func (c *catalogIdentityCache) setLinks(links projectLinkSet) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.links.equal(links) {
+		c.links = links
+		return
+	}
+	c.links = links
+	c.generation++
+	c.entries = map[string]catalogIdentityEntry{}
+	c.known = map[string]*CatalogProject{}
 }
 
 // rootRepository reads the key and repository of an added project's folder.
@@ -193,9 +216,9 @@ func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Ses
 // every discovery pass.
 func (c *catalogIdentityCache) resolve(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) catalogIdentity {
 	c.mu.Lock()
-	projects, generation := c.projects, c.generation
+	projects, links, generation := c.projects, c.links, c.generation
 	c.mu.Unlock()
-	identity, gitDirs, transient := resolveCatalogIdentity(ctx, path, projects, c.repositories)
+	identity, gitDirs, transient := resolveCatalogIdentity(ctx, path, projects, links, c.repositories)
 	if transient {
 		c.mu.Lock()
 		known, found := c.known[path]
@@ -306,7 +329,13 @@ func catalogConfigStamp(dirs catalogGitDirs) string {
 // the same place in the repository's main checkout, so a linked worktree's
 // session finds the projects added in the main checkout. Without one, a
 // repository is an implicit project at its main checkout.
-func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
+func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, links projectLinkSet, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
+	identity, dirs, transient := resolveUnlinkedCatalogIdentity(ctx, path, projects, repositories)
+	identity.Project = links.apply(identity.Project)
+	return identity, dirs, transient
+}
+
+func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
 	identity := catalogIdentity{Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
 	existing := nearestExistingDirectory(path)
 	repository, notRepository, err := resolveCatalogRepository(ctx, existing, repositories)
@@ -345,8 +374,9 @@ type catalogRepository struct {
 	toplevel   string
 	commonDir  string
 	gitDir     string
-	mainRoot   string
-	repository *project.Repository
+	mainRoot    string
+	repository  *project.Repository
+	rootCommits []string
 }
 
 // translate maps a folder in this checkout to the same folder in the main
@@ -380,7 +410,7 @@ func (repository catalogRepository) implicitProject() *CatalogProject {
 	if repository.repository != nil {
 		name = repository.repository.Name
 	}
-	found := &CatalogProject{LocalID: catalogImplicitProjectID(repository.mainRoot), DisplayName: name, RootPath: repository.mainRoot, Kind: catalogProjectGit, Key: repository.key(repository.mainRoot), Repository: repository.repository}
+	found := &CatalogProject{LocalID: catalogImplicitProjectID(repository.mainRoot), DisplayName: name, RootPath: repository.mainRoot, Kind: catalogProjectGit, Key: repository.key(repository.mainRoot), Repository: repository.repository, RootCommits: repository.rootCommits}
 	found.ID = found.LocalID
 	if found.Key != "" {
 		found.ID = found.Key
@@ -431,11 +461,14 @@ type catalogRepositoryCache struct {
 }
 
 type catalogRepositoryEntry struct {
-	repository *project.Repository
-	stamp      string
+	repository  *project.Repository
+	rootCommits []string
+	stamp       string
 }
 
-func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, error) {
+// A repository without commits yet is read again next time, so its first
+// commit's root is found without waiting for a config change.
+func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, []string, error) {
 	stamp := "missing"
 	if info, err := os.Stat(filepath.Join(commonDir, "config")); err == nil {
 		stamp = surface.Stamp(info).String()
@@ -444,20 +477,31 @@ func (repositories *catalogRepositoryCache) repository(ctx context.Context, comm
 		repositories.mu.Lock()
 		entry, found := repositories.entries[commonDir]
 		repositories.mu.Unlock()
-		if found && entry.stamp == stamp {
-			return entry.repository, nil
+		if found && entry.stamp == stamp && len(entry.rootCommits) > 0 {
+			return entry.repository, entry.rootCommits, nil
 		}
 	}
 	repository, err := readCatalogRepository(ctx, commonDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	roots := readCatalogRootCommits(ctx, commonDir)
 	if repositories != nil {
 		repositories.mu.Lock()
-		repositories.entries[commonDir] = catalogRepositoryEntry{repository: repository, stamp: stamp}
+		repositories.entries[commonDir] = catalogRepositoryEntry{repository: repository, rootCommits: roots, stamp: stamp}
 		repositories.mu.Unlock()
 	}
-	return repository, nil
+	return repository, roots, nil
+}
+
+func readCatalogRootCommits(ctx context.Context, commonDir string) []string {
+	output, err := catalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return nil
+	}
+	roots := strings.Fields(output)
+	slices.Sort(roots)
+	return roots
 }
 
 // readCatalogRepository reads the remote that names the repository: origin,
@@ -545,7 +589,7 @@ func resolveCatalogRepository(ctx context.Context, path string, repositories *ca
 	default:
 		repository.mainRoot = repository.commonDir
 	}
-	if repository.repository, err = repositories.repository(gitCtx, repository.commonDir); err != nil {
+	if repository.repository, repository.rootCommits, err = repositories.repository(gitCtx, repository.commonDir); err != nil {
 		return catalogRepository{}, false, err
 	}
 	return repository, false, nil

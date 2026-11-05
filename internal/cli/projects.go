@@ -15,6 +15,8 @@ const projectUsage = `usage: agenthail project list [--all] [--json]
        agenthail project remove <name|id|path> [--json]
        agenthail project rename <name|id|path> <new name> [--json]
        agenthail project <archive|unarchive> <name|id|path> [--json]
+       agenthail project link <joined: name|id|path> <into: name|id|path> [--json]
+       agenthail project unlink <name|id|path> [--json]
 
 A project is a folder you add, and it may be a folder inside a repository. A
 session belongs to the deepest added project that holds its folder, reading a
@@ -23,7 +25,14 @@ session is a project of its own. Projects in the same place of a repository
 with a remote are one project on every paired host. Archiving hides a project
 and its sessions until it is unarchived or one of its sessions shows new
 activity; removing an added project moves its sessions to the next project
-that holds them.`
+that holds them.
+
+Linking joins one project into another: its sessions, lead and ledger become
+the second project's. A link between two repositories with remotes holds on
+every paired host; a link naming a folder without one holds on this host. A
+project that already has a lead or a ledger board of its own cannot be joined
+into another; link the other way round. Unlinking makes it a project of its
+own again.`
 
 type projectHost struct {
 	ID    string `json:"id"`
@@ -38,6 +47,7 @@ type projectCheckout struct {
 	Added        bool        `json:"added"`
 	SessionCount int         `json:"sessionCount"`
 	Archived     bool        `json:"archived"`
+	LinkedFrom   *projectRef `json:"linkedFrom,omitempty"`
 }
 
 type projectCoordinator struct {
@@ -58,6 +68,9 @@ type projectRow struct {
 	LastActive   time.Time            `json:"lastActive,omitempty"`
 	SessionCount int                  `json:"sessionCount"`
 	Archived     bool                 `json:"archived"`
+	Linked       []projectRef         `json:"linked,omitempty"`
+	LinkHeld     string               `json:"linkHeld,omitempty"`
+	SameHistory  []projectRef         `json:"sameHistory,omitempty"`
 }
 
 // lead names the project's coordinator as this host addresses it, "-" when it
@@ -157,8 +170,13 @@ func (a *App) cmdProject(args []string) error {
 				name += " (archived)"
 			}
 			fmt.Printf("%-24s %-20s %-24s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostNames(), 20), truncate(project.lead(), 24), project.SessionCount, relTime(project.LastActive), project.rootPath())
+			for _, note := range project.linkNotes() {
+				fmt.Printf("  %s\n", note)
+			}
 		}
 		return nil
+	case "link", "unlink":
+		return a.cmdProjectLink(ctx, client, positional, jsonOut)
 	case "add":
 		if len(positional) != 2 {
 			return fmt.Errorf("%s", projectUsage)

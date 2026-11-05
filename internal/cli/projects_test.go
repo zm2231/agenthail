@@ -135,6 +135,29 @@ func TestProjectRenameNamesTheProjectOnEveryHost(t *testing.T) {
 	}
 }
 
+func TestProjectLinkNamesAJoinedProjectByItsOwnName(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	laptop := `{"id":"local","name":"laptop","state":"local"}`
+	api.snapshot = `{"projects":[
+{"id":"repo:github.com/example/upstream","displayName":"upstream","kind":"git","checkouts":[{"host":` + laptop + `,"projectId":"implicit:/work/fork","rootPath":"/work/fork","linkedFrom":{"id":"repo:github.com/example/fork","displayName":"fork"}}],"coordinators":[],"linked":[{"id":"repo:github.com/example/fork","displayName":"fork"}]},
+{"id":"p-notes","displayName":"notes","kind":"git","checkouts":[{"host":` + laptop + `,"projectId":"p-notes","rootPath":"/work/notes"}],"coordinators":[],"sameHistory":[{"id":"repo:github.com/example/upstream","displayName":"upstream"}]}]}`
+	api.response = `{"ok":true,"changed":true,"link":{"joined":"p-notes","survivor":"repo:github.com/example/upstream","linked":true}}`
+	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "list"}) })
+	if err != nil || !strings.Contains(output, "includes fork") || !strings.Contains(output, "same history as upstream; to make them one project: agenthail project link /work/notes repo:github.com/example/upstream") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"project", "unlink", "fork"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"project", "link", "notes", "upstream"}) }); err != nil {
+		t.Fatal(err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 2 || actions[0]["action"] != "project-unlink" || actions[0]["projectId"] != "repo:github.com/example/fork" || actions[1]["action"] != "project-link" || actions[1]["projectId"] != "p-notes" || actions[1]["survivor"] != "repo:github.com/example/upstream" {
+		t.Fatalf("actions=%v", actions)
+	}
+}
+
 func TestProjectRefusalsCarryTheFlagThatResolvesThem(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	api.responses = map[string]string{"coordinator-set": `{"error":{"code":"coordinator_exists","message":"the project already has coordinator @widget-lead; replace it to take over"}}`}

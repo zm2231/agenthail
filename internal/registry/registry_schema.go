@@ -525,6 +525,13 @@ CREATE TABLE IF NOT EXISTS projects (
 	created_at_ms INTEGER NOT NULL DEFAULT 0,
 	archived_at_ms INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS project_links (
+	joined TEXT PRIMARY KEY,
+	survivor TEXT NOT NULL,
+	linked INTEGER NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL

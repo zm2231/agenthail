@@ -32,7 +32,7 @@ func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashbo
 		return actionResult{}, invalidRequest("attachments are only accepted with send")
 	}
 	if strings.HasPrefix(request.Action, "project-") {
-		return d.doProjectAction(ctx, p, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title})
+		return d.doProjectAction(ctx, p, projectRequest{Action: request.Action, ProjectID: request.ProjectID, Path: request.Path, Title: request.Title, Survivor: request.Survivor})
 	}
 	if strings.HasPrefix(request.Action, "coordinator-") {
 		return d.doCoordinatorAction(ctx, p, coordinatorRequest{Action: request.Action, SessionID: request.SessionID, SourceSessionID: request.SourceSessionID, ProjectID: request.ProjectID, Project: request.Project, Name: request.Name, Surface: request.Surface, Cwd: request.Cwd, Path: request.Path, Model: request.Model, PermissionMode: request.PermissionMode, Instructions: request.Instructions, Replace: request.Replace, ChangedAt: request.ChangedAt, ChangedBy: request.ChangedBy, Message: request.Message, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions, NoQueue: request.NoQueue})

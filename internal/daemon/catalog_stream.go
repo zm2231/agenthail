@@ -372,6 +372,9 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.refreshProjectRepositories(ctx, projects, time.Now())
 		d.catalogIdentities.setProjects(projects)
 	}
+	if err := d.refreshProjectLinks(); err != nil {
+		d.log.Printf("catalog project links: %s", err)
+	}
 	for _, adapter := range d.Surfaces {
 		if only != nil && !only[adapter.Name()] {
 			continue

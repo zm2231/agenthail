@@ -1,4 +1,4 @@
--- schemaVersion 52
+-- schemaVersion 53
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -468,6 +468,15 @@ CREATE TABLE paired_devices (
 CREATE TABLE pending_ceilings (
 	credential_id INTEGER PRIMARY KEY REFERENCES session_credentials(id) ON DELETE CASCADE,
 	ceiling TEXT NOT NULL
+);
+
+-- table project_links
+CREATE TABLE project_links (
+	joined TEXT PRIMARY KEY,
+	survivor TEXT NOT NULL,
+	linked INTEGER NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
 );
 
 -- table projects
