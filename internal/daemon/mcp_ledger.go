@@ -18,10 +18,14 @@ func (d *Daemon) mcpLedgerRead(_ context.Context, caller *mcpCaller, input mcpLe
 	if !caller.has("ledger.read") {
 		return nil, refuse("capability_missing", "Reading the ledger needs ledger.read.")
 	}
-	if caller.project == nil || caller.project.Key == "" {
+	key, err := LedgerKey(d.Registry, caller.project)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
 		return nil, refuse("invalid", "Your session is not in a project with a ledger; the person adds one with agenthail project add.")
 	}
-	result, err := d.ledgerRead(caller.project.Key, ledger.ReadRequest{View: input.View, ID: input.ID, Limit: input.Limit, Cursor: input.Cursor, Budget: mcpPageBudget})
+	result, err := d.ledgerRead(key, ledger.ReadRequest{View: input.View, ID: input.ID, Limit: input.Limit, Cursor: input.Cursor, Budget: mcpPageBudget})
 	var refusal *ledger.Refusal
 	var missing *ledger.NotFound
 	switch {

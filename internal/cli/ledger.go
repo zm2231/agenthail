@@ -81,14 +81,7 @@ func ledgerProjectKey(a *App) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	project, err := daemon.ResolvePathProject(context.Background(), a.registry(), cwd)
-	if err != nil {
-		return "", err
-	}
-	if project == nil || project.Key == "" {
-		return "", fmt.Errorf("no project found for %s; run 'agenthail project add' first", cwd)
-	}
-	return project.Key, nil
+	return daemon.ResolvePathLedgerKey(context.Background(), a.registry(), cwd)
 }
 
 func (a *App) ledgerBoard(store *ledger.Store, args []string) error {

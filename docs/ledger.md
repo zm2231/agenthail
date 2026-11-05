@@ -2,6 +2,8 @@
 
 The intent ledger keeps what the person asked for next to the work agent sessions do about it. It is per project, keyed by the repository's remote, so every session working on the same repository shares one ledger.
 
+A folder needs no repository to have a ledger. A project added with `agenthail project add` whose folder is not a Git repository, or has only a remote on this machine (a path or a `file:` URL), keeps its ledger under its project id, `project:<id>`. Once anything is kept in that ledger (a captured word, a session's grant or an owner), it stays under the id when the folder later gains a remote, and when the folder is removed and added again it takes the same id back, with its ledger; meanwhile `agenthail ledger` in the removed folder names the kept ledger, and sessions there use whatever ledger the folder resolves to without the project, such as its repository's. Linking a project away is refused while it holds a ledger, as it is for a repository's; a project linked into another uses the survivor's ledger. Another host that owns or replicates the ledger holds it under the same key.
+
 Every change is an event in an append-only log; the board you read is rebuilt from that log. Nothing is edited in place: a correction is a new event that supersedes an old one.
 
 ## Capture and scope

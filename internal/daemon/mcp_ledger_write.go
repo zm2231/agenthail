@@ -21,7 +21,11 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if !caller.has("ledger.write") {
 		return nil, refuse("capability_missing", "Writing the ledger needs ledger.write.")
 	}
-	if caller.project == nil || caller.project.Key == "" {
+	projectKey, err := LedgerKey(d.Registry, caller.project)
+	if err != nil {
+		return nil, err
+	}
+	if projectKey == "" {
 		return nil, refuse("invalid", "Your session is not in a project with a ledger; the person adds one with agenthail project add.")
 	}
 	handlers := map[string]http.HandlerFunc{"attach": d.apiLedgerAttachHandler, "clause": d.apiLedgerClauseHandler, "question": d.apiLedgerQuestionHandler, "work": d.apiLedgerWorkHandler}
@@ -37,7 +41,7 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if owner, _ := request["owner"].(string); strings.TrimSpace(owner) != "" {
 		return nil, refuse("invalid", "Ledger ownership is set by the person, not over MCP.")
 	}
-	request["projectKey"], request["sessionId"] = caller.project.Key, caller.session.ID
+	request["projectKey"], request["sessionId"] = projectKey, caller.session.ID
 	key, err := input.key("agenthail_ledger_write")
 	if err != nil {
 		return nil, err
