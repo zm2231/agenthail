@@ -444,22 +444,10 @@ func (d *Daemon) resumeHostMoves(ctx context.Context, host *pairedHost) {
 
 func (d *Daemon) registerMoveAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/session-moves", d.apiV1Guard(dashboard, "control", d.apiSessionMovesHandler))
-	mux.HandleFunc("/api/v1/session-move", d.apiV1Guard(dashboard, "control", d.moveHostOnly(d.apiMoveStatusHandler)))
-	mux.HandleFunc("/api/v1/session-move/prepare", d.apiV1Guard(dashboard, "control", d.moveHostOnly(d.apiMovePrepareHandler)))
-	mux.HandleFunc("/api/v1/session-move/transfer", d.apiV1Guard(dashboard, "control", d.moveHostOnly(d.apiMoveTransferHandler)))
-	mux.HandleFunc("/api/v1/session-move/abort", d.apiV1Guard(dashboard, "control", d.moveHostOnly(d.apiMoveAbortHandler)))
-}
-
-// moveHostOnly admits only a paired host's token, with control: a move in
-// names its source by that token, never by what the request says.
-func (d *Daemon) moveHostOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if hostID, isHost := requestingHost(r.Context()); !isHost || hostID == "" {
-			writeAPIError(w, http.StatusForbidden, "forbidden", "Only a paired host can move a session here.")
-			return
-		}
-		next(w, r)
-	}
+	mux.HandleFunc("/api/v1/session-move", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveStatusHandler)))
+	mux.HandleFunc("/api/v1/session-move/prepare", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMovePrepareHandler)))
+	mux.HandleFunc("/api/v1/session-move/transfer", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveTransferHandler)))
+	mux.HandleFunc("/api/v1/session-move/abort", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveAbortHandler)))
 }
 
 func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) {

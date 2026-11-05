@@ -31,11 +31,15 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	if err != nil {
 		return replyWith(func(w http.ResponseWriter) {
 			var owned registry.SessionOwnedError
-			if errors.As(err, &owned) {
+			var failure *actionError
+			switch {
+			case errors.As(err, &owned):
 				writeRouteError(w, err)
-				return
+			case errors.As(err, &failure):
+				writeActionResult(w, actionResult{}, err)
+			default:
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			}
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		})
 	}
 	if host == nil {

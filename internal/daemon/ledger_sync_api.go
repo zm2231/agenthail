@@ -66,24 +66,14 @@ type ledgerOwnerResponse struct {
 }
 
 func (d *Daemon) registerLedgerSyncRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
-	mux.HandleFunc("/api/v1/ledger/sync/claim", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncClaimHandler)))
-	mux.HandleFunc("/api/v1/ledger/sync/confirm", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncConfirmHandler)))
-	mux.HandleFunc("/api/v1/ledger/sync/abort", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncAbortHandler)))
-	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.ledgerHostOnly(d.apiLedgerSyncReplayHandler)))
-	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncEventsHandler)))
-	mux.HandleFunc("/api/v1/ledger/sync/digest", d.apiV1Guard(dashboard, "read", d.ledgerHostOnly(d.apiLedgerSyncDigestHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/claim", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncClaimHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/confirm", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncConfirmHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/abort", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncAbortHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncReplayHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiLedgerSyncEventsHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/digest", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiLedgerSyncDigestHandler)))
 	mux.HandleFunc("/api/v1/ledger/owner", d.apiV1Guard(dashboard, "control", d.apiLedgerOwnerHandler))
 	mux.HandleFunc("/api/v1/ledger/sync/status", d.apiV1Guard(dashboard, "read", d.apiLedgerSyncStatusHandler))
-}
-
-func (d *Daemon) ledgerHostOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if hostID, isHost := requestingHost(r.Context()); !isHost || hostID == "" {
-			writeAPIError(w, http.StatusForbidden, "forbidden", "Only a paired host syncs a ledger with this one.")
-			return
-		}
-		next(w, r)
-	}
 }
 
 func (d *Daemon) apiLedgerSyncReplayHandler(w http.ResponseWriter, r *http.Request) {

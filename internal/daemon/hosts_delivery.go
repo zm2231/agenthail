@@ -50,8 +50,8 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 }
 
 func (d *Daemon) doHostRelay(ctx context.Context, session *surface.Session, message, sourceID, busyDelivery string, hops int) (actionResult, error) {
-	if _, fromHost := requestingHost(ctx); !fromHost {
-		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "relayHops is set only by a paired host forwarding a relay")
+	if _, err := d.boundHost(ctx); err != nil {
+		return actionResult{}, err
 	}
 	if hops < 1 || hops > maxRelayHops {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("a relay may take at most %d hops", maxRelayHops))

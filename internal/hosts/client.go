@@ -298,10 +298,13 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 
 // RevokeDevice asks the host to forget this daemon's device token. It is
 // part of pairing, so it does not wait for Version.
-func (c *Client) RevokeDevice(ctx context.Context) {
-	if response, err := c.do(ctx, c.http, http.MethodDelete, "/api/v1/device", nil, nil, nil); err == nil {
-		response.Body.Close()
+func (c *Client) RevokeDevice(ctx context.Context) error {
+	response, err := c.do(ctx, c.http, http.MethodDelete, "/api/v1/device", nil, nil, nil)
+	if err != nil {
+		return err
 	}
+	_, err = ReadResponse(response)
+	return err
 }
 
 type ErrProtocolMismatch struct{ Remote Version }
@@ -364,7 +367,9 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName, hostID str
 	if err != nil {
 		revokeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		paired.RevokeDevice(revokeCtx)
+		if revokeErr := paired.RevokeDevice(revokeCtx); revokeErr != nil {
+			return "", version, fmt.Errorf("%w; %s", err, Unrevoked("the token this pairing was just given", link.Endpoint, revokeErr))
+		}
 		return "", version, err
 	}
 	return completed.Token, version, nil
