@@ -45,7 +45,11 @@ struct SessionTreeTest {
         expect(ids(tree) == ["zeta", "old", "alpha", "busy"], "families keep daemon order inside each checkout, a family without a row is skipped: \(ids(tree))")
         expect(tree.projects[1].checkouts.map(\.label) == ["main", "feat/x"], "checkouts appear in the order their first family does")
         expect(tree.counts[.running] == 1 && tree.counts[.all] == 4 && tree.counts[.archived] == nil, "counts are the daemon's: \(tree.counts)")
-        expect(tree.projects[0].pinned == ["zeta"], "pinned comes from the view")
+        let eight = ["w1", "w2", "i1", "i2", "i3", "i4", "i5", "i6"]
+        let fiveView = view(eight.map { family($0, project: "five", pinned: $0.hasPrefix("w")) }, projects: [("five", ["w1", "w2", "i1", "i2", "i3"])])
+        let five = SessionTree.ordered(list: fiveView, current: nil, rows: rows(eight.map { session($0, project: "five") }), attention: [:]).projects[0]
+        expect(five.collapsed(keeping: nil).checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3"], "two pinned and six idle collapse to the daemon's five")
+        expect(five.collapsed(keeping: "i6").checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3", "i6"], "a selected sixth idle family is added in its place")
         let collapsed = tree.projects[1].collapsed(keeping: nil)
         expect(collapsed.checkouts.flatMap(\.families).map(\.id) == ["old"], "collapse shows exactly the daemon's collapsed families")
         expect(tree.projects[1].collapsed(keeping: "busy").checkouts.flatMap(\.families).map(\.id) == ["old", "busy"], "the selected family stays visible in its daemon place")

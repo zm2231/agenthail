@@ -266,7 +266,7 @@ struct ConversationListView: View {
             ForEach(tree.projects) { project in
                 let collapsed = collapsedProjects.contains(project.id)
                 Section {
-                    ForEach(project.checkouts.flatMap(\.families).filter { !collapsed || project.pinned.contains($0.id) }) { family in familyRows(family) }
+                    ForEach((collapsed ? project.collapsed(keeping: selectedID) : project).checkouts.flatMap(\.families)) { family in familyRows(family) }
                 } header: {
                     HStack(spacing: 10) {
                         Button {

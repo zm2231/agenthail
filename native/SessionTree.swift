@@ -40,9 +40,6 @@ struct SessionTree: Equatable {
         /// The daemon's project, or nil for the group of sessions without one.
         let identity: ProjectIdentity?
         var checkouts: [Checkout]
-        /// Families that are working, queued or need attention. Collapsing a
-        /// project never hides them.
-        var pinned: Set<String> = []
         var collapsed: Set<String> = []
         var counts = ScopePage.Count(families: 0, sessions: 0)
 
