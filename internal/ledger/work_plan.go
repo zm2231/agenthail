@@ -16,8 +16,11 @@ var workTransitions = map[WorkAction]struct {
 	WorkSubmit:  {from: []WorkState{WorkInProgress}, to: WorkInReview},
 	WorkApprove: {from: []WorkState{WorkInReview}, to: WorkDone},
 	WorkReject:  {from: []WorkState{WorkInReview}, to: WorkInProgress},
-	WorkReopen:  {from: []WorkState{WorkDone}, to: WorkOpen},
+	WorkReopen:  {from: []WorkState{WorkDone, WorkClosed}, to: WorkOpen},
 	WorkHandoff: {from: []WorkState{WorkInProgress, WorkBlocked}, to: WorkOpen},
+	WorkClose:   {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview}, to: WorkClosed},
+	WorkDelete:  {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed}, to: WorkDeleted},
+	WorkRestore: {from: []WorkState{WorkDeleted}, to: WorkOpen},
 }
 
 func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string, error) {
@@ -28,6 +31,10 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		return b.planWorkDep(req)
 	case WorkComment, WorkLog:
 		return b.planWorkNote(req)
+	case WorkEdit:
+		return b.planWorkEdit(req)
+	case WorkLink:
+		return b.planWorkLink(req)
 	}
 	transition, ok := workTransitions[req.Action]
 	if !ok {
@@ -41,7 +48,7 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		return "", nil, "", refuse("%s is %s; %s needs it %s", item.ID, item.State, req.Action, joinStates(transition.from))
 	}
 	payload := WorkItemStatePayload{ItemID: item.ID, FromState: item.State, ToState: transition.to, Actor: req.SessionID, Assignee: item.Assignee, Reason: strings.TrimSpace(req.Reason)}
-	readback := fmt.Sprintf("%s %s (%s)", item.ID, transition.to, item.ClauseID)
+	readback := fmt.Sprintf("%s %s (%s)", item.ID, transition.to, item.origin())
 	switch req.Action {
 	case WorkClaim:
 		if open := b.openDeps(item); len(open) > 0 {
@@ -76,26 +83,57 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		handoff := req.Handoff
 		handoff.By = req.SessionID
 		payload.Handoff, payload.Assignee = &handoff, ""
-		readback = fmt.Sprintf("%s handed off by %s (%s), open for the next session", item.ID, req.SessionID, item.ClauseID)
+		readback = fmt.Sprintf("%s handed off by %s (%s), open for the next session", item.ID, req.SessionID, item.origin())
+	case WorkClose:
+		if !closeReason(payload.Reason) {
+			return "", nil, "", refuse("close needs --reason starting with %s; finished work goes through submit and review", strings.Join(workCloseReasons, ", "))
+		}
+		payload.Assignee = ""
+	case WorkDelete, WorkRestore:
+		payload.Assignee = ""
 	}
 	return EventWorkItemState, payload, readback, nil
 }
 
+// planWorkAdd adds asked work under a live clause, or found work with no clause: work a session came across, which never enters the person's intent until it is linked.
 func (b *Board) planWorkAdd(req WorkRequest, ids *idIssuer) (EventType, any, string, error) {
-	c := b.clauses[req.ClauseID]
-	if c == nil {
-		return "", nil, "", refuse("a work item hangs off a clause; %q is not a clause in %s", req.ClauseID, req.ProjectKey)
-	}
-	if c.State == StateRejected || clauseFullyCut(c) {
-		return "", nil, "", refuse("%s is no longer in scope; work items hang off live clauses", c.ID)
+	if req.ClauseID != "" {
+		if err := b.liveClause(req.ClauseID, req.ProjectKey); err != nil {
+			return "", nil, "", err
+		}
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
 		return "", nil, "", refuse("a work item needs its text")
 	}
+	fields, err := req.Fields.normalized()
+	if err != nil {
+		return "", nil, "", err
+	}
+	if req.ClauseID != "" && fields.From != "" {
+		return "", nil, "", refuse("--clause is asked work and --found-in is found work; give one")
+	}
+	if fields.From != "" && b.workItems[fields.From] == nil && b.clauses[fields.From] == nil {
+		return "", nil, "", refuse("--found-in %q is not a work item or clause in %s", fields.From, req.ProjectKey)
+	}
 	id, err := ids.next(EventWorkItem, "W")
 	if err != nil {
 		return "", nil, "", err
 	}
-	return EventWorkItem, WorkItemPayload{ItemID: id, ClauseID: c.ID, Text: text, CreatedBy: req.SessionID}, fmt.Sprintf("+%s on %s", id, c.ID), nil
+	payload := WorkItemPayload{ItemID: id, ClauseID: req.ClauseID, Text: text, CreatedBy: req.SessionID, WorkFields: fields}
+	if req.ClauseID == "" {
+		return EventWorkItem, payload, fmt.Sprintf("+%s found (%s %s)", id, fields.withDefaults().Type, fields.withDefaults().Priority), nil
+	}
+	return EventWorkItem, payload, fmt.Sprintf("+%s on %s", id, req.ClauseID), nil
+}
+
+func (b *Board) liveClause(id, projectKey string) error {
+	c := b.clauses[id]
+	if c == nil {
+		return refuse("%q is not a clause in %s", id, projectKey)
+	}
+	if c.State == StateRejected || clauseFullyCut(c) {
+		return refuse("%s is no longer in scope; work items hang off live clauses", c.ID)
+	}
+	return nil
 }

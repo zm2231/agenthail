@@ -81,14 +81,14 @@ func TestLedgerWorkShowsAnItemAndWhatIsReady(t *testing.T) {
 		return out
 	}
 	text := run("widget-W1")
-	for _, want := range []string{"widget-W1 [in_progress]", "(1 comments, 1 log entries)", "timeline:", "s1  created  add the index", "s1  -> in_progress", "reviewer  comment  check the migration", "s1  log (blocker)  fts5 is too slow"} {
+	for _, want := range []string{"widget-W1 [in_progress] P2 task on widget-C1", "(1 comments, 1 log entries)", "for widget-C1 [", "the person, ", "blocks widget-W2 [open]", "timeline:", "s1  created  add the index", "s1  -> in_progress", "reviewer  comment  check the migration", "s1  log (blocker)  fts5 is too slow"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("ledger work widget-W1 lacks %q:\n%s", want, text)
 		}
 	}
-	var item ledger.WorkItem
-	if err := json.Unmarshal([]byte(run("widget-W1", "--json")), &item); err != nil || len(item.Timeline) != 4 || item.Timeline[3].LogType != "blocker" {
-		t.Fatalf("json item = %+v, %v", item, err)
+	var ctx ledger.WorkContext
+	if err := json.Unmarshal([]byte(run("widget-W1", "--json")), &ctx); err != nil || len(ctx.Item.Timeline) != 4 || ctx.Item.Timeline[3].LogType != "blocker" || ctx.Clause == nil || len(ctx.Clause.Words) == 0 || len(ctx.Dependents) != 1 {
+		t.Fatalf("json context = %+v, %v", ctx, err)
 	}
 	if out := run("ready"); !strings.Contains(out, "no work item is ready") {
 		t.Fatalf("ready with W1 claimed and W2 waiting on it:\n%s", out)
