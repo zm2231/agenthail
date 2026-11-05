@@ -501,6 +501,8 @@ struct SessionScreen: View {
     @State private var jumps = 0
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
+    @State private var olderPlace = OlderPlaceHold()
+    private static let rowSpacing: CGFloat = 12
 
     private var displayTitle: String {
         session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
@@ -550,6 +552,7 @@ struct SessionScreen: View {
 #if DEBUG
         PreviewFollowStuck.enabled = false
 #endif
+        olderPlace.release()
         followingLatest = true
         jumps += 1
         position.scrollTo(edge: .bottom)
@@ -583,7 +586,15 @@ struct SessionScreen: View {
             if let timeline = detail.timeline,
                Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
                 if (model.activityCursor ?? 0) > 0 {
-                    Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
+                    Button {
+                        followingLatest = false
+                        let hold = olderPlace.hold(activityOnly ? items.first?.id : TimelineGroup.make(items, foldAgents: !expandAgents).first?.id)
+                        Task {
+                            await model.loadOlderActivity()
+                            olderPlace.pageApplied(hold)
+                            if followingLatest { await settleAtLatest() }
+                        }
+                    } label: {
                         if model.loadingOlderActivity { ProgressView("Loading older activity") }
                         else { Label("Load older activity", systemImage: "arrow.up") }
                     }.disabled(model.loadingOlderActivity).frame(minHeight: 44)
@@ -594,10 +605,13 @@ struct SessionScreen: View {
                         .font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
                 if activityOnly {
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
+                    let leading = items.first?.id
+                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).id($0.id) }
                 } else {
-                    ForEach(TimelineGroup.make(items, foldAgents: !expandAgents)) { group in
-                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
+                    let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
+                    ForEach(groups) { group in
+                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
+                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).id(group.id)
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -626,14 +640,17 @@ struct SessionScreen: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
                     transcriptRows
                     if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly) }
                 }.transcriptScrimRow()
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
-            .environment(\.revealRow) { position.scrollTo(y: $0) }
+            .environment(\.revealRow) {
+                olderPlace.release()
+                position.scrollTo(y: $0)
+            }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
@@ -658,6 +675,7 @@ struct SessionScreen: View {
 #endif
             if phase == .interacting {
                 if !userScrolling { edge.beginDrag(following: followingLatest) }
+                olderPlace.release()
                 userScrolling = true
                 followingLatest = false
             } else if phase == .idle && userScrolling {
@@ -679,9 +697,14 @@ struct SessionScreen: View {
         } action: { _, value in
             overflows = value
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            olderPlace.read(geometry)
+            return geometry.contentSize.height
+        } action: { old, new in
+            olderPlace.contentChanged()
             if landed, followingLatest, !userScrolling, new > old { scrollToLatest() }
         }
+        .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
@@ -769,6 +792,7 @@ struct SessionScreen: View {
             }
         }
         .task(id: session.id) {
+            olderPlace.release()
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
             edge.atLatest = !startsAtOldest
@@ -784,6 +808,7 @@ struct SessionScreen: View {
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
         }
+        .onDisappear { olderPlace.release() }
         .modifier(QueueTailTracking(model: model, tail: $queueTail, session: session, timeline: items))
         .onChange(of: queueTail.shownIDs) { _, _ in
             if landed, followingLatest { scrollToLatest() }
