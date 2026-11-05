@@ -69,6 +69,7 @@ type dashboardSession struct {
 	LiveHiddenSubagents *surface.SubagentRollup      `json:"liveHiddenSubagents,omitempty"`
 	Listed              bool                         `json:"listed"`
 	Host                *dashboardHost               `json:"host,omitempty"`
+	Placement           string                       `json:"placement,omitempty"`
 }
 
 type dashboardPerson struct {
