@@ -226,6 +226,10 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyWorkDep(event)
 	case EventWorkComment, EventWorkLog:
 		err = b.applyWorkNote(event)
+	case EventWorkEdit:
+		err = b.applyWorkEdit(event)
+	case EventWorkLink:
+		err = b.applyWorkLink(event)
 	case EventCutWithdrawn:
 		err = b.applyCutWithdrawn(event.Payload)
 	case EventReclassified:

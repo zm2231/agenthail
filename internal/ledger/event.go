@@ -36,6 +36,8 @@ const (
 	EventCutWithdrawn  EventType = "cut.withdrawn"
 	EventReclassified  EventType = "utterance.reclassified"
 	EventCapture       EventType = "capture"
+	EventWorkEdit      EventType = "work_item.edit"
+	EventWorkLink      EventType = "work_item.link"
 )
 
 const (

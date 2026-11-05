@@ -44,7 +44,7 @@ func (b *Board) reaches(from, to string) bool {
 func (b *Board) openDeps(item *WorkItem) []string {
 	var open []string
 	for _, id := range item.DependsOn {
-		if dep := b.workItems[id]; dep != nil && dep.State != WorkDone {
+		if dep := b.workItems[id]; dep != nil && !dep.State.settled() {
 			open = append(open, id)
 		}
 	}
@@ -65,7 +65,7 @@ func (b *Board) CriticalPath() []WorkItem {
 		deps := append([]string(nil), item.DependsOn...)
 		sort.Strings(deps)
 		for _, dep := range deps {
-			if d := b.workItems[dep]; d != nil && d.State != WorkDone {
+			if d := b.workItems[dep]; d != nil && !d.State.settled() {
 				if path := longest(dep); len(path) > len(best) {
 					best = path
 				}
@@ -77,7 +77,7 @@ func (b *Board) CriticalPath() []WorkItem {
 	var best []string
 	ids := make([]string, 0, len(b.workItems))
 	for id, item := range b.workItems {
-		if item.State != WorkDone {
+		if !item.State.settled() {
 			ids = append(ids, id)
 		}
 	}
@@ -97,7 +97,7 @@ func (b *Board) CriticalPath() []WorkItem {
 func (b *Board) blockedOnOthers(c Clause, sessionID string) bool {
 	waiting := false
 	for _, item := range c.WorkItems {
-		if item.State == WorkDone {
+		if item.State.settled() {
 			continue
 		}
 		others := item.Assignee != "" && item.Assignee != sessionID

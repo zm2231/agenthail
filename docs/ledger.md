@@ -104,10 +104,13 @@ If nobody answers by the deadline:
 
 ## Work items
 
-Work items break a clause into tracked pieces of work.
+Work items are the project's tasks. *Asked* work hangs off a clause, so it traces to the person's words. *Found* work is work a session came across, such as a bug it hit: it has no clause, and it stays out of the person's intent (goals, asks, the turn gate and the checker) until it is linked to one.
 
 ```
-agenthail ledger work add <clause> "add the index"
+agenthail ledger work add "add the index" --clause <clause>       # asked work
+agenthail ledger add "index build leaks a handle" --type bug --priority P1 --found-in <item>   # found work
+agenthail ledger work link <item> <clause>  # found work the person wants becomes asked work
+agenthail ledger work edit <item> --priority P0 --label perf --unlabel db --text "..."
 agenthail ledger work claim <item>          # waits for the item's dependencies
 agenthail ledger work block <item> --reason "..."
 agenthail ledger work submit <item>         # in_review
@@ -116,18 +119,20 @@ agenthail ledger work dep <item> --on <other item>
 agenthail ledger work handoff <item> --done "..." --remaining "..."
 ```
 
-An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`.
+`ledger add`, `ledger create`, `ledger work create` and `ledger work new` are short for `ledger work add`, and `ledger work update` for `ledger work edit`. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from.
+
+An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
 
 Two kinds of notes attach to an item:
 
 - `agenthail ledger work comment <item> "..."`: anyone can comment.
 - `agenthail ledger work log <item> "..." [--type progress|blocker|decision|hypothesis|tried|result]`: the running log of the session holding the item.
 
-`agenthail ledger work <item>` shows the item with its full timeline of state changes, comments and log entries. Comments and logs stay on the item when the clause above it is later retracted or cut, and they survive a rebuild.
+`agenthail ledger work <item>` shows everything a session picking the item up needs in one read: its fields, the clause it serves with its ask, goal and the person's own words, where it was found, what it waits on and what waits on it, any handoff, and its full timeline of state changes, edits, comments and log entries. `agenthail ledger work` lists unfinished items; filter with `--state`, `--type`, `--priority`, `--label`, `--found` or `--mine`, and add done and closed ones with `--all`. Comments and logs stay on the item when the clause above it is cut, and they survive a rebuild. When the person's words behind a clause are retracted, asked work added under that clause goes with them, notes included, and the board lists it among the retractions; found work that was linked to the clause goes back to found.
 
 To pick up work:
 
-- `agenthail ledger work ready` lists open items whose dependencies are done, the ones that unblock the most first.
+- `agenthail ledger work ready` lists open items whose dependencies are settled, the most urgent first and then the ones that unblock the most.
 - `agenthail ledger work next` shows the first of those.
 - `agenthail ledger work critical-path` shows the longest chain of unfinished items.
 

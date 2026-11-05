@@ -92,9 +92,10 @@ type QuestionEscalatedPayload struct {
 
 type WorkItemPayload struct {
 	ItemID    string `json:"itemId"`
-	ClauseID  string `json:"clauseId"`
+	ClauseID  string `json:"clauseId,omitempty"`
 	Text      string `json:"text"`
 	CreatedBy string `json:"createdBy"`
+	WorkFields
 }
 
 type WorkItemStatePayload struct {
