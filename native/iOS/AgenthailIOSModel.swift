@@ -255,9 +255,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if !hostOrder.contains(connection.id) { hostOrder.append(connection.id) }
     }
 
-    func setHostSnapshot(_ value: DashboardSnapshot?, host hostID: String? = nil) {
+    func setHostSnapshot(_ value: DashboardSnapshot?, view: ScopePage.View? = nil, host hostID: String? = nil) {
         guard let connection = hostID.flatMap({ connections[$0] }) ?? hostOrder.first.flatMap({ connections[$0] }) else { return }
-        connection.setSnapshot(value)
+        connection.setSnapshot(value, view: view)
     }
 
     func connection(_ hostID: String) -> HostConnection? { connections[hostID] }

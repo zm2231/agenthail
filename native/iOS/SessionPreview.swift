@@ -16,7 +16,9 @@ struct SessionPreview: View {
     init() {
         let decoder = JSONDecoder()
         let capture = SessionCapture.current
-        let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data(Self.withTurnNotice(capture?.snapshotJSON ?? Self.snapshotJSON).utf8))
+        let snapshotJSON = Self.withTurnNotice(capture?.snapshotJSON ?? Self.snapshotJSON)
+        let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data(snapshotJSON.utf8))
+        let view = (try? decoder.decode(ScopePage.self, from: Data(PreviewOrder.withView(snapshotJSON).utf8)))?.view
         let capturedDetail = capture.flatMap { $0.detailJSON[$0.initialSessionID] }
         var detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
         if ProcessInfo.processInfo.arguments.contains("--preview-app"),
@@ -32,7 +34,7 @@ struct SessionPreview: View {
             hostName: "studio-mac",
             composerStore: ProcessInfo.processInfo.arguments.contains("--preview-send-past-its-hour") ? Self.storeWithASendPastItsHour : nil
         )
-        model.setHostSnapshot(snapshot)
+        model.setHostSnapshot(snapshot, view: view)
         detail.session.id = HostCatalog.qualify("computer", detail.session.id)
         self.detail = detail
         session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? detail.sessionState(open: false)
@@ -454,7 +456,8 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             switch request.url?.path {
             case "/api/v1/snapshot":
                 if let parentID = query.first(where: { $0.name == "parentId" })?.value { captured = query.contains { $0.name == "cursor" } ? nil : capture.subagentPageJSON[parentID] }
-                else { captured = query.contains { $0.name == "scope" } ? PreviewOrder.withView(capture.snapshotJSON) : capture.snapshotJSON }
+                else if let scope = query.first(where: { $0.name == "scope" })?.value { captured = PreviewOrder.scoped(capture.snapshotJSON, scope) }
+                else { captured = capture.snapshotJSON }
             case "/api/v1/queue": captured = capture.queueJSON
             case "/api/v1/inbox": captured = #"{"items":[]}"#
             case "/api/v1/projects/activity": captured = SessionPreview.projectActivityJSON
@@ -485,7 +488,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
                 .filter { query.isEmpty || $0.0.localizedCaseInsensitiveContains(query) }
                 .map { #"{"path":"\#($0.0)","dir":\#($0.1)}"# }
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
-        case "/api/v1/snapshot": body = requestQuery.contains { $0.name == "scope" } ? PreviewOrder.withView(SessionPreview.snapshotJSON) : SessionPreview.snapshotJSON
+        case "/api/v1/snapshot": body = requestQuery.first(where: { $0.name == "scope" }).map { PreviewOrder.scoped(SessionPreview.snapshotJSON, $0.value) } ?? SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
             let action = Self.actionBody(request)

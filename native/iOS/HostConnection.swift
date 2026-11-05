@@ -154,8 +154,9 @@ final class HostConnection {
         drops?.stopped(host: id)
     }
 
-    func setSnapshot(_ value: DashboardSnapshot?) {
+    func setSnapshot(_ value: DashboardSnapshot?, view: ScopePage.View? = nil) {
         snapshot = value
+        currentView = view
         reachable = value != nil
         holding = false
         delegate?.hostDidChange(self)

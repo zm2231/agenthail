@@ -3,15 +3,24 @@ import Foundation
 /// The view a daemon would send with preview rows: every family in the order
 /// the rows are served, so previews and UI tests render a daemon order.
 enum PreviewOrder {
+    static func pinned(_ row: [String: Any]) -> Bool {
+        row["status"] as? String == "busy" || (row["queueCount"] as? Int ?? 0) > 0 || row["waitingOn"] != nil
+    }
+
+    static func scoped(_ json: String, _ scope: String?) -> String {
+        guard scope == "running", var object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+              let sessions = object["sessions"] as? [[String: Any]] else { return withView(json) }
+        object["sessions"] = sessions.filter(pinned)
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return withView(json) }
+        return withView(String(decoding: data, as: UTF8.self))
+    }
+
     static func withView(_ json: String) -> String {
         guard var object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any], object["view"] == nil,
               let sessions = object["sessions"] as? [[String: Any]] else { return json }
         let ids = Set(sessions.compactMap { $0["id"] as? String })
         func parent(_ row: [String: Any]) -> String? {
             ((row["subagent"] as? [String: Any])?["parentId"] as? String).flatMap { ids.contains($0) ? $0 : nil }
-        }
-        func pinned(_ row: [String: Any]) -> Bool {
-            row["status"] as? String == "busy" || (row["queueCount"] as? Int ?? 0) > 0 || row["waitingOn"] != nil
         }
         var families: [[String: Any]] = []
         var projects: [(id: String, name: String, families: [String])] = []
