@@ -132,6 +132,17 @@ final class QueueTailTests: XCTestCase {
         XCTAssertTrue(tail.rows.isEmpty, "it can't stay stuck once the turn is over")
     }
 
+    func testASteerFinishingAfterTheTurnEndedLeavesEightSecondsLater() throws {
+        var tail = QueueTail()
+        let item = try row(1, message: "go")
+        tail.update(active: [item], timeline: [], turnRunning: false, now: start)
+        tail.steered(try XCTUnwrap(tail.rows.first), now: start)
+        tail.update(active: [], timeline: [], turnRunning: false, now: start.addingTimeInterval(QueueTail.leavesAfter - 1))
+        XCTAssertEqual(tail.rows.count, 1)
+        tail.update(active: [], timeline: [], turnRunning: false, now: start.addingTimeInterval(QueueTail.leavesAfter))
+        XCTAssertTrue(tail.rows.isEmpty, "the clock isn't started a second time")
+    }
+
     func testAPlainDeliveredRowKeepsItsShortClockWhileATurnRuns() throws {
         var tail = QueueTail()
         try tail.update(active: [row(1, message: "go")], timeline: [], turnRunning: true, now: start)

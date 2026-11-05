@@ -99,8 +99,9 @@ struct QueueTailRows: View {
             if let steering, steering.refusal == nil {
                 control("Steer", id: "queue-tail-steer-\(item.id)", enabled: idle) {
                     run(row, leaves: false) {
-                        try await model.steerQueued(item, capabilities: steering.capabilities)
-                        tail.steered(row, now: Date())
+                        let steered = try await model.steerQueued(item, capabilities: steering.capabilities)
+                        if steered { tail.steered(row, now: Date()) }
+                        return steered
                     }
                 }
             }
@@ -138,14 +139,14 @@ struct QueueTailRows: View {
             .accessibilityIdentifier(id)
     }
 
-    private func run(_ row: QueueTail.Row, leaves: Bool, _ perform: @escaping () async throws -> Void) {
+    private func run(_ row: QueueTail.Row, leaves: Bool, _ perform: @escaping () async throws -> Bool) {
         retrying = nil
         let generation = tail.generation
         tail.report(nil, from: generation)
         Task {
             do {
-                try await perform()
-                if leaves, tail.generation == generation { tail.drop(row) }
+                let done = try await perform()
+                if done, leaves, tail.generation == generation { tail.drop(row) }
             } catch {
                 tail.report(AgenthailAPIError.userMessage(error), from: generation)
             }

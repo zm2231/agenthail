@@ -19,6 +19,7 @@ struct QueueTail: Equatable {
     private(set) var rows: [Row] = []
     private var dropped: Set<String> = []
     private(set) var problem: String?
+    private var turnRunning = false
     var expanded = false
 
     var shown: [Row] {
@@ -43,6 +44,7 @@ struct QueueTail: Equatable {
     }
 
     mutating func update(active: [QueueState], timeline: [TimelineItem], turnRunning: Bool = false, now: Date) {
+        self.turnRunning = turnRunning
         let listed = active.filter(Self.shows).sorted { $0.id < $1.id }
         let listedIDs = Set(listed.map(\.listID))
         dropped.formIntersection(listedIDs)
@@ -73,7 +75,7 @@ struct QueueTail: Equatable {
         dropped.insert(row.item.listID)
         guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
         rows[index].leavingSince = now
-        rows[index].awaitsTurnEnd = true
+        rows[index].awaitsTurnEnd = turnRunning
     }
 
     mutating func report(_ problem: String?, from generation: UUID) {
