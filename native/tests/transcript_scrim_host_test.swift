@@ -53,6 +53,17 @@ struct TranscriptScrimHostTest {
         rows.position()
         check(rows.root.sublayers?.first?.frame.minX == -100, "the rows are positioned in the replacement's box, got \(String(describing: rows.root.sublayers?.first?.frame.minX))")
 
+        let detachedAnchor = ScrimAnchor()
+        let detached = BackdropLayerView(frame: container.bounds)
+        detached.apply(style: BackdropLayerStyle(kind: .surface, role: .content, hostsAnchor: true), set: nil, anchor: detachedAnchor)
+        let detachedScrim = detachedAnchor.transcript
+        detachedScrim.move(to: .zero)
+        detachedScrim.update(ObjectIdentifier(key), CGRect(x: 20, y: 20, width: 200, height: 40))
+        detachedScrim.reportEnd(120)
+        check(detachedScrim.mask.layers.isEmpty, "rows reported off-window wait for the host")
+        container.addSubview(detached)
+        check(detachedScrim.mask.layers.count == 2, "a host joining a window rebuilds the panels it was waiting on, got \(detachedScrim.mask.layers.count) layers")
+
         if failures > 0 { fatalError("\(failures) failures") }
         print("ok")
     }

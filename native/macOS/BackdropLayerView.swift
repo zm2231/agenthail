@@ -92,6 +92,7 @@ final class BackdropLayerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         frames.watch(self) { [weak self] in self?.moved() }
+        if ownsRows { anchor?.rows?.flush() }
         moved()
     }
 
