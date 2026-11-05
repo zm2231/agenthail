@@ -266,3 +266,37 @@ func TestARefusedOwnerAssignmentLeavesNeitherHostOwning(t *testing.T) {
 		}
 	}
 }
+
+func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.T) {
+	mac, owner, _ := ledgerOnTwoHosts(t)
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachAtCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	words := capturePrompt(t, mac, "local-a", "p-1", "build search for the docs")
+	checkpoint := func() string {
+		t.Helper()
+		var out ledgerCheckpointResponse
+		mustLedger(t, mac, "/api/v1/ledger/checkpoint", ledgerCheckpointRequest{SessionID: "local-a"}, &out)
+		return out.Instruction
+	}
+	var added ledger.WorkResult
+	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkAdd, Text: "index the docs"}, &added)
+	if added.Item.ID != "widget-W1" || countEvents(t, owner.reg, ledger.EventWorkItem, "") != 1 {
+		t.Fatalf("the add did not go through the owner: %+v", added)
+	}
+	if text := checkpoint(); !strings.Contains(text, words+": build search for the docs") {
+		t.Fatalf("the replica's checkpoint after a proxied add = %q", text)
+	}
+	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Search"}, nil)
+	var batch ledger.AttachEachResult
+	mustLedger(t, mac, "/api/v1/ledger/attach", map[string]any{"projectKey": widgetKey, "sessionId": "local-a", "fragments": []ledger.AttachRequest{
+		{UtteranceID: words, As: ledger.AsNewAsk, To: "widget-G1", Clauses: []string{"build search for the docs"}}}}, &batch)
+	if len(batch.Fragments) != 1 || batch.Fragments[0].Refused != "" || countEvents(t, owner.reg, ledger.EventAttach, "") != 1 {
+		t.Fatalf("the batched attach did not go through the owner: %+v", batch)
+	}
+	if text := checkpoint(); text != "" {
+		t.Fatalf("the replica still shows words the owner has attached: %q", text)
+	}
+	sameLedgerOnBothHosts(t, mac, owner)
+}
