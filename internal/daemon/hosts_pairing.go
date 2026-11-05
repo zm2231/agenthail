@@ -110,7 +110,7 @@ func (d *Daemon) repairHostLocked(w http.ResponseWriter, existing registry.Paire
 	d.federation.lifecycle.Unlock()
 	view := hostView{PairedHost: record}
 	if err := d.revokeRemoteDevice(previous.Token, previous.Endpoint, previous.Address); err != nil {
-		view.Notice = unrevokedToken("the token this host held before", record.Name, err)
+		view.Notice = hosts.Unrevoked("the token this host held before", record.Name, err)
 	}
 	d.publishEvent("host.paired", record.ID, map[string]any{"id": record.ID, "name": record.Name})
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": view, "repaired": true})
@@ -120,13 +120,9 @@ func (d *Daemon) repairHostLocked(w http.ResponseWriter, existing registry.Paire
 // and adds to message how to remove it by hand when the host refuses.
 func (d *Daemon) discardPairing(message, hostName, token, endpoint, address string) string {
 	if err := d.revokeRemoteDevice(token, endpoint, address); err != nil {
-		return message + "; " + unrevokedToken("the token this pairing was just given", hostName, err)
+		return message + "; " + hosts.Unrevoked("the token this pairing was just given", hostName, err)
 	}
 	return message
-}
-
-func unrevokedToken(which, hostName string, err error) string {
-	return fmt.Sprintf("%s could not be revoked on %s: %s; find it there with 'agenthail devices list' and run 'agenthail devices remove <id>'", which, hostName, err)
 }
 
 func (d *Daemon) revokeRemoteDevice(token, endpoint, address string) error {

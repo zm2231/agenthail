@@ -13,6 +13,10 @@ func Unproven(remote string) string {
 	return fmt.Sprintf("Host %s doesn't know this host as a paired host. On %s run 'agenthail hosts invite', then here run 'agenthail hosts add <pairing-link>'", remote, remote)
 }
 
+func Unrevoked(which, host string, err error) string {
+	return fmt.Sprintf("%s could not be revoked on %s: %s; find it there with 'agenthail devices list' and run 'agenthail devices remove <id>'", which, host, err)
+}
+
 type TokenDevice struct {
 	Scopes []string `json:"scopes"`
 	HostID string   `json:"hostId"`

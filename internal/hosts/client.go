@@ -367,7 +367,9 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName, hostID str
 	if err != nil {
 		revokeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = paired.RevokeDevice(revokeCtx)
+		if revokeErr := paired.RevokeDevice(revokeCtx); revokeErr != nil {
+			return "", version, fmt.Errorf("%w; %s", err, Unrevoked("the token this pairing was just given", link.Endpoint, revokeErr))
+		}
 		return "", version, err
 	}
 	return completed.Token, version, nil
