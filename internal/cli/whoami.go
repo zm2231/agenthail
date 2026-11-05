@@ -119,14 +119,18 @@ func (a *App) cardSources() agentcard.Sources {
 		LeadRef:     a.coordinator().Ref,
 		PromptsHeld: claudePromptsHeld,
 		PromptHearer: func(ctx context.Context, session surface.Session) string {
-			found, seen := projects[session.Cwd]
-			if !seen && session.Cwd != "" {
-				found, _ = project(ctx, session.Cwd)
-				projects[session.Cwd] = found
-			}
 			projectID, where := "", ""
-			if found != nil {
-				projectID, where = found.ID, found.Name
+			if stored := daemon.StoredSessionProject(a.registry(), session.ID); stored != nil {
+				projectID, where = stored.ID, stored.DisplayName
+			} else {
+				found, seen := projects[session.Cwd]
+				if !seen && session.Cwd != "" {
+					found, _ = project(ctx, session.Cwd)
+					projects[session.Cwd] = found
+				}
+				if found != nil {
+					projectID, where = found.ID, found.Name
+				}
 			}
 			hearer, _, _ := a.coordinator().PromptHearer(session.ID, projectID, where)
 			return hearer

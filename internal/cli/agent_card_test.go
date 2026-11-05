@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -169,6 +170,18 @@ func TestASessionWhoseWorkerHasNoLeadIsToldItAnswersItsPrompts(t *testing.T) {
 	}
 	if worker := callerCardJSON(t, app, "CODEX_THREAD_ID", "thread-new"); worker.Decides {
 		t.Fatalf("a worker with no workers of its own is told it decides: %+v", worker)
+	}
+
+	worker, err := app.Registry.Session("thread-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := json.RawMessage(`{"id":"project-card","localId":"project-card","displayName":"card","rootPath":"/elsewhere","kind":"git"}`)
+	if _, _, err := app.Registry.RecordCatalogSession(registry.CatalogSessionState{Session: *worker, Project: stored, Checkout: json.RawMessage(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: "stored"}, registry.CatalogEvent{DedupeKey: "session:thread-new", Type: "session.upserted", EntityID: "thread-new", Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if planner := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); planner.Decides {
+		t.Fatalf("the daemon's stored project sends the worker's prompts to the lead, but the spawner is told it decides: %+v", planner)
 	}
 }
 
