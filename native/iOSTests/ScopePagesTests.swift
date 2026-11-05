@@ -240,10 +240,10 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             base["catalogSeq"] = 1
             respond(200, Self.json(base))
         case "/api/v1/snapshot" where query["scope"] == "current":
-            respond(200, Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1]))
+            respond(200, PreviewOrder.withView(Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1])))
         case "/api/v1/snapshot" where query["q"] != nil:
             let search = host.searches[query["q"]!] ?? ([], .zero)
-            let body = Self.json(["sessions": search.rows])
+            let body = PreviewOrder.withView(Self.json(["sessions": search.rows]))
             let delay = search.delay.components
             let seconds = Double(delay.seconds) + Double(delay.attoseconds) / 1e18
             if seconds == 0 { return respond(200, body) }
@@ -255,8 +255,8 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             let project = query["projectId"]
             var page: [String: Any] = ["sessions": rows.filter { project == nil || ($0["project"] as? [String: Any])?["id"] as? String == project }]
             if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
-            if host.pageDelay == 0 { return respond(200, Self.json(page)) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, Self.json(page)) }
+            if host.pageDelay == 0 { return respond(200, PreviewOrder.withView(Self.json(page))) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, PreviewOrder.withView(Self.json(page))) }
         default:
             respond(200, "{}")
         }

@@ -107,8 +107,17 @@ final class HostCatalogTests: XCTestCase {
             host("hserver", "server.example.ts.net", reachable: true, sessions: [row("s2")]),
         ])
         XCTAssertEqual(Set(catalog.sessions.compactMap(\.checkout?.id)), ["hlaptop::checkout-1", "hserver::checkout-1"])
-        let projects = SessionTree.build(catalog.sessions, filter: .all, attention: [:]).projects
+        func order(_ hostID: String, _ sessionID: String) -> ScopePage.View {
+            let family = ViewFamily(id: sessionID, rootId: sessionID, projectId: "repo:github.com/acme/widget", checkoutId: "checkout-1", members: [ViewMember(id: sessionID, depth: 0, contextOnly: false, pinned: false)], pinned: false, workingSubagents: 0)
+            let view = ScopePage.View(counts: ["all": ScopePage.Count(families: 1, sessions: 1)], surfaces: [], projects: [ViewProject(id: "repo:github.com/acme/widget", name: "widget", counts: ScopePage.Count(families: 1, sessions: 1), collapsedFamilyIds: [sessionID])], families: [family])
+            return view.renamed { HostCatalog.qualify(hostID, $0) }
+        }
+        let joined = ScopePage.View.joined([order("hlaptop", "s1"), order("hserver", "s2")])
+        let rows = Dictionary(catalog.sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let projects = SessionTree.ordered(list: joined, current: joined, rows: rows, attention: [:]).projects
         XCTAssertEqual(projects.map(\.id), ["repo:github.com/acme/widget"])
+        XCTAssertEqual(projects.first?.checkouts.flatMap(\.families).map(\.id), ["hlaptop::s1", "hserver::s2"], "the first computer's order, then the second's")
+        XCTAssertEqual(joined?.counts["all"]?.families, 2, "two computers that do not mirror each other add their counts")
         XCTAssertEqual(projects.first?.checkouts.count, 2)
         XCTAssertEqual(Set(projects.first?.hosts ?? []), ["laptop", "server"])
     }

@@ -50,10 +50,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     let rowMemory = TranscriptRowMemory()
     @Published private(set) var creationHosts: [CreationHost] = []
     @Published private(set) var projects: [String: ListedProject] = [:]
+    @Published private(set) var projectOrder: [String] = []
     @Published private(set) var holderPicks: [String: HolderPin] = [:]
     private(set) var sessionFamilies: [SessionFamily] = []
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private var listedTree: (scope: SessionFilter, search: String, tree: SessionTree)?
+    private var orderHold = OrderHold()
+    private var heldList: ScopePage.View?
+    private var heldKey: (scope: SessionFilter, search: String)?
+    private var shownOrder: [ScopePage.View?] = []
     @Published var selectedDetail: SessionDetail? {
         didSet { paintOpeningSession() }
     }
@@ -279,6 +284,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                 leadReplacements: catalog.leadReplacements)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
+        let order = orderSignature
+        if order != shownOrder {
+            shownOrder = order
+            listedTree = nil
+            objectWillChange.send()
+        }
         store.carry(rekeys)
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
@@ -288,13 +299,18 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
                              person: connection.snapshot?.person, build: connection.build)
         }
         var listed: [String: ListedProject] = [:]
+        var listedOrder: [String] = []
         for connection in ordered {
             for project in connection.snapshot?.projects ?? [] {
                 let id = HostCatalog.qualify(connection.id, project.id)
-                if listed[id] == nil { listed[id] = ListedProject(state: project, hostID: connection.id) }
+                if listed[id] == nil {
+                    listed[id] = ListedProject(state: project, hostID: connection.id)
+                    listedOrder.append(id)
+                }
             }
         }
         if projects != listed { projects = listed }
+        if projectOrder != listedOrder { projectOrder = listedOrder }
         creationHosts = catalog.hosts.map { host in
             CreationHost(id: host.id, name: host.name, state: catalog.target(forHost: host.id) == nil ? (host.state == "connected" ? "unreachable" : host.state) : "connected")
         }
@@ -1094,14 +1110,52 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     /// rather than on every view update.
     func sessionTree(scope: SessionFilter, search: String) -> SessionTree {
         if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
-        let families = sessionFamilies.filter { family in
-            search.isEmpty || family.sessions.contains { session in
-                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.project?.displayName.localizedCaseInsensitiveContains(search) ?? false) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
-            }
-        }
-        let tree = SessionTree.build(families.flatMap(\.sessions), families: families, filter: scope, attention: sessionAttention)
+        if orderHold.held, heldKey?.scope != scope || heldKey?.search != search { orderHold.release() }
+        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shown = orderHold.shown(list: listOrder(scope: scope, search: search, rows: rows), current: currentOrder, rows: rows)
+        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
+        heldList = shown.list
         listedTree = (scope, search, tree)
         return tree
+    }
+
+    private var orderHosts: [HostConnection] { listedHosts.filter(\.shownReachable) + listedHosts.filter { !$0.shownReachable } }
+
+    private func joinedOrder(_ pick: (HostConnection) -> ScopePage.View?) -> ScopePage.View? {
+        ScopePage.View.joined(orderHosts.compactMap { host in pick(host)?.renamed { HostCatalog.qualify(host.id, $0) } })
+    }
+
+    var currentOrder: ScopePage.View? { joinedOrder(\.currentView) }
+
+    private var orderSignature: [ScopePage.View?] {
+        listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
+    }
+
+    func listOrder(scope: SessionFilter, search: String, rows: [String: SessionState]) -> ScopePage.View? {
+        if !search.isEmpty {
+            if let found = joinedOrder({ $0.reader.foundView }) { return found }
+            return currentOrder?.keeping { id in rows[id].map { Self.matches($0, search) } ?? false }
+        }
+        if scope == .recent { return currentOrder }
+        return joinedOrder { $0.view(ScopeRequest(scope: scope.viewScope)) }
+    }
+
+    static func matches(_ session: SessionState, _ search: String) -> Bool {
+        [session.displayName, SessionFamilies.label(session), session.surface, session.project?.displayName ?? "", session.cwd ?? ""].contains { $0.localizedCaseInsensitiveContains(search) }
+    }
+
+    /// Keeps the list's order while a finger is on it; rows still update in place.
+    func holdOrder(_ holding: Bool) {
+        guard holding != orderHold.held else { return }
+        if holding {
+            let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            orderHold.hold(list: heldList, current: currentOrder, rows: rows)
+            heldKey = listedTree.map { ($0.scope, $0.search) }
+        } else {
+            orderHold.release()
+            listedTree = nil
+            objectWillChange.send()
+        }
     }
 
     func loadSession(_ id: String) async {

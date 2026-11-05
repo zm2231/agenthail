@@ -21,6 +21,11 @@ final class HostConnection {
     let api: AgenthailAPI
     let isPreview: Bool
     private(set) var snapshot: DashboardSnapshot?
+    private(set) var currentView: ScopePage.View?
+    private var currentViewSeq: (epoch: String?, seq: UInt64) = (nil, 0)
+    private var orderReread: Task<Void, Never>?
+    private var orderRereadDirty = false
+    private var refreshAtTask: Task<Void, Never>?
     private(set) var reachable = false
     private(set) var holding = false
     var shownReachable: Bool { reachable || holding }
@@ -74,6 +79,8 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        orderReread?.cancel()
+        refreshAtTask?.cancel()
     }
 
     var name: String { snapshot?.daemon.host?.name ?? credential.hostName }
@@ -136,6 +143,8 @@ final class HostConnection {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        orderReread?.cancel()
+        refreshAtTask?.cancel()
         reader.cancel()
         catalogFeed.stop()
         reachable = false
@@ -169,10 +178,12 @@ final class HostConnection {
             async let base = api.snapshotBase(fresh: fresh, timeout: refreshTimeout)
             async let current = api.scopeSessions("current", timeout: refreshTimeout)
             async let activity = api.projectActivity(fresh: fresh, timeout: refreshTimeout)
-            let loaded = try await DashboardSnapshot(base: base, current: current, activity: activity)
+            let readCurrent = try await current
+            let loaded = try await DashboardSnapshot(base: base, current: readCurrent, activity: activity)
             guard !stopped else { return false }
             guard generation > appliedGeneration else { return true }
             appliedGeneration = generation
+            adoptCurrentView(readCurrent)
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
@@ -205,6 +216,8 @@ final class HostConnection {
     }
 
     func readMore(_ request: ScopeRequest) async { await reader.readMore(request) }
+
+    func view(_ request: ScopeRequest) -> ScopePage.View? { reader.views[request] }
 
     func search(_ query: String, scope: String) async { await reader.search(query, in: ScopeRequest(scope: scope)) }
 
@@ -368,21 +381,64 @@ final class HostConnection {
 
     private func applyCatalog(_ events: [CatalogStreamEvent]) -> Bool {
         guard !stopped, let current = snapshot else { return false }
+        let fresh = events.filter { $0.stream == "catalog" && $0.seq > catalogStreamCursor }
+        let held = reader.joined(current.sessions)
+        let news = CatalogNews.moves(fresh, held: Dictionary(held.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
         let batch = current.applyingCatalog(events, after: catalogStreamCursor)
         catalogStreamCursor = batch.cursor
         if batch.changed {
             if batch.sessionsChanged { snapshotSeq = delegate?.nextStateRequest() ?? snapshotSeq }
             snapshot = batch.snapshot
             reader.adoptCurrent()
-            var reread = false
             for removal in batch.removals {
-                if reader.removed(removal.id, unlisted: removal.unlisted) { reread = true }
+                _ = reader.removed(removal.id, unlisted: removal.unlisted)
                 delegate?.host(self, removedSession: removal.id, unlisted: removal.unlisted)
                 if let next = removal.rekeyedTo { delegate?.host(self, rekeyed: [removal.id: next]) }
             }
-            if reread { reader.rereadAll() }
             delegate?.hostDidChange(self)
         }
+        if news { rereadOrder() }
         return batch.needsSnapshot
+    }
+
+    private func adoptCurrentView(_ read: ScopeSessions) {
+        guard let view = read.view else { return }
+        let seq = read.catalogSeq ?? 0
+        if read.hostEpoch == currentViewSeq.epoch, seq < currentViewSeq.seq { return }
+        currentViewSeq = (read.hostEpoch, seq)
+        currentView = view
+        refreshAtTask?.cancel()
+        guard let at = view.refreshAt.flatMap(TimestampParser.date) else { return }
+        refreshAtTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(1, at.timeIntervalSinceNow)))
+            guard !Task.isCancelled else { return }
+            self?.rereadOrder()
+        }
+    }
+
+    func rereadOrder() {
+        guard orderReread == nil else {
+            orderRereadDirty = true
+            return
+        }
+        orderReread = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled, !stopped else { return }
+            reader.rereadAll()
+            if let read = try? await api.scopeSessions("current", timeout: refreshTimeout) {
+                adoptCurrentView(read)
+                if var merged = snapshot {
+                    let held = Set(merged.sessions.map(\.id))
+                    merged.sessions += read.sessions.filter { !held.contains($0.id) }
+                    snapshot = merged
+                }
+                delegate?.hostDidChange(self)
+            }
+            orderReread = nil
+            if orderRereadDirty {
+                orderRereadDirty = false
+                rereadOrder()
+            }
+        }
     }
 }
