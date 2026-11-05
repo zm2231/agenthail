@@ -299,24 +299,22 @@ func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.
 		t.Fatalf("the replica still shows words the owner has attached: %q", text)
 	}
 	sameLedgerOnBothHosts(t, mac, owner)
-	writers := func(node *federationNode) string {
+	written := func(node *federationNode) (bySelf, byOthers int) {
 		t.Helper()
-		var self, writer string
+		var self string
 		if err := node.reg.ReadDB().QueryRow(`SELECT host_id FROM host_identity WHERE id=1`).Scan(&self); err != nil || self == "" {
 			t.Fatalf("host identity %q: %v", self, err)
 		}
-		if err := node.reg.ReadDB().QueryRow(`SELECT COALESCE(GROUP_CONCAT(DISTINCT actor_host_id),'') FROM ledger_events WHERE project_key=? AND type IN (?,?)`, widgetKey, string(ledger.EventWorkItem), string(ledger.EventAttach)).Scan(&writer); err != nil {
+		if err := node.reg.ReadDB().QueryRow(`SELECT COALESCE(SUM(actor_host_id=?),0), COALESCE(SUM(actor_host_id<>?),0) FROM ledger_events WHERE project_key=? AND type IN (?,?)`,
+			self, self, widgetKey, string(ledger.EventWorkItem), string(ledger.EventAttach)).Scan(&bySelf, &byOthers); err != nil {
 			t.Fatal(err)
 		}
-		if writer == self {
-			return "self"
-		}
-		return writer
+		return bySelf, byOthers
 	}
-	if got := writers(owner); got != "self" {
-		t.Fatalf("the work item and attach were written by %q, not planned by the owner", got)
+	if bySelf, byOthers := written(owner); bySelf != 2 || byOthers != 0 {
+		t.Fatalf("the owner holds %d work item and attach events it wrote and %d another host wrote; want 2 and 0", bySelf, byOthers)
 	}
-	if got := writers(mac); got == "self" {
-		t.Fatal("the replica wrote the work item or attach itself")
+	if bySelf, byOthers := written(mac); bySelf != 0 || byOthers != 2 {
+		t.Fatalf("the replica holds %d work item and attach events it wrote and %d from the owner; want 0 and 2", bySelf, byOthers)
 	}
 }
