@@ -361,10 +361,7 @@ func (a *App) ledgerShow(store *ledger.Store, args []string, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := board.WorkItem(id); ok {
-		return a.ledgerWorkShow(store, w, id)
-	}
-	if item, ok := board.WorkItemByOrigin(id); ok {
+	if item, ok := board.WorkItem(id); ok {
 		return a.ledgerWorkShow(store, w, item.ID)
 	}
 	for _, ask := range board.AllAsks() {

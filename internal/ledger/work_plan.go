@@ -85,11 +85,20 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		payload.Handoff, payload.Assignee = &handoff, ""
 		readback = fmt.Sprintf("%s handed off by %s (%s), open for the next session", item.ID, req.SessionID, item.origin())
 	case WorkClose:
-		if !closeReason(payload.Reason) {
-			return "", nil, "", refuse("close needs --reason starting with %s; finished work goes through submit and review", strings.Join(workCloseReasons, ", "))
+		word, evidence := closeReason(payload.Reason)
+		switch {
+		case word == workCloseDone && (item.Assignee != "" || item.State == WorkInReview):
+			return "", nil, "", refuse("%s is %s by %s; claimed work is finished through submit and review", item.ID, item.State, item.Assignee)
+		case word == workCloseDone && evidence == "":
+			return "", nil, "", refuse("close --reason done needs what finished %s, such as \"done: PR #12\" or a commit", item.ID)
+		case word == workCloseDone:
+			payload.ToState = WorkDone
+			readback = fmt.Sprintf("%s done (%s): %s", item.ID, item.origin(), evidence)
+		case !slices.Contains(workCloseReasons, word):
+			return "", nil, "", refuse("close needs --reason starting with done (and what finished it), %s; claimed work is finished through submit and review", strings.Join(workCloseReasons, ", "))
 		}
 		payload.Assignee = ""
-	case WorkDelete, WorkRestore:
+	case WorkDelete, WorkRestore, WorkReopen:
 		payload.Assignee = ""
 	}
 	return EventWorkItemState, payload, readback, nil

@@ -163,13 +163,28 @@ func (b *Board) QueryWork(q WorkQuery) ([]WorkItem, error) {
 	return out, nil
 }
 
-func (b *Board) WorkItemByOrigin(name string) (WorkItem, bool) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+// workItem finds an item by its id or, for an imported item, by the whole id it had where it came from, with or without the source prefix.
+func (b *Board) workItem(ref string) *WorkItem {
+	if item := b.workItems[ref]; item != nil || ref == "" {
+		return item
+	}
 	for _, item := range b.workItems {
-		if o := item.ImportedFrom; o != "" && (o == name || strings.HasSuffix(o, ":"+name)) {
-			return item.snapshot(), true
+		if o := item.ImportedFrom; o != "" && (o == ref || strings.HasSuffix(o, ":"+ref)) {
+			return item
 		}
 	}
-	return WorkItem{}, false
+	return nil
+}
+
+func (b *Board) canonicalWorkRefs(req WorkRequest) WorkRequest {
+	refs := []*string{&req.ItemID, &req.DependsOn}
+	if b.clauses[req.Fields.From] == nil {
+		refs = append(refs, &req.Fields.From)
+	}
+	for _, ref := range refs {
+		if item := b.workItem(*ref); item != nil {
+			*ref = item.ID
+		}
+	}
+	return req
 }
