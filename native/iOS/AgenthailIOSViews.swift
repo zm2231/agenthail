@@ -654,7 +654,8 @@ struct SessionScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }#endif
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
+#endif
             if phase == .interacting {
                 if !userScrolling { edge.beginDrag(following: followingLatest) }
                 userScrolling = true

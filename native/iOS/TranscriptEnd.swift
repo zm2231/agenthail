@@ -58,7 +58,8 @@ struct JumpToLatestControl: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Jump to latest")
-                .padding(.bottom, 8)            }
+                .padding(.bottom, 8)
+            }
         }
         .task(id: edge.atLatest) {
             stuckBehind = false
