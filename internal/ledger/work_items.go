@@ -15,7 +15,12 @@ const (
 	WorkBlocked    WorkState = "blocked"
 	WorkInReview   WorkState = "in_review"
 	WorkDone       WorkState = "done"
+	WorkClosed     WorkState = "closed"
+	WorkDeleted    WorkState = "deleted"
 )
+
+// settled is a state nothing waits on: done through review, closed without it, or deleted.
+func (s WorkState) settled() bool { return s == WorkDone || s == WorkClosed || s == WorkDeleted }
 
 type WorkAction string
 
@@ -32,6 +37,11 @@ const (
 	WorkDep     WorkAction = "dep"
 	WorkComment WorkAction = "comment"
 	WorkLog     WorkAction = "log"
+	WorkEdit    WorkAction = "edit"
+	WorkLink    WorkAction = "link"
+	WorkClose   WorkAction = "close"
+	WorkDelete  WorkAction = "delete"
+	WorkRestore WorkAction = "restore"
 )
 
 type Handoff struct {
@@ -47,9 +57,10 @@ func (h Handoff) empty() bool {
 }
 
 type WorkItem struct {
-	ID        string      `json:"id"`
-	ClauseID  string      `json:"clauseId"`
-	Text      string      `json:"text"`
+	ID       string `json:"id"`
+	ClauseID string `json:"clauseId,omitempty"`
+	Text     string `json:"text"`
+	WorkFields
 	State     WorkState   `json:"state"`
 	Assignee  string      `json:"assignee,omitempty"`
 	CreatedBy string      `json:"createdBy"`
@@ -72,6 +83,8 @@ type WorkRequest struct {
 	UtteranceID string     `json:"utteranceId,omitempty"`
 	Handoff     Handoff    `json:"handoff,omitempty"`
 	LogType     string     `json:"logType,omitempty"`
+	Fields      WorkFields `json:"fields,omitempty"`
+	Change      WorkChange `json:"change,omitempty"`
 }
 
 type WorkResult struct {
@@ -119,10 +132,10 @@ func (b *Board) applyWorkItem(event Event) error {
 	if err := json.Unmarshal(event.Payload, &p); err != nil {
 		return err
 	}
-	item := &WorkItem{ID: p.ItemID, ClauseID: p.ClauseID, Text: p.Text, State: WorkOpen, CreatedBy: p.CreatedBy,
+	item := &WorkItem{ID: p.ItemID, ClauseID: p.ClauseID, Text: p.Text, WorkFields: p.WorkFields.withDefaults(), State: WorkOpen, CreatedBy: p.CreatedBy,
 		Timeline: []WorkEntry{{At: event.CreatedAt, Actor: p.CreatedBy, Kind: "created", Text: p.Text, State: WorkOpen}}}
 	b.workItems[p.ItemID] = item
-	if c := b.clauses[p.ClauseID]; c != nil {
+	if c := b.clauses[p.ClauseID]; c != nil && p.ClauseID != "" {
 		c.WorkItems = append(c.WorkItems, item)
 	}
 	return nil

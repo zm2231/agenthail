@@ -92,6 +92,7 @@ func (b *Board) WorkItem(id string) (WorkItem, bool) {
 func (item *WorkItem) snapshot() WorkItem {
 	out := *item
 	out.DependsOn = slices.Clone(item.DependsOn)
+	out.Labels = slices.Clone(item.Labels)
 	out.Timeline = slices.Clone(item.Timeline)
 	return out
 }
@@ -101,7 +102,7 @@ func (b *Board) Ready() []WorkItem {
 	defer b.mu.RUnlock()
 	unblocks := map[string]int{}
 	for id, item := range b.workItems {
-		if item.State == WorkDone {
+		if item.State.settled() {
 			continue
 		}
 		for other := range b.workItems {
@@ -117,6 +118,9 @@ func (b *Board) Ready() []WorkItem {
 		}
 	}
 	sort.Slice(ready, func(i, j int) bool {
+		if pi, pj := priorityRank(ready[i].Priority), priorityRank(ready[j].Priority); pi != pj {
+			return pi < pj
+		}
 		if unblocks[ready[i].ID] != unblocks[ready[j].ID] {
 			return unblocks[ready[i].ID] > unblocks[ready[j].ID]
 		}

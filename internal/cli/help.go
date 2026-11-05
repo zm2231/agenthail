@@ -166,11 +166,21 @@ Intent ledger:
                                  Unanswered, only a --keeps-breadth default applies itself;
                                  any other waits for the person's ack
   ledger questions [--all]       List open questions (--all includes answered ones)
-  ledger work [--mine]           List work items
-  ledger work add <clause_id> "<text>"
-                                 Add a work item under a clause; closing work never closes the clause
-  ledger work <claim|block|unblock|submit|reopen> <item_id> [--reason "..."]
+  ledger work [--mine] [--found] [--state <s>] [--type <t>] [--priority <p>] [--label <l>] [--all]
+                                 List unfinished work items; --all adds done and closed ones
+  ledger work add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature]
+                  [--priority P0-P3] [--description "..."] [--acceptance "..."] [--label <l>]...
+                                 Add asked work under a clause, or found work with none; ledger add,
+                                 ledger create, work create and work new are short for it. Closing work
+                                 never closes the clause
+  ledger work edit <item_id> [--text|--type|--priority|--description|--acceptance "..."] [--label|--unlabel <l>]
+                                 Change an item's fields; work update is the same
+  ledger work link <item_id> <clause_id>
+                                 Hang found work off a clause of the person's
+  ledger work <claim|block|unblock|submit|reopen|restore|delete> <item_id> [--reason "..."]
                                  Move a work item; claim waits for its dependencies, block needs a reason
+  ledger work close <item_id> --reason "duplicate|wontfix|obsolete ..."
+                                 Close work that will not be done, without review
   ledger work <approve|reject> <item_id> [--utterance <id>] [--reason "..."]
                                  Review submitted work: another session, or the person's own words
   ledger work dep <item_id> --on <item_id>
@@ -182,8 +192,8 @@ Intent ledger:
                                  syncs its log back; without a host, show the owner, sync cursor and replay backlog
   ledger digest [--through N]    Hash of this host's ledger log in owner order through owner position N (default:
                                  the sync cursor, or the log's end on the owner); equal on two hosts means equal logs
-  ledger work <item_id>          Show one work item with its timeline
-  ledger work ready | next       Open items whose dependencies are done, most-unblocking first; next is the top one
+  ledger work <item_id>          Show one work item with its clause, the person's words, dependencies and timeline
+  ledger work ready | next       Open items whose dependencies are settled, most urgent then most-unblocking first
   ledger work comment <item_id> "<text>"
                                  Comment on a work item from any session
   ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
