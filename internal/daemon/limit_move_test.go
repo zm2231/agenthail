@@ -150,6 +150,30 @@ func TestNoMoveIsOfferedWhenNoOtherAccountHasRoom(t *testing.T) {
 	}
 }
 
+func TestALimitMoveRefusesAProxyRootThatAMoveByHandTakes(t *testing.T) {
+	node, _, pool := limitMoveNode(t, "95")
+	session := startMovable(t, node)
+	primary := filepath.Join(node.host.Home, ".claude")
+	stopAtLimit(t, node, session, primary, "u1", time.Now().Add(-time.Minute))
+	response := postAction(t, node.handler, map[string]any{"action": "limit-move", "sessionId": session.ID, "configRoot": "pool"})
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "shared proxy") {
+		t.Fatalf("limit-move status=%d body=%s", response.Code, response.Body.String())
+	}
+	if transcriptUnder(primary, session.ID) == "" {
+		t.Fatal("a refused limit move took the transcript away")
+	}
+	if _, err := node.daemon.moveSessionToRoot(context.Background(), sessionMoveRequest{SessionID: session.ID, Root: "pool"}); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptUnder(primary, session.ID) != "" || transcriptUnder(pool, session.ID) == "" {
+		t.Fatal("the session did not move to the proxy root")
+	}
+	spawns := node.host.Spawns(t, session.ID)
+	if last := spawns[len(spawns)-1]; last.ConfigDir == nil || *last.ConfigDir != pool {
+		t.Fatalf("the session resumed in %v, want %s", last.ConfigDir, pool)
+	}
+}
+
 func TestACanceledStopIsNotMovedOrReleasedByAMove(t *testing.T) {
 	node, second, _ := limitMoveNode(t, "10")
 	session := startMovable(t, node)

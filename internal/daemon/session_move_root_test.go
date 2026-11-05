@@ -137,6 +137,26 @@ func TestAMoveToAPairedHostLandsInTheAccountItNames(t *testing.T) {
 	}
 }
 
+func TestAMoveToAPairedHostLandsInAProxyRootItNames(t *testing.T) {
+	source, target, _, _ := movePair(t)
+	pool := filepath.Join(target.host.Home, ".pool", ".claude")
+	writeUsageFixture(t, map[string]string{
+		filepath.Join(target.host.Home, ".agenthail", "config.json"): `{"claudeConfigDirs":[{"path":"` + pool + `","proxy":"shared"}],"proxies":[{"name":"shared","url":"http://127.0.0.1:9"}]}`,
+		filepath.Join(pool, ".claude.json"):                          `{}`,
+	})
+	session := startMovable(t, source)
+	if _, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server", Root: "pool"}); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptUnder(pool, session.ID) == "" {
+		t.Fatal("the session did not land in the proxy root on the target")
+	}
+	spawns := target.host.Spawns(t, session.ID)
+	if len(spawns) != 1 || spawns[0].ConfigDir == nil || *spawns[0].ConfigDir != pool {
+		t.Fatalf("target spawns=%+v, want one resume in %s", spawns, pool)
+	}
+}
+
 func TestAMoveToAHostThatIgnoresTheAccountIsRefused(t *testing.T) {
 	source, target, _, _ := movePair(t)
 	addClaudeRoot(t, target.host.Home)
