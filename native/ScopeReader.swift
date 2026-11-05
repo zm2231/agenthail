@@ -15,6 +15,9 @@ final class ScopeReader {
     private(set) var pageError: String?
     private(set) var views: [ScopeRequest: ScopePage.View] = [:]
     private(set) var foundView: ScopePage.View?
+    private(set) var foundQuery: String?
+
+    func searchPending(_ query: String) -> Bool { !query.isEmpty && foundQuery != query }
     private var reads: [ScopeRequest: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
     private var rereadTask: Task<Void, Never>?
@@ -72,9 +75,10 @@ final class ScopeReader {
         searchGeneration += 1
         let generation = searchGeneration
         guard !query.isEmpty, source.reachable(), let api = source.api() else {
-            if !pages.found.isEmpty || foundView != nil {
+            if !pages.found.isEmpty || foundView != nil || foundQuery != nil {
                 pages.setFound([])
                 foundView = nil
+                foundQuery = nil
                 source.changed()
             }
             return
@@ -85,6 +89,7 @@ final class ScopeReader {
         guard source.active(), !Task.isCancelled, generation == searchGeneration else { return }
         pages.setFound(page?.sessions ?? [])
         foundView = page?.view
+        foundQuery = query
         source.changed()
     }
 

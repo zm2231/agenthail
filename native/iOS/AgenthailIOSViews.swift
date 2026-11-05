@@ -336,7 +336,12 @@ struct ConversationListView: View {
                     .task(id: "\(scope.rawValue)|\(model.snapshot?.sessions.count ?? 0)") { await model.listMore(scope) }
                     .accessibilityIdentifier("list-more")
             }
-            if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
+            if families.isEmpty && model.searchPending(search) {
+                Text("Searching")
+                    .font(.footnote)
+                    .foregroundStyle(PhonePalette.muted)
+                    .listRowBackground(Color.clear)
+            } else if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {

@@ -1144,6 +1144,11 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
     }
 
+    func searchPending(_ search: String) -> Bool {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return listedHosts.contains { $0.shownReachable && $0.reader.searchPending(query) }
+    }
+
     func listOrder(scope: SessionFilter, search: String) -> ScopePage.View? {
         if !search.isEmpty { return joinedOrder { $0.reader.foundView } }
         if scope == .recent { return currentOrder }

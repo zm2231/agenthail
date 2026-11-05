@@ -290,7 +290,7 @@ extension SessionSidebar {
                 sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
             }
             if local.isEmpty {
-                Text("No matching sessions.")
+                Text(model.reader.searchPending(query) ? "Searching" : "No matching sessions.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 14)
