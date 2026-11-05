@@ -84,23 +84,26 @@ func (w *deliveredWords) claim(sessionID, promptID, uuid, text string, now time.
 	defer w.mu.Unlock()
 	w.prune(now)
 	text = strings.TrimSpace(text)
-	for _, bucket := range []string{sessionID, startingSession} {
-		if entry, ok := claimEntry(w.bySession[bucket], promptID, uuid, text, now); ok {
-			return entry.uuid, entry.words, true
-		}
+	if entry, ok := claimEntry(w.bySession[sessionID], promptID, uuid, text, now); ok {
+		return entry.uuid, entry.words, true
+	}
+	if entry, ok := claimEntry(w.bySession[startingSession], promptID, uuid, "", now); ok {
+		return entry.uuid, entry.words, true
 	}
 	return "", "", false
 }
 
+// An empty text matches by uuid only: a first turn not yet settled on its
+// session must not be taken by another session's prompt with the same words.
 func claimEntry(entries []deliveredEntry, promptID, uuid, text string, now time.Time) (deliveredEntry, bool) {
 	found := -1
 	for i, entry := range entries {
-		if entry.promptID == promptID || entry.promptID == "" && uuid != "" && entry.uuid == uuid {
+		if entry.promptID != "" && entry.promptID == promptID || entry.promptID == "" && uuid != "" && entry.uuid == uuid {
 			found = i
 			break
 		}
 	}
-	if found < 0 {
+	if found < 0 && text != "" {
 		for i, entry := range entries {
 			if entry.promptID == "" && entry.turn == text && now.Sub(entry.at) <= deliveredTextWindow {
 				found = i

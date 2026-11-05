@@ -69,6 +69,9 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 	ref, surfaceName, words := ledger.PromptRef(req.PromptID), "terminal", req.Prompt
 	if uuid, delivered, ok := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now); ok {
 		ref, surfaceName, words = ledger.DeliveryRef(uuid), string(session.Surface), delivered
+		// A copy of the hook that could not name the delivery recorded the
+		// prompt under its own id first.
+		d.reclassifyHookCapture(*session, ledger.PromptRef(req.PromptID), "delivered")
 	}
 	record, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: words, At: now, CapturedBy: ledger.CapturedByHook})
 	if err != nil {

@@ -183,6 +183,12 @@ func TestAPersonsMessageThatStartsACoordinatorIsThePersonsTurn(t *testing.T) {
 }
 
 func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *testing.T) {
+	for _, order := range []string{"journal first", "installed hook first", "host hook first"} {
+		t.Run(order, func(t *testing.T) { startCoordinatorAndCapture(t, order) })
+	}
+}
+
+func startCoordinatorAndCapture(t *testing.T, order string) {
 	f := newMCPClaudeFixture(t)
 	root, err := canonicalCatalogPath(f.host.Cwd)
 	if err != nil {
@@ -204,34 +210,36 @@ func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *test
 	}
 	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
 	turn := f.host.Turns(t, spec.SessionID)[0]
-
 	coordinator, err := f.registry.Session(spec.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	journalSource(f.daemon, *coordinator, nil).append(liveEvent(typedPrompt(turn.UUID, "first", turn.Text, time.Now())))
+
 	handler := f.daemon.dashboardHandler(&dashboardServer{token: "test-token"})
-	for _, copy := range []ledgerCaptureRequest{
-		{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text},
-		{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text, MessageUUID: turn.UUID},
-	} {
-		if resp := ledgerPost(t, handler, copy); resp.Ref != ledger.DeliveryRef(turn.UUID) {
-			t.Fatalf("a hook copy of the first turn named %q, want the delivery %s", resp.Ref, turn.UUID)
-		}
+	installed := ledgerCaptureRequest{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text}
+	host := ledgerCaptureRequest{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text, MessageUUID: turn.UUID}
+	copies := []ledgerCaptureRequest{installed, host}
+	switch order {
+	case "journal first":
+		journalSource(f.daemon, *coordinator, nil).append(liveEvent(typedPrompt(turn.UUID, "first", turn.Text, time.Now())))
+	case "host hook first":
+		copies = []ledgerCaptureRequest{host, installed}
 	}
-	events, err := store.Events(key, 0, 100)
+	for _, copy := range copies {
+		ledgerPost(t, handler, copy)
+	}
+	if resp := ledgerPost(t, handler, installed); resp.Ref != ledger.DeliveryRef(turn.UUID) {
+		t.Fatalf("a hook copy of the first turn named %q, want the delivery %s", resp.Ref, turn.UUID)
+	}
+	board, err := store.Board(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var texts []string
-	for _, e := range withoutCapture(events) {
-		var u ledger.UtterancePayload
-		if err := json.Unmarshal(e.Payload, &u); err != nil {
-			t.Fatal(err)
-		}
+	for _, u := range board.Utterances() {
 		texts = append(texts, u.Text)
 	}
 	if len(texts) != 1 || texts[0] != "hello" {
-		t.Fatalf("captured %q, want the person's words once", texts)
+		t.Fatalf("the board holds %q, want the person's words once", texts)
 	}
 }

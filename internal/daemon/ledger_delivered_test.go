@@ -177,3 +177,38 @@ func TestAFirstTurnWhoseStartFailedIsNeverClaimedByItsRetry(t *testing.T) {
 		t.Fatal("another session's prompt claimed a settled first turn")
 	}
 }
+
+func TestAFirstTurnStillStartingIsNotTakenByAnotherSessionsPrompt(t *testing.T) {
+	var w deliveredWords
+	start := time.Now()
+	w.addStart("starting", "[started] hello", "hello", start)
+	if _, _, ok := w.claim("terminal", "typed", "", "[started] hello", start.Add(time.Second)); ok {
+		t.Fatal("another session's prompt took a first turn whose start had not returned")
+	}
+	if got, _, ok := w.claim("lead", "first", "starting", "[started] hello", start.Add(time.Second)); !ok || got != "starting" {
+		t.Fatalf("the started session's hook = %q %v", got, ok)
+	}
+}
+
+func TestAHookCopyThatRanBeforeItsStartSettledIsTakenBack(t *testing.T) {
+	d, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-early", "early-key")
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	lead := p.session(t, r, "lead")
+	d.delivered.addStart("intent", "[started] hello", "hello", time.Now())
+	if resp := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: lead.ID, PromptID: "first", Prompt: "[started] hello"}); resp.Ref != ledger.PromptRef("first") {
+		t.Fatalf("the installed copy named %q before the start settled", resp.Ref)
+	}
+	if resp := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: lead.ID, PromptID: "first", Prompt: "[started] hello", MessageUUID: "intent"}); resp.Ref != ledger.DeliveryRef("intent") {
+		t.Fatalf("the host copy named %q", resp.Ref)
+	}
+	board, err := p.store.Board(p.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if words := board.Utterances(); len(words) != 1 || words[0].Text != "hello" {
+		t.Fatalf("the board holds %+v, want the person's words once", words)
+	}
+}
