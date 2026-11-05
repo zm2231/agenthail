@@ -16,7 +16,29 @@ struct TranscriptEnd: Equatable {
 
 @MainActor @Observable
 final class TranscriptEdge {
+    static let reach: CGFloat = 24
+
     var atLatest = true
+    @ObservationIgnored private var end: TranscriptEnd?
+    @ObservationIgnored private var dragStart: (end: TranscriptEnd, following: Bool)?
+
+    func update(_ end: TranscriptEnd) {
+        self.end = end
+        let reached = end.distance < Self.reach
+        if reached != atLatest { atLatest = reached }
+    }
+
+    func beginDrag(following: Bool) {
+        dragStart = end.map { ($0, following) }
+    }
+
+    // Content that grew during the drag moves the end, not the reader; only a reader who scrolled up stops following.
+    func endDrag() -> (follow: Bool, catchUp: Bool) {
+        defer { dragStart = nil }
+        guard let start = dragStart, let end, start.following else { return (atLatest, false) }
+        let follow = atLatest || start.end.contentHeight - (end.visibleBottom - end.bottomInset) < Self.reach
+        return (follow, follow && !atLatest && end.contentHeight > start.end.contentHeight)
+    }
 }
 
 struct JumpToLatestControl: View {
@@ -36,8 +58,7 @@ struct JumpToLatestControl: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Jump to latest")
-                .padding(.bottom, 8)
-            }
+                .padding(.bottom, 8)            }
         }
         .task(id: edge.atLatest) {
             stuckBehind = false

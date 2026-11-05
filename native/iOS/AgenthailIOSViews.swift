@@ -654,14 +654,16 @@ struct SessionScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
 #if DEBUG
-            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
-#endif
+            guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }#endif
             if phase == .interacting {
+                if !userScrolling { edge.beginDrag(following: followingLatest) }
                 userScrolling = true
                 followingLatest = false
             } else if phase == .idle && userScrolling {
-                followingLatest = edge.atLatest
+                let after = edge.endDrag()
+                followingLatest = after.follow
                 userScrolling = false
+                if after.catchUp { scrollToLatest() }
             }
         }
         // Raw edges: a derived value that repeats across a landing can skip its last action.
@@ -669,8 +671,7 @@ struct SessionScreen: View {
 #if DEBUG
             guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
-            let reached = end.distance < 24
-            if reached != edge.atLatest { edge.atLatest = reached }
+            edge.update(end)
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height > geometry.visibleRect.height

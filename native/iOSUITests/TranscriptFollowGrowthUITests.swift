@@ -55,16 +55,36 @@ final class TranscriptFollowGrowthUITests: XCTestCase {
     }
 
     func testPullingPastTheEndShowsNoJumpAndKeepsFollowing() {
-        let app = launch(["--preview-tail", "-preview-tail", "many"])
+        let app = launch(["--preview-tail", "-preview-tail", "many", "--preview-stream"])
         XCTAssertTrue(lastRow(app).waitForExistence(timeout: 5))
         sleep(4)
         let timeline = app.scrollViews["session-timeline"]
         let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -80)), withVelocity: 200, thenHoldForDuration: 0.3)
         XCTAssertFalse(app.buttons["Jump to latest"].exists, "pulling past the end offered Jump to latest")
-        sleep(1)
-        XCTAssertFalse(app.buttons["Jump to latest"].exists)
-        XCTAssertLessThanOrEqual(covered(app), 0, "the last row ended up under the composer after pulling past the end")
+        for _ in 0..<12 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            XCTAssertFalse(app.buttons["Jump to latest"].exists, "Jump to latest appeared while the stream kept growing after pulling past the end")
+        }
+        XCTAssertLessThanOrEqual(covered(app), 0, "the stream grew after pulling past the end and the last row ended up under the composer")
+    }
+
+    func testSmallNudgesUpAddUpAndStopFollowingAStream() {
+        let app = launch(["--preview-tail", "-preview-tail", "many", "--preview-stream"])
+        XCTAssertTrue(lastRow(app).waitForExistence(timeout: 5))
+        sleep(3)
+        let timeline = app.scrollViews["session-timeline"]
+        for _ in 0..<5 {
+            let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 20)), withVelocity: 60, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2), "the nudges up never stopped following")
+        let anchor = timeline.staticTexts.allElementsBoundByIndex.first { timeline.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) && !$0.label.isEmpty }
+        guard let anchor else { return XCTFail("no text on screen after the nudges") }
+        let (label, before) = (anchor.label, anchor.frame.minY)
+        sleep(3)
+        let after = timeline.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch.frame.minY
+        XCTAssertEqual(after, before, accuracy: 2, "the stream pulled back a reader who nudged up")
     }
 
     func testStreamingWithTheKeyboardUpScrollsAtAModestRate() {
