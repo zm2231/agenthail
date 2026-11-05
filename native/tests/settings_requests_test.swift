@@ -28,6 +28,7 @@ struct SettingsRequestsTest {
         let config = await waitFor { $0.path == "/api/v1/settings" && $0.method == "POST" }
         check(config?.body["action"] as? String == "dashboard-config" && config?.body["codexRecentHours"] as? Int == 12 && config?.body["busyDelivery"] as? String == "steer", "the window change keeps the busy delivery: \(String(describing: config?.body))")
         check(await waitFor { $0.path == "/api/v1/snapshot" } != nil, "the window change refreshes the snapshot")
+        check(await waitForRefresh(), "the window change's refresh sends all of its requests: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
         RecordingProtocol.reset()
         model.setCodexRecentHours(5)
         try? await Task.sleep(for: .milliseconds(200))
@@ -118,6 +119,15 @@ struct SettingsRequestsTest {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil
+    }
+
+    private static func waitForRefresh() async -> Bool {
+        for _ in 0..<40 {
+            let paths = RecordingProtocol.requests.map(\.path)
+            if paths.filter({ $0 == "/api/v1/snapshot" }).count >= 2 && paths.contains("/api/v1/projects/activity") && paths.contains("/api/v1/history") { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
     }
 
     @MainActor
