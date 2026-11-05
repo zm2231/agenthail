@@ -45,7 +45,7 @@ type FoundRef struct {
 func (b *Board) WorkContext(id string) (WorkContext, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	item := b.workItems[id]
+	item := b.workItem(id)
 	if item == nil {
 		return WorkContext{}, false
 	}

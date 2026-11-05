@@ -82,7 +82,7 @@ func (b *Board) applyWorkNote(event Event) error {
 func (b *Board) WorkItem(id string) (WorkItem, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	item := b.workItems[id]
+	item := b.workItem(id)
 	if item == nil {
 		return WorkItem{}, false
 	}

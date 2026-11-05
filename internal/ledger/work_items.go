@@ -105,6 +105,8 @@ func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 	}
 	id, readback := req.ItemID, ""
 	board, release, err := s.writePlanned(req.ProjectKey, req.SessionID, now, func(board *Board, ids *idIssuer) (EventType, any, error) {
+		req = board.canonicalWorkRefs(req)
+		id = req.ItemID
 		typ, payload, text, err := board.planWork(req, ids)
 		if p, ok := payload.(WorkItemPayload); ok {
 			id = p.ItemID

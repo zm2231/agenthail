@@ -2,7 +2,7 @@ package cli
 
 const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger help prints this):
 
- Work items (each is also "ledger work <command>"):
+ Work items (each is also "ledger work <command>"; an <item_id> can be an imported item's td id):
   ledger list [filters] [--all] List unfinished work items; --all adds done and closed ones
   ledger search <words>... [filters]
                                  Items with every word in their id, td id, text, description, acceptance,
@@ -29,6 +29,9 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger review <item_id>        Submit a claimed item for review (submit)
   ledger approve <item_id> | ledger reject <item_id> --reason "..." [--utterance <id>]
                                  Review submitted work: another session, or the person's own words
+  ledger close <item_id> --reason "done: <PR, commit or where it landed>"
+                                 Mark unclaimed work done that was finished elsewhere; claimed work goes
+                                 through review
   ledger close <item_id> --reason "duplicate|wontfix|obsolete ..."
                                  Close work that will not be done, without review
   ledger reopen <item_id>        Take a done or closed item back to open

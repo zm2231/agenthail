@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,7 +76,7 @@ func TestClosingDeletingAndRestoringWork(t *testing.T) {
 	items(t, s, "schema", "index")
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "widget-W2", DependsOn: "widget-W1"})
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1"}, "close needs --reason")
-	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "done already"}, "close needs --reason")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "finished already"}, "close needs --reason")
 	closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "duplicate of widget-W9"})
 	if closed.Item.State != ledger.WorkClosed {
 		t.Fatalf("closed = %+v", closed.Item)
@@ -93,6 +94,52 @@ func TestClosingDeletingAndRestoringWork(t *testing.T) {
 	if restored.Item.State != ledger.WorkOpen {
 		t.Fatalf("restored = %+v", restored.Item)
 	}
+}
+
+func TestUnclaimedWorkClosesAsDoneWithWhatFinishedIt(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	items(t, s, "schema", "index", "ranking")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "widget-W2", DependsOn: "widget-W1"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "done"}, "needs what finished")
+	closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "done: PR #12"})
+	if closed.Item.State != ledger.WorkDone || closed.Item.Reason != "done: PR #12" || closed.Item.Reviewer != "" || !strings.Contains(closed.Readback, "PR #12") {
+		t.Fatalf("closed as done = %+v %q", closed, closed.Readback)
+	}
+	if ready := board(t, s).Ready(); len(ready) != 2 || ready[0].ID != "widget-W2" {
+		t.Fatalf("a done dependency did not free its dependent: %+v", ready)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W2"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W2", Reason: "done: PR #13"}, "submit and review")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W2", Reason: "waits on CI"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W2", Reason: "done: PR #13"}, "submit and review")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W3"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W3", Reason: "done: PR #14"}, "submit and review")
+	if closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W3", Reason: "obsolete, superseded"}); closed.Item.State != ledger.WorkClosed {
+		t.Fatalf("a claimed item can still be closed as obsolete: %+v", closed.Item)
+	}
+}
+
+func TestEveryWorkActionTakesAnImportedItemsTDID(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	if _, err := s.ImportWork(ledger.WorkImportRequest{ProjectKey: project, SessionID: "s1", Items: []ledger.WorkImport{
+		{ImportedFrom: "td:td-aa11", Text: "schema"}, {ImportedFrom: "td:td-bb22", Text: "index"}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "td-bb22", DependsOn: "td:td-aa11"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "td-aa11", Text: "landed in main"})
+	found := work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "flaky test", Fields: ledger.WorkFields{From: "td-aa11"}})
+	closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "td-aa11", Reason: "done: commit 1a2b3c"})
+	if closed.Item.ID != "widget-W1" || closed.Item.State != ledger.WorkDone {
+		t.Fatalf("closed by td id = %+v", closed.Item)
+	}
+	ctx, ok := board(t, s).WorkContext("td-bb22")
+	if !ok || len(ctx.DependsOn) != 1 || ctx.DependsOn[0].ID != "widget-W1" || found.Item.From != "widget-W1" {
+		t.Fatalf("td ids were stored instead of item ids: %+v %+v", ctx, found.Item)
+	}
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "td-bb"}, "is not a work item")
 }
 
 func TestReadyPutsTheMostUrgentFirst(t *testing.T) {
