@@ -138,6 +138,27 @@ func TestSessionViewOrderMovesOnlyOnNews(t *testing.T) {
 	}
 }
 
+func TestSessionViewOrderHoldsAFamilyWhileItsChildTakesTurns(t *testing.T) {
+	f := newOrderFixture()
+	f.add(&dashboardSession{ID: "turns", Surface: surface.KindClaude, Status: surface.StatusBusy, RegisteredAt: f.now, LastActive: f.now, Activity: &surface.Activity{BusySince: f.now}, Subagent: &surface.Subagent{ParentID: "s14", RootID: "s14"}})
+	started := f.order(t, "all")
+	if fmt.Sprint(started.Projects) != "[p-alpha p-beta p-gamma ]" || started.Collapsed["p-gamma"][0] != "s14" {
+		t.Fatalf("an idle family did not become active when its child started: %+v", started)
+	}
+	child := f.rows["turns"]
+	for step := range 40 {
+		f.now = f.now.Add(30 * time.Second)
+		if step%2 == 0 {
+			child.Status, child.Activity, child.LastActive = surface.StatusIdle, nil, f.now
+		} else {
+			child.Status, child.Activity, child.LastActive = surface.StatusBusy, &surface.Activity{BusySince: f.now}, f.now
+		}
+		if got := f.order(t, "all"); !reflect.DeepEqual(got.Projects, started.Projects) || !reflect.DeepEqual(got.Collapsed["p-gamma"], started.Collapsed["p-gamma"]) {
+			t.Fatalf("step %d: the family moved between its child's turns: %+v", step, got)
+		}
+	}
+}
+
 func TestSessionViewHoldSetsARefreshDeadline(t *testing.T) {
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	rows := []dashboardSession{{ID: "done", Status: surface.StatusIdle, LastActive: now.Add(-time.Minute)}}
