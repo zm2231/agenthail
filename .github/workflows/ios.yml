@@ -2,7 +2,7 @@ name: iOS
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -15,12 +15,22 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       ios: ${{ steps.diff.outputs.ios }}
+      full: ${{ steps.full.outputs.full }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - id: full
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/ci-full-gate.sh
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -51,7 +61,7 @@ jobs:
 
   ios:
     needs: changes
-    if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.full == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 30
     env:
