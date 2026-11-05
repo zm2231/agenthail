@@ -79,6 +79,11 @@ func (r *Registry) SetProjectLink(joined, survivor string, linked bool) (Project
 	if err := putProjectLinkTx(tx, link); err != nil {
 		return ProjectLink{}, err
 	}
+	if linked {
+		if err := moveLeadHistoryTx(tx, joined, survivor); err != nil {
+			return ProjectLink{}, err
+		}
+	}
 	return link, tx.Commit()
 }
 
@@ -102,6 +107,11 @@ func (r *Registry) AdoptProjectLinks(links []ProjectLink) (bool, error) {
 		}
 		if err := putProjectLinkTx(tx, link); err != nil {
 			return false, err
+		}
+		if link.Linked {
+			if err := moveLeadHistoryTx(tx, link.Joined, link.Survivor); err != nil {
+				return false, err
+			}
 		}
 		changed = true
 	}
@@ -136,6 +146,14 @@ func putProjectLinkTx(tx *sql.Tx, link ProjectLink) error {
 	return err
 }
 
+// A joined project's past leads become its survivor's, except while it still
+// has a lead on this host, whose own record CoordinatorSince reads.
+func moveLeadHistoryTx(tx *sql.Tx, joined, survivor string) error {
+	_, err := tx.Exec(`UPDATE coordinator_history SET project_id=?2 WHERE project_id=?1
+		AND NOT EXISTS (SELECT 1 FROM coordinators WHERE project_id=?1 AND host_id='')`, joined, survivor)
+	return err
+}
+
 // ProjectHistory names what a project holds under its own id that a link
 // would strand: at most one lead entry and one ledger entry.
 func (r *Registry) ProjectHistory(id string) ([]string, error) {
@@ -144,7 +162,6 @@ func (r *Registry) ProjectHistory(id string) ([]string, error) {
 	for _, group := range [][]check{
 		{
 			{"a lead", `SELECT COUNT(*) FROM coordinators WHERE project_id=?`},
-			{"past leads", `SELECT COUNT(*) FROM coordinator_history WHERE project_id=?`},
 		},
 		{
 			{"a ledger board", `SELECT COUNT(*) FROM ledger_events WHERE project_key=?`},

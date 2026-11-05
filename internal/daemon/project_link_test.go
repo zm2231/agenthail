@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -105,6 +107,104 @@ func TestALinkJoinsAForkIntoUpstreamOnEveryPairedHostAndAnUnlinkMadeOfflineWins(
 	}
 }
 
+func namedLead(t *testing.T, node *federationNode, project, name string) {
+	t.Helper()
+	setLead(t, node, project, t.TempDir(), name, "", registry.CoordinatorChange{})
+}
+
+func clearLead(t *testing.T, node *federationNode, project string) {
+	t.Helper()
+	if _, err := node.reg.ClearCoordinator(project, "test", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func leadHistory(t *testing.T, node *federationNode, project string) []string {
+	t.Helper()
+	history, err := node.reg.CoordinatorHistory(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []string
+	for _, entry := range history {
+		entries = append(entries, entry.Action+":"+entry.Name)
+	}
+	return entries
+}
+
+func linkHonoured(t *testing.T, node *federationNode) bool {
+	t.Helper()
+	node.daemon.discoverCatalog(context.Background())
+	upstream := snapshotProject(t, node, upstreamProject)
+	return upstream != nil && len(upstream.Linked) == 1 && snapshotProject(t, node, forkProject) == nil
+}
+
+func TestAForkWithPastLeadsJoinsUpstreamAndItsLeadHistoryFollowsOnEveryHost(t *testing.T) {
+	laptop, server := linkedFederation(t)
+	namedLead(t, laptop, forkProject, "laptop-fork-lead")
+	clearLead(t, laptop, forkProject)
+	namedLead(t, server, forkProject, "server-fork-lead")
+	clearLead(t, server, forkProject)
+	namedLead(t, laptop, upstreamProject, "upstream-lead")
+	if err := ledger.NewStore(laptop.reg.WriteDB(), laptop.reg.ReadDB()).Enable(upstreamProject); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the laptop no longer mirrors the server's cleared fork lead", 10*time.Second, func() bool {
+		held, err := laptop.reg.ProjectHistory(forkProject)
+		return err == nil && len(held) == 0
+	})
+
+	linkAction(t, laptop, map[string]string{"action": "project-link", "projectId": forkProject, "survivor": upstreamProject})
+	want := map[*federationNode][]string{
+		laptop: {"set:laptop-fork-lead", "cleared:laptop-fork-lead", "set:upstream-lead"},
+		server: {"set:server-fork-lead", "cleared:server-fork-lead"},
+	}
+	for node, entries := range want {
+		testkit.Eventually(t, "the link is honoured and the fork's past leads are upstream's", 15*time.Second, func() bool {
+			return linkHonoured(t, node) && len(leadHistory(t, node, forkProject)) == 0 && slices.Equal(leadHistory(t, node, upstreamProject), entries)
+		})
+	}
+
+	linkAction(t, laptop, map[string]string{"action": "project-unlink", "projectId": forkProject})
+	for node, entries := range want {
+		testkit.Eventually(t, "the unlink reaches the host and the moved history stays upstream's", 15*time.Second, func() bool {
+			node.daemon.discoverCatalog(context.Background())
+			upstream := snapshotProject(t, node, upstreamProject)
+			return upstream != nil && len(upstream.Linked) == 0 && snapshotProject(t, node, forkProject) != nil && len(leadHistory(t, node, forkProject)) == 0 && slices.Equal(leadHistory(t, node, upstreamProject), entries)
+		})
+	}
+	linkAction(t, laptop, map[string]string{"action": "project-link", "projectId": forkProject, "survivor": upstreamProject})
+	testkit.Eventually(t, "the fork links again", 15*time.Second, func() bool { return linkHonoured(t, laptop) && linkHonoured(t, server) })
+}
+
+func TestAHostHoldsALinkWhileTheForkHasALeadThereAndReleasesItWhenTheLeadIsCleared(t *testing.T) {
+	laptop, server := linkedFederation(t)
+	for _, node := range []*federationNode{laptop, server} {
+		node.gate.proxyDown.Store(true)
+		node.server.CloseClientConnections()
+	}
+	namedLead(t, server, forkProject, "server-fork-lead")
+	linkAction(t, laptop, map[string]string{"action": "project-link", "projectId": forkProject, "survivor": upstreamProject})
+	laptop.gate.proxyDown.Store(false)
+	server.gate.proxyDown.Store(false)
+	testkit.Eventually(t, "the server takes the link and holds it for its fork's lead", 15*time.Second, func() bool {
+		links, err := server.reg.ProjectLinks()
+		if err != nil || len(links) != 1 || !links[0].Linked {
+			return false
+		}
+		server.daemon.discoverCatalog(context.Background())
+		fork := snapshotProject(t, server, forkProject)
+		return fork != nil && fork.LinkHeld != ""
+	})
+	if entries := leadHistory(t, server, forkProject); !slices.Equal(entries, []string{"set:server-fork-lead"}) {
+		t.Fatalf("fork history while held = %v, want the current lead's record kept", entries)
+	}
+	clearLead(t, server, forkProject)
+	testkit.Eventually(t, "clearing the lead releases the link and moves the fork's history", 15*time.Second, func() bool {
+		return linkHonoured(t, server) && len(leadHistory(t, server, forkProject)) == 0 && slices.Equal(leadHistory(t, server, upstreamProject), []string{"set:server-fork-lead", "cleared:server-fork-lead"})
+	})
+}
+
 func TestARepositoryGainsItsRootCommitWithItsFirstCommit(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "fresh")
 	gitRun(t, t.TempDir(), "init", "-b", "main", repo)
@@ -134,12 +234,14 @@ func TestARepositoryGainsItsRootCommitWithItsFirstCommit(t *testing.T) {
 
 func TestALinkRefusesToStrandAProjectsLeadAndNamesTheWayRound(t *testing.T) {
 	cases := []struct {
-		name  string
-		leads []string
-		want  string
+		name   string
+		leads  []string
+		boards []string
+		want   string
 	}{
-		{"only the joined project has a lead", []string{forkProject}, "fork already has a lead of its own; link the other way round: agenthail project link " + upstreamProject + " " + forkProject},
-		{"both projects have a lead", []string{forkProject, upstreamProject}, "fork has a lead and upstream has a lead; merging two projects' leads and ledger boards isn't supported"},
+		{"only the joined project has a lead", []string{forkProject}, nil, "fork already has a lead of its own; link the other way round: agenthail project link " + upstreamProject + " " + forkProject},
+		{"both projects have a lead", []string{forkProject, upstreamProject}, nil, "fork has a lead and upstream has a lead; merging two projects' leads and ledger boards isn't supported"},
+		{"both projects have a ledger board", nil, []string{forkProject, upstreamProject}, "fork has a ledger board and upstream has a ledger board; merging two projects' leads and ledger boards isn't supported"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -149,6 +251,11 @@ func TestALinkRefusesToStrandAProjectsLeadAndNamesTheWayRound(t *testing.T) {
 			for index, project := range c.leads {
 				spec := registry.CoordinatorSpec{ProjectID: project, ProjectRoot: root, Name: fmt.Sprintf("lead-%d", index), Surface: "codex", Cwd: root}
 				if _, err := node.reg.SetCoordinator(spec, registry.CoordinatorChange{ChangedBy: "test"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, project := range c.boards {
+				if err := ledger.NewStore(node.reg.WriteDB(), node.reg.ReadDB()).Enable(project); err != nil {
 					t.Fatal(err)
 				}
 			}
