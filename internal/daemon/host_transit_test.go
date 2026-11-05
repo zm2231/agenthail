@@ -156,7 +156,7 @@ func TestAPairedHostCannotGiveALedgerToAThirdHost(t *testing.T) {
 	h := pairThreeHosts(t)
 	moveSession(t, h.middle, "local-a", widgetRepo(t, "https://github.com/example/widget.git"), time.Now())
 	moveSession(t, h.far, "remote-a", widgetRepo(t, "https://github.com/example/widget.git"), time.Now())
-	if err := ledger.NewStore(h.middle.reg.WriteDB(), h.middle.reg.ReadDB()).Enable(widgetKey); err != nil {
+	if err := ledger.NewStore(h.middle.reg.WriteDB(), h.middle.reg.ReadDB()).Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	status, body := h.ask(t, http.MethodPost, "/api/v1/ledger/owner", nil, ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"})

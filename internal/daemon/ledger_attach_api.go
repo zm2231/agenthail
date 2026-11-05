@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -146,9 +147,28 @@ func (d *Daemon) apiLedgerImportHandler(w http.ResponseWriter, r *http.Request) 
 	writeDashboardJSON(w, http.StatusOK, result)
 }
 
+type ledgerAttachBody struct {
+	ledger.AttachRequest
+	Fragments []ledger.AttachRequest `json:"fragments,omitempty"`
+}
+
 func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) {
-	var req ledger.AttachRequest
-	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
+	var body ledgerAttachBody
+	if !decodeLedgerWrite(w, r, &body) || !d.knownLedgerSession(w, r, body.SessionID) || !d.knownLedgerProject(w, r, body.ProjectKey, body.SessionID) {
+		return
+	}
+	req := body.AttachRequest
+	if len(body.Fragments) > 0 {
+		if !reflect.DeepEqual(req, ledger.AttachRequest{ProjectKey: req.ProjectKey, SessionID: req.SessionID}) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "Give the fragments, or one attach, not both.")
+			return
+		}
+		result, err := d.ledgerStore().AttachEach(req.ProjectKey, req.SessionID, body.Fragments)
+		if err != nil {
+			writeLedgerError(w, err)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, result)
 		return
 	}
 	result, err := d.ledgerStore().Attach(req)

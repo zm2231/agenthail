@@ -127,7 +127,7 @@ func TestEnableKeepsItsGrantTimeUntilDisabled(t *testing.T) {
 		t.Fatalf("new project scope %+v err %v", scope, err)
 	}
 	before := time.Now().Add(-time.Millisecond)
-	if err := s.Enable("p"); err != nil {
+	if err := s.Enable("p", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := s.Scope("p")
@@ -135,7 +135,7 @@ func TestEnableKeepsItsGrantTimeUntilDisabled(t *testing.T) {
 		t.Fatalf("enable scope %+v", first)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := s.Enable("p"); err != nil {
+	if err := s.Enable("p", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := s.Scope("p"); !again.Since.Equal(first.Since) {
@@ -145,7 +145,7 @@ func TestEnableKeepsItsGrantTimeUntilDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := s.Enable("p"); err != nil {
+	if err := s.Enable("p", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if reenabled, _ := s.Scope("p"); !reenabled.Since.After(first.Since) {
@@ -160,7 +160,7 @@ func TestConcurrentEnablesWriteOneCaptureEvent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := ledger.NewStore(db, db).Enable("p"); err != nil {
+			if err := ledger.NewStore(db, db).Enable("p", ledger.AttachEachPrompt); err != nil {
 				t.Error(err)
 			}
 		}()

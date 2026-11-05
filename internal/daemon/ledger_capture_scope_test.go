@@ -23,7 +23,7 @@ func TestTheLeadOfAGitProjectIsCapturedWithoutBeingAskedToAttach(t *testing.T) {
 	if got := captureOf(t, mac, "local-a", "p-2", "not the lead"); got.Captured {
 		t.Fatalf("a session that does not lead the project was captured: %+v", got)
 	}
-	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey); err != nil {
+	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if got := captureOf(t, mac, "lead", "p-3", "and keep it fast"); !got.Captured || !got.Attach || len(got.Unattached) != 1 {
@@ -40,7 +40,7 @@ func TestEnablingTheLedgerOnOneHostEnablesItWhereverItIsKept(t *testing.T) {
 	}
 	macStore := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB())
 	ownerStore := ledger.NewStore(owner.reg.WriteDB(), owner.reg.ReadDB())
-	if err := macStore.Enable(widgetKey); err != nil {
+	if err := macStore.Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the owner holds the enable", 20*time.Second, func() bool {

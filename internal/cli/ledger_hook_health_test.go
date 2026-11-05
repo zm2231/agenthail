@@ -61,7 +61,7 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 		t.Fatalf("board warned before anything captures: %q", out)
 	}
 
-	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("hook-key"); err != nil {
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("hook-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if problems := doctor(); len(problems) != 1 || problems[0] != (promptHookProblem{Root: root, State: claudehooks.Missing}) {
@@ -152,7 +152,7 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("unresolved-key"); err != nil {
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("unresolved-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	unknown := t.TempDir()
@@ -197,7 +197,7 @@ func TestAnExpiredDeadlineStopsTheScanBeforeAnyUnrelatedSession(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	_, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("expired-key"); err != nil {
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("expired-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	places := localSessionPlaces
@@ -223,7 +223,7 @@ func TestADeadlineOnTheSessionScanKeepsTheProblemAndFailsDoctor(t *testing.T) {
 	if err := store.AddProject(registry.ProjectRecord{ID: "proj-d", WorkspaceRoot: dir, Title: "proj-d", Key: "deadline-key"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("deadline-key"); err != nil {
+	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("deadline-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	places := localSessionPlaces

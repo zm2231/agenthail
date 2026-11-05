@@ -11,7 +11,7 @@ import (
 func TestAReclassifiedHookCaptureLeavesThePersonsWords(t *testing.T) {
 	db := openTestDB(t)
 	s := ledger.NewCachedStore(db, db)
-	if err := s.Enable("p"); err != nil {
+	if err := s.Enable("p", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	for _, u := range []ledger.Utterance{said("claude-prompt:wake", "check the review"), said("claude-prompt:typed", "ship it")} {

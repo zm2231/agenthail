@@ -50,8 +50,9 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger goal <name>             Create a goal, or show the one with that name
   ledger asks | ledger ask <ask_id>
                                  List all asks, or show one with its clauses
-  ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."]
-                                 Attach the person's words: new-ask, extends, constrains, refines,
+  ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."] [--and <utterance_id> --as ...]...
+                                 Attach the person's words, several fragments in one call with --and:
+                                 new-ask, extends, constrains, refines,
                                  reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
                                  decides, conversation; --covers <cut> withdraws a checker's cut
                                  with a clause from the words it was raised from
@@ -75,9 +76,13 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  The narrowing check session's own report; refused from any other session
 
  Setup:
-  ledger enable [@session]       Capture the person's words to every session in this project and ask
+  ledger enable [@session] [--attach prompt|checkpoints]
+                                 Capture the person's words to every session in this project and ask
                                  each to attach them, or only for one session and its later forks;
-                                 without it, only the lead's words are captured and nothing is asked
+                                 without it, only the lead's words are captured and nothing is asked.
+                                 --attach checkpoints asks at points a session already reaches (work
+                                 add, claim or submit, a start or compaction, and ledger) instead of
+                                 with each message, and the turn gate stops holding for unattached words
   ledger disable [@session]      Capture nothing in this project, or take back a session's grant
   ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
                                  syncs its log back; without a host, show the owner, sync cursor and replay backlog

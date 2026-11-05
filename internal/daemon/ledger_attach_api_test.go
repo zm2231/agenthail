@@ -29,7 +29,7 @@ func ledgerWrite(t *testing.T, handler http.Handler, path string, payload, into 
 func TestLedgerAPIAttachesCapturedWordsToAGoal(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-a", "repo:github.com/acme/widget")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s1")
@@ -49,7 +49,7 @@ func TestLedgerAPIAttachesCapturedWordsToAGoal(t *testing.T) {
 func TestLedgerAPICaptureNamesTheSessionsEarlierUnattachedWords(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-u", "repo:github.com/acme/widget")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s1")
@@ -69,7 +69,7 @@ func TestLedgerAPICaptureNamesTheSessionsEarlierUnattachedWords(t *testing.T) {
 func TestLedgerAPIWorkItemsMoveThroughTheDaemon(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-w", "repo:github.com/acme/widget")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s1")

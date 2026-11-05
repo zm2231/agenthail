@@ -13,7 +13,7 @@ import (
 func TestWorkAttachedFromAScheduledPromptIsTakenBackWithOneNotice(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-raced", "raced-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "racer")
@@ -58,7 +58,7 @@ func TestWorkAttachedFromAScheduledPromptIsTakenBackWithOneNotice(t *testing.T) 
 func TestAScheduledPromptIsNotThePersonsWordsInEitherOrder(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-wake", "wake-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "looping")

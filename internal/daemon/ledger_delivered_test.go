@@ -12,7 +12,7 @@ import (
 func TestDeliveredWordsAndTheirPromptHookAreOneUtterance(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-once", "once-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	host := p.session(t, r, "hosted")
@@ -54,7 +54,7 @@ func TestDeliveredWordsAndTheirPromptHookAreOneUtterance(t *testing.T) {
 func TestAPeerEnvelopeIsNeverCapturedAsThePersonsWords(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-peer", "peer-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := p.session(t, r, "worker")

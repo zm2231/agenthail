@@ -63,7 +63,7 @@ func TestAGrantAddsAProjectWithoutCapturingTheFolderProjectOutOfScope(t *testing
 	if events := home.events(t); len(events) != 0 {
 		t.Fatalf("the unset folder project captured a non-coordinator: %+v", events)
 	}
-	if err := home.store.Enable(home.key); err != nil {
+	if err := home.store.Enable(home.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "worker", PromptID: "both", Prompt: "for both"})
