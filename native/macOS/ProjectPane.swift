@@ -196,6 +196,7 @@ struct ProjectPane: View {
         .padding(DesktopSpace.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line, lineWidth: 1))
     }
 
     private func empty(_ text: String) -> some View {

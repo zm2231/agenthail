@@ -27,6 +27,8 @@ enum ProjectNowPreview {
         let export = checkout("checkout-export", "/work/fieldnotes/.worktrees/export", branch: "feat/export")
         let waiting: [String: Any] = ["waitingOn": SessionPreview.previewWaiting]
         switch scenario {
+        case "empty":
+            return []
         case "single":
             return [
                 row("idle", "Update the docs", minutes: 40, checkout: main, capabilities: capabilities),

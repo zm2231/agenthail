@@ -1,10 +1,9 @@
 // Mirrors native/ProjectNow.swift; scripts/fixtures/project-now-vectors.json holds both to the same answers.
 import { shortHostName } from "./hosts.js";
+import { hostDown as unreachable } from "./presence.js";
 
-const downHostStates = new Set(["unreachable", "unauthorized", "incompatible"]);
 const knownSince = Date.UTC(2000, 0, 1);
 
-const unreachable = (session) => downHostStates.has(session.host?.state || "");
 const running = (session) => !session.archived && (session.status === "busy" || (session.subagents?.working || 0) > 0);
 
 function rank(session) {

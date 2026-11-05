@@ -1,5 +1,6 @@
 import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const now = Date.UTC(2026, 10, 3, 12);
@@ -83,6 +84,27 @@ assert.equal(run("rowTime")({ ...sessions[1], activity: { busySince: at(25) } },
 assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a start shows now, never its last activity");
 assert.equal(run("rowTime")(sessions[3], now), "2h", "an idle row shows its last activity");
 assert.match(html, /<span class="project-row-time">2h<\/span>/);
+
+const waiting = { ...sessions[1], id: "asking", name: "asking", waitingOn: { kind: "question", id: "q", answerable: true }, lastActive: at(4), activity: { busySince: at(90) } };
+const unreachable = { ...sessions[1], id: "buildbox::far", name: "far", host: { ...buildbox, state: "unreachable" }, lastActive: at(7), activity: { busySince: at(90) } };
+const sessionRow = run("sessionButton");
+assert.match(sessionRow(waiting), /<i class="dot waiting">/, "waiting on you has its own colour");
+assert.match(sessionRow(waiting), /Waiting on you/);
+assert.match(sessionRow(unreachable), /<i class="dot unavailable">/);
+assert.match(sessionRow(unreachable), /Unavailable/);
+assert.doesNotMatch(sessionRow(unreachable), /Working/, "a busy row on an unreachable computer doesn't claim to work");
+assert.match(sessionRow(sessions[3]), /<i class="dot idle">/);
+assert.match(sessionRow({ ...sessions[3], currentReason: "open" }), /<i class="dot idle">/, "an open idle session isn't marked as working");
+assert.match(sessionRow(sessions[1]), /<i class="dot active">/);
+assert.match(sessionRow({ ...sessions[3], currentReason: "queued" }), /<i class="dot queued">/);
+assert.equal(run("rowTime")(waiting, now), "4m", "a waiting row shows its last activity, as Mac and iPhone do");
+assert.equal(run("rowTime")(unreachable, now), "7m", "an unreachable row shows its last activity");
+const tokens = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
+const dotColour = (tone) => tokens.match(new RegExp(`\\.dot\\.${tone}[^{]*\\{\\s*background: var\\(--([a-z]+)\\)`))?.[1];
+assert.equal(dotColour("waiting"), "warn");
+assert.equal(dotColour("idle"), "quiet");
+assert.equal(dotColour("unavailable"), "bad");
+assert.equal(dotColour("active"), "good");
 
 const workingLead = { ...sessions[0], status: "busy", activity: { busySince: at(12) } };
 context.app.state.sessions = [workingLead, ...sessions.slice(1)];

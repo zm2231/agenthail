@@ -5,7 +5,7 @@ import vm from "node:vm";
 
 const vectors = JSON.parse(readFileSync(new URL("./fixtures/project-now-vectors.json", import.meta.url), "utf8"));
 const context = { app: { state: {} } };
-await dashboardModules(["project-now", "hosts"], context);
+await dashboardModules(["project-now", "presence", "hosts"], context);
 const projectNow = vm.runInContext("projectNow", context);
 
 for (const vector of vectors.cases) {

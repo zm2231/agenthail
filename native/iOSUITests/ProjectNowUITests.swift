@@ -6,8 +6,30 @@ final class ProjectNowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-project", "-preview-now", scenario, "--preview-theme", theme]
         app.launch()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Now · '")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(now(app).waitForExistence(timeout: 15))
         return app
+    }
+
+    private func now(_ app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Now'")).firstMatch
+    }
+
+    func testNowComesBeforeTheLeadWhenItHasRows() {
+        let app = launch("single")
+        XCTAssertLessThan(top(now(app)), top(app.staticTexts["Lead"]), "what needs you is the first thing on the screen")
+    }
+
+    func testTheLeadStaysFirstWithNothingInNow() {
+        let app = launch("empty")
+        XCTAssertLessThan(top(app.staticTexts["Lead"]), top(now(app)))
+        XCTAssertTrue(app.staticTexts["Nothing in the last day"].exists)
+    }
+
+    func testAGroupLineSitsCloseToTheRowsUnderIt() {
+        let app = launch("multi")
+        let line = app.staticTexts["feat/export"]
+        let title = app.staticTexts["Add CSV export"]
+        XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
     }
 
     private func record(_ app: XCUIApplication, _ name: String) {

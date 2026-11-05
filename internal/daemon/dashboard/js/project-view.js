@@ -4,6 +4,7 @@ import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 import { projectSessions } from "./session-order.js";
 import { projectNow } from "./project-now.js";
+import { hostDown } from "./presence.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -63,7 +64,7 @@ function compactAge(ms) {
   return `${Math.floor(minutes / (60 * 24))}d`;
 }
 
-export function rowTime(session, now = Date.now(), running = sessionRunning(session)) {
+export function rowTime(session, now = Date.now(), running = sessionRunning(session) && !session.waitingOn && !hostDown(session)) {
   if (!running) return activity(session) ? compactAge(now - activity(session)) : "";
   const since = Date.parse(session.activity?.busySince || "");
   return since >= knownSince ? compactAge(now - since) : "now";
