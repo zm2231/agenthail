@@ -27,12 +27,19 @@ const ledgerWorkUsage = `usage: agenthail ledger work [--mine] [--found] [--stat
        agenthail ledger work dep <item_id> --on <item_id>
        agenthail ledger work handoff <item_id> [--done "..."] [--remaining "..."] [--decisions "..."] [--uncertain "..."]`
 
-var workActionAliases = map[string]ledger.WorkAction{"create": ledger.WorkAdd, "new": ledger.WorkAdd, "update": ledger.WorkEdit}
+var workActionAliases = map[string]ledger.WorkAction{"create": ledger.WorkAdd, "new": ledger.WorkAdd, "update": ledger.WorkEdit,
+	"start": ledger.WorkClaim, "review": ledger.WorkSubmit}
 
 func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	w, err := parseLedgerWrite(args)
 	if err != nil {
 		return err
+	}
+	if len(w.positional) >= 2 && w.positional[1] == "list" {
+		w.positional = slices.Delete(w.positional, 1, 2)
+	}
+	if len(w.positional) == 3 && w.positional[1] == "show" {
+		return a.ledgerWorkShow(store, w, w.positional[2])
 	}
 	if len(w.positional) < 2 {
 		return a.ledgerWorkList(store, w)

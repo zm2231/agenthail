@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -12,61 +13,68 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+type ledgerCall struct {
+	store      *ledger.Store
+	args       []string
+	positional []string
+}
+
+var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
+	"asks": func(a *App, c ledgerCall) error { return a.ledgerAsks(c.store, c.args) },
+	"ask": func(a *App, c ledgerCall) error {
+		if len(c.positional) < 2 {
+			return fmt.Errorf("usage: agenthail ledger ask <ask_id>")
+		}
+		return a.ledgerAsk(c.store, c.positional[1], c.args)
+	},
+	"show": func(a *App, c ledgerCall) error {
+		if len(c.positional) != 2 {
+			return fmt.Errorf("usage: agenthail ledger show <item_id|ask_id>")
+		}
+		return a.ledgerShow(c.store, c.args, c.positional[1])
+	},
+	"enable":       func(a *App, c ledgerCall) error { return a.ledgerEnable(c.store, c.args) },
+	"disable":      func(a *App, c ledgerCall) error { return a.ledgerDisable(c.store, c.args) },
+	"goal":         func(a *App, c ledgerCall) error { return a.ledgerGoal(c.args) },
+	"goals":        func(a *App, c ledgerCall) error { return a.ledgerGoals(c.store, c.args) },
+	"attach":       func(a *App, c ledgerCall) error { return a.ledgerAttach(c.args, false) },
+	"propose":      func(a *App, c ledgerCall) error { return a.ledgerAttach(c.args, true) },
+	"question":     func(a *App, c ledgerCall) error { return a.ledgerQuestion(c.args) },
+	"questions":    func(a *App, c ledgerCall) error { return a.ledgerQuestions(c.store, c.args) },
+	"work":         func(a *App, c ledgerCall) error { return a.ledgerWork(c.store, c.args) },
+	"import":       func(a *App, c ledgerCall) error { return a.ledgerImport(c.store, c.args) },
+	"owner":        func(a *App, c ledgerCall) error { return a.ledgerOwner(c.store, c.args) },
+	"digest":       func(a *App, c ledgerCall) error { return a.ledgerDigest(c.store, c.args) },
+	"own":          func(a *App, c ledgerCall) error { return a.ledgerClause(ledger.ClauseOwn, c.args) },
+	"progress":     func(a *App, c ledgerCall) error { return a.ledgerClause(ledger.ClauseProgress, c.args) },
+	"wait":         func(a *App, c ledgerCall) error { return a.ledgerClause(ledger.ClauseWait, c.args) },
+	"check":        func(a *App, c ledgerCall) error { return a.ledgerCheck(c.args) },
+	"check-report": func(a *App, c ledgerCall) error { return a.ledgerCheckReport(c.args) },
+}
+
 func (a *App) cmdLedger(args []string) error {
-	positional := stripFlags(args)
+	at, help := ledgerPositionals(args)
+	positional := make([]string, len(at))
+	for i, j := range at {
+		positional[i] = args[j]
+	}
+	if help || len(positional) > 0 && (positional[0] == "help" || positional[0] == "-h") {
+		fmt.Print(ledgerHelp)
+		return nil
+	}
 	r := a.registry()
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
-
 	if len(positional) == 0 {
 		return a.ledgerBoard(store, args)
 	}
-	switch positional[0] {
-	case "asks":
-		return a.ledgerAsks(store, args)
-	case "ask":
-		if len(positional) < 2 {
-			return fmt.Errorf("usage: agenthail ledger ask <ask_id>")
-		}
-		return a.ledgerAsk(store, positional[1], args)
-	case "enable":
-		return a.ledgerEnable(store, args)
-	case "disable":
-		return a.ledgerDisable(store, args)
-	case "goal":
-		return a.ledgerGoal(args)
-	case "goals":
-		return a.ledgerGoals(store, args)
-	case "attach":
-		return a.ledgerAttach(args, false)
-	case "propose":
-		return a.ledgerAttach(args, true)
-	case "question":
-		return a.ledgerQuestion(args)
-	case "questions":
-		return a.ledgerQuestions(store, args)
-	case "work":
-		return a.ledgerWork(store, args)
-	case "add", "create":
-		return a.ledgerWork(store, workAddArgs(args, positional[0]))
-	case "import":
-		return a.ledgerImport(args)
-	case "owner":
-		return a.ledgerOwner(store, args)
-	case "digest":
-		return a.ledgerDigest(store, args)
-	case "own":
-		return a.ledgerClause(ledger.ClauseOwn, args)
-	case "progress":
-		return a.ledgerClause(ledger.ClauseProgress, args)
-	case "wait":
-		return a.ledgerClause(ledger.ClauseWait, args)
-	case "check":
-		return a.ledgerCheck(args)
-	case "check-report":
-		return a.ledgerCheckReport(args)
-	default:
-		return fmt.Errorf("unknown ledger command %q", positional[0])
+	if ledgerWorkShortForms[positional[0]] {
+		return a.ledgerWork(store, workArgs(args, at[0]))
 	}
+	run, ok := ledgerCommands[positional[0]]
+	if !ok {
+		return fmt.Errorf("unknown ledger command %q\n\n%s", positional[0], ledgerHelp)
+	}
+	return run(a, ledgerCall{store: store, args: args, positional: positional})
 }
 
 func ledgerProjectKey(a *App) (string, error) {
@@ -286,8 +294,54 @@ func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
 	return nil
 }
 
-// workAddArgs turns 'ledger add ...' and 'ledger create ...' into 'ledger work add ...'.
-func workAddArgs(args []string, verb string) []string {
-	i := slices.Index(args, verb)
-	return slices.Concat(args[:i], []string{"work", "add"}, args[i+1:])
+var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
+	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
+	"approve": true, "reject": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
+	"ready": true, "next": true, "critical-path": true}
+
+func workArgs(args []string, i int) []string {
+	if args[i] == "list" {
+		return slices.Concat(args[:i], []string{"work"}, args[i+1:])
+	}
+	return slices.Concat(args[:i], []string{"work"}, args[i:])
+}
+
+func ledgerPositionals(args []string) (at []int, help bool) {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--":
+			for j := i + 1; j < len(args); j++ {
+				at = append(at, j)
+			}
+			return at, help
+		case ledgerWriteValueFlags[a]:
+			i++
+		case a == "--help":
+			help = true
+		case strings.HasPrefix(a, "--"):
+		default:
+			at = append(at, i)
+		}
+	}
+	return at, help
+}
+
+func (a *App) ledgerShow(store *ledger.Store, args []string, id string) error {
+	w, err := parseLedgerWrite(args)
+	if err != nil {
+		return err
+	}
+	board, err := a.workBoard(store, w)
+	if err != nil {
+		return err
+	}
+	if _, ok := board.WorkItem(id); ok {
+		return a.ledgerWorkShow(store, w, id)
+	}
+	for _, ask := range board.AllAsks() {
+		if ask.ID == id {
+			return a.ledgerAsk(store, id, args)
+		}
+	}
+	return fmt.Errorf("%q is not a work item or an ask in this project; agenthail ledger list shows the items", id)
 }

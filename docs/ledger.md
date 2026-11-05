@@ -119,7 +119,7 @@ agenthail ledger work dep <item> --on <other item>
 agenthail ledger work handoff <item> --done "..." --remaining "..."
 ```
 
-`ledger add`, `ledger create`, `ledger work create` and `ledger work new` are short for `ledger work add`, and `ledger work update` for `ledger work edit`. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from.
+Every `ledger work <command>` can also be written without `work`, as in td: `ledger list`, `ledger show <item>`, `ledger add` (or `create`, `new`), `ledger edit` (or `update`), `ledger start` (claim), `ledger review` (submit), `ledger close`, `ledger delete`, `ledger reopen` and the rest. `agenthail ledger help` lists them all, and so does an unknown command. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from.
 
 An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
 
@@ -138,7 +138,7 @@ To pick up work:
 
 ### Moving over from td
 
-`agenthail ledger import td [<path>]` reads a td database, read-only, and brings its open, in-progress, blocked and in-review issues over as found work. Each item keeps its title, type, priority, description, acceptance criteria and labels, plus its comments, logs, handoffs and reviews, at their original times and with the td session that wrote them. `--all` also brings closed issues, as done. The default path is `.todos/issues.db` in the current directory or the nearest parent that has one, and `--dry-run` shows what would come over without writing anything.
+`agenthail ledger import td [<path>]` reads a td database, read-only, and brings its open, in-progress, blocked and in-review issues over as found work. Each item keeps its title, type, priority, description, acceptance criteria and labels, plus its comments, logs, handoffs and reviews, at their original times and with the td session that wrote them. `--all` also brings closed issues, as done. The default path is `.todos/issues.db` in the current directory or the nearest parent that has one, and `--dry-run` shows what would come over without writing anything, leaving out what this host's copy of the ledger already holds.
 
 The import maps td onto the ledger as follows:
 
