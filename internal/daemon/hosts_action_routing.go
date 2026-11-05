@@ -11,6 +11,9 @@ import (
 var actionSessionFields = []string{"sessionId", "targetId", "fromId", "toId"}
 
 func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any) (*pairedHost, bool, error) {
+	if err := d.checkNamedSender(ctx, request); err != nil {
+		return nil, false, err
+	}
 	var host *pairedHost
 	local := false
 	rewritten := false

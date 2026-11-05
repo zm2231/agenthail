@@ -89,14 +89,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var sendErr error
 	addressed := *session
 	var steered *surface.ControlResult
-	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author, Uploads: item.Uploads, PersonName: item.PersonName}
-	steers := d.Registry.Steers(item.BusyDelivery)
-	if item.BusyDelivery == "" && route == surface.RoutePeer {
-		steers = false
-	}
+	route := surface.RouteFor(adapter, session, options.RouteAuthor())
+	steers := route != surface.RoutePeer && d.Registry.Steers(item.BusyDelivery) && d.dispatcher().MaySteer(item.SourceSessionID, item.Author, *session)
 	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, item.Message, options)
-	steer := steers && canSteer && (route != surface.RoutePeer || len(options.Uploads) == 0) && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
+	steer := steers && canSteer && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer
 	if steer {
 		steered, sendErr = surface.SteerWithEvidence(operationCtx, adapter, session, steerText, steerImages)
 		if sendErr == nil {
@@ -115,7 +112,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		d.finishReachedHostOwned(item, session, item.Message, ownedErr)
 		return
 	}
-	peerTransport := surface.RouteFor(adapter, session, item.Author).TransportOnly()
+	peerTransport := surface.RouteFor(adapter, session, options.RouteAuthor()).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return

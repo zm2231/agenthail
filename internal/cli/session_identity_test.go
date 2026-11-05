@@ -103,8 +103,8 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 		t.Fatalf("original whoami=%+v", got)
 	}
 
-	if sender := sendFrom(t, app, r, originalConversation, "claude:"+branchConversation, "to the branch"); sender != originalConversation || posts.count("to the branch") != 1 {
-		t.Fatalf("send to the branch: sender=%q posts=%d", sender, posts.count("to the branch"))
+	if sender := sendFrom(t, app, r, originalConversation, "claude:"+branchConversation, "to the branch"); sender != originalConversation || posts.count("to the branch") != 0 || r.QueueCount(branchConversation) != 1 {
+		t.Fatalf("send to the branch: sender=%q posts=%d queued=%d, want an agent's message queued for a branch with no socket, never posted as its turn", sender, posts.count("to the branch"), r.QueueCount(branchConversation))
 	}
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)

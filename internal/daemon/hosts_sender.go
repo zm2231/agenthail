@@ -71,6 +71,9 @@ func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target
 		return true, nil
 	}
 	principalHost, fromHost := requestingHost(ctx)
+	if fromHost && source == surface.SystemSessionID {
+		return false, nil
+	}
 	hostRef, rawID, qualified := hosts.Split(source)
 	if !fromHost {
 		_, rawID, err := d.routeSession(source)
@@ -104,6 +107,28 @@ func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target
 	}
 	request["sourceSessionId"] = sender
 	return true, nil
+}
+
+// The person, the CLI and Agenthail send only as the daemon names them; a
+// request may not, except a paired host forwarding Agenthail's own notice.
+func (d *Daemon) checkNamedSender(ctx context.Context, request map[string]any) error {
+	source, _ := request["sourceSessionId"].(string)
+	if source = strings.TrimSpace(source); source == "" {
+		return nil
+	}
+	_, id, _ := hosts.Split(source)
+	if canonical, _, found, err := d.Registry.CanonicalSession(id); err != nil {
+		return err
+	} else if found {
+		id = canonical
+	}
+	if _, pseudo := surface.AgenthailSender(id, ""); !pseudo {
+		return nil
+	}
+	if _, fromHost := requestingHost(ctx); fromHost && id == surface.SystemSessionID {
+		return nil
+	}
+	return fmt.Errorf("a request cannot name %s as its sender", source)
 }
 
 func (d *Daemon) senderName(sessionID string) string {

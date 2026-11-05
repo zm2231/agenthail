@@ -161,6 +161,35 @@ func TestClaudeStreamCarriesAMidTurnMessage(t *testing.T) {
 	}
 }
 
+func TestClaudeTimelineShowsAnAgenthailTurnAsItsNoticeAndThePersonsTypingAsTheirs(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","uuid":"u1","turnOrigin":"sdk","message":{"content":"[agenthail] @builder is blocked on a prompt: Bash"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Answering."}]}}
+{"type":"user","uuid":"u2","origin":{"kind":"human"},"message":{"content":"[agenthail] is the prefix I mean"}}
+`)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var users []surface.TimelineItem
+	for _, item := range page.Items {
+		if item.Role != "assistant" && item.Kind != "done" {
+			users = append(users, item)
+		}
+	}
+	if len(users) != 2 {
+		t.Fatalf("items=%+v", page.Items)
+	}
+	if notice := users[0]; notice.Kind != "event" || notice.Origin != "agenthail-notice" || notice.Text != "@builder is blocked on a prompt: Bash" {
+		t.Fatalf("notice=%+v, want Agenthail's notice", notice)
+	}
+	if typed := users[1]; typed.Kind != "message" || typed.Role != "user" || typed.Origin == "agenthail-notice" {
+		t.Fatalf("typed=%+v, want the person's prompt", typed)
+	}
+	if IsTypedHumanPrompt("[agenthail] @builder is blocked") {
+		t.Fatal("the prompt hook would record Agenthail's notice as the person's words")
+	}
+}
+
 func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
 	notice := strings.ReplaceAll(surface.LimitResumeNotice(), `"`, `\"`)
 	path := timelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"`+notice+`"}}

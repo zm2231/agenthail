@@ -2373,7 +2373,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent as a message, not a steer: only the person, the lead of to or the session that started it can steer it.\"}}\n"
   },
   "api/action steer refused as invalid": {
     "status": 400,
@@ -4809,7 +4809,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"source\":\"parity\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent to to.\"}}\n"
+    "body": "{\"ok\":true,\"result\":{\"evidence\":\"delivered\",\"status\":\"sent\",\"sessionId\":\"to\",\"turnId\":\"turn\",\"deliveryId\":1,\"messageId\":\"\u003cuuid\u003e\",\"detail\":\"Sent as a message, not a steer: only the person, the lead of to or the session that started it can steer it.\"}}\n"
   },
   "api/v1/actions steer refused as invalid": {
     "status": 400,

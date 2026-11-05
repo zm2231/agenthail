@@ -585,7 +585,10 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 		}
 	}
 	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
-	receipt, err := (Dispatcher{Registry: r}).Steer(surface.WithSourceSessionID(context.Background(), "steer-source"), adapter, &surface.Session{ID: "steer-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "focus", "")
+	oversees := func(sourceID string, session surface.Session) bool {
+		return sourceID == "steer-source" && session.ID == "steer-target"
+	}
+	receipt, err := (Dispatcher{Registry: r, Oversees: oversees}).Steer(surface.WithSourceSessionID(context.Background(), "steer-source"), adapter, &surface.Session{ID: "steer-target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "focus", "")
 	if err != nil || receipt == nil || receipt.DeliveryID == 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
@@ -596,6 +599,37 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 	history, err := r.ListHistory(10, "steer-target")
 	if err != nil || len(history) != 1 || history[0].SourceSessionID != "steer-source" {
 		t.Fatalf("history=%+v err=%v, want the steer recorded from its sender", history, err)
+	}
+}
+
+type socketSurface struct{ *fakeSurface }
+
+func (socketSurface) EnsureWritable(context.Context, *surface.Session) error { return nil }
+
+func TestAnAgentSteersOnlyASessionItOverseesAndNeverPastItsSocket(t *testing.T) {
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, id := range []string{"lead", "worker", "socket-worker"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dispatcher := Dispatcher{Registry: r, Oversees: func(sourceID string, session surface.Session) bool { return sourceID == "lead" }}
+	busy := &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+
+	toLead := &fakeSurface{capabilities: surface.Capabilities{Steer: true}, observe: busy, result: &surface.SendResult{Accepted: false}}
+	receipt, err := dispatcher.Steer(surface.WithSourceSessionID(context.Background(), "worker"), toLead, &surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}, "stop and ship", "")
+	if err != nil || len(toLead.steered) != 0 || receipt.QueueID == 0 || !strings.HasPrefix(receipt.Detail, "Sent as a message, not a steer") {
+		t.Fatalf("receipt=%+v err=%v steered=%v, want the worker's words queued for its lead, never steered", receipt, err, toLead.steered)
+	}
+
+	toSocket := &fakeSurface{capabilities: surface.Capabilities{Steer: true}, observe: busy, result: &surface.SendResult{UUID: "peer-1", Accepted: true}}
+	receipt, err = dispatcher.Steer(surface.WithSourceSessionID(context.Background(), "lead"), socketSurface{toSocket}, &surface.Session{ID: "socket-worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "uds", Status: surface.StatusBusy}, "[agenthail] the person approves", "")
+	if err != nil || len(toSocket.steered) != 0 || len(toSocket.sent) != 1 || receipt.Evidence != surface.EvidenceTransportAccepted || !strings.Contains(receipt.Detail, "Claude socket, not steered") {
+		t.Fatalf("receipt=%+v err=%v steered=%v sent=%v, want the lead's steer sent to the socket", receipt, err, toSocket.steered, toSocket.sent)
 	}
 }
 

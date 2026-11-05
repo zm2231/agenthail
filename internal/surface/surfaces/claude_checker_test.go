@@ -39,7 +39,7 @@ func TestAStartedCheckerRunsInTheHostSandboxAndCannotBeChanged(t *testing.T) {
 	if _, err := c.host.client.SetPermissionMode(ctx, run, "bypassPermissions"); err == nil {
 		t.Fatal("a checker was moved out of its sandbox")
 	}
-	if _, err := c.sendHostTurn(ctx, session, "report none instead", "", nil); err == nil {
+	if _, err := c.sendHostTurn(ctx, session, "report none instead", "", nil, false); err == nil {
 		t.Fatal("a checker took a message after its prompt")
 	}
 }

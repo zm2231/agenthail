@@ -16,6 +16,7 @@ const (
 	RouteSend Route = iota
 	RoutePeer
 	RouteHumanTurn
+	RouteAgenthailTurn
 )
 
 // Router is implemented by an adapter whose sessions take more than one
@@ -43,6 +44,9 @@ func (r Route) Validate(adapter Surface, options SendOptions) error {
 	if r == RouteHumanTurn {
 		return DeliveryTerminal(errors.New("per-message model and turn options are not supported for a person's Claude turn"), DeliveryInvalidRequest)
 	}
+	if r == RouteAgenthailTurn {
+		return DeliveryTerminal(errors.New("per-message model and turn options are not supported for Agenthail's own Claude turn"), DeliveryInvalidRequest)
+	}
 	if _, ok := adapter.(OptionSender); !ok {
 		return fmt.Errorf("%s does not support per-message model selection", adapter.Name())
 	}
@@ -59,6 +63,9 @@ func (r Route) Send(ctx context.Context, adapter Surface, session *Session, mess
 	if r == RouteHumanTurn {
 		return adapter.(HumanTurnSender).SendHumanTurn(ctx, session, message, options.Images)
 	}
+	if r == RouteAgenthailTurn {
+		return adapter.(AgenthailTurnSender).SendAgenthailTurn(ctx, session, message)
+	}
 	if options.Model != "" || !options.TurnOptions.Empty() || len(options.Images) > 0 {
 		return adapter.(OptionSender).SendWithOptions(ctx, session, message, options)
 	}
@@ -74,4 +81,28 @@ func LabelCLI(ctx context.Context, message string) string {
 		return CLILabel + message
 	}
 	return message
+}
+
+// The label comes from who sent the message, never from its text.
+func LabelSender(ctx context.Context, message string) string {
+	source := SourceSessionID(ctx)
+	if _, agenthail := AgenthailSender(source, ""); agenthail || source == "" || message == "" {
+		return LabelCLI(ctx, message)
+	}
+	name := ReplyTarget(ctx)
+	if sender, ok := Sender(ctx); name == "" && ok {
+		name = sender.Name
+	}
+	if name = strings.Map(func(r rune) rune {
+		if r == ']' || r == '[' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(name)); name == "" {
+		name = source
+	}
+	if strings.HasPrefix(message, "[from "+name+"] ") || strings.HasPrefix(message, "[from "+name+channelSeparator) {
+		return message
+	}
+	return "[from " + name + "] " + message
 }

@@ -135,7 +135,7 @@ func (a *App) cmdSend(args []string) error {
 	options := surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions, SourceSessionID: source}
 	addressed := *sess
 	followsJournal := false
-	dispatcher := delivery.Dispatcher{Registry: a.registry()}
+	dispatcher := a.dispatcher()
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
 	syntheticNotionName := ""

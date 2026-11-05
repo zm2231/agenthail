@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,7 +66,7 @@ func (c *recordingClaude) Send(_ context.Context, _ *surface.Session, message st
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sent = append(c.sent, message)
-	return &surface.SendResult{UUID: "peer", Accepted: true}, nil
+	return &surface.SendResult{UUID: "peer-" + strconv.Itoa(len(c.sent)), Accepted: true}, nil
 }
 
 func (c *recordingClaude) Steer(_ context.Context, _ *surface.Session, message string) error {
@@ -321,9 +322,9 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	}
 
 	q.answer(t)
-	testkit.Eventually(t, "the held steer to reach the answered turn", 5*time.Second, func() bool {
-		_, steered := claude.delivered()
-		return len(steered) == 1
+	testkit.Eventually(t, "the held steer to reach the answered turn over the socket", 5*time.Second, func() bool {
+		sent, steered := claude.delivered()
+		return len(sent) == 1 && sent[0] == "steer after the answer" && len(steered) == 0
 	})
 	testkit.Eventually(t, "the answered question to clear", 5*time.Second, func() bool { return h.sessionWaiting(session.ID) == nil })
 	if item := h.queueItem(queuedID); item.Status != "pending" || item.HeldBy != registry.QueueHeldBusy {
@@ -335,7 +336,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 	testkit.Eventually(t, "the queued message after the turn ends", 5*time.Second, func() bool {
 		sent, _ := claude.delivered()
-		return len(sent) == 1
+		return len(sent) == 2
 	})
 	testkit.Eventually(t, "both held messages to finish", 5*time.Second, func() bool {
 		for _, id := range []int64{queuedID, steerID} {
@@ -346,7 +347,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 		return true
 	})
 	sent, steered := claude.delivered()
-	if len(sent) != 1 || sent[0] != "after you answer" || len(steered) != 1 || steered[0] != "steer after the answer" {
+	if len(sent) != 2 || sent[0] != "steer after the answer" || sent[1] != "after you answer" || len(steered) != 0 {
 		t.Fatalf("sent=%q steered=%q", sent, steered)
 	}
 	if got := pushes.count("session.waiting"); got != 1 {

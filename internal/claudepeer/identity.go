@@ -32,7 +32,7 @@ func listedName(reg *registry.Registry, session surface.Session) string {
 	return session.Name
 }
 
-var closingPeerTag = regexp.MustCompile(`(?i)<(\s*/\s*cross-session-message\b)`)
+var peerTag = regexp.MustCompile(`(?i)<(\s*/?\s*cross-session-message\b)`)
 
 // messageID is the delivery's own uuid when it has one, so a report on the
 // message names the delivery it belongs to.
@@ -66,7 +66,7 @@ func peerContent(session surface.Session, target, socket, fromMode, message stri
 	case surface.CLISessionID:
 		message = "Sent with agenthail send from outside any session; no one reads replies to it.\n\n" + message
 	}
-	message = closingPeerTag.ReplaceAllString(message, `<\$1`)
+	message = peerTag.ReplaceAllString(message, `<\$1`)
 	mode := ""
 	if fromMode == "bypass" || fromMode == "prompting" {
 		mode = ` from-mode="` + fromMode + `"`

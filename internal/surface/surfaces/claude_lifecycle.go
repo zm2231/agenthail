@@ -170,7 +170,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		}
 		return nil, nil, failure
 	}
-	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil)
+	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID)
 	return session, sent, err
 }
 

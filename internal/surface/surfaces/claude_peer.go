@@ -77,12 +77,52 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if socket == "" {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude messaging socket is unavailable"))
 	}
-	if sender, senderSocket, found, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx)); err != nil {
+	sender, senderSocket, native, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx))
+	if err != nil {
 		return nil, err
-	} else if found {
-		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, c.permissionClass(ctx, sender), message)
 	}
-	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
+	fromMode := ""
+	var result *surface.SendResult
+	if native {
+		fromMode = c.permissionClass(ctx, sender)
+		result, err = claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, fromMode, message)
+	} else {
+		result, err = peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
+	}
+	if err == nil && result != nil && result.Notice == "" {
+		result.Notice = c.peerHoldNotice(ctx, session, fromMode)
+	}
+	return result, err
+}
+
+// Without a setting, Claude holds a message whose sender's mode differs from the session's.
+func (c *Claude) peerHoldNotice(ctx context.Context, target *surface.Session, fromMode string) string {
+	root, _ := c.conversationRoot(target.ID)
+	if root == "" {
+		if roots, err := surface.ClaudeConfigRoots(c.home); err == nil && len(roots) > 0 {
+			root = roots[0]
+		}
+	}
+	inbound := surface.ReadClaudeInbound(root, target.Cwd)
+	switch inbound.Value {
+	case "accept":
+		return ""
+	case "refuse":
+		return fmt.Sprintf("Claude refuses this message: crossSessionInbound is refuse in %s, so it never reaches the model.", inbound.Path)
+	case "hold":
+		if claudeHosted(target) {
+			return fmt.Sprintf("Claude holds this message: crossSessionInbound is hold in %s, and a hosted session has no prompt to approve it, so it expires. You are told when it does.", inbound.Path)
+		}
+		return fmt.Sprintf("Claude holds this message until the person approves it in that session's terminal: crossSessionInbound is hold in %s.", inbound.Path)
+	}
+	if !claudeHosted(target) {
+		return "If this session runs in a different permission mode than the sender, Claude holds the message until the person approves it in that session's terminal."
+	}
+	mode := c.permissionClass(ctx, target)
+	if mode == "" || (mode == "bypass") == (fromMode == "bypass") {
+		return ""
+	}
+	return "Claude holds this message: the sender and the session run in different permission modes, and a hosted session has no prompt to approve it, so it expires. You are told when it does."
 }
 
 // nativeCaller finds the sender's own messaging socket. The source carries

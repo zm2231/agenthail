@@ -66,7 +66,7 @@ func (f noticeFixture) notices(t *testing.T) []registry.QueueRow {
 	}
 	var notices []registry.QueueRow
 	for _, row := range rows {
-		if row.SourceSessionID == f.worker.ID {
+		if row.SourceSessionID == surface.SystemSessionID && strings.HasPrefix(row.Message, "[agenthail] "+f.d.resolveDisplay(f.worker.ID)+" ") {
 			notices = append(notices, row)
 		}
 	}

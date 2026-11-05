@@ -103,6 +103,9 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
+			if err := r.RecordSessionOrigin(registry.OriginOf(to.ID, from.ID)); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 				t.Fatal(err)
 			}
@@ -116,6 +119,29 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 				t.Fatalf("steered=%v sent=%v queued=%d, want the relay held for the turn", fake.steered, fake.sent, r.QueueCount(to.ID))
 			}
 		})
+	}
+}
+
+func TestARelayFromASessionThatDoesNotOverseeItsTargetNeverSteersIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: deliverypolicy.Steer}); err != nil {
+		t.Fatal(err)
+	}
+	d, r, fake, from, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	fake.rejectBusy = true
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	d.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	d.scanAndRelay(context.Background())
+	if len(fake.steered) != 0 || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("steered=%v queued=%d, want the relay to wait for the turn as a message", fake.steered, r.QueueCount(to.ID))
 	}
 }
 

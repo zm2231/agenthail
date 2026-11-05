@@ -202,10 +202,8 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	if request.Author != "" && request.Author != surface.AuthorPerson || request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
 		return actionResult{}, invalidRequest("author must be \"person\" and name no source session when set")
 	}
-	if request.SourceSessionID != "" {
-		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
-			return actionResult{}, invalidRequest("source session not found")
-		}
+	if err := d.knownSource(request.SourceSessionID); err != nil {
+		return actionResult{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()

@@ -70,6 +70,33 @@ type Dispatcher struct {
 	Registry         *registry.Registry
 	ProblemCommitted func()
 	PersonCapture    PersonCaptureFunc
+	// Oversees reports whether an agent is the session's lead or the session
+	// that started it; without it no agent steers.
+	Oversees func(sourceID string, session surface.Session) bool
+}
+
+// MaySteer keeps a worker from pushing its lead mid-turn: an agent steers
+// only a session it oversees.
+func (d Dispatcher) MaySteer(sourceID string, author surface.Author, session surface.Session) bool {
+	if author == surface.AuthorPerson {
+		return true
+	}
+	if _, agenthail := surface.AgenthailSender(sourceID, ""); agenthail || sourceID == "" {
+		return true
+	}
+	return d.Oversees != nil && d.Oversees(sourceID, session)
+}
+
+func (d Dispatcher) display(session *surface.Session) string {
+	if d.Registry != nil {
+		if alias, err := d.Registry.ReverseAlias(session.ID); err == nil && alias != "" {
+			return "@" + alias
+		}
+	}
+	if session.Name != "" {
+		return session.Name
+	}
+	return session.ID
 }
 
 func (d Dispatcher) Deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string) (*Receipt, error) {
@@ -191,6 +218,16 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		target = session.ID
 	}
 	sourceID := surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx), Author: author}.Sender()
+	options := surface.SendOptions{SourceSessionID: sourceID, Author: author, PersonName: surface.PersonName(ctx)}
+	if !d.MaySteer(sourceID, author, *session) {
+		options.BusyDelivery = string(deliverypolicy.Queue)
+		receipt, err := d.DeliverWithOptions(ctx, adapter, session, message, "", options)
+		if err == nil {
+			receipt.Detail = fmt.Sprintf("Sent as a message, not a steer: only the person, the lead of %s or the session that started it can steer it.", d.display(session))
+		}
+		return receipt, err
+	}
+	peer := surface.RouteFor(adapter, session, options.RouteAuthor()) == surface.RoutePeer
 	if d.Registry != nil {
 		if err := d.Registry.EnsureSender(sourceID); err != nil {
 			return nil, fmt.Errorf("persist delivery source: %w", err)
@@ -210,6 +247,13 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	}
 	if observation != nil && observation.WaitingOn != nil && d.Registry != nil {
 		return d.queueForWaiting(session, message, target, sourceID, observation.WaitingOn)
+	}
+	if peer {
+		receipt, err := d.DeliverWithOptions(ctx, adapter, session, message, "", options)
+		if err == nil && receipt.Evidence == surface.EvidenceTransportAccepted {
+			receipt.Detail = fmt.Sprintf("Sent to %s's Claude socket, not steered: Claude passes it to the model at its next tool call, or as a new turn if none is running.", d.display(session))
+		}
+		return receipt, err
 	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil {
@@ -279,7 +323,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
-	route := surface.RouteFor(adapter, session, options.Author)
+	route := surface.RouteFor(adapter, session, options.RouteAuthor())
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -402,7 +446,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID, Notice: result.Notice}
-		peerTransport := surface.RouteFor(adapter, session, options.Author).TransportOnly()
+		peerTransport := surface.RouteFor(adapter, session, options.RouteAuthor()).TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
@@ -443,7 +487,13 @@ func WithSender(ctx context.Context, r *registry.Registry, sourceID, given strin
 		if err != nil {
 			return nil, fmt.Errorf("read how the sender is addressed: %w", err)
 		}
-		return surface.WithReplyTarget(ctx, target), nil
+		ctx = surface.WithReplyTarget(ctx, target)
+		if _, agenthail := surface.AgenthailSender(sourceID, ""); !agenthail && sourceID != "" {
+			if sender, err := r.Session(sourceID); err == nil {
+				ctx = surface.WithSender(ctx, *sender)
+			}
+		}
+		return ctx, nil
 	}
 	if given == "" {
 		name, err := r.PersonName()
@@ -482,7 +532,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	}
 	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, message, options)
 	options.SteersUploads = canSteer && busyMode == deliverypolicy.Steer
-	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer
+	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer && d.MaySteer(options.SourceSessionID, options.Author, *session)
 	if steerable && observation == nil {
 		observed, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
