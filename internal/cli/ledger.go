@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -45,6 +46,8 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerQuestions(store, args)
 	case "work":
 		return a.ledgerWork(store, args)
+	case "add", "create":
+		return a.ledgerWork(store, workAddArgs(args, positional[0]))
 	case "owner":
 		return a.ledgerOwner(store, args)
 	case "digest":
@@ -279,4 +282,10 @@ func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
 	}
 	fmt.Printf("ledger disabled for %s\n", key)
 	return nil
+}
+
+// workAddArgs turns 'ledger add ...' and 'ledger create ...' into 'ledger work add ...'.
+func workAddArgs(args []string, verb string) []string {
+	i := slices.Index(args, verb)
+	return slices.Concat(args[:i], []string{"work", "add"}, args[i+1:])
 }
