@@ -118,14 +118,20 @@ one ledger:
   record of the link decides over the `linkedFrom` a paired host's row
   arrived with, so a host that has not yet taken an unlink cannot keep the
   projects joined.
-- A project that already has a lead, past leads, a ledger board (enabling
-  the ledger starts one) or ledger grants is refused as the joined side
+- A project that already has a lead, a ledger board (enabling the ledger
+  starts one) or ledger grants is refused as the joined side
   (`409 project_history`):
   when only it has that, the message names the link the other way round, and
   when both do, merging them is not supported. A host that adopts a link onto
   such a project holds it: the project stays its own, with `linkHeld` naming
   why, and `agenthail doctor` fails until it is resolved. Chains are refused
   (`409 project_linked`) and held when they arrive.
+- A joined project's past leads become the survivor's: each host moves the
+  project's `coordinator_history` rows to the survivor in the transaction
+  that records or adopts the link. A host where the joined project still has
+  its own lead keeps those rows until the lead is cleared, and the clear moves
+  them. An unlink leaves the moved history with the survivor, so the joined
+  project comes back with no past leads.
 - Two unlinked projects whose repositories share a root commit are named in
   `sameHistory` on the one with fewer sessions, and `project list` and
   `doctor` print the link command that would join them.
