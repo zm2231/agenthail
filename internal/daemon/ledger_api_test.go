@@ -105,7 +105,7 @@ func makeCoordinator(t *testing.T, r *registry.Registry, p ledgerProject, sessio
 func TestLedgerAPICapturesForEnabledProject(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-1", "test-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s1")
@@ -121,7 +121,7 @@ func TestLedgerAPICapturesForEnabledProject(t *testing.T) {
 func TestLedgerAPISkipsDisabledProject(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-2", "disabled-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if err := p.store.Disable(p.key); err != nil {
@@ -150,7 +150,7 @@ func TestLedgerAPICapturesOnlyTheCoordinatorInUnsetProject(t *testing.T) {
 func TestLedgerAPIKeepsRepeatsAndCollapsesHookCopies(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-5", "repeat-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s5")
@@ -178,7 +178,7 @@ func TestLedgerAPIRequiresAPromptID(t *testing.T) {
 func TestLedgerAPIIgnoresPeerMessagesDeliveredAsPrompts(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-6", "peer-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	p.session(t, r, "s6")

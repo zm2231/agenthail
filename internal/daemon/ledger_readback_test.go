@@ -13,7 +13,7 @@ import (
 func TestAPersonDeliveryToACodexSessionQueuesItsReadbackOnce(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-readback", "readback-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	codex := surface.Session{ID: "codex-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: p.dir, Status: surface.StatusIdle}

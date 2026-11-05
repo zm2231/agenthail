@@ -46,7 +46,7 @@ func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
 			d.log.Printf("ledger G2: scope of %s in %s: %s", session.ID, target.key, err)
 			continue
 		}
-		if !scope.attach {
+		if !scope.attach && !scope.checkpoints {
 			continue
 		}
 		result, err := store.GateTurn(target.key, session.ID, turnID, time.Now())

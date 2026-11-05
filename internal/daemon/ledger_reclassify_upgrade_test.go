@@ -70,7 +70,7 @@ func TestRederivesWaitForASlot(t *testing.T) {
 func TestRederivingAnOlderJournalReclassifiesAnEarlierHookCapture(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-upgrade", "upgrade-key")
-	if err := p.store.Enable(p.key); err != nil {
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	s := surface.Session{ID: "upgraded", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: p.dir, Status: surface.StatusIdle, Transcript: "/transcript.jsonl"}

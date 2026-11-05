@@ -113,6 +113,9 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if scope.State == ledger.LedgerEnabled {
 		capture = "enabled"
 		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
+		if scope.Attach == ledger.AttachAtCheckpoints {
+			coverage += "\nsessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and here"
+		}
 	}
 
 	board, err := store.Board(key)
@@ -144,7 +147,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"attachedElsewhere":  attachment.Elsewhere,
 		}
 		if scope.State == ledger.LedgerEnabled {
-			out["captureSince"] = scope.Since
+			out["captureSince"], out["attach"] = scope.Since, scope.Attach
 		}
 		if g2Err != nil {
 			out["g2Error"] = g2Err.Error()
@@ -168,6 +171,9 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if scope.State == ledger.LedgerEnabled {
 		fmt.Println(g2Line(g2, g2Err))
 		view.print(attachment, 0)
+		if scope.Attach == ledger.AttachAtCheckpoints && len(attachment.Unattached) > 0 {
+			fmt.Println(ledgerAttachInOneCall)
+		}
 		return nil
 	}
 	shown := ledgerLeadWordsShown
@@ -179,6 +185,9 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 }
 
 const ledgerLeadWordsShown = 5
+
+const ledgerAttachInOneCall = `attach your own in one call, one fragment per intent:
+  agenthail ledger attach <utterance> --as <...> --to <...> --clause "..." --and <utterance> --as ...`
 
 func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
@@ -237,13 +246,26 @@ func (a *App) ledgerSessionArg(args []string) (*surface.Session, error) {
 }
 
 func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
+	w, err := parseLedgerWrite(args)
+	if err != nil {
+		return err
+	}
+	mode, err := ledger.ParseAttachMode(w.value("--attach"))
+	if err != nil {
+		return err
+	}
 	key, err := ledgerProjectKey(a)
 	if err != nil {
 		return err
 	}
-	session, err := a.ledgerSessionArg(args)
-	if err != nil {
-		return err
+	var session *surface.Session
+	if len(w.positional) > 1 {
+		if w.value("--attach") != "" {
+			return fmt.Errorf("--attach sets when the whole project attaches; a session you add follows it")
+		}
+		if session, _, err = a.resolveTarget(context.Background(), w.positional[1]); err != nil {
+			return err
+		}
 	}
 	if session != nil {
 		if err := store.GrantSession(key, session.ID); err != nil {
@@ -255,13 +277,17 @@ func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
 		fmt.Printf("ledger captures %s for %s\n", session.ID, key)
 		return nil
 	}
-	if err := store.Enable(key); err != nil {
+	if err := store.Enable(key, mode); err != nil {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return emit(map[string]any{"projectKey": key, "enabled": true})
+		return emit(map[string]any{"projectKey": key, "enabled": true, "attach": mode})
 	}
-	fmt.Printf("ledger enabled for %s\n", key)
+	if mode == ledger.AttachAtCheckpoints {
+		fmt.Printf("ledger enabled for %s; sessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and agenthail ledger\n", key)
+		return nil
+	}
+	fmt.Printf("ledger enabled for %s; sessions attach each of the person's messages before replying\n", key)
 	return nil
 }
 

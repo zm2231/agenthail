@@ -20,7 +20,7 @@ var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--claus
 	"--recommendation": true, "--default": true, "--deadline": true, "--kind": true, "--reason": true, "--ref": true, "--condition": true,
 	"--on": true, "--utterance": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
 	"--covers": true, "--missing": true, "--in": true, "--through": true,
-	"--priority": true, "--description": true, "--acceptance": true, "--label": true, "--unlabel": true, "--text": true, "--found-in": true, "--state": true, "--assignee": true, "--sort": true, "--limit": true}
+	"--priority": true, "--description": true, "--acceptance": true, "--label": true, "--unlabel": true, "--text": true, "--found-in": true, "--state": true, "--assignee": true, "--sort": true, "--limit": true, "--attach": true}
 
 var ledgerRepeatableFlags = map[string]bool{"--clause": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
 	"--covers": true, "--missing": true, "--in": true, "--label": true, "--unlabel": true}
@@ -127,16 +127,51 @@ func (a *App) ledgerGoal(args []string) error {
 	return nil
 }
 
-func (a *App) ledgerAttach(args []string, propose bool) error {
-	w, err := parseLedgerWrite(args)
-	if err != nil {
-		return err
-	}
-	req := ledger.AttachRequest{
+func attachFields(w ledgerWriteArgs) ledger.AttachRequest {
+	return ledger.AttachRequest{
 		As: ledger.AttachAs(w.value("--as")), To: w.value("--to"), Clauses: w.values["--clause"],
 		AskType: ledger.AskType(w.value("--type")), Source: ledger.ClauseSource(w.value("--source")),
 		Adopt: w.bools["--adopt"], Reject: w.bools["--reject"], Ack: w.bools["--ack"], Delegate: w.value("--session"), Covers: w.values["--covers"],
 	}
+}
+
+func attachSegments(args []string) [][]string {
+	segments := [][]string{{}}
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; {
+		case arg == "--":
+			last := len(segments) - 1
+			segments[last] = append(segments[last], args[i:]...)
+			return segments
+		case arg == "--and":
+			segments = append(segments, []string{})
+		case ledgerWriteValueFlags[arg] && i+1 < len(args):
+			last := len(segments) - 1
+			segments[last] = append(segments[last], arg, args[i+1])
+			i++
+		default:
+			last := len(segments) - 1
+			segments[last] = append(segments[last], arg)
+		}
+	}
+	return segments
+}
+
+const attachUsage = `usage: agenthail ledger attach <utterance_id> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> [--to <goal|ask|clause|project>] [--clause "..."] [--and <utterance_id> --as ... ]...`
+
+func (a *App) ledgerAttach(args []string, propose bool) error {
+	segments := attachSegments(args)
+	if len(segments) > 1 {
+		if propose {
+			return fmt.Errorf("propose records one fragment; --and is for attach")
+		}
+		return a.ledgerAttachEach(segments)
+	}
+	w, err := parseLedgerWrite(args)
+	if err != nil {
+		return err
+	}
+	req := attachFields(w)
 	switch {
 	case propose && len(w.positional) > 1:
 		return fmt.Errorf("usage: agenthail ledger propose --to <ask|goal|project> --clause \"...\" [--as extends|new-ask|constrains]")
@@ -149,7 +184,7 @@ func (a *App) ledgerAttach(args []string, propose bool) error {
 			req.As = ledger.AsExtends
 		}
 	case len(w.positional) != 2:
-		return fmt.Errorf("usage: agenthail ledger attach <utterance_id> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> [--to <goal|ask|clause|project>] [--clause \"...\"]")
+		return fmt.Errorf("%s", attachUsage)
 	default:
 		req.UtteranceID = w.positional[1]
 	}
@@ -168,5 +203,65 @@ func (a *App) ledgerAttach(args []string, propose bool) error {
 		return emit(result)
 	}
 	fmt.Println(result.Readback)
+	return nil
+}
+
+func (a *App) ledgerAttachEach(segments [][]string) error {
+	first, err := parseLedgerWrite(segments[0])
+	if err != nil {
+		return err
+	}
+	fragments := make([]ledger.AttachRequest, len(segments))
+	for i, segment := range segments {
+		w, utterance := first, ""
+		if i == 0 {
+			if len(w.positional) != 2 {
+				return fmt.Errorf("%s", attachUsage)
+			}
+			utterance = w.positional[1]
+		} else {
+			if w, err = parseLedgerWrite(segment); err != nil {
+				return err
+			}
+			for _, flag := range []string{"--project", "--from", "--json"} {
+				if len(w.values[flag]) > 0 || w.bools[flag] {
+					return fmt.Errorf("%s applies to the whole call; give it before the first --and", flag)
+				}
+			}
+			if len(w.positional) != 1 {
+				return fmt.Errorf("each --and starts with the utterance it attaches\n%s", attachUsage)
+			}
+			utterance = w.positional[0]
+		}
+		fragments[i] = attachFields(w)
+		fragments[i].UtteranceID = utterance
+		if fragments[i].As == "" {
+			return fmt.Errorf("fragment %d (%s) needs --as", i+1, utterance)
+		}
+	}
+	ctx := context.Background()
+	key, session, err := a.ledgerWriteContext(ctx, first)
+	if err != nil {
+		return err
+	}
+	var result ledger.AttachEachResult
+	if err := a.ledgerPost(ctx, "/api/v1/ledger/attach", map[string]any{"projectKey": key, "sessionId": session, "fragments": fragments}, &result); err != nil {
+		return err
+	}
+	if first.bools["--json"] {
+		return emit(result)
+	}
+	refused := 0
+	for i, outcome := range result.Fragments {
+		if outcome.Refused != "" {
+			refused++
+			fmt.Printf("%s: refused: %s\n", fragments[i].UtteranceID, outcome.Refused)
+			continue
+		}
+		fmt.Println(outcome.Readback)
+	}
+	if refused > 0 {
+		return fmt.Errorf("%d of %d fragments were refused; the others are attached", refused, len(fragments))
+	}
 	return nil
 }

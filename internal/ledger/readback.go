@@ -3,6 +3,7 @@ package ledger
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 func ReadbackInstruction(ref, projectKey string, unattached []string) string {
@@ -21,4 +22,39 @@ Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. %s Never 
 		text += "\nStill unattached from earlier: " + strings.Join(unattached, ", ")
 	}
 	return text
+}
+
+const (
+	checkpointWordRunes  = 400
+	checkpointWordsShown = 10
+)
+
+func (a WorkAction) AttachCheckpoint() bool {
+	return a == WorkAdd || a == WorkClaim || a == WorkSubmit
+}
+
+func CheckpointInstruction(projectKey string, words []UtteranceView) string {
+	if len(words) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[intent ledger] The person's words to you in %s that are not attached yet:\n", projectKey)
+	shown := words
+	if len(shown) > checkpointWordsShown {
+		shown = shown[:checkpointWordsShown]
+	}
+	for _, u := range shown {
+		text := strings.Join(strings.Fields(u.Text), " ")
+		if utf8.RuneCountInString(text) > checkpointWordRunes {
+			text = string([]rune(text)[:checkpointWordRunes]) + "..."
+		}
+		fmt.Fprintf(&b, "  %s: %s\n", u.ID, text)
+	}
+	if more := len(words) - len(shown); more > 0 {
+		fmt.Fprintf(&b, "  and %d more; agenthail ledger --all lists them\n", more)
+	}
+	b.WriteString(`Attach them in one call, one fragment per intent, separated by --and:
+  agenthail ledger attach <utterance> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> --to <goal|ask|clause|project> --clause "<their words, broadest reading>" --and <utterance> --as ...
+Never narrow what they asked; anything you leave out is a cut they must ack.`)
+	return b.String()
 }

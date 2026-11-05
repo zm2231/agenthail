@@ -18,7 +18,7 @@ const widgetKey = "repo:github.com/example/widget"
 func ledgerOnTwoHosts(t *testing.T) (mac, owner *federationNode, record registry.PairedHost) {
 	t.Helper()
 	mac, owner, record = widgetOnTwoHosts(t)
-	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey); err != nil {
+	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	return mac, owner, record

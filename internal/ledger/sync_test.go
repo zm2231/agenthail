@@ -336,10 +336,10 @@ func TestCaptureStateFollowsTheOwnersOrderOnBothHosts(t *testing.T) {
 			if err := owner.store.Disable(project); err != nil {
 				return err
 			}
-			return mac.store.Enable(project)
+			return mac.store.Enable(project, ledger.AttachEachPrompt)
 		}, ledger.LedgerEnabled},
 		{"the mac enables, then the owner disables after the replay", func(mac, owner syncHost) error {
-			if err := mac.store.Enable(project); err != nil {
+			if err := mac.store.Enable(project, ledger.AttachEachPrompt); err != nil {
 				return err
 			}
 			syncOnce(t, project, mac, owner)

@@ -146,7 +146,7 @@ func TestAForkWithPastLeadsJoinsUpstreamAndItsLeadHistoryFollowsOnEveryHost(t *t
 	namedLead(t, server, forkProject, "server-fork-lead")
 	clearLead(t, server, forkProject)
 	namedLead(t, laptop, upstreamProject, "upstream-lead")
-	if err := ledger.NewStore(laptop.reg.WriteDB(), laptop.reg.ReadDB()).Enable(upstreamProject); err != nil {
+	if err := ledger.NewStore(laptop.reg.WriteDB(), laptop.reg.ReadDB()).Enable(upstreamProject, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the link is taken once the laptop no longer mirrors the server's cleared fork lead", 10*time.Second, func() bool {
@@ -253,7 +253,7 @@ func TestALinkRefusesToStrandAProjectsLeadAndNamesTheWayRound(t *testing.T) {
 				}
 			}
 			for _, project := range c.boards {
-				if err := ledger.NewStore(node.reg.WriteDB(), node.reg.ReadDB()).Enable(project); err != nil {
+				if err := ledger.NewStore(node.reg.WriteDB(), node.reg.ReadDB()).Enable(project, ledger.AttachEachPrompt); err != nil {
 					t.Fatal(err)
 				}
 			}

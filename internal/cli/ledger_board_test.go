@@ -44,7 +44,7 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	if out := board("--all"); !strings.Contains(out, "word a") {
 		t.Fatalf("--all leaves words out %q", out)
 	}
-	if err := ls.Enable("board-key"); err != nil {
+	if err := ls.Enable("board-key", ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
 	if out := board(); !strings.Contains(out, "capturing since") || !strings.Contains(out, "not in the ledger") || !strings.Contains(out, "G2:") || !strings.Contains(out, "unattached (7):") {
@@ -56,6 +56,22 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(board("--json")), &enabled); err != nil || enabled.Capture != "enabled" || enabled.CaptureSince == "" {
 		t.Fatalf("enabled board json %+v err %v", enabled, err)
+	}
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"enable", "--attach", "whenever"}) }); err == nil {
+		t.Fatal("an unknown attach mode was accepted")
+	}
+	board("enable", "--attach", "checkpoints")
+	if scope, err := ls.Scope("board-key"); err != nil || scope.Attach != ledger.AttachAtCheckpoints || scope.State != ledger.LedgerEnabled {
+		t.Fatalf("enable --attach checkpoints: %+v %v", scope, err)
+	}
+	if out := board(); !strings.Contains(out, "attach the person's words at checkpoints") || !strings.Contains(out, "attach your own in one call") {
+		t.Fatalf("checkpoint board %q", out)
+	}
+	var mode struct {
+		Attach ledger.AttachMode `json:"attach"`
+	}
+	if err := json.Unmarshal([]byte(board("--json")), &mode); err != nil || mode.Attach != ledger.AttachAtCheckpoints {
+		t.Fatalf("checkpoint board json %+v err %v", mode, err)
 	}
 	if err := ls.Disable("board-key"); err != nil {
 		t.Fatal(err)

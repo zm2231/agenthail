@@ -35,7 +35,9 @@ func ledgerWriteFixture(t *testing.T, respond func(path string, body map[string]
 			return
 		}
 		body["path"] = r.URL.Path
-		calls = append(calls, body)
+		if r.URL.Path != "/api/v1/ledger/checkpoint" {
+			calls = append(calls, body)
+		}
 		status, answer := respond(r.URL.Path, body)
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(answer)
