@@ -1010,7 +1010,12 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 }
 
 func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
-	raw, err := d.Registry.CatalogSessionProject(sessionID)
+	return StoredSessionProject(d.Registry, sessionID)
+}
+
+// The stored project survives a transient git failure, as the daemon's own resolution does.
+func StoredSessionProject(reg *registry.Registry, sessionID string) *CatalogProject {
+	raw, err := reg.CatalogSessionProject(sessionID)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}

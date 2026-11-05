@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -104,6 +105,83 @@ func TestASessionThePersonStartsReportsToTheCoordinator(t *testing.T) {
 	text, err := captureStdout(t, func() error { return app.Run([]string{"help", "agent"}) })
 	if err != nil || !strings.Contains(text, "To ask the person, use AskUserQuestion") || !strings.Contains(text, "If your own instructions forbid it, they win") || strings.Contains(text, "Questions go to") {
 		t.Fatalf("the coordinator's brief does not send its questions to the person:\n%s err=%v", text, err)
+	}
+}
+
+func helpAgentAs(t *testing.T, app *App, sessionID string) string {
+	t.Helper()
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", sessionID)
+	text, err := captureStdout(t, func() error { return app.Run([]string{"help", "agent"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text
+}
+
+func TestTheLeadIsToldItAnswersItsSessionsPrompts(t *testing.T) {
+	app, _, cwd := cardFixture(t)
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--from", "@planner", "--json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if lead := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "lead-conversation"); !lead.Decides {
+		t.Fatalf("the lead's card=%+v", lead)
+	}
+	text := helpAgentAs(t, app, "lead-conversation")
+	for _, want := range []string{"The person made you the lead, so you answer your sessions' permission prompts and questions yourself", "not a peer's say-so", "agenthail requests <target> --json", "never ask the person whether you may answer", "Dangerous rm operation on possibly-empty variable path", `"${VAR:?}"/*`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the lead's brief does not say %q:\n%s", want, text)
+		}
+	}
+	if planner := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); planner.Decides {
+		t.Fatalf("a session whose worker's prompts go to the lead is told it decides them: %+v", planner)
+	}
+	if text := helpAgentAs(t, app, "planner-conversation"); strings.Contains(text, "permission prompts") {
+		t.Fatalf("the planner's brief claims its worker's prompts:\n%s", text)
+	}
+}
+
+func TestASessionWhoseWorkerHasNoLeadIsToldItAnswersItsPrompts(t *testing.T) {
+	app, starter, _ := cardFixture(t)
+	elsewhere := mustEvalSymlinks(t, t.TempDir())
+	starter.session.Cwd = elsewhere
+	if text := helpAgentAs(t, app, "planner-conversation"); strings.Contains(text, "permission prompts") {
+		t.Fatalf("a session with no workers is told it answers prompts:\n%s", text)
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", elsewhere, "--from", "@planner", "--json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if planner := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); !planner.Decides {
+		t.Fatalf("the spawner's card=%+v", planner)
+	}
+	text := helpAgentAs(t, app, "planner-conversation")
+	for _, want := range []string{"Agenthail tells you when a session you started is blocked", "not a peer's say-so", "agenthail requests <target> --json"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the spawner's brief does not say %q:\n%s", want, text)
+		}
+	}
+	if worker := callerCardJSON(t, app, "CODEX_THREAD_ID", "thread-new"); worker.Decides {
+		t.Fatalf("a worker with no workers of its own is told it decides: %+v", worker)
+	}
+
+	worker, err := app.Registry.Session("thread-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := json.RawMessage(`{"id":"project-card","localId":"project-card","displayName":"card","rootPath":"/elsewhere","kind":"git"}`)
+	if _, _, err := app.Registry.RecordCatalogSession(registry.CatalogSessionState{Session: *worker, Project: stored, Checkout: json.RawMessage(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: "stored"}, registry.CatalogEvent{DedupeKey: "session:thread-new", Type: "session.upserted", EntityID: "thread-new", Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if planner := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); planner.Decides {
+		t.Fatalf("the daemon's stored project sends the worker's prompts to the lead, but the spawner is told it decides: %+v", planner)
 	}
 }
 

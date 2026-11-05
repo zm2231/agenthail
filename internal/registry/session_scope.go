@@ -23,6 +23,10 @@ func (r *Registry) SessionDescendants(sessionID string) ([]string, error) {
 		SELECT s.id FROM spawned JOIN sessions s ON s.id=spawned.id WHERE `+liveLocalSession, sessionID)
 }
 
+func (r *Registry) SessionChildren(sessionID string) ([]string, error) {
+	return queryRows(r.read, nil, scanString, `SELECT s.id FROM session_origins o JOIN sessions s ON s.id=o.session_id WHERE o.creator_session_id=? AND `+liveLocalSession+` ORDER BY s.rowid`, sessionID)
+}
+
 func (r *Registry) RunningChildren(creatorID string) (int, error) {
 	var running int
 	err := r.read.QueryRow(`SELECT COUNT(*) FROM session_origins o JOIN sessions s ON s.id=o.session_id WHERE o.creator_session_id=? AND (s.status='busy' OR (s.status<>'offline' AND EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.state='running'))) AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.stalled=1) AND `+liveLocalSession, creatorID).Scan(&running)
