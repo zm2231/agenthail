@@ -37,7 +37,7 @@ final class ScopePagesTests: XCTestCase {
         ScopeServer.state.set("one", current: [ScopeServer.row("live", name: "fresh")], scopes: ["all": [[ScopeServer.row("live", name: "stale"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         ScopeServer.state.set("two", current: [], scopes: ["all": [[ScopeServer.row("c")]]])
         let model = try await connect(["one", "two"])
-        XCTAssertEqual(listed(.all), ["one::live"])
+        XCTAssertEqual(listed(.all), [], "All lists only what the daemons' All pages list")
         XCTAssertTrue(model.canListMore(.all))
 
         await model.listMore(.all)
@@ -92,7 +92,7 @@ final class ScopePagesTests: XCTestCase {
     }
 
     func testASessionThatLeavesCurrentStaysInAll() async throws {
-        ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("other"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
         await model.listMore(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::other", "one::a"])
