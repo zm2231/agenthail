@@ -1,0 +1,28 @@
+name: Full CI label
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  rerun:
+    if: ${{ github.event.label.name == 'full-ci' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: CI
+        run: scripts/ci-full-label.sh ci.yml gate native installer package
+      - name: iOS
+        env:
+          RAN: ios-release
+        run: scripts/ci-full-label.sh ios.yml changes ios

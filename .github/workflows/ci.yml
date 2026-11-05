@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -12,6 +12,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      full: ${{ steps.full.outputs.full }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: full
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/ci-full-gate.sh
+
   verify:
     if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
@@ -98,7 +116,9 @@ jobs:
           scripts/test-check-public-copy.sh
           scripts/check-public-copy.sh
       - name: Runner hook tests
-        run: scripts/test-ci-runner-job-started.sh
+        run: |
+          scripts/test-ci-runner-job-started.sh
+          scripts/test-ci-full-label.sh
       - name: Push relay tests
         working-directory: push-relay
         run: |
@@ -128,7 +148,8 @@ jobs:
         run: scripts/ci-self-hosted.sh cleanup
 
   native:
-    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+    needs: gate
+    if: ${{ needs.gate.outputs.full == 'true' }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
@@ -211,7 +232,8 @@ jobs:
           (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
 
   installer:
-    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+    needs: gate
+    if: ${{ needs.gate.outputs.full == 'true' }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 30
     steps:
@@ -237,7 +259,8 @@ jobs:
           scripts/test-install-upgrade.sh
 
   package:
-    if: ${{ (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) && (startsWith(github.head_ref, 'train/') || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+    needs: gate
+    if: ${{ needs.gate.outputs.full == 'true' }}
     runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 45
     steps:

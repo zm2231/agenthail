@@ -2,7 +2,15 @@
 
 Pull requests from branches in this repository run `verify`, `native` and `ios` on self-hosted Mac runners labelled `agenthail`, and `package` and `installer` in disposable macOS virtual machines labelled `agenthail-vm`. Pull requests from forks run all of these jobs on GitHub-hosted runners. `ios-release` always runs on a GitHub-hosted runner: for a branch in this repository it signs, archives and exports the iPhone app and its notification service with the release credentials, without uploading, and that makes a temporary signing keychain the runner's default.
 
-On an ordinary pull request `changes`, `verify` and `verify-linux` run, and `ios-release` runs when iOS inputs change. `native`, `installer`, `package` and `ios` run only on merge-train pull requests (head branch `train/...`) or on a pull request labelled `full-ci`; `ios` still needs changed iOS inputs. Adding the label starts a new run with those jobs. Adding any label starts a new run that replaces the one in progress, so add labels before a long run starts. Otherwise those jobs are skipped, and a skipped required check counts as passed, so on a worker pull request they prove nothing. The merge train is the gate: merge worker pull requests only through a train, never directly.
+On an ordinary pull request `changes`, `verify` and `verify-linux` run, and `ios-release` runs when iOS inputs change. `native`, `installer`, `package` and `ios` run only on merge-train pull requests (head branch `train/...`) or on a pull request labelled `full-ci`; `ios` still needs changed iOS inputs. Otherwise those jobs are skipped, and a skipped required check counts as passed, so on a worker pull request they prove nothing. The merge train is the gate: merge worker pull requests only through a train, never directly.
+
+Labels don't start runs. CI and iOS run when a pull request is opened, reopened or pushed to. Their `gate` and `changes` jobs read the pull request's labels through the API when they run, rather than from the event. `gh pr create --label` opens the pull request before it adds the labels, so the labels the event carries would be missing. Adding `full-ci` later runs `Full CI label` (`scripts/ci-full-label.sh`):
+
+- If the latest run's gate is still deciding, it picks the label up by itself.
+- If the gate already skipped the full jobs, the run is rerun, cancelled first if it is still going.
+- If the run already has the full jobs, it is left alone. So is a cancelled run, such as one a merge train cancelled, and an iOS run with no iOS changes.
+
+Any other label changes nothing. Adding `full-ci` to a pull request from a fork reruns nothing, because its token cannot rerun workflows; rerun CI by hand after adding the label. `scripts/test-ci-full-label.sh` checks these decisions against a stub `gh`.
 
 ## Fork protection
 
