@@ -31,7 +31,7 @@ struct ProjectScreen: View {
     var body: some View {
         Group {
             if let project {
-                content(project, ProjectContents.build(project, sessions: model.snapshot?.sessions ?? []))
+                content(project, ProjectContents.build(project, sessions: model.inDaemonOrder(model.snapshot?.sessions ?? [])))
             } else {
                 ContentUnavailableView("Project not found", systemImage: "folder", description: Text("It may have been removed or its computer is not paired."))
             }

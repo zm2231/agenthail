@@ -8,8 +8,8 @@ struct ScopeTarget {
 @MainActor
 enum SessionScopes {
     static func targets(_ filter: SessionFilter, on hosts: [HostConnection]) -> [ScopeTarget] {
-        guard let scope = filter.pagedScope else { return [] }
-        return hosts.map { ScopeTarget(host: $0, request: ScopeRequest(scope: scope)) }
+        guard filter != .recent else { return [] }
+        return hosts.map { ScopeTarget(host: $0, request: ScopeRequest(scope: filter.viewScope)) }
     }
 
     static func readMore(_ targets: [ScopeTarget]) async {
@@ -25,10 +25,9 @@ enum SessionScopes {
     }
 
     static func search(_ query: String, filter: SessionFilter, on hosts: [HostConnection]) async {
-        let scope = filter.pagedScope
         await withTaskGroup(of: Void.self) { group in
             for host in hosts {
-                group.addTask { await host.search(scope == nil ? "" : query, scope: scope ?? "all") }
+                group.addTask { await host.search(query, scope: filter.viewScope) }
             }
         }
     }

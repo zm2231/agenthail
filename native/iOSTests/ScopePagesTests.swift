@@ -33,11 +33,26 @@ final class ScopePagesTests: XCTestCase {
         try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"\#(type)","data":\#(data)}"#.utf8))
     }
 
+    func testThePreviewRunningScopeListsWhatTheDaemonCallsWorking() throws {
+        let rows: [[String: Any]] = [
+            ["id": "busy", "status": "busy"],
+            ["id": "background", "status": "idle", "backgroundTasks": ["running": true, "source": "claude"]],
+            ["id": "subagents", "status": "idle", "observedSubagents": ["count": 2, "working": 1]],
+            ["id": "queued", "status": "idle", "queueCount": 1],
+            ["id": "waiting", "status": "idle", "waitingOn": ["kind": "question", "id": "q"]],
+        ]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: ["sessions": rows]), as: UTF8.self)
+        let running = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PreviewOrder.scoped(json, "running").utf8)) as? [String: Any])
+        XCTAssertEqual((running["sessions"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["busy", "background", "subagents"])
+        let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(PreviewOrder.scoped(json, "all").utf8)) as? [String: Any])
+        XCTAssertEqual((all["sessions"] as? [[String: Any]])?.count, rows.count)
+    }
+
     func testAllIsReadPageByPageFromEveryComputer() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live", name: "fresh")], scopes: ["all": [[ScopeServer.row("live", name: "stale"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         ScopeServer.state.set("two", current: [], scopes: ["all": [[ScopeServer.row("c")]]])
         let model = try await connect(["one", "two"])
-        XCTAssertEqual(listed(.all), ["one::live"])
+        XCTAssertEqual(listed(.all), [], "All lists only what the daemons' All pages list")
         XCTAssertTrue(model.canListMore(.all))
 
         await model.listMore(.all)
@@ -92,7 +107,7 @@ final class ScopePagesTests: XCTestCase {
     }
 
     func testASessionThatLeavesCurrentStaysInAll() async throws {
-        ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("a")], [ScopeServer.row("b")]]])
+        ScopeServer.state.set("one", current: [ScopeServer.row("live"), ScopeServer.row("other")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("other"), ScopeServer.row("a")], [ScopeServer.row("b")]]])
         let model = try await connect(["one"])
         await model.listMore(.all)
         XCTAssertEqual(listed(.all), ["one::live", "one::other", "one::a"])
@@ -240,10 +255,10 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             base["catalogSeq"] = 1
             respond(200, Self.json(base))
         case "/api/v1/snapshot" where query["scope"] == "current":
-            respond(200, Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1]))
+            respond(200, PreviewOrder.withView(Self.json(["sessions": host.current.map { var row = $0; row["current"] = true; return row }, "hostEpoch": host.epoch, "catalogSeq": 1])))
         case "/api/v1/snapshot" where query["q"] != nil:
             let search = host.searches[query["q"]!] ?? ([], .zero)
-            let body = Self.json(["sessions": search.rows])
+            let body = PreviewOrder.withView(Self.json(["sessions": search.rows]))
             let delay = search.delay.components
             let seconds = Double(delay.seconds) + Double(delay.attoseconds) / 1e18
             if seconds == 0 { return respond(200, body) }
@@ -255,8 +270,8 @@ final class ScopeServer: URLProtocol, @unchecked Sendable {
             let project = query["projectId"]
             var page: [String: Any] = ["sessions": rows.filter { project == nil || ($0["project"] as? [String: Any])?["id"] as? String == project }]
             if index + 1 < pages.count { page["nextCursor"] = String(index + 1) }
-            if host.pageDelay == 0 { return respond(200, Self.json(page)) }
-            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, Self.json(page)) }
+            if host.pageDelay == 0 { return respond(200, PreviewOrder.withView(Self.json(page))) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + host.pageDelay) { self.respond(200, PreviewOrder.withView(Self.json(page))) }
         default:
             respond(200, "{}")
         }

@@ -506,7 +506,7 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 	q := newClaudeQuestion(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var first sync.Once
-	_, stop := runDaemonWith(t, q.store, func(d *Daemon) {
+	running, stop := runDaemonWith(t, q.store, func(d *Daemon) {
 		d.notifyDesktop = func(_, _, _, _, _ string, _ []surface.RequestAction) error {
 			first.Do(func() {
 				close(entered)
@@ -524,6 +524,15 @@ func TestTheDaemonStopsOnlyAfterAnAnnouncementInFlightFinishes(t *testing.T) {
 		defer close(stopped)
 		stop()
 	}()
+	// The stop reaches background work once the daemon's loop sees it, which
+	// can wait out a scan in progress; release the notification only after
+	// that, so the announcement is the one the stop cut short.
+	select {
+	case <-running.daemon.background.ctx.Done():
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("the stop never reached the announcement in flight")
+	}
 	select {
 	case <-stopped:
 		close(release)

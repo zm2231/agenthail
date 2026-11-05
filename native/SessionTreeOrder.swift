@@ -1,0 +1,51 @@
+import Foundation
+
+extension SessionTree {
+    static func ordered(list listed: ScopePage.View?, current: ScopePage.View?, rows: [String: SessionState], attention: [String: SessionAttention]) -> SessionTree {
+        var projects: [Project] = []
+        for viewProject in listed?.projects ?? [] {
+            let families = (listed?.families ?? []).filter { $0.projectId == viewProject.id }.compactMap { family(from: $0, rows: rows) }
+            guard let first = families.first else { continue }
+            var project = Project(id: viewProject.id, name: viewProject.name, identity: first.root.project, checkouts: [])
+            project.collapsed = Set(viewProject.collapsedFamilyIds)
+            project.counts = viewProject.counts
+            project.pinned = Set((listed?.families ?? []).filter { $0.projectId == viewProject.id && $0.pinned }.map(\.id))
+            for family in families {
+                let checkoutID = checkoutID(of: family.root, view: listed?.families.first { $0.id == family.id })
+                if let index = project.checkouts.firstIndex(where: { $0.id == checkoutID }) {
+                    project.checkouts[index].families.append(family)
+                } else {
+                    let root = family.root
+                    project.checkouts.append(Checkout(id: checkoutID, host: root.remoteHostName == nil ? nil : root.host, label: checkoutLabel(root), branchLabel: branchLabel(root), isMain: root.checkout?.isMain ?? true, dirty: root.checkout?.dirty ?? false, families: [family]))
+                }
+            }
+            projects.append(project)
+        }
+        var counts: [SessionFilter: Int] = [:]
+        for filter in SessionFilter.allCases {
+            counts[filter] = (current ?? listed)?.counts[filter.viewScope]?.families
+        }
+        return SessionTree(projects: projects, needsYou: needsYou(in: current ?? listed, rows: rows, attention: attention), attention: attention, counts: counts)
+    }
+
+    static func family(from view: ViewFamily, rows: [String: SessionState]) -> SessionFamily? {
+        guard let root = rows[view.rootId] else { return nil }
+        let members = view.members.filter { $0.id != view.rootId }.compactMap { member in
+            rows[member.id].map { SessionFamily.Member(session: $0, depth: member.depth) }
+        }
+        return SessionFamily(root: root, members: members, workingSubagents: view.workingSubagents)
+    }
+
+    static func needsYou(in view: ScopePage.View?, rows: [String: SessionState], attention: [String: SessionAttention]) -> [SessionState] {
+        var seen: Set<String> = []
+        return (view?.families ?? []).flatMap(\.members).compactMap { member in
+            guard let kind = attention[member.id]?.kind, kind != .replacedRequest, seen.insert(member.id).inserted else { return nil }
+            return rows[member.id]
+        }
+    }
+
+    private static func checkoutID(of root: SessionState, view: ViewFamily?) -> String {
+        if let id = view?.checkoutId, !id.isEmpty { return id }
+        return (root.checkout?.path ?? root.cwd ?? root.project?.id ?? noProjectID) + (root.remoteHostID.map { "@" + $0 } ?? "")
+    }
+}

@@ -334,7 +334,7 @@ final class HostDropProtocol: URLProtocol, @unchecked Sendable {
         let body: String
         switch path {
         case "/api/v1/version": body = #"{"protocol":2,"minimumProtocol":1,"maximumProtocol":2}"#
-        case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
+        case "/api/v1/snapshot": body = PreviewOrder.withView(SessionPreview.snapshotJSON)
         case "/api/v1/session": body = SessionPreview.detailJSON
         default: body = "{}"
         }

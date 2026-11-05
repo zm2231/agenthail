@@ -55,6 +55,11 @@ targets:
       - path: SessionDisplayKind.swift
       - path: SessionDetailState.swift
       - path: SnapshotParts.swift
+      - path: ViewOrder.swift
+      - path: SessionTreeOrder.swift
+      - path: SessionAttention.swift
+      - path: OrderHold.swift
+      - path: CatalogNews.swift
       - path: LeadReplacement.swift
       - path: SessionRowTime.swift
       - path: HostNames.swift

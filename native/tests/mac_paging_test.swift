@@ -8,14 +8,21 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var slowPages: Set<String> = []
     nonisolated(unsafe) static var firstAll = ["live", "older"]
     nonisolated(unsafe) static var servedFirstAll = 0
+    nonisolated(unsafe) static var baseEpochs: [String] = []
     static let lock = NSLock()
 
     static func row(_ id: String, status: String = "idle", current: Bool = false, name: String? = nil) -> String {
         #"{"id":"\#(id)","surface":"claude","name":"\#(name ?? id)","status":"\#(status)","lastActive":"2026-11-03T11:00:00Z","queueCount":0,"open":true,"current":\#(current),"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}"#
     }
 
+    static func order(_ ids: [String]) -> String {
+        let families = ids.map { #"{"id":"\#($0)","rootId":"\#($0)","projectId":"","checkoutId":"","members":[{"id":"\#($0)","depth":0,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0}"# }
+        let collapsed = ids.map { #""\#($0)""# }.joined(separator: ",")
+        return #""projects":[{"id":"","name":"No project","counts":{"families":\#(ids.count),"sessions":\#(ids.count)},"collapsedFamilyIds":[\#(collapsed)]}],"families":[\#(families.joined(separator: ","))]"#
+    }
+
     static func page(_ ids: [String], next: String?, current: Bool = false, refreshAt: String? = nil) -> String {
-        let view = #"{"counts":{"running":{"families":1,"sessions":1},"current":{"families":2,"sessions":2},"recent":{"families":3,"sessions":3},"all":{"families":5,"sessions":5},"archived":{"families":1,"sessions":1}},"surfaces":[{"surface":"claude","counts":{}},{"surface":"codex","counts":{}}]\#(refreshAt.map { #","refreshAt":"\#($0)""# } ?? "")}"#
+        let view = #"{"counts":{"running":{"families":1,"sessions":1},"current":{"families":2,"sessions":2},"recent":{"families":3,"sessions":3},"all":{"families":5,"sessions":5},"archived":{"families":1,"sessions":1}},"surfaces":[{"surface":"claude","counts":{}},{"surface":"codex","counts":{}}],\#(order(ids))\#(refreshAt.map { #","refreshAt":"\#($0)""# } ?? "")}"#
         return #"{"sessions":[\#(ids.map { row($0, current: current) }.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)\#(next.map { #","nextCursor":"\#($0)""# } ?? "")}"#
     }
 
@@ -31,14 +38,17 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         switch (url.path, query["scope"], query["cursor"], query["q"]) {
         case ("/api/v1/projects/activity", _, _, _): body = #"{"projects":[]}"#
         case ("/api/v1/history", _, _, _): body = #"{"items":[],"hasMore":false,"nextBefore":0,"kinds":[]}"#
-        case ("/api/v1/snapshot", nil, _, _): body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(Self.epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
+        case ("/api/v1/snapshot", nil, _, _):
+            let epoch = Self.lock.withLock { Self.baseEpochs.isEmpty ? Self.epoch : Self.baseEpochs.removeFirst() }
+            body = #"{"updatedAt":"2026-11-03T12:00:00Z","hostEpoch":"\#(epoch)","catalogSeq":5,"daemon":{"running":true,"pid":1,"stale":false},"surfaces":[],"queue":[],"channels":[],"relays":[],"attention":[],"codexRecentHours":5}"#
         case ("/api/v1/snapshot", "current", _, _): body = Self.page(["live", "lead"], next: nil, current: true)
-        case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : [], next: nil)
+        case ("/api/v1/snapshot", "all", _, let q?) where !q.isEmpty: body = Self.page(q == "zet" || q == "gps" ? ["zeta"] : q == "ze" ? ["live", "zeta"] : [], next: nil)
         case ("/api/v1/snapshot", "all", nil, _): body = Self.page(Self.firstAll, next: "p2", refreshAt: query["status"] == nil ? nil : "2026-11-03T12:00:00Z")
         case ("/api/v1/snapshot", "all", "p2", _): body = Self.page(["oldest", "zeta"], next: nil)
         case ("/api/v1/snapshot", "archived", _, _): body = Self.page(Self.archived, next: nil)
         default: body = "{}"
         }
+        if query["q"] == "slow" { Thread.sleep(forTimeInterval: 0.3) }
         let plainAll = query["scope"] == "all" && query["q"] == nil && query["status"] == nil
         if plainAll && Self.slowPages.contains(query["cursor"] ?? "first") { Thread.sleep(forTimeInterval: 0.3) }
         finish(url, body)
@@ -107,6 +117,16 @@ struct MacPagingTest {
         model.findSessions("gps")
         check(await settle { model.pages.found.map(\.id) == ["zeta"] }, "the palette's query goes to the daemon")
         check(model.paletteSessions("gps").map(\.id) == ["zeta"], "a daemon match the title does not show stays in the palette")
+        model.findSessions("ze")
+        check(await settle { model.pages.found.map(\.id) == ["live", "zeta"] }, "a search lists the daemon's rows")
+        check(model.paletteSessions("ze").map(\.id) == ["live", "zeta"], "the palette keeps the daemon's order, title matches included: \(model.paletteSessions("ze").map(\.id))")
+        let abandoned = Task { await model.reader.search("slow", in: ScopeRequest(scope: "all")) }
+        try? await Task.sleep(for: .milliseconds(50))
+        abandoned.cancel()
+        await abandoned.value
+        check(model.pages.found.isEmpty && model.reader.foundView == nil && !model.reader.searchPending("slow"), "a cancelled search leaves no earlier query's rows: \(model.pages.found.map(\.id))")
+        model.findSessions("zet")
+        check(await settle { model.pages.found.map(\.id) == ["zeta"] }, "a search after a cancelled one lands")
         model.mainPane.select("zeta")
         model.findSessions("")
         check(await settle { model.pages.found.isEmpty }, "clearing the search drops what it found")
@@ -160,6 +180,10 @@ struct MacPagingTest {
         PagingDaemon.epoch = "e2"
         _ = await model.refresh()
         check(await settle { published.last!.contains { $0.id == "boxed" } }, "a new epoch walks again")
+        PagingDaemon.lock.withLock { PagingDaemon.baseEpochs = ["e2"] }
+        PagingDaemon.epoch = "e3"
+        check(await model.refresh(), "a refresh that spans a restart reads both parts again")
+        check(model.catalogPosition.epoch == "e3" && model.currentViewPosition.epoch == "e3" && model.currentView != nil, "the restarted daemon's Current view is installed: \(model.catalogPosition.epoch ?? "none") \(model.currentViewPosition.epoch ?? "none")")
         model.stopIndexingSpotlight()
         print("ok   mac_paging_test")
     }

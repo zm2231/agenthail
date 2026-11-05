@@ -4,11 +4,14 @@ import Foundation
 @main
 struct ClaudeSubagentListTest {
     static func main() async {
-        let links = (0..<12).map { index in
+        let daemonOrder = [10, 11] + Array(0..<10)
+        let links = daemonOrder.map { index in
             link("agent-\(index)", working: index >= 10, minutesAgo: index, description: index == 0 ? "Review the parser" : nil, type: index == 1 ? "Explore" : nil)
         }
         let paged = ClaudeSubagentList(links, total: 30, expanded: false)
-        check(paged.shown.map(\.agentId) == ["agent-10", "agent-11"] + (0..<8).map { "agent-\($0)" }, "working subagents come first, then the most recent: \(paged.shown.map(\.agentId))")
+        check(paged.shown.map(\.agentId) == ["agent-10", "agent-11"] + (0..<8).map { "agent-\($0)" }, "the list keeps the daemon's order: \(paged.shown.map(\.agentId))")
+        let reversed = ClaudeSubagentList(Array(links.reversed()), total: nil, expanded: true)
+        check(reversed.shown.map(\.agentId) == links.reversed().map(\.agentId), "the client never reorders what the daemon sent")
         check(paged.working == 2 && paged.total == 30 && paged.earlier == 20, "the server total counts what is not shown: \(paged.earlier)")
         check(paged.summary == "2 working, 30 subagents in all" && paged.earlierLabel == "Show 20 earlier", "summary: \(paged.summary)")
 
@@ -18,9 +21,10 @@ struct ClaudeSubagentListTest {
         check(expanded.shown.count == 12 && expanded.earlier == 0, "an expanded list shows every subagent")
         check(ClaudeSubagentList([], total: 0, expanded: false).summary == "0 subagents in all", "an empty list reads as none")
 
-        check(links[0].title == "Review the parser" && links[0].kindLabel == nil, "the description is the title")
-        check(links[1].title == "Explore" && links[1].kindLabel == nil, "without a description the type is the title")
-        check(links[2].title == "Subagent agent-2", "without either the title is the short ID: \(links[2].title)")
+        let byID = Dictionary(uniqueKeysWithValues: links.map { ($0.agentId, $0) })
+        check(byID["agent-0"]?.title == "Review the parser" && byID["agent-0"]?.kindLabel == nil, "the description is the title")
+        check(byID["agent-1"]?.title == "Explore" && byID["agent-1"]?.kindLabel == nil, "without a description the type is the title")
+        check(byID["agent-2"]?.title == "Subagent agent-2", "without either the title is the short ID")
         let described = link("x", working: false, minutesAgo: 0, description: "Fix it", type: "general-purpose")
         check(described.kindLabel == "general-purpose", "a described subagent shows its type beside the title")
 
