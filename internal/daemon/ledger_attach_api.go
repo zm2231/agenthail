@@ -133,6 +133,19 @@ func (d *Daemon) apiLedgerWorkHandler(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, http.StatusOK, result)
 }
 
+func (d *Daemon) apiLedgerImportHandler(w http.ResponseWriter, r *http.Request) {
+	var req ledger.WorkImportRequest
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
+		return
+	}
+	result, err := d.ledgerStore().ImportWork(req, time.Now())
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, result)
+}
+
 func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) {
 	var req ledger.AttachRequest
 	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {

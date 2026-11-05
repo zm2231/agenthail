@@ -61,14 +61,15 @@ type WorkItem struct {
 	ClauseID string `json:"clauseId,omitempty"`
 	Text     string `json:"text"`
 	WorkFields
-	State     WorkState   `json:"state"`
-	Assignee  string      `json:"assignee,omitempty"`
-	CreatedBy string      `json:"createdBy"`
-	Reason    string      `json:"reason,omitempty"`
-	Reviewer  string      `json:"reviewer,omitempty"`
-	DependsOn []string    `json:"dependsOn,omitempty"`
-	Handoff   *Handoff    `json:"handoff,omitempty"`
-	Timeline  []WorkEntry `json:"timeline,omitempty"`
+	ImportedFrom string      `json:"importedFrom,omitempty"`
+	State        WorkState   `json:"state"`
+	Assignee     string      `json:"assignee,omitempty"`
+	CreatedBy    string      `json:"createdBy"`
+	Reason       string      `json:"reason,omitempty"`
+	Reviewer     string      `json:"reviewer,omitempty"`
+	DependsOn    []string    `json:"dependsOn,omitempty"`
+	Handoff      *Handoff    `json:"handoff,omitempty"`
+	Timeline     []WorkEntry `json:"timeline,omitempty"`
 }
 
 type WorkRequest struct {
@@ -134,6 +135,12 @@ func (b *Board) applyWorkItem(event Event) error {
 	}
 	item := &WorkItem{ID: p.ItemID, ClauseID: p.ClauseID, Text: p.Text, WorkFields: p.WorkFields.withDefaults(), State: WorkOpen, CreatedBy: p.CreatedBy,
 		Timeline: []WorkEntry{{At: event.CreatedAt, Actor: p.CreatedBy, Kind: "created", Text: p.Text, State: WorkOpen}}}
+	if h := p.History; h != nil {
+		item.ImportedFrom, item.State, item.Reason, item.Reviewer, item.Handoff = p.ImportedFrom, h.State, h.Reason, h.Reviewer, h.Handoff
+		item.Timeline[0].At = h.CreatedAt
+		item.Timeline = append(append(item.Timeline, h.Timeline...),
+			WorkEntry{At: event.CreatedAt, Actor: event.ActorSessionID, Kind: "imported", Text: "from " + p.ImportedFrom, State: h.State})
+	}
 	b.workItems[p.ItemID] = item
 	if c := b.clauses[p.ClauseID]; c != nil && p.ClauseID != "" {
 		c.WorkItems = append(c.WorkItems, item)

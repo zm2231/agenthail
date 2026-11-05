@@ -48,6 +48,8 @@ func (a *App) cmdLedger(args []string) error {
 		return a.ledgerWork(store, args)
 	case "add", "create":
 		return a.ledgerWork(store, workAddArgs(args, positional[0]))
+	case "import":
+		return a.ledgerImport(args)
 	case "owner":
 		return a.ledgerOwner(store, args)
 	case "digest":
