@@ -38,7 +38,7 @@ struct QueueTailRows: View {
                     Text("It may already have reached the agent. Check the session first.")
                 }
                 .sheet(isPresented: Binding(get: { reading?.id == row.id }, set: { if !$0 { reading = nil } })) {
-                    TranscriptDocument(title: "Queued message", text: PeerEnvelope(row.item.message).body, markdown: false)
+                    QueuedMessageSheet(item: row.item)
                 }
         }
     }

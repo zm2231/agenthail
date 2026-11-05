@@ -409,8 +409,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return page.items
     }
 
-    func inbox(sessionID: String? = nil, host: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> InboxMessagePage {
-        try await request(try Self.listPath("/api/v1/inbox", ["sessionId": sessionID, "host": host, "before": before.map(String.init)]), method: "GET", body: nil, timeout: timeout)
+    func inbox(host: String? = nil, before: Int64? = nil, timeout: TimeInterval = 25) async throws -> InboxMessagePage {
+        try await request(try Self.listPath("/api/v1/inbox", ["host": host, "before": before.map(String.init)]), method: "GET", body: nil, timeout: timeout)
     }
 
     private static func listPath(_ path: String, _ values: [String: String?]) throws -> String {

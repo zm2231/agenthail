@@ -64,9 +64,6 @@ struct SessionEditingControls: View {
 
 struct QueueListView: View {
     @ObservedObject var model: AgenthailIOSModel
-    var sessionID: String? = nil
-    var onOpenSession: ((String) -> Void)? = nil
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var page = InboxPage()
@@ -82,7 +79,7 @@ struct QueueListView: View {
     private var history: [InboxMessage] { page.history }
     private var pollsHistory: Bool { showHistory && scenePhase == .active }
     private var activeInSnapshot: [String] {
-        (model.snapshot?.queue ?? []).filter { sessionID == nil || $0.sessionId == sessionID }.map { "\($0.id):\($0.status)" }
+        (model.snapshot?.queue ?? []).map { "\($0.id):\($0.status)" }
     }
 
     var body: some View {
@@ -104,17 +101,16 @@ struct QueueListView: View {
                         .foregroundStyle(PhonePalette.muted).font(.footnote)
                         .accessibilityIdentifier("inbox-outdated-\(name)")
                 }
-                if sessionID == nil, !model.leadReplacements.isEmpty {
+                if !model.leadReplacements.isEmpty {
                     Section("Lead replaced") {
                         ForEach(model.leadReplacements, id: \.listID) { replacement in
                             leadReplacementRow(replacement)
                         }
                     }
                 }
-                let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
-                if !problems.isEmpty {
+                if !model.deliveryProblems.isEmpty {
                     Section("Delivery problems") {
-                        ForEach(problems) { problem in
+                        ForEach(model.deliveryProblems) { problem in
                             deliveryProblemRow(problem)
                         }
                     }
@@ -138,7 +134,7 @@ struct QueueListView: View {
                     }
                 } else {
                     if history.isEmpty && !loading && !page.hasOlder {
-                        ContentUnavailableView("No delivery history", systemImage: "clock", description: Text(sessionID == nil ? "Messages sent to your sessions appear here." : "Messages sent to this session appear here."))
+                        ContentUnavailableView("No delivery history", systemImage: "clock", description: Text("Messages sent to your sessions appear here."))
                             .listRowSeparator(.hidden)
                     }
                     ForEach(history, id: \.listID) { message in
@@ -166,7 +162,7 @@ struct QueueListView: View {
         }
         .listStyle(.insetGrouped)
         .phoneBackdrop(.pane)
-        .navigationTitle(sessionID == nil ? "Inbox" : "Session inbox")
+        .navigationTitle("Inbox")
         .task { await reload() }
         .refreshable { _ = await model.refresh(fresh: true); await reload() }
         .onChange(of: activeInSnapshot) { _, _ in Task { await reload() } }
@@ -196,7 +192,7 @@ struct QueueListView: View {
     }
 
     private func open(_ id: String) {
-        if let onOpenSession { onOpenSession(id) } else { dismiss(); model.openSession(id) }
+        model.openSession(id)
     }
 
     private func sendAgain(_ message: InboxMessage) {
@@ -351,7 +347,7 @@ struct QueueListView: View {
     private func reload() async {
         let requestID = UUID(); reloadID = requestID
         do {
-            let first = try await model.inboxPage(sessionID: sessionID) { partial in
+            let first = try await model.inboxPage { partial in
                 guard reloadID == requestID, !settled else { return }
                 page = page.refreshed(with: partial); loading = false
             }
@@ -369,7 +365,7 @@ struct QueueListView: View {
         loadingOlder = true
         defer { loadingOlder = false }
         do {
-            let older = try await model.inboxPage(sessionID: sessionID, before: page.cursors)
+            let older = try await model.inboxPage(before: page.cursors)
             page = page.appending(older); error = nil
         } catch {
             self.error = error.localizedDescription

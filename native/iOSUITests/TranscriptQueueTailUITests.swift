@@ -179,6 +179,29 @@ final class TranscriptQueueTailUITests: XCTestCase {
         app.buttons["queue-tail-read-21"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["Queued message"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["This is the failing screen, match the spacing."].exists)
+        record(app, "queued-message-sheet")
+        XCTAssertEqual(app.staticTexts["queued-message-hold"].label, "Held: this agent is working")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Attempts'")).firstMatch.exists)
+    }
+
+    func testTheReceiptGoesToTheQueuedRow() {
+        let app = launch("many", extra: ["--preview-delivery"])
+        let timeline = app.scrollViews["session-timeline"]
+        timeline.swipeDown(velocity: .slow)
+        XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2))
+        let receipt = app.buttons["latest-instruction"]
+        XCTAssertTrue(receipt.exists)
+        receipt.tapWhenReady()
+        XCTAssertTrue(row(25, app).waitForExistence(timeout: 5))
+        settle()
+        assertNotCovered(row(25, app), app, "after the receipt")
+        XCTAssertFalse(app.buttons["Jump to latest"].exists)
+    }
+
+    func testTheReceiptIsPlainWithNoQueuedRow() {
+        let app = launch("none", extra: ["--preview-delivery"])
+        XCTAssertTrue(app.staticTexts["latest-instruction"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["latest-instruction"].exists)
     }
 
     func testAPeerRowDoesNotPushOutThePersonsOwn() {

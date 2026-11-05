@@ -36,13 +36,13 @@ struct InboxPage {
     }
 
     // One unreachable computer must not hold the inbox, so hosts are asked at once with a short timeout.
-    static func load(from hosts: [Host], sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
+    static func load(from hosts: [Host], before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
         let asked = cursors.map { cursors in hosts.filter { cursors[$0.id] != nil } } ?? hosts
         let (page, failure) = await withTaskGroup(of: (Host, Result<Answer, Error>).self) { group -> (InboxPage, Error?) in
             for host in asked {
                 let before = cursors?[host.id]
                 group.addTask {
-                    do { return (host, .success(try await answer(from: host, sessionID: sessionID, before: before))) }
+                    do { return (host, .success(try await answer(from: host, before: before))) }
                     catch { return (host, .failure(error)) }
                 }
             }
@@ -74,20 +74,20 @@ struct InboxPage {
         return page
     }
 
-    private static func answer(from host: Host, sessionID: String?, before: Int64?) async throws -> Answer {
+    private static func answer(from host: Host, before: Int64?) async throws -> Answer {
         if let before {
-            return Answer(messages: try await host.api.inbox(sessionID: sessionID, host: host.remote, before: before, timeout: hostTimeout))
+            return Answer(messages: try await host.api.inbox(host: host.remote, before: before, timeout: hostTimeout))
         }
-        async let queue = host.api.activeQueue(sessionID: sessionID, host: host.remote, timeout: hostTimeout)
-        async let messages = messagesUnlessOutdated(from: host, sessionID: sessionID)
+        async let queue = host.api.activeQueue(host: host.remote, timeout: hostTimeout)
+        async let messages = messagesUnlessOutdated(from: host)
         let (rows, page) = try await (queue, messages)
         // A computer older than the inbox ignores `host` and lists its own queue, so those rows are not the remote's.
         let trusted = page == nil && host.remote != nil ? [] : rows
         return Answer(active: trusted.filter { !$0.isHistorical }, messages: page)
     }
 
-    private static func messagesUnlessOutdated(from host: Host, sessionID: String?) async throws -> InboxMessagePage? {
-        do { return try await host.api.inbox(sessionID: sessionID, host: host.remote, timeout: hostTimeout) }
+    private static func messagesUnlessOutdated(from host: Host) async throws -> InboxMessagePage? {
+        do { return try await host.api.inbox(host: host.remote, timeout: hostTimeout) }
         catch AgenthailAPIError.olderHost { return nil }
     }
 

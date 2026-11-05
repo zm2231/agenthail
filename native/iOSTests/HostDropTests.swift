@@ -231,7 +231,7 @@ final class HostDropTests: XCTestCase {
         for _ in 0..<200 where connection.reachable { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(connection.holding && !connection.reachable, "the computer is held through the grace")
         do {
-            _ = try await model.inboxPage(sessionID: nil)
+            _ = try await model.inboxPage()
             XCTFail("a down computer answered the inbox")
         } catch AgenthailAPIError.unavailable(let message) {
             XCTFail("the inbox refused a computer shown connected without asking it: \(message)")
