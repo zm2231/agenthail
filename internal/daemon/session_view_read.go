@@ -106,6 +106,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		display := sessionDisplay(row, now)
 		row.Display = &display
 		row.Attention = rowAttention(row, read.Outgoing[record.ID], record.Attention)
+		row.Placement = sessionPlacement(row)
 		rows = append(rows, row)
 		revision = append(revision, newRevisionRow(record, row))
 		if record.Retired && !read.History {

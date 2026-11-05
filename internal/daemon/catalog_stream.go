@@ -300,6 +300,13 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 				continue
 			}
 			event.Type, event.Payload = "session.removed", payload
+		} else if event.Type == "session.upserted" {
+			payload, err := withPlacement(event.Payload)
+			if err != nil {
+				d.log.Printf("catalog placement %s: %s", event.EntityID, err)
+				return nil, err
+			}
+			event.Payload = payload
 		}
 		listed = append(listed, event)
 	}
