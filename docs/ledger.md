@@ -16,7 +16,7 @@ agenthail ledger disable             # capture nothing in this project, not even
 agenthail ledger disable @session    # take back a session's grant
 ```
 
-A project's enable or disable is an event in its ledger, so it holds on every host that keeps or replicates the ledger. A session's grant stays on the host where the session runs, since that is where its words are captured.
+A project's enable or disable is an event in its ledger, so it holds on every host that keeps or replicates the ledger. A session's grant stays on the host where the session runs, since that is where its words are captured. Both are made by the local daemon, so these commands fail while it is stopped; start it with `agenthail daemon start`. Other programs make the same change with `POST /api/v1/ledger/scope`, sending `projectKey`, `enabled`, and either `attach` (`prompt` or `checkpoints`) or a `sessionId` to grant or revoke.
 
 Words are captured from three sources, and each message is recorded once even when more than one source sees it:
 

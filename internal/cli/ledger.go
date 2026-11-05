@@ -10,7 +10,6 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type ledgerCall struct {
@@ -33,8 +32,8 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 		}
 		return a.ledgerShow(c.store, c.args, c.positional[1])
 	},
-	"enable":       func(a *App, c ledgerCall) error { return a.ledgerEnable(c.store, c.args) },
-	"disable":      func(a *App, c ledgerCall) error { return a.ledgerDisable(c.store, c.args) },
+	"enable":       func(a *App, c ledgerCall) error { return a.ledgerEnable(c.args) },
+	"disable":      func(a *App, c ledgerCall) error { return a.ledgerDisable(c.args) },
 	"goal":         func(a *App, c ledgerCall) error { return a.ledgerGoal(c.args) },
 	"goals":        func(a *App, c ledgerCall) error { return a.ledgerGoals(c.store, c.args) },
 	"attach":       func(a *App, c ledgerCall) error { return a.ledgerAttach(c.args, false) },
@@ -236,16 +235,7 @@ func (a *App) ledgerAsk(store *ledger.Store, askID string, args []string) error 
 	return fmt.Errorf("ask %s not found", askID)
 }
 
-func (a *App) ledgerSessionArg(args []string) (*surface.Session, error) {
-	positional := stripFlags(args)
-	if len(positional) < 2 {
-		return nil, nil
-	}
-	session, _, err := a.resolveTarget(context.Background(), positional[1])
-	return session, err
-}
-
-func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
+func (a *App) ledgerEnable(args []string) error {
 	w, err := parseLedgerWrite(args)
 	if err != nil {
 		return err
@@ -254,70 +244,73 @@ func (a *App) ledgerEnable(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	key, err := ledgerProjectKey(a)
+	if len(w.positional) > 1 && w.value("--attach") != "" {
+		return fmt.Errorf("--attach sets when the whole project attaches; a session you add follows it")
+	}
+	answer, err := a.ledgerSetScope(w.positional, true, mode)
 	if err != nil {
 		return err
 	}
-	var session *surface.Session
-	if len(w.positional) > 1 {
-		if w.value("--attach") != "" {
-			return fmt.Errorf("--attach sets when the whole project attaches; a session you add follows it")
-		}
-		if session, _, err = a.resolveTarget(context.Background(), w.positional[1]); err != nil {
-			return err
-		}
-	}
-	if session != nil {
-		if err := store.GrantSession(key, session.ID); err != nil {
-			return err
-		}
-		if hasFlag(args, "--json") {
-			return emit(map[string]any{"projectKey": key, "sessionId": session.ID, "granted": true})
-		}
-		fmt.Printf("ledger captures %s for %s\n", session.ID, key)
-		return nil
-	}
-	if err := store.Enable(key, mode); err != nil {
-		return err
-	}
 	if hasFlag(args, "--json") {
-		return emit(map[string]any{"projectKey": key, "enabled": true, "attach": mode})
+		return emit(answer)
 	}
-	if mode == ledger.AttachAtCheckpoints {
-		fmt.Printf("ledger enabled for %s; sessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and agenthail ledger\n", key)
+	if answer.SessionID != "" {
+		fmt.Printf("ledger captures %s for %s\n", answer.SessionID, answer.ProjectKey)
 		return nil
 	}
-	fmt.Printf("ledger enabled for %s; sessions attach each of the person's messages before replying\n", key)
+	if answer.Attach == ledger.AttachAtCheckpoints {
+		fmt.Printf("ledger enabled for %s; sessions attach the person's words at checkpoints: adding, claiming or submitting work, starting or compacting, and agenthail ledger\n", answer.ProjectKey)
+		return nil
+	}
+	fmt.Printf("ledger enabled for %s; sessions attach each of the person's messages before replying\n", answer.ProjectKey)
 	return nil
 }
 
-func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
-	key, err := ledgerProjectKey(a)
+func (a *App) ledgerDisable(args []string) error {
+	answer, err := a.ledgerSetScope(stripFlags(args), false, "")
 	if err != nil {
-		return err
-	}
-	session, err := a.ledgerSessionArg(args)
-	if err != nil {
-		return err
-	}
-	if session != nil {
-		if err := store.RevokeSession(key, session.ID); err != nil {
-			return err
-		}
-		if hasFlag(args, "--json") {
-			return emit(map[string]any{"projectKey": key, "sessionId": session.ID, "granted": false})
-		}
-		fmt.Printf("ledger no longer captures %s for %s\n", session.ID, key)
-		return nil
-	}
-	if err := store.Disable(key); err != nil {
 		return err
 	}
 	if hasFlag(args, "--json") {
-		return emit(map[string]any{"projectKey": key, "enabled": false})
+		return emit(answer)
 	}
-	fmt.Printf("ledger disabled for %s\n", key)
+	if answer.SessionID != "" {
+		fmt.Printf("ledger no longer captures %s for %s\n", answer.SessionID, answer.ProjectKey)
+		return nil
+	}
+	fmt.Printf("ledger disabled for %s\n", answer.ProjectKey)
 	return nil
+}
+
+type ledgerScopeAnswer struct {
+	Attach     ledger.AttachMode `json:"attach,omitempty"`
+	Enabled    *bool             `json:"enabled,omitempty"`
+	Granted    *bool             `json:"granted,omitempty"`
+	ProjectKey string            `json:"projectKey"`
+	SessionID  string            `json:"sessionId,omitempty"`
+}
+
+func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.AttachMode) (*ledgerScopeAnswer, error) {
+	ctx := context.Background()
+	key, err := ledgerProjectKey(a)
+	if err != nil {
+		return nil, err
+	}
+	req := map[string]any{"projectKey": key, "enabled": enabled}
+	if len(positional) > 1 {
+		session, _, err := a.resolveTarget(ctx, positional[1])
+		if err != nil {
+			return nil, err
+		}
+		req["sessionId"] = session.ID
+	} else if enabled {
+		req["attach"] = mode
+	}
+	var answer ledgerScopeAnswer
+	if err := a.ledgerPost(ctx, "/api/v1/ledger/scope", req, &answer); err != nil {
+		return nil, err
+	}
+	return &answer, nil
 }
 
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
