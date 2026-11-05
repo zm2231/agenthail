@@ -98,7 +98,10 @@ struct QueueTailRows: View {
             let steering = model.queueSteer(item)
             if let steering, steering.refusal == nil {
                 control("Steer", id: "queue-tail-steer-\(item.id)", enabled: idle) {
-                    run(row, leaves: true) { try await model.steerQueued(item, capabilities: steering.capabilities) }
+                    run(row, leaves: false) {
+                        try await model.steerQueued(item, capabilities: steering.capabilities)
+                        tail.steered(row, now: Date())
+                    }
                 }
             }
             Menu {
@@ -166,7 +169,11 @@ struct QueueTailTracking: ViewModifier {
         return ([session.id, session.status, String(session.queueCount), model.deliveryStatus[session.id] ?? ""] + listed).joined(separator: "|")
     }
 
-    private func settle() { tail.update(active: active, timeline: timeline, now: Date()) }
+    private var turnRunning: Bool {
+        (model.snapshot?.sessions.first { $0.id == session.id } ?? session).status == "busy"
+    }
+
+    private func settle() { tail.update(active: active, timeline: timeline, turnRunning: turnRunning, now: Date()) }
 
     func body(content: Content) -> some View {
         content
@@ -188,5 +195,6 @@ struct QueueTailTracking: ViewModifier {
                 settle()
             }
             .onChange(of: timeline) { _, _ in settle() }
+            .onChange(of: turnRunning) { _, _ in settle() }
     }
 }

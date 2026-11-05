@@ -4,6 +4,7 @@ struct QueueTail: Equatable {
     struct Row: Identifiable, Equatable {
         var item: QueueState
         var leavingSince: Date? = nil
+        var awaitsTurnEnd = false
 
         var id: String { "queue-\(item.listID)" }
         var isDead: Bool { item.status == "dead" }
@@ -30,7 +31,7 @@ struct QueueTail: Equatable {
     var lastShownID: String? { shown.last?.id }
     var shownIDs: [String] { shown.map(\.id) }
     var nextDeparture: Date? {
-        rows.compactMap(\.leavingSince).min()?.addingTimeInterval(Self.leavesAfter)
+        rows.compactMap { $0.leavingSince }.min()?.addingTimeInterval(Self.leavesAfter)
     }
 
     static func shows(_ item: QueueState) -> Bool {
@@ -41,13 +42,14 @@ struct QueueTail: Equatable {
         row.isDead ? 0 : row.isOwn ? 1 : 2
     }
 
-    mutating func update(active: [QueueState], timeline: [TimelineItem], now: Date) {
+    mutating func update(active: [QueueState], timeline: [TimelineItem], turnRunning: Bool = false, now: Date) {
         let listed = active.filter(Self.shows).sorted { $0.id < $1.id }
         let listedIDs = Set(listed.map(\.listID))
         dropped.formIntersection(listedIDs)
-        let gone = rows.filter { !listedIDs.contains($0.item.listID) }.map { row in
+        let gone = rows.filter { !listedIDs.contains($0.item.listID) || dropped.contains($0.item.listID) }.map { row in
             var leaving = row
-            leaving.leavingSince = row.leavingSince ?? now
+            leaving.leavingSince = row.awaitsTurnEnd ? now : row.leavingSince ?? now
+            leaving.awaitsTurnEnd = row.awaitsTurnEnd && turnRunning
             return leaving
         }
         let current = listed.filter { !dropped.contains($0.listID) }.map { Row(item: $0) }
@@ -65,6 +67,13 @@ struct QueueTail: Equatable {
     mutating func drop(_ row: Row) {
         dropped.insert(row.item.listID)
         rows.removeAll { $0.id == row.id }
+    }
+
+    mutating func steered(_ row: Row, now: Date) {
+        dropped.insert(row.item.listID)
+        guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
+        rows[index].leavingSince = now
+        rows[index].awaitsTurnEnd = true
     }
 
     mutating func report(_ problem: String?, from generation: UUID) {

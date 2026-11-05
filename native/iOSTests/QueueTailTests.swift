@@ -104,6 +104,42 @@ final class QueueTailTests: XCTestCase {
         XCTAssertTrue(tail.rows.isEmpty, "and doesn't come back as leaving")
     }
 
+    func testASteeredRowStaysUntilTheModelTakesIt() throws {
+        var tail = QueueTail()
+        let item = try row(1, message: "go")
+        tail.update(active: [item], timeline: [], turnRunning: true, now: start)
+        tail.steered(try XCTUnwrap(tail.rows.first), now: start)
+        tail.update(active: [item], timeline: [], turnRunning: true, now: start.addingTimeInterval(1))
+        XCTAssertEqual(tail.rows.map(\.item.id), [1], "a stale list doesn't make it a queued row again")
+        XCTAssertNotNil(tail.rows.first?.leavingSince)
+        tail.update(active: [], timeline: [], turnRunning: true, now: start.addingTimeInterval(1800))
+        XCTAssertEqual(tail.rows.count, 1, "a long tool run can hold the next model request for many minutes")
+        try tail.update(active: [], timeline: [user("go")], turnRunning: true, now: start.addingTimeInterval(1801))
+        XCTAssertTrue(tail.rows.isEmpty, "no duplicate once the timeline has it")
+    }
+
+    func testASteeredRowLeavesAfterTheTurnEndsIfNothingMatches() throws {
+        var tail = QueueTail()
+        try tail.update(active: [row(1, message: "go")], timeline: [], turnRunning: true, now: start)
+        tail.steered(try XCTUnwrap(tail.rows.first), now: start)
+        let ended = start.addingTimeInterval(600)
+        tail.update(active: [], timeline: [], turnRunning: true, now: ended.addingTimeInterval(-5))
+        tail.update(active: [], timeline: [], turnRunning: false, now: ended)
+        XCTAssertEqual(tail.nextDeparture, ended.addingTimeInterval(QueueTail.leavesAfter), "the clock starts when the turn ends")
+        tail.update(active: [], timeline: [], turnRunning: false, now: ended.addingTimeInterval(QueueTail.leavesAfter - 1))
+        XCTAssertEqual(tail.rows.count, 1)
+        tail.update(active: [], timeline: [], turnRunning: false, now: ended.addingTimeInterval(QueueTail.leavesAfter))
+        XCTAssertTrue(tail.rows.isEmpty, "it can't stay stuck once the turn is over")
+    }
+
+    func testAPlainDeliveredRowKeepsItsShortClockWhileATurnRuns() throws {
+        var tail = QueueTail()
+        try tail.update(active: [row(1, message: "go")], timeline: [], turnRunning: true, now: start)
+        tail.update(active: [], timeline: [], turnRunning: true, now: start.addingTimeInterval(1))
+        tail.update(active: [], timeline: [], turnRunning: true, now: start.addingTimeInterval(1 + QueueTail.leavesAfter))
+        XCTAssertTrue(tail.rows.isEmpty)
+    }
+
     func testAPeerIsNamedTheWayTheDaemonNamesIt() {
         for (sender, name) in [("agenthail/claude: @helper", "@helper"), ("agenthail/claude: worker", "worker"), ("agenthail/codex: Fix the build", "Fix the build"), ("uds:/tmp/a.sock", "uds:/tmp/a.sock"), ("agenthail/claude: ", "agenthail/claude:")] {
             XCTAssertEqual(PeerEnvelope(sender: sender, body: "m").senderName, name)
