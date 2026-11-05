@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,6 +102,33 @@ func TestALinkJoinsAForkIntoUpstreamOnEveryPairedHostAndAnUnlinkMadeOfflineWins(
 			fork, upstream := snapshotProject(t, node, forkProject), snapshotProject(t, node, upstreamProject)
 			return fork != nil && upstream != nil && len(upstream.Linked) == 0
 		})
+	}
+}
+
+func TestARepositoryGainsItsRootCommitWithItsFirstCommit(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "fresh")
+	gitRun(t, t.TempDir(), "init", "-b", "main", repo)
+	gitRun(t, repo, "config", "user.email", "test@example.com")
+	gitRun(t, repo, "config", "user.name", "Test")
+	repositories := &catalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}
+	resolve := func() []string {
+		identity, _, transient := resolveCatalogIdentity(context.Background(), repo, nil, projectLinkSet{}, repositories)
+		if transient || identity.Project == nil {
+			t.Fatalf("identity=%+v transient=%v", identity, transient)
+		}
+		return identity.Project.RootCommits
+	}
+	if roots := resolve(); len(roots) != 0 {
+		t.Fatalf("a repository without commits has roots %v", roots)
+	}
+	gitRun(t, repo, "commit", "--allow-empty", "-m", "first")
+	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := strings.TrimSpace(string(head))
+	if roots := resolve(); len(roots) != 1 || roots[0] != root {
+		t.Fatalf("after the first commit roots=%v want [%s]", roots, root)
 	}
 }
 
