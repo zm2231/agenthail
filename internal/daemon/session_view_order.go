@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -59,13 +58,7 @@ func (p *sessionViewPlan) orderProjects() {
 		if a.active != b.active {
 			return a.active
 		}
-		if folded, other := strings.ToLower(a.Name), strings.ToLower(b.Name); folded != other {
-			return folded < other
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
-		}
-		return a.ID < b.ID
+		return projectNameBefore(a.Name, a.ID, b.Name, b.ID)
 	})
 	rank := map[string]int{}
 	for i, project := range p.view.Projects {

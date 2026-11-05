@@ -325,7 +325,9 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		})
 		projects = append(projects, *project)
 	}
-	sort.SliceStable(projects, func(i, j int) bool { return projects[i].LastActive.After(projects[j].LastActive) })
+	sort.SliceStable(projects, func(i, j int) bool {
+		return projectNameBefore(projects[i].DisplayName, projects[i].ID, projects[j].DisplayName, projects[j].ID)
+	})
 	return projects
 }
 
