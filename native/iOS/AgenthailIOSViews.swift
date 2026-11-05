@@ -494,7 +494,7 @@ struct SessionScreen: View {
     @State private var activityOnly = false
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
-    @State private var atLatest = true
+    @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
     @State private var landed = false
     @State private var overflows = false
@@ -527,6 +527,10 @@ struct SessionScreen: View {
     }
 
     private func scrollToLatest() {
+#if DEBUG
+        ScrollCount.value += 1
+        if PreviewFollowStuck.enabled, landed { return }
+#endif
         if overflows, let id = queueTail.lastShownID ?? latestRowID {
             position.scrollTo(id: id, anchor: .bottom)
         } else {
@@ -543,6 +547,9 @@ struct SessionScreen: View {
     }
 
     private func goToLatest() {
+#if DEBUG
+        PreviewFollowStuck.enabled = false
+#endif
         followingLatest = true
         jumps += 1
         position.scrollTo(edge: .bottom)
@@ -552,17 +559,6 @@ struct SessionScreen: View {
     private var showQueuedRow: (() -> Void)? {
         guard queueTail.lastShownID != nil else { return nil }
         return { goToLatest() }
-    }
-
-    private var jumpToLatest: some View {
-        Button(action: goToLatest) {
-            Image(systemName: "arrow.down")
-                .font(.body.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .floatingGlass(in: Circle(), interactive: true)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Jump to latest")
     }
 
     @ViewBuilder private var transcriptRows: some View {
@@ -653,7 +649,7 @@ struct SessionScreen: View {
         .accessibilityIdentifier("session-timeline")
         .phoneBackdrop(.transcript)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
+        .defaultScrollAnchor(followingLatest && !PreviewFollowStuck.enabled ? .bottom : nil, for: .sizeChanges)
         .defaultScrollAnchor(.top, for: .alignment)
         .scrollDismissesKeyboard(.interactively)
         .onScrollPhaseChange { _, phase in
@@ -664,30 +660,35 @@ struct SessionScreen: View {
                 userScrolling = true
                 followingLatest = false
             } else if phase == .idle && userScrolling {
-                followingLatest = atLatest
+                followingLatest = edge.atLatest
                 userScrolling = false
             }
         }
-        // A distance, not a Bool: a Bool that flips back during landing never delivers its action, leaving atLatest stale.
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentSize.height - geometry.visibleRect.maxY
-        } action: { _, distance in
+        // Raw edges: a derived value that repeats across a landing can skip its last action.
+        .onScrollGeometryChange(for: TranscriptEnd.self) { TranscriptEnd($0) } action: { _, end in
 #if DEBUG
             guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
-            atLatest = distance < 60
+            let reached = end.distance < 24
+            if reached != edge.atLatest { edge.atLatest = reached }
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height > geometry.visibleRect.height
         } action: { _, value in
             overflows = value
         }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { old, new in
+            if landed, followingLatest, !userScrolling, new > old { scrollToLatest() }
+        }
         .refreshable { await model.refreshSession(session.id) }
         .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
         .overlay(alignment: .bottom) {
-            if !atLatest && detail != nil { jumpToLatest.padding(.bottom, 8) }
+            if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
         }
+#if DEBUG
+        .overlay(alignment: .topLeading) { ScrollCountLabel() }
+#endif
         .edgeBar(.top, spacing: 0) {
             if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
@@ -768,7 +769,7 @@ struct SessionScreen: View {
         .task(id: session.id) {
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
-            atLatest = !startsAtOldest
+            edge.atLatest = !startsAtOldest
             landed = false
             await model.loadSession(session.id)
             if startsAtOldest, let first = items.first {
