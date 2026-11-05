@@ -33,7 +33,7 @@ func (s *Store) AskQuestion(req QuestionRequest, now time.Time) (Question, error
 		return Question{}, err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(req.ProjectKey)
 	if err != nil {
 		return Question{}, err
 	}

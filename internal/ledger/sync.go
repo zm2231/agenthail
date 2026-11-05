@@ -82,6 +82,10 @@ func (s *Store) SyncedProjects(owner string) ([]string, error) {
 	return s.projectKeys(`SELECT project_key FROM ledger_state WHERE owner_host_id=? ORDER BY project_key`, owner)
 }
 
+func (s *Store) ProjectKeys() ([]string, error) {
+	return s.projectKeys(`SELECT DISTINCT project_key FROM ledger_events ORDER BY project_key`)
+}
+
 func (s *Store) projectKeys(query string, args ...any) ([]string, error) {
 	rows, err := s.read.Query(query, args...)
 	if err != nil {
@@ -126,12 +130,12 @@ func (s *Store) syncWrite(projectKey string, reorders bool, fn func(tx *sql.Tx) 
 		return err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := fn(tx); err != nil {
+	if err := fn(tx.Tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

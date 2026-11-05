@@ -224,6 +224,31 @@ The digest covers, for each event in owner order:
 - its creation time;
 - its payload bytes.
 
+## Reading the ledger from another program
+
+Sessions read the ledger with the `agenthail_ledger_read` MCP tool. Other clients use the daemon's HTTP API, which answers from the same code, so the two always agree.
+
+```
+GET /api/v1/ledger?projectKey=<key>                         # the board
+GET /api/v1/ledger?projectKey=<key>&view=work&state=open&q=index
+GET /api/v1/ledger?projectKey=<key>&view=item&id=<item or ask>
+GET /api/v1/ledger/events                                   # ledger.changed, one per project when it changes
+```
+
+- **Views.** `view` is one of:
+  - `board`, the default: capture state, sync state, counts, the first page of goals, and the newest five unattached words with their total;
+  - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;
+  - `ready`, the ranked next work;
+  - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.
+- **Work filters.** With no filter, the `work` view lists every work item, settled and deleted ones included. With any filter, it selects as `agenthail ledger list` does: `q`, `state`, `type`, `priority`, `label`, `assignee`, `clause`, `found` and `all`.
+- **Paging.** Lists are ordered by id and paged with `limit` (1 to 100) and the `nextCursor` of the previous page. A page starts after that id, so items added meanwhile don't shift it.
+- **Caching.** Every answer carries an `ETag`, a hash of its exact bytes. Send it back as `If-None-Match` and an unchanged answer is `304 Not Modified`. Two different answers never share a tag, including after the daemon rebuilds a board from the log.
+- **Sync.** On a host that replicates the ledger, the board's `sync` shows the owner, the pulled cursor, writes not yet replayed, the owner's head as last seen, and how far behind that is. A write from this host goes to the owner, and the daemon pulls right after, so a read that follows shows it. If that pull fails, the write still stands, since the owner recorded it. `sync.error` says why the pull failed until a later pull succeeds.
+- **The change stream.** `GET /api/v1/ledger/events` is server-sent events, and keeps no history:
+  - On connect, it sends a `ledger.changed` event with the current `version` for every project with a ledger. The version is the board's ETag.
+  - After that, it sends one event per changed project at most once a second, however many events were written meanwhile. A client that reads slowly gets the newest version of each project it missed, and is never dropped.
+  - A client that reconnects should refetch what it shows.
+
 ## Doctor
 
 `agenthail doctor` reports on the ledger:

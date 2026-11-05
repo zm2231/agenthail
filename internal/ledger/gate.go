@@ -26,7 +26,7 @@ func (s *Store) GateTurn(projectKey, sessionID, turnID string, now time.Time) (G
 		return GateResult{}, err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return GateResult{}, err
 	}

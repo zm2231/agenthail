@@ -80,7 +80,7 @@ func (s *Store) RecordUtterance(u Utterance) (Event, bool, error) {
 }
 
 func (s *Store) insertUtterance(u Utterance, data []byte) (Event, bool, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.begin(u.ProjectKey)
 	if err != nil {
 		return Event{}, false, err
 	}

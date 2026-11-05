@@ -110,7 +110,7 @@ func (s *Store) writePlanned(projectKey, actor string, now time.Time, plan plann
 }
 
 func (s *Store) commitPlanned(board *Board, projectKey, actor string, now time.Time, plan plannedEvent) error {
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return err
 	}

@@ -180,6 +180,9 @@ type actionGate struct {
 	confirmBlocked atomic.Bool
 	// digestRequests counts the ledger digest lookups this host answers.
 	digestRequests atomic.Int32
+	// refusePullsAfterWrite refuses every ledger pull once this host is sent a ledger write.
+	refusePullsAfterWrite atomic.Bool
+	pullsRefused          atomic.Bool
 }
 
 const (
@@ -321,6 +324,13 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path == "/api/v1/ledger/sync/digest" {
 			n.gate.digestRequests.Add(1)
+		}
+		if n.gate.refusePullsAfterWrite.Load() && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/ledger/") && !strings.HasPrefix(r.URL.Path, "/api/v1/ledger/sync/") {
+			n.gate.pullsRefused.Store(true)
+		}
+		if n.gate.pullsRefused.Load() && r.URL.Path == "/api/v1/ledger/sync/events" {
+			http.Error(w, "pulls refused", http.StatusServiceUnavailable)
+			return
 		}
 		if r.URL.Path == "/api/v1/ledger/sync/confirm" {
 			if loss := n.gate.confirmLoss.Swap(0); loss != 0 || n.gate.confirmBlocked.Load() {

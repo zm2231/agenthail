@@ -113,8 +113,9 @@ func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerI
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		host.ledgerMu.Lock()
-		_, _ = d.pullLedger(r.Context(), host, key)
+		head, err := d.pullLedger(r.Context(), host, key)
 		host.ledgerMu.Unlock()
+		d.recordLedgerSync(key, head, err)
 	}
 	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
 	w.WriteHeader(response.StatusCode)

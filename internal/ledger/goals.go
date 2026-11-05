@@ -16,7 +16,7 @@ func (s *Store) EnsureGoal(projectKey, name, sessionID string) (Goal, bool, erro
 		return Goal{}, false, err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return Goal{}, false, err
 	}

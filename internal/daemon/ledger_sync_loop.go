@@ -44,13 +44,15 @@ func (h *ledgerSyncHealth) recordCheck(key string, check ledgerLogCheck) {
 	h.byProject[key] = result
 }
 
-func (h *ledgerSyncHealth) record(key string, head int64, err error) {
+// record reports whether what a read shows of the sync, its error and the owner's head, changed.
+func (h *ledgerSyncHealth) record(key string, head int64, err error) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.byProject == nil {
 		h.byProject = map[string]ledgerSyncResult{}
 	}
 	result := h.byProject[key]
+	before := result
 	result.At, result.Error = time.Now(), ""
 	if err != nil {
 		result.Error = err.Error()
@@ -58,6 +60,13 @@ func (h *ledgerSyncHealth) record(key string, head int64, err error) {
 		result.SyncedAt, result.Head = result.At, head
 	}
 	h.byProject[key] = result
+	return result.Error != before.Error || result.Head != before.Head
+}
+
+func (d *Daemon) recordLedgerSync(key string, head int64, err error) {
+	if d.ledgerSync.record(key, head, err) {
+		d.ledgerChanged(key)
+	}
 }
 
 func (h *ledgerSyncHealth) last(key string) (ledgerSyncResult, bool) {
@@ -98,7 +107,7 @@ func (d *Daemon) syncLedgerHost(ctx context.Context, host *pairedHost) {
 	}
 	for _, key := range keys {
 		head, err := d.syncLedgerProject(ctx, host, key)
-		d.ledgerSync.record(key, head, err)
+		d.recordLedgerSync(key, head, err)
 	}
 }
 

@@ -3,13 +3,15 @@ package ledger
 import (
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
 type Store struct {
-	db    *sql.DB
-	read  *sql.DB
-	cache *boardCache
+	db      *sql.DB
+	read    *sql.DB
+	cache   *boardCache
+	changed atomic.Pointer[func(string)]
 }
 
 func NewStore(db, read *sql.DB) *Store {
@@ -23,7 +25,11 @@ func (s *Store) AppendEvent(event Event) (Event, error) {
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
-	return insertEvent(s.db, `INSERT`, event)
+	inserted, err := insertEvent(s.db, `INSERT`, event)
+	if err == nil {
+		s.notify(event.ProjectKey)
+	}
+	return inserted, err
 }
 
 type execer interface {

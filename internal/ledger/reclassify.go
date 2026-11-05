@@ -29,7 +29,7 @@ func (s *Store) ReclassifyUtterance(projectKey, ref, reason string, now time.Tim
 	if err != nil {
 		return false, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return false, err
 	}

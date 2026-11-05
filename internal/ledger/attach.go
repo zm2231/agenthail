@@ -62,7 +62,7 @@ func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
 		return AttachResult{}, err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(req.ProjectKey)
 	if err != nil {
 		return AttachResult{}, err
 	}

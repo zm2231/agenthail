@@ -141,7 +141,7 @@ func (s *Store) setCapture(projectKey string, want CapturePayload) error {
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return err
 	}

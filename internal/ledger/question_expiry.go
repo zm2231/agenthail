@@ -45,7 +45,7 @@ func (s *Store) ExpireQuestions(projectKey string, now time.Time) ([]Expiry, err
 		return nil, err
 	}
 	defer release()
-	tx, err := s.db.Begin()
+	tx, err := s.begin(projectKey)
 	if err != nil {
 		return nil, err
 	}
