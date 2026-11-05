@@ -1,4 +1,4 @@
--- schemaVersion 54
+-- schemaVersion 55
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -543,6 +543,13 @@ CREATE TABLE relay_provenance (
 CREATE TABLE relay_sources (
     source_key TEXT PRIMARY KEY,
     cursor TEXT NOT NULL
+);
+
+-- table removed_project_ledgers
+CREATE TABLE removed_project_ledgers (
+	workspace_root TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	removed_at_ms INTEGER NOT NULL
 );
 
 -- table routes

@@ -251,3 +251,15 @@ func TestLedgerEnableFailsWhenTheDaemonIsDown(t *testing.T) {
 		t.Fatalf("the ledger changed with no daemon: %+v %v", scope, err)
 	}
 }
+
+func TestLedgerEnableInAFolderWithoutARepositoryNamesItsProjectsLedger(t *testing.T) {
+	app, calls := ledgerWriteFixtureFor(t, registry.ProjectRecord{ID: "p-notes", Title: "notes"}, func(_ string, body map[string]any) (int, any) {
+		return http.StatusOK, map[string]any{"projectKey": body["projectKey"], "enabled": body["enabled"], "attach": body["attach"]}
+	})
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"enable"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 || (*calls)[0]["projectKey"] != registry.LedgerProjectKey("p-notes") {
+		t.Fatalf("requests %v, want the ledger of project p-notes", *calls)
+	}
+}

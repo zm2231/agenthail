@@ -217,3 +217,62 @@ func TestALinkFindsAKeylessLedgerUnderTheRemoteItsProjectGained(t *testing.T) {
 		t.Fatalf("linking away a project whose ledger predates its remote: %d %s", refused.Code, refused.Body)
 	}
 }
+
+func TestASessionInAKeylessProjectReadsItsLedgerOverMCP(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	path := plainFolder(t)
+	id := addFolderProject(t, d, path)
+	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(ledgerKeyAt(t, r, path), ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, folderSession(t, r, "worker", path)))
+	if board, refused := callMCP(t, session, "agenthail_ledger_read", nil); refused || board["projectKey"] != registry.LedgerProjectKey(id) {
+		t.Fatalf("board = %v", board)
+	}
+	write := map[string]any{"op": "work", "clientRequestId": "w1", "request": map[string]any{"action": "add", "text": "tidy the notes"}}
+	if out, refused := callMCP(t, session, "agenthail_ledger_write", write); refused {
+		t.Fatalf("write: %v", out)
+	}
+	board, err := d.ledgerStore().Board(registry.LedgerProjectKey(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work := board.Ready(); len(work) != 1 {
+		t.Fatalf("the MCP write did not land in the project's ledger: %+v", work)
+	}
+}
+
+func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
+	d, r, handler := ledgerDaemon(t)
+	path := catalogTestRepo(t)
+	gitRun(t, path, "remote", "add", "origin", "/srv/git/notes.git")
+	id := addFolderProject(t, d, path)
+	key := ledgerKeyAt(t, r, path)
+	folderSession(t, r, "worker", path)
+	if code, body := ledgerWrite(t, handler, "/api/v1/ledger/scope", ledgerScopeRequest{ProjectKey: key, SessionID: "worker", Enabled: true}, nil); code != http.StatusOK {
+		t.Fatalf("grant: %d %s", code, body)
+	}
+
+	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	records, err := r.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.refreshProjectRepositories(context.Background(), records, time.Now())
+	if got := ledgerKeyAt(t, r, path); got != key {
+		t.Fatalf("a granted ledger moved to %q when its folder gained a remote", got)
+	}
+	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("remove: %d %s", response.Code, response.Body)
+	}
+	if _, err := ResolvePathLedgerKey(context.Background(), r, path); err == nil || !strings.Contains(err.Error(), key) {
+		t.Fatalf("the removed folder resolves without naming its kept ledger: %v", err)
+	}
+	if again := addFolderProject(t, d, path); again != id || ledgerKeyAt(t, r, path) != key {
+		t.Fatalf("adding the folder again made project %s", again)
+	}
+	grants, err := d.ledgerStore().SessionGrants("worker")
+	if err != nil || len(grants) != 1 || grants[0].ProjectKey != key {
+		t.Fatalf("grants = %+v %v", grants, err)
+	}
+}

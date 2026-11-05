@@ -11,11 +11,15 @@ import (
 // its folder moves.
 func LedgerProjectKey(projectID string) string { return "project:" + projectID }
 
+// A ledger exists once anything is kept under its key: an event, a session's
+// grant, or an owner.
 func holdsLedger(q interface {
 	QueryRow(string, ...any) *sql.Row
 }, key string) (bool, error) {
 	var one int
-	err := q.QueryRow(`SELECT 1 FROM ledger_events WHERE project_key=? LIMIT 1`, key).Scan(&one)
+	err := q.QueryRow(`SELECT 1 FROM ledger_events WHERE project_key=?1
+		UNION ALL SELECT 1 FROM ledger_grants WHERE project_key=?1
+		UNION ALL SELECT 1 FROM ledger_state WHERE project_key=?1 AND owner_host_id!='' LIMIT 1`, key).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

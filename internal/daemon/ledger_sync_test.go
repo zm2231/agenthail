@@ -344,3 +344,15 @@ func TestAKeylessProjectsLedgerReplicatesToItsOwner(t *testing.T) {
 		t.Fatal("the owner's board lacks the words captured before it owned the ledger")
 	}
 }
+
+func TestAKeylessLedgerWithOnlyAnOwnerIsNotLinkedAway(t *testing.T) {
+	mac, _, _ := pairedFederation(t)
+	path := plainFolder(t)
+	id := addFolderProject(t, mac.daemon, path)
+	other := addFolderProject(t, mac.daemon, plainFolder(t))
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: ledgerKeyAt(t, mac.reg, path), Host: "vps"}, nil)
+	refused := runDashboardAction(t, mac.daemon, `{"action":"project-link","projectId":"`+id+`","survivor":"`+other+`"}`)
+	if refused.Code != http.StatusConflict || apiErrorCode(t, refused) != "project_history" {
+		t.Fatalf("linking away a project whose ledger has an owner: %d %s", refused.Code, refused.Body)
+	}
+}

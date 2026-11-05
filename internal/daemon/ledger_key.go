@@ -11,6 +11,8 @@ import (
 // added project without one, the key of its own id. A ledger already kept
 // under an added project's id stays there once the project gains a
 // repository, for every checkout and link that resolves to that project.
+// A folder whose removed project kept a ledger has none until it is added
+// again, rather than a new one under its repository.
 func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 	if found == nil {
 		return "", nil
@@ -37,6 +39,9 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 			continue
 		}
 		return addedLedgerKey(reg, record)
+	}
+	if _, kept, err := reg.RemovedProjectLedger(found.RootPath); err != nil || kept {
+		return "", err
 	}
 	return found.Key, nil
 }
