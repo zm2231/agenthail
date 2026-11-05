@@ -268,8 +268,8 @@ final class AgenthailModel: ObservableObject {
             async let history = api.history(limit: 50)
             let (readBase, readCurrent, readActivity, readHistory) = try await (base, current, activity, history)
             let loaded = DashboardSnapshot(base: readBase, current: readCurrent, activity: readActivity, history: readHistory.items)
-            adoptCurrentView(readCurrent)
             adoptRefreshed(loaded)
+            adoptCurrentView(readCurrent)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
             reconcilePanes()
@@ -286,6 +286,7 @@ final class AgenthailModel: ObservableObject {
     func adoptCurrentView(_ read: ScopeSessions, mergingRows: Bool = false) {
         guard let view = read.view else { return }
         let seq = read.catalogSeq ?? 0
+        if let epoch = catalogPosition.epoch, read.hostEpoch != epoch { return }
         if read.hostEpoch == currentViewPosition.epoch, seq < currentViewPosition.cursor { return }
         currentViewPosition = CatalogPosition(epoch: read.hostEpoch, cursor: seq)
         if mergingRows, var merged = snapshot {

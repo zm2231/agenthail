@@ -36,13 +36,7 @@ extension AgenthailModel {
     }
 
     func paletteSessions(_ query: String) -> [SessionState] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let found = Set(pages.found.map(\.id))
-        return inDaemonOrder(knownSessions.filter { session in
-            trimmed.isEmpty || found.contains(session.id) || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
-                .compactMap { $0 }
-                .contains { $0.localizedCaseInsensitiveContains(trimmed) }
-        })
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? inDaemonOrder(knownSessions) : pages.found
     }
 
     var refinementSurfaces: [String] {

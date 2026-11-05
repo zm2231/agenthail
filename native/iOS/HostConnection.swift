@@ -183,7 +183,6 @@ final class HostConnection {
             guard !stopped else { return false }
             guard generation > appliedGeneration else { return true }
             appliedGeneration = generation
-            adoptCurrentView(readCurrent)
             if let retired = loaded.rekeyed, !retired.isEmpty { delegate?.host(self, rekeyed: retired) }
             let before = Set(snapshot?.sessions.map(\.id) ?? [])
             snapshot = loaded.keepingCatalog(of: snapshot, appliedThrough: catalogStreamCursor)
@@ -200,6 +199,7 @@ final class HostConnection {
             } else {
                 catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             }
+            adoptCurrentView(readCurrent)
             connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The computer could not refresh its agents.") : nil
             delegate?.hostDidChange(self)
             await delegate?.hostRefreshed(self)
@@ -404,6 +404,7 @@ final class HostConnection {
     private func adoptCurrentView(_ read: ScopeSessions) {
         guard let view = read.view else { return }
         let seq = read.catalogSeq ?? 0
+        if let epoch = catalogHostEpoch, read.hostEpoch != epoch { return }
         if read.hostEpoch == currentViewSeq.epoch, seq < currentViewSeq.seq { return }
         currentViewSeq = (read.hostEpoch, seq)
         currentView = view

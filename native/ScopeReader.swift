@@ -18,12 +18,15 @@ final class ScopeReader {
     private var reads: [ScopeRequest: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
     private var rereadTask: Task<Void, Never>?
+    private var rereadDirty = false
     private let source: Source
 
     init(_ source: Source) { self.source = source }
 
     func cancel() {
         rereadTask?.cancel()
+        rereadTask = nil
+        rereadDirty = false
         reads.values.forEach { $0.cancel() }
         reads = [:]
     }
@@ -101,12 +104,21 @@ final class ScopeReader {
         pages.remove(id) || unlisted && !pages.listings.isEmpty
     }
 
+    /// One reread in flight; news that arrives meanwhile runs one more after it.
     func rereadAll() {
-        rereadTask?.cancel()
+        guard rereadTask == nil else {
+            rereadDirty = true
+            return
+        }
         rereadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard let self, !Task.isCancelled else { return }
             for request in pages.listings.keys.sorted() { await reread(request) }
+            rereadTask = nil
+            if rereadDirty {
+                rereadDirty = false
+                rereadAll()
+            }
         }
     }
 

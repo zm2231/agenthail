@@ -88,7 +88,6 @@ struct SessionTreeTest {
         expect(ScopePage.View.joined([mirror, renamed])?.counts["current"]?.families == 2, "a computer the first already mirrors adds no counts")
         let merged = mac.merging(view([family("b", project: "mac-only"), family("e", project: "mac-only")], projects: []))
         expect(merged.families.map(\.id) == ["a", "b", "e"] && merged.projects.count == 2, "a later page adds its new families and keeps the first page's projects")
-        expect(mac.keeping { $0 == "b" }.projects.map(\.id) == ["mac-only"], "a local search keeps daemon order and drops empty projects")
     }
 
     static func detectsNews() {

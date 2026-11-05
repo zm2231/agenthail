@@ -33,9 +33,6 @@ struct ProjectContents: Equatable {
         contents.leadSession = leadID.flatMap { id in sessions.first { $0.id == id } }
         let members = sessions.filter { $0.project?.id == projectID && $0.subagent == nil && $0.archived != true && $0.id != leadID }
         let idle = members.filter { !running($0) }
-            .map { (session: $0, active: $0.lastActive.flatMap(SessionTree.parseTimestamp) ?? .distantPast) }
-            .sorted { $0.active > $1.active }
-            .map(\.session)
         contents.running = members.filter(running)
         contents.recent = idle.filter(\.current)
         contents.earlier = idle.filter { !$0.current }

@@ -11,8 +11,8 @@ struct SidebarDeriveTest {
         return row
     }
 
-    static func listing(_ sessions: [SessionState], attention: [AttentionState] = []) -> DashboardSnapshot {
-        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: attention, deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+    static func listing(_ sessions: [SessionState], attention: [AttentionState] = [], epoch: String = "h") -> DashboardSnapshot {
+        DashboardSnapshot(updatedAt: "2026-10-23T08:00:00Z", eventCursor: 1, hostEpoch: epoch, catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: sessions, totalSessions: sessions.count, queue: [], channels: [], relays: [], history: [], attention: attention, deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
     }
 
     static func family(_ id: String, project: String, members: [String] = [], pinned: Bool = false) -> ViewFamily {
@@ -68,6 +68,16 @@ struct SidebarDeriveTest {
         let project = model.sessionTree.projects[0]
         check(project.collapsed(keeping: nil).checkouts.flatMap(\.families).map(\.id) == ["c"], "collapse shows exactly the daemon's collapsed families")
         check(project.collapsed(keeping: "c3").checkouts.flatMap(\.families).map(\.id) == ["c", "c3"], "a selected family stays in its daemon place")
+
+        model.adoptRefreshed(listing([session("c", status: "busy")], epoch: "h2"))
+        var stale = view([("proj-z", [family("z", project: "proj-z")], ["z"])], seq: 99)
+        stale.hostEpoch = "h"
+        model.adoptCurrentView(stale)
+        check(!shown(model).contains("proj-z/z"), "a Current view from the epoch before a restart never replaces the newer one: \(shown(model))")
+        var current = view([("proj-c", [family("c", project: "proj-c")], ["c"])], seq: 1)
+        current.hostEpoch = "h2"
+        model.adoptCurrentView(current)
+        check(shown(model) == ["proj-c/c"], "the restarted daemon's view is taken: \(shown(model))")
 
         model.sessionFilter = .running
         check(shown(model).isEmpty, "another filter shows nothing until its own view arrives, never the Current order first")

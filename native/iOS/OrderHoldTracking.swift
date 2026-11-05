@@ -5,9 +5,10 @@ import SwiftUI
 struct OrderHoldTracking: ViewModifier {
     let model: AgenthailIOSModel
     var linger: Duration = .milliseconds(500)
-    @State private var touching = false
+    @GestureState private var touching = false
     @State private var scrolling = false
     @State private var release: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         content
@@ -15,14 +16,12 @@ struct OrderHoldTracking: ViewModifier {
                 scrolling = phase != .idle
                 update()
             }
-            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in
-                guard !touching else { return }
-                touching = true
-                update()
-            }.onEnded { _ in
-                touching = false
-                update()
-            })
+            .simultaneousGesture(DragGesture(minimumDistance: 0).updating($touching) { _, touching, _ in touching = true })
+            .onChange(of: touching) { update() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { releaseNow() }
+            }
+            .onDisappear(perform: releaseNow)
     }
 
     private func update() {
@@ -36,6 +35,12 @@ struct OrderHoldTracking: ViewModifier {
             guard !Task.isCancelled else { return }
             model.holdOrder(false)
         }
+    }
+
+    private func releaseNow() {
+        release?.cancel()
+        scrolling = false
+        model.holdOrder(false)
     }
 }
 

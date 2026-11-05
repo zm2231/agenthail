@@ -1112,7 +1112,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         if let listed = listedTree, listed.scope == scope, listed.search == search { return listed.tree }
         if orderHold.held, heldKey?.scope != scope || heldKey?.search != search { orderHold.release() }
         let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shown = orderHold.shown(list: listOrder(scope: scope, search: search, rows: rows), current: currentOrder, rows: rows)
+        let shown = orderHold.shown(list: listOrder(scope: scope, search: search), current: currentOrder, rows: rows)
         let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
         heldList = shown.list
         listedTree = (scope, search, tree)
@@ -1127,21 +1127,27 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
 
     var currentOrder: ScopePage.View? { joinedOrder(\.currentView) }
 
+    /// Sessions in the daemon's order: Current first, then each loaded listing; others keep their place after.
+    func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
+        var order: [String: Int] = [:]
+        let listings = listedHosts.flatMap { host in host.reader.requests.sorted().compactMap { host.view($0)?.renamed { HostCatalog.qualify(host.id, $0) } } }
+        for member in ([currentOrder].compactMap { $0 } + listings).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
+            order[member.id] = order.count
+        }
+        return sessions.enumerated().sorted { lhs, rhs in
+            let (left, right) = (order[lhs.element.id] ?? Int.max, order[rhs.element.id] ?? Int.max)
+            return left != right ? left < right : lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
     private var orderSignature: [ScopePage.View?] {
         listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
     }
 
-    func listOrder(scope: SessionFilter, search: String, rows: [String: SessionState]) -> ScopePage.View? {
-        if !search.isEmpty {
-            if let found = joinedOrder({ $0.reader.foundView }) { return found }
-            return currentOrder?.keeping { id in rows[id].map { Self.matches($0, search) } ?? false }
-        }
+    func listOrder(scope: SessionFilter, search: String) -> ScopePage.View? {
+        if !search.isEmpty { return joinedOrder { $0.reader.foundView } }
         if scope == .recent { return currentOrder }
         return joinedOrder { $0.view(ScopeRequest(scope: scope.viewScope)) }
-    }
-
-    static func matches(_ session: SessionState, _ search: String) -> Bool {
-        [session.displayName, SessionFamilies.label(session), session.surface, session.project?.displayName ?? "", session.cwd ?? ""].contains { $0.localizedCaseInsensitiveContains(search) }
     }
 
     /// Keeps the list's order while a finger is on it; rows still update in place.

@@ -44,16 +44,6 @@ extension ScopePage.View {
         return copy
     }
 
-    func keeping(_ member: (String) -> Bool) -> ScopePage.View {
-        var copy = self
-        copy.families = families.filter { $0.members.contains { member($0.id) } }
-        let kept = Set(copy.families.map(\.id))
-        copy.projects = projects.filter { project in copy.families.contains { $0.projectId == project.id } }.map {
-            ViewProject(id: $0.id, name: $0.name, counts: $0.counts, collapsedFamilyIds: $0.collapsedFamilyIds.filter(kept.contains))
-        }
-        return copy
-    }
-
     /// One computer's order first; another's projects and families it lacks follow in that computer's order.
     static func joined(_ views: [ScopePage.View]) -> ScopePage.View? {
         guard var joined = views.first else { return nil }

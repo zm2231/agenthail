@@ -18,6 +18,10 @@ struct OrderHoldTracking: ViewModifier {
                 releaseWhenUp()
             }
         }
+        .onDisappear {
+            release?.cancel()
+            model.holdOrder(false)
+        }
     }
 
     private func scheduleRelease() {
