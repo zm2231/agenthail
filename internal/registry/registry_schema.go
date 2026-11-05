@@ -590,6 +590,11 @@ CREATE TABLE IF NOT EXISTS ledger_grants (
 	PRIMARY KEY (project_key, session_id)
 );
 CREATE INDEX IF NOT EXISTS ledger_grants_session ON ledger_grants(session_id);
+CREATE TABLE IF NOT EXISTS removed_project_ledgers (
+	workspace_root TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	removed_at_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
 	owner_host_id TEXT NOT NULL DEFAULT '',

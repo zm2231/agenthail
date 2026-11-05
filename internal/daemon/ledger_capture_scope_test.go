@@ -60,5 +60,5 @@ func TestEnablingTheLedgerOnOneHostEnablesItWhereverItIsKept(t *testing.T) {
 	if got := captureOf(t, mac, "lead", "p-2", "after the disable"); got.Captured {
 		t.Fatalf("the lead was captured in a project disabled on its owner: %+v", got)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 }
