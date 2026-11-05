@@ -17,7 +17,7 @@ func (c *Claude) MoveToRoot(ctx context.Context, out *surface.MoveOut, moveID, r
 	if !claudeConversationID(conversation) || !claudeConversationID(moveID) {
 		return nil, fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
-	target, err := surface.ResolveClaudeMoveRoot(c.home, root)
+	target, err := surface.ResolveClaudeConfigRoot(c.home, root)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (c *Claude) RecoverRootMove(ctx context.Context, conversation, moveID, root
 		return false, err
 	}
 	defer unlock()
-	target, err := surface.ResolveClaudeMoveRoot(c.home, root)
+	target, err := surface.ResolveClaudeConfigRoot(c.home, root)
 	if err != nil {
 		return false, c.RestoreMove(conversation, moveID)
 	}
