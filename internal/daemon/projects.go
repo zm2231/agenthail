@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -119,6 +120,10 @@ type dashboardProject struct {
 	LastActive   time.Time                     `json:"lastActive,omitempty"`
 	SessionCount int                           `json:"sessionCount"`
 	Archived     bool                          `json:"archived"`
+	Linked       []CatalogProjectRef           `json:"linked,omitempty"`
+	// LinkHeld is why this host keeps the project apart although a link joins it into another.
+	LinkHeld string `json:"linkHeld,omitempty"`
+	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
 }
 
 // dashboardProjectCoordinator is one host's coordinator of a project.
@@ -140,6 +145,7 @@ type dashboardProjectCheckout struct {
 	Added        bool          `json:"added"`
 	SessionCount int           `json:"sessionCount"`
 	Archived     bool          `json:"archived"`
+	LinkedFrom   *CatalogProjectRef `json:"linkedFrom,omitempty"`
 }
 
 // catalogScopes lists the session scopes every client renders. A scope counts
@@ -217,15 +223,28 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 // this host shows. A coordinator whose folder this host now lists under
 // another project, after its repository's origin changed, belongs to no
 // listed project; 'coordinator list' marks it.
-func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
+func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, links projectLinkSet, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
+	named := map[string]bool{}
+	roots := map[string][]string{}
 	entry := func(found *CatalogProject) *dashboardProject {
+		found = links.apply(found)
 		project, ok := byID[found.ID]
 		if !ok {
-			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, Repository: found.Repository}
+			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, LinkHeld: links.held[found.ID]}
 			byID[found.ID] = project
 			order = append(order, found.ID)
+		}
+		if found.LinkedFrom == nil && len(found.RootCommits) > 0 && roots[found.ID] == nil {
+			roots[found.ID] = found.RootCommits
+		}
+		if found.LinkedFrom == nil && !named[found.ID] {
+			named[found.ID] = true
+			project.DisplayName, project.Kind, project.Key, project.Repository = found.DisplayName, found.Kind, found.Key, found.Repository
+		}
+		if found.LinkedFrom != nil && !slices.ContainsFunc(project.Linked, func(ref CatalogProjectRef) bool { return ref.ID == found.LinkedFrom.ID }) {
+			project.Linked = append(project.Linked, *found.LinkedFrom)
 		}
 		return project
 	}
@@ -235,7 +254,8 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 				return &project.Checkouts[index]
 			}
 		}
-		project.Checkouts = append(project.Checkouts, dashboardProjectCheckout{Host: host, ProjectID: found.LocalID, RootPath: found.RootPath, Added: found.Added, Archived: found.Archived})
+		found = links.apply(found)
+		project.Checkouts = append(project.Checkouts, dashboardProjectCheckout{Host: host, ProjectID: found.LocalID, RootPath: found.RootPath, Added: found.Added, Archived: found.Archived, LinkedFrom: found.LinkedFrom})
 		return &project.Checkouts[len(project.Checkouts)-1]
 	}
 	for _, row := range rows {
@@ -278,7 +298,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		if spec.HostID != "" {
 			continue
 		}
-		if _, listed := byID[spec.ProjectID]; listed || localRoots[spec.ProjectRoot] {
+		if _, listed := byID[links.idOf(spec.ProjectID)]; listed || localRoots[spec.ProjectRoot] {
 			continue
 		}
 		found := coordinatorCatalogProject(spec)
@@ -286,7 +306,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		checkout(entry(found), local, found)
 	}
 	for _, spec := range coordinators {
-		project, listed := byID[spec.ProjectID]
+		project, listed := byID[links.idOf(spec.ProjectID)]
 		if !listed {
 			continue
 		}
@@ -296,6 +316,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		}
 		project.Coordinators = append(project.Coordinators, dashboardProjectCoordinator{Host: host, Name: spec.Name, Surface: spec.Surface, SessionID: spec.SessionID, ChangedBy: spec.ChangedBy, ChangedAt: spec.ChangedAt})
 	}
+	suggestSameHistory(byID, order, roots)
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {
 		project := byID[id]
@@ -379,6 +400,10 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 		default:
 			return actionOK(map[string]any{"ok": true, "project": project, "created": created}), nil
 		}
+	case "project-link":
+		return d.doProjectLink(request)
+	case "project-unlink":
+		return d.doProjectUnlink(request)
 	case "project-remove", "project-archive", "project-unarchive", "project-rename":
 	default:
 		return actionResult{}, invalidRequest("unknown project action")
@@ -485,6 +510,7 @@ type projectRequest struct {
 	ProjectID string
 	Path      string
 	Title     string
+	Survivor  string
 }
 
 // localProjectCheckouts lists this host's projects a project id names: the
@@ -737,7 +763,11 @@ func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string
 			added = append(added, record)
 		}
 	}
-	identity, _, transient := resolveCatalogIdentity(ctx, path, added, nil)
+	links, err := loadProjectLinks(reg)
+	if err != nil {
+		return nil, err
+	}
+	identity, _, transient := resolveCatalogIdentity(ctx, path, added, links, nil)
 	if transient {
 		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.Problem)
 	}

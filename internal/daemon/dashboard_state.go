@@ -127,6 +127,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for _, spec := range coordinators {
 		state.Coordinators = append(state.Coordinators, spec.Entry())
 	}
+	if state.ProjectLinks, err = d.sharedProjectLinks(); err != nil {
+		return dashboardState{}, fmt.Errorf("read project links: %w", err)
+	}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
@@ -276,7 +279,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if err != nil {
 			return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
 		}
-		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
+		links, err := loadProjectLinks(d.Registry)
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read project links: %w", err)
+		}
+		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, links, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
 	}
 	if err := d.addLeadReplacements(&state); err != nil {
 		return dashboardState{}, err

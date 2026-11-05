@@ -1151,6 +1151,42 @@
     },
     "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
   },
+  "api/action project-link a project with a lead": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_history\",\"message\":\"Parity already has a lead of its own; link the other way round: agenthail project link repo:example.com/upstream p-parity\"}}\n"
+  },
+  "api/action project-link two repositories": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"changed\":true,\"link\":{\"joined\":\"repo:example.com/fork\",\"linked\":true,\"survivor\":\"repo:example.com/upstream\"},\"ok\":true}\n"
+  },
+  "api/action project-link without a survivor": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId and survivor are required\"}}\n"
+  },
   "api/action project-remove": {
     "status": 404,
     "header": {
@@ -1258,6 +1294,18 @@
       ]
     },
     "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/action project-unlink a project not linked": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_linked\",\"message\":\"fork is not linked into another project\"}}\n"
   },
   "api/action queue-cancel": {
     "status": 200,
@@ -3539,6 +3587,42 @@
     },
     "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
   },
+  "api/v1/actions project-link a project with a lead": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_history\",\"message\":\"Parity already has a lead of its own; link the other way round: agenthail project link repo:example.com/upstream p-parity\"}}\n"
+  },
+  "api/v1/actions project-link two repositories": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"changed\":true,\"link\":{\"joined\":\"repo:example.com/fork\",\"linked\":true,\"survivor\":\"repo:example.com/upstream\"},\"ok\":true}\n"
+  },
+  "api/v1/actions project-link without a survivor": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId and survivor are required\"}}\n"
+  },
   "api/v1/actions project-remove": {
     "status": 404,
     "header": {
@@ -3646,6 +3730,18 @@
       ]
     },
     "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/v1/actions project-unlink a project not linked": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_linked\",\"message\":\"fork is not linked into another project\"}}\n"
   },
   "api/v1/actions queue-cancel": {
     "status": 200,

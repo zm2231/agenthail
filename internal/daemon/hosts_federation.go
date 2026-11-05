@@ -452,6 +452,7 @@ type remoteSnapshot struct {
 	RetiredClock *int64                      `json:"retiredClock"`
 	RetiredIDs   []string                    `json:"retiredIds"`
 	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
+	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *hostOutage) (bool, error) {
@@ -540,6 +541,9 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		}
 	}
 	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
+		return 0, localMirror(err)
+	}
+	if err := d.adoptProjectLinks(snapshot.ProjectLinks); err != nil {
 		return 0, localMirror(err)
 	}
 	host.epoch = snapshot.HostEpoch
@@ -651,6 +655,12 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		if entry, ok := mirroredCoordinator(host.record.ID, registry.CoordinatorEntry{ProjectID: payload.ProjectID, Name: "-"}); ok {
 			return d.Registry.RemoveHostCoordinator(host.record.ID, entry.ProjectID)
 		}
+	case "project.linked":
+		var link registry.ProjectLink
+		if err := json.Unmarshal(envelope.Data, &link); err != nil {
+			return err
+		}
+		return d.adoptProjectLinks([]registry.ProjectLink{link})
 	}
 	return nil
 }
