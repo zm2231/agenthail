@@ -21,6 +21,9 @@ func (a *App) ledgerWorkShow(store *ledger.Store, w ledgerWriteArgs, id string) 
 	}
 	item := ctx.Item
 	fmt.Println(workLine(item))
+	if item.ImportedFrom != "" {
+		fmt.Println("imported from " + item.ImportedFrom)
+	}
 	printWorkText("description", item.Description)
 	printWorkText("acceptance", item.Acceptance)
 	if c := ctx.Clause; c != nil {
