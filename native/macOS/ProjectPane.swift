@@ -174,7 +174,7 @@ struct ProjectPane: View {
     private func rows(_ sessions: [SessionState]) -> some View {
         ForEach(sessions) { session in
             Button { pane.select(session.id) } label: {
-                SessionRowView(session: session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.sessionAttention[session.id] != nil)
+                SessionRowView(session: session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.sessionAttention[session.id] != nil, saysWaiting: true)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
