@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
 
-const ledgerWorkUsage = `usage: agenthail ledger work [--mine] [--found] [--state <state>] [--type <type>] [--priority <P0-P3>] [--label <label>] [--all]
+const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [--type <t,...>] [--priority <P0,...>] [--label <l>]... [--assignee <session>|--mine]
+                             [--clause <id>] [--found] [--sort id|priority|created|updated] [--limit <n>] [--all]
+       agenthail ledger work search <words>... [the same filters]
        agenthail ledger work <item_id>
        agenthail ledger work <critical-path|ready|next>
        agenthail ledger work add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature] [--priority P0-P3]
@@ -42,7 +44,13 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 		return a.ledgerWorkShow(store, w, w.positional[2])
 	}
 	if len(w.positional) < 2 {
-		return a.ledgerWorkList(store, w)
+		return a.ledgerWorkList(store, w, nil)
+	}
+	if w.positional[1] == "search" {
+		if len(w.positional) < 3 {
+			return fmt.Errorf("usage: agenthail ledger search <words>... [filters]\n%s", ledgerWorkUsage)
+		}
+		return a.ledgerWorkList(store, w, w.positional[2:])
 	}
 	switch view := w.positional[1]; view {
 	case "critical-path", "ready", "next":
@@ -126,29 +134,19 @@ func (a *App) workBoard(store *ledger.Store, w ledgerWriteArgs) (*ledger.Board, 
 	return store.Board(key)
 }
 
-func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs) error {
+func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs, terms []string) error {
 	board, err := a.workBoard(store, w)
 	if err != nil {
 		return err
 	}
-	mine := ""
-	if w.bools["--mine"] {
-		if mine, err = a.sourceSessionID(context.Background(), w.value("--from")); err != nil {
-			return err
-		}
-		if mine == "" {
-			return fmt.Errorf("--mine needs to run inside a session, or pass --from <session>")
-		}
+	q, err := a.workQuery(w, terms)
+	if err != nil {
+		return err
 	}
-	filter := workFilter{mine: mine, state: ledger.WorkState(w.value("--state")), typ: ledger.WorkType(strings.ToLower(w.value("--type"))),
-		priority: strings.ToUpper(w.value("--priority")), label: strings.ToLower(w.value("--label")), found: w.bools["--found"], all: w.bools["--all"]}
-	var items []ledger.WorkItem
-	for _, item := range board.WorkItems() {
-		if filter.keeps(item) {
-			items = append(items, item)
-		}
+	items, err := board.QueryWork(q)
+	if err != nil {
+		return err
 	}
-	sort.Slice(items, func(i, j int) bool { return ledgerIDNumber(items[i].ID) < ledgerIDNumber(items[j].ID) })
 	if w.bools["--json"] {
 		return emit(items)
 	}
@@ -160,6 +158,46 @@ func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs) error {
 		fmt.Println(workLine(item))
 	}
 	return nil
+}
+
+func (a *App) workQuery(w ledgerWriteArgs, terms []string) (ledger.WorkQuery, error) {
+	q := ledger.WorkQuery{Terms: terms, All: w.bools["--all"] || len(terms) > 0, Labels: w.values["--label"], Assignee: w.value("--assignee"),
+		Clause: w.value("--clause"), Found: w.bools["--found"], Sort: w.value("--sort")}
+	for _, s := range commaList(w.value("--state")) {
+		q.States = append(q.States, ledger.WorkState(s))
+	}
+	for _, t := range commaList(w.value("--type")) {
+		q.Types = append(q.Types, ledger.WorkType(t))
+	}
+	q.Priorities = commaList(w.value("--priority"))
+	if limit := w.value("--limit"); limit != "" {
+		n, err := strconv.Atoi(limit)
+		if err != nil {
+			return q, fmt.Errorf("--limit is a number of items, got %q", limit)
+		}
+		q.Limit = n
+	}
+	if w.bools["--mine"] {
+		mine, err := a.sourceSessionID(context.Background(), w.value("--from"))
+		if err != nil {
+			return q, err
+		}
+		if mine == "" {
+			return q, fmt.Errorf("--mine needs to run inside a session, or pass --from <session>")
+		}
+		q.Assignee = mine
+	}
+	return q, nil
+}
+
+func commaList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func (a *App) ledgerCriticalPath(store *ledger.Store, w ledgerWriteArgs) error {
@@ -186,32 +224,6 @@ var workActions = map[ledger.WorkAction]bool{
 	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkDep: true,
 	ledger.WorkComment: true, ledger.WorkLog: true, ledger.WorkEdit: true, ledger.WorkLink: true, ledger.WorkClose: true,
 	ledger.WorkDelete: true, ledger.WorkRestore: true,
-}
-
-// workFilter keeps unsettled items by default; --all adds done and closed ones, and deleted ones show only when asked for by state.
-type workFilter struct {
-	mine, priority, label string
-	state                 ledger.WorkState
-	typ                   ledger.WorkType
-	found, all            bool
-}
-
-func (f workFilter) keeps(item ledger.WorkItem) bool {
-	switch {
-	case f.mine != "" && item.Assignee != f.mine,
-		f.typ != "" && item.Type != f.typ,
-		f.priority != "" && item.Priority != f.priority && "P"+f.priority != item.Priority,
-		f.label != "" && !slices.Contains(item.Labels, f.label),
-		f.found && item.ClauseID != "":
-		return false
-	case f.state != "":
-		return item.State == f.state
-	case item.State == ledger.WorkDeleted:
-		return false
-	case f.all:
-		return true
-	}
-	return item.State != ledger.WorkDone && item.State != ledger.WorkClosed
 }
 
 func workLine(item ledger.WorkItem) string {

@@ -94,6 +94,12 @@ func (item *WorkItem) snapshot() WorkItem {
 	out.DependsOn = slices.Clone(item.DependsOn)
 	out.Labels = slices.Clone(item.Labels)
 	out.Timeline = slices.Clone(item.Timeline)
+	if item.Handoff != nil {
+		h := *item.Handoff
+		h.Done, h.Remaining = slices.Clone(h.Done), slices.Clone(h.Remaining)
+		h.Decisions, h.Uncertain = slices.Clone(h.Decisions), slices.Clone(h.Uncertain)
+		out.Handoff = &h
+	}
 	return out
 }
 

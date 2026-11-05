@@ -128,7 +128,16 @@ Two kinds of notes attach to an item:
 - `agenthail ledger work comment <item> "..."`: anyone can comment.
 - `agenthail ledger work log <item> "..." [--type progress|blocker|decision|hypothesis|tried|result]`: the running log of the session holding the item.
 
-`agenthail ledger work <item>` shows everything a session picking the item up needs in one read: its fields, the clause it serves with its ask, goal and the person's own words, where it was found, what it waits on and what waits on it, any handoff, and its full timeline of state changes, edits, comments and log entries. `agenthail ledger work` lists unfinished items; filter with `--state`, `--type`, `--priority`, `--label`, `--found` or `--mine`, and add done and closed ones with `--all`. Comments and logs stay on the item when the clause above it is cut, and they survive a rebuild. When the person's words behind a clause are retracted, asked work added under that clause goes with them, notes included, and the board lists it among the retractions; found work that was linked to the clause goes back to found.
+`agenthail ledger work <item>` shows everything a session picking the item up needs in one read: its fields, the clause it serves with its ask, goal and the person's own words, where it was found, what it waits on and what waits on it, any handoff, and its full timeline of state changes, edits, comments and log entries. `agenthail ledger list` lists unfinished items, and `--all` adds done and closed ones. `agenthail ledger search <words>...` finds items in any state but deleted that have every word somewhere in their id, td id, text, description, acceptance criteria, labels, comments or logs. Both take the same filters:
+
+- `--state`, `--type` and `--priority` take one value or a comma list (`--priority P0,P1`).
+- `--label` can be repeated, and an item must have every label given.
+- `--assignee <session>` or `--mine`, `--clause <id>`, and `--found` for found work only.
+- `--sort id|priority|created|updated` (newest first for the dates) and `--limit <n>`.
+
+`agenthail ledger show` also takes an imported item's td id (`ledger show td-1a2b3c`).
+
+Comments and logs stay on the item when the clause above it is cut, and they survive a rebuild. When the person's words behind a clause are retracted, asked work added under that clause goes with them, notes included, and the board lists it among the retractions; found work that was linked to the clause goes back to found.
 
 To pick up work:
 
