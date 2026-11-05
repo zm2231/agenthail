@@ -42,7 +42,7 @@ struct ProjectPane: View {
     @State private var showingEarlier = false
 
     var body: some View {
-        let contents = ProjectContents.build(project, sessions: model.knownSessions)
+        let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions))
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)

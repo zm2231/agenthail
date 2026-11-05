@@ -229,7 +229,7 @@ struct ConversationListView: View {
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
         guard (scope == .recent || scope == .all) && search.isEmpty else { return [] }
         let listed = Set(tree.projects.compactMap(\.identity?.id))
-        return model.projects.filter { $0.value.state.archived != true && !listed.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
+        return model.projectOrder.filter { !listed.contains($0) }.compactMap { model.projects[$0] }.filter { $0.state.archived != true }
     }
 
     var body: some View {
@@ -281,7 +281,7 @@ struct ConversationListView: View {
                                     IOSHostBadge(name: host)
                                 }
                                 Spacer(minLength: 0)
-                                Text("\(project.listedSessionCount)")
+                                Text("\(project.counts.sessions)")
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(PhonePalette.muted)
                                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
@@ -326,7 +326,7 @@ struct ConversationListView: View {
                 }
             }
             let listingMore = search.isEmpty && model.canListMore(scope)
-            if let error = model.listingError, scope.pagedScope != nil {
+            if let error = model.listingError, scope != .recent {
                 Button { Task { await model.listMore(scope) } } label: {
                     Label(error, systemImage: "arrow.clockwise").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
@@ -336,7 +336,12 @@ struct ConversationListView: View {
                     .task(id: "\(scope.rawValue)|\(model.snapshot?.sessions.count ?? 0)") { await model.listMore(scope) }
                     .accessibilityIdentifier("list-more")
             }
-            if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
+            if families.isEmpty && model.searchPending(search) {
+                Text("Searching")
+                    .font(.footnote)
+                    .foregroundStyle(PhonePalette.muted)
+                    .listRowBackground(Color.clear)
+            } else if families.isEmpty && empty.isEmpty && !model.searching && !listingMore {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : scope == .archived ? "Nothing archived" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
@@ -359,6 +364,7 @@ struct ConversationListView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(14)
+        .holdsOrder(model)
         .phoneBackdrop(.list)
         .navigationTitle("Sessions")
         .searchable(text: $search, prompt: "Search sessions")

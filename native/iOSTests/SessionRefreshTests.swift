@@ -199,17 +199,16 @@ final class SessionRefreshTests: XCTestCase {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
         await model.refresh()
-        func running(_ search: String = "") -> [String] { model.sessionTree(scope: .running, search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
-        XCTAssertTrue(running().contains("computer::demo"))
-        for search in ["", "demo", "zzz-no-match"] {
-            XCTAssertEqual(model.sessionTree(scope: .recent, search: search).counts[.running], running(search).count, "the Running chip counts what Running lists for \"\(search)\"")
-        }
+        await model.listMore(.running)
+        func running() -> [String] { model.sessionTree(scope: .running, search: "").projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } } }
+        XCTAssertTrue(running().contains("computer::demo"), "Running lists the daemon's running rows")
 
         SessionRefreshProtocol.state.set(snapshotStatus: "idle")
         await model.refresh()
+        model.connection("computer")!.rereadOrder()
+        try? await waitUntil(timeout: 3) { !running().contains("computer::demo") }
 
-        XCTAssertFalse(running().contains("computer::demo"))
-        XCTAssertEqual(model.sessionTree(scope: .running, search: "zzz-no-match").projects.count, 0)
+        XCTAssertFalse(running().contains("computer::demo"), "a session that stopped leaves Running once the order is read again")
     }
 
     @MainActor
@@ -527,6 +526,14 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         object["session"] = session
         return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
+    static func scoped(_ body: String, _ scope: String?) -> String {
+        guard let scope, var object = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any] else { return body }
+        if scope == "running", let sessions = object["sessions"] as? [[String: Any]] {
+            object["sessions"] = sessions.filter { $0["status"] as? String == "busy" }
+        }
+        return PreviewOrder.withView(String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+    }
+
     static func snapshot(status: String, canStream: Bool, fields: String) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
         var sessions = object["sessions"] as! [[String: Any]]
@@ -553,8 +560,9 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         switch request.url?.path {
         case "/api/v1/session", "/api/v1/snapshot":
             let detail = request.url?.path == "/api/v1/session"
+            let scope = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "scope" }?.value
             DispatchQueue.global().async { [self] in
-                finish(status: 200, body: detail ? Self.state.detailResponse() : Self.state.snapshotResponse())
+                finish(status: 200, body: detail ? Self.state.detailResponse() : Self.scoped(Self.state.snapshotResponse(), scope))
             }
             return
         case "/api/v1/session-metadata":
