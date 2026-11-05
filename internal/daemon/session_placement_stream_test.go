@@ -31,19 +31,26 @@ func TestWithPlacementOnAnEmptySessionObject(t *testing.T) {
 	}
 }
 
-func TestWithPlacementReplacesAStoredPlacement(t *testing.T) {
-	served, err := withPlacement([]byte(`{"session":{"id":"s1","surface":"claude","status":"idle","placement":"stale"}}`))
+func TestWithPlacementReplacesOnlyAStoredPlacementValue(t *testing.T) {
+	payload := []byte(`{"echo":{"id":"s1"},  "session": { "status":"idle","placement" :  "stale", "id":"s1","surface":"claude","future":{"placement":"nested","z":[1, 2]}} }`)
+	served, err := withPlacement(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded struct {
-		Session dashboardSession `json:"session"`
+	fresh := `"` + sessionPlacement(dashboardSession{ID: "s1", Surface: surface.KindClaude, Status: surface.StatusIdle}) + `"`
+	if want := bytes.Replace(payload, []byte(`"stale"`), []byte(fresh), 1); !bytes.Equal(served, want) {
+		t.Fatalf("served %s\nwant   %s", served, want)
 	}
-	if err := json.Unmarshal(served, &decoded); err != nil {
+}
+
+func TestWithPlacementFindsTheSessionMemberNotAnEarlierCopy(t *testing.T) {
+	payload := []byte(`{"before":{"id":"s1","surface":"claude","status":"idle"},"session":{"id":"s1","surface":"claude","status":"idle"}}`)
+	served, err := withPlacement(payload)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Session.Placement == "stale" || decoded.Session.Placement != sessionPlacement(dashboardSession{ID: "s1", Surface: surface.KindClaude, Status: surface.StatusIdle}) {
-		t.Fatalf("placement=%q", decoded.Session.Placement)
+	if !bytes.HasPrefix(served, []byte(`{"before":{"id":"s1","surface":"claude","status":"idle"},"session":{"id":"s1","surface":"claude","status":"idle","placement":"`)) {
+		t.Fatalf("served %s", served)
 	}
 }
 

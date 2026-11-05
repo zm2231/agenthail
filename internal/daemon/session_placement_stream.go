@@ -17,10 +17,6 @@ func withPlacement(payload []byte) ([]byte, error) {
 	if !ok {
 		return payload, nil
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, err
-	}
 	var row dashboardSession
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return nil, err
@@ -29,24 +25,49 @@ func withPlacement(payload []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, stored := fields["placement"]; stored {
-		fields["placement"] = placement
-		if envelope["session"], err = json.Marshal(fields); err != nil {
-			return nil, err
-		}
-		return json.Marshal(envelope)
-	}
-	at := bytes.Index(payload, raw)
-	end := bytes.LastIndexByte(raw, '}')
-	if at < 0 || end < 0 {
+	at, _, _, err := topLevelValue(payload, "session")
+	if err != nil || at < 0 {
 		return nil, errPlacementPayload
 	}
-	member := append([]byte(`"placement":`), placement...)
-	if len(fields) > 0 {
-		member = append([]byte(","), member...)
+	start, end, members, err := topLevelValue(raw, "placement")
+	if err != nil {
+		return nil, err
 	}
-	spliced := make([]byte, 0, len(payload)+len(member))
-	spliced = append(spliced, payload[:at+end]...)
-	spliced = append(spliced, member...)
+	insert := placement
+	if start < 0 {
+		start = bytes.LastIndexByte(raw, '}')
+		end = start
+		insert = append([]byte(`"placement":`), placement...)
+		if members > 0 {
+			insert = append([]byte(","), insert...)
+		}
+	}
+	spliced := make([]byte, 0, len(payload)+len(insert))
+	spliced = append(spliced, payload[:at+start]...)
+	spliced = append(spliced, insert...)
 	return append(spliced, payload[at+end:]...), nil
+}
+
+func topLevelValue(object []byte, key string) (start, end, members int, err error) {
+	decoder := json.NewDecoder(bytes.NewReader(object))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return -1, -1, 0, errPlacementPayload
+	}
+	start, end = -1, -1
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return -1, -1, 0, err
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return -1, -1, 0, err
+		}
+		members++
+		if name == key {
+			end = int(decoder.InputOffset())
+			start = end - len(value)
+		}
+	}
+	return start, end, members, nil
 }
