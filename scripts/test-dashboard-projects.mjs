@@ -17,23 +17,43 @@ const sessions = [
   { id: "kept", name: "kept", surface: "claude", status: "idle", lastActive: at(40), project: notes, archived: true },
   { id: "loose", name: "loose", surface: "claude", status: "idle", lastActive: at(2), current: true },
 ];
+const family = (id, projectId) => ({ id, rootId: id, projectId, members: [{ id, depth: 0, contextOnly: false }] });
+const widgetOrder = ["lead", "busy", "queued", "flagged", "w3", "w0", "w1", "w2", "w4", "w5", "w6"];
+const sessionOrder = {
+  current: { projects: [], families: [family("busy", widget.id), family("w0", widget.id), family("far", vps.id), family("loose", "")] },
+  all: {
+    projects: [{ id: widget.id, collapsedFamilyIds: widgetOrder.slice(0, 9) }, { id: vps.id, collapsedFamilyIds: ["far"] }],
+    families: [...widgetOrder.map((id) => family(id, widget.id)), family("far", vps.id), family("loose", "")],
+  },
+  archived: { projects: [{ id: notes.id, collapsedFamilyIds: ["kept"] }, { id: widget.id, collapsedFamilyIds: ["hidden"] }], families: [family("kept", notes.id), family("hidden", widget.id)] },
+};
 const context = {
-  app: { state: { sessions, projects: [widget, vps, notes], attention: [{ sessionId: "flagged" }] }, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
+  app: { state: { sessions, projects: [widget, vps, notes], attention: [{ sessionId: "flagged" }] }, sessionOrder, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
   labels: { codex: "Codex", claude: "Claude Code" },
   escape: (value) => String(value ?? "").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"),
   displayName: (session) => session.name, rawDisplayName: (session) => session.name,
   presenceTone: () => "idle", presenceLabel: () => "Ready", livePlan: () => null,
 };
-await dashboardModules(["session-scope", "projects", "holders", "session-row", "project-model", "hosts"], context);
+await dashboardModules(["session-order", "session-scope", "projects", "holders", "session-row", "project-model", "hosts"], context);
 const ids = (list) => list.map((session) => session.id).join(",");
-assert.equal(ids(vm.runInContext("scopedSessions()", context)), "w0,busy,far,loose", "Current hides archived sessions");
+assert.equal(ids(vm.runInContext("scopedSessions()", context)), "busy,w0,far,loose", "Current lists the daemon's current view in its order");
 context.app.inboxMode = "all";
 assert(!ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "All hides archived sessions by default");
 context.app.showArchived = true;
-assert(ids(vm.runInContext("scopedSessions()", context)).includes("hidden"), "Show archived lists them");
+assert(ids(vm.runInContext("scopedSessions()", context)).endsWith("hidden"), "Show archived lists them after the rest");
 const { html, count } = vm.runInContext('renderProjects("")', context);
 assert.equal(count, 2);
 const widgetSection = html.slice(0, html.indexOf("</section>"));
+assert.equal([...widgetSection.matchAll(/data-session="([^"]+)"/g)].map((match) => match[1]).join(","), widgetOrder.slice(0, 9).join(","), "a collapsed project shows the daemon's collapsed families in the daemon's order, not by last activity");
+context.app.expandedProjects.add(widget.id);
+const expanded = vm.runInContext('renderProjects("")', context).html;
+assert.equal([...expanded.slice(0, expanded.indexOf("</section>")).matchAll(/data-session="([^"]+)"/g)].map((match) => match[1]).join(","), widgetOrder.join(","), "an expanded project shows every family in the daemon's order");
+assert.match(expanded, /Show less/);
+context.app.expandedProjects.clear();
+context.app.sessionOrder = { ...sessionOrder, all: { ...sessionOrder.all, projects: [...sessionOrder.all.projects].reverse() } };
+const reordered = vm.runInContext('renderProjects("")', context).html;
+assert(reordered.indexOf('data-project-open="h1::project-widget"') < reordered.indexOf('data-project-open="project-widget"'), "projects follow the daemon's project order");
+context.app.sessionOrder = sessionOrder;
 assert.match(widgetSection, /<button class="project-name" type="button" data-project-open="project-widget"[^>]*>widget<\/button><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header opens the project and counts its sessions");
 for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
 assert.doesNotMatch(widgetSection, /data-session="w5"/, "older idle sessions collapse");

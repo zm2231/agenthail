@@ -2,6 +2,7 @@ import { app } from "./state.js";
 import { escape, labels, timeAgo } from "./format.js";
 import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
+import { projectSessions } from "./session-order.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -25,15 +26,13 @@ export function leadSessionID(lead) {
   return `${lead.host.id}::${lead.sessionId}`;
 }
 
-export function projectContents(project, sessions) {
+export function projectContents(project) {
   const lead = (project.coordinators || [])[0] || null;
   const leadID = leadSessionID(lead);
-  const members = sessions
-    .filter((session) => session.project?.id === project.id && !session.subagent?.parentId && !session.archived && session.id !== leadID)
-    .sort((a, b) => activity(b) - activity(a));
+  const members = projectSessions("all", project.id).filter((session) => !session.subagent?.parentId && session.id !== leadID);
   return {
     lead,
-    leadSession: leadID ? sessions.find((session) => session.id === leadID) || null : null,
+    leadSession: leadID ? app.state.sessions.find((session) => session.id === leadID) || null : null,
     running: members.filter(sessionRunning),
     recent: members.filter((session) => session.current && !sessionRunning(session)),
     earlier: members.filter((session) => !session.current && !sessionRunning(session)),
@@ -108,7 +107,7 @@ function folders(project) {
 }
 
 export function renderProjectView(project) {
-  const contents = projectContents(project, app.state.sessions);
+  const contents = projectContents(project);
   const computers = new Set((project.checkouts || []).map((checkout) => checkout.host.id)).size;
   const count = contents.running.length + contents.recent.length + contents.earlier.length + (contents.leadSession ? 1 : 0);
   const id = escape(project.id);

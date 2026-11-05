@@ -1,19 +1,33 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"time"
 )
 
+const (
+	sessionBandNeedsYou = iota
+	sessionBandActive
+	sessionBandIdle
+)
+
 type sessionViewKey struct {
-	Activity time.Time `json:"activity"`
-	ID       string    `json:"id"`
+	Band int       `json:"band"`
+	At   time.Time `json:"at"`
+	ID   string    `json:"id"`
 }
 
 func (a sessionViewKey) before(b sessionViewKey) bool {
-	if !a.Activity.Equal(b.Activity) {
-		return a.Activity.After(b.Activity)
+	if a.Band != b.Band {
+		return a.Band < b.Band
+	}
+	if !a.At.Equal(b.At) {
+		if a.Band == sessionBandNeedsYou {
+			return a.At.Before(b.At)
+		}
+		return a.At.After(b.At)
 	}
 	return a.ID < b.ID
 }
@@ -32,7 +46,12 @@ func encodeSessionViewCursor(request sessionViewRequest, after sessionViewKey) s
 func decodeSessionViewCursor(raw string) (sessionViewCursor, bool) {
 	var cursor sessionViewCursor
 	encoded, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil || json.Unmarshal(encoded, &cursor) != nil || cursor.After.ID == "" {
+	if err != nil {
+		return cursor, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&cursor) != nil || cursor.After.ID == "" || cursor.After.Band < sessionBandNeedsYou || cursor.After.Band > sessionBandIdle {
 		return cursor, false
 	}
 	return cursor, true

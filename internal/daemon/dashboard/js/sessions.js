@@ -31,7 +31,7 @@ export function renderSessions() {
     $("#session-filters").hidden = true;
     $("#show-archived-row").hidden = true;
     syncInboxModeButtons();
-    $("#filter-summary").textContent = projects.count ? `${projects.count} ${projects.count === 1 ? "project" : "projects"}, most recent first` : "No projects yet";
+    $("#filter-summary").textContent = projects.count ? `${projects.count} ${projects.count === 1 ? "project" : "projects"}, active first` : "No projects yet";
     $("#session-list").innerHTML = projects.html || '<div class="empty-state compact"><p>Sessions in a Git repository or an added folder appear here.</p></div>';
     $("#session-more").hidden = true;
     return;

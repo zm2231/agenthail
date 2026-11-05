@@ -123,9 +123,26 @@ func newSessionViewPlan(rows []dashboardSession, scope string, filters SessionVi
 	return p
 }
 
+const sessionHold = 10 * time.Minute
+
+func presentationNeedsYou(row *dashboardSession) bool {
+	return row.Attention != nil && row.Attention.Kind != AttentionReplacedRequest
+}
+
+func presentationWaitingSince(row *dashboardSession) time.Time {
+	if row.WaitingOn == nil {
+		return time.Time{}
+	}
+	return row.WaitingOn.Since
+}
+
+func (p *sessionViewPlan) held(activity time.Time) bool {
+	return !activity.IsZero() && activity.After(p.now.Add(-sessionHold))
+}
+
 func presentationBefore(a, b dashboardSession) bool {
-	if !a.LastActive.Equal(b.LastActive) {
-		return a.LastActive.After(b.LastActive)
+	if !a.RegisteredAt.Equal(b.RegisteredAt) {
+		return a.RegisteredAt.After(b.RegisteredAt)
 	}
 	return a.ID < b.ID
 }
@@ -173,6 +190,8 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 		if row.Checkout != nil {
 			family.CheckoutID = row.Checkout.ID
 		}
+		needsYou := false
+		var waitingSince time.Time
 		var walk func(string, int)
 		walk = func(at string, depth int) {
 			if !needed[at] {
@@ -182,6 +201,12 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 			pinned := matched[at] && presentationPinned(member)
 			family.Members = append(family.Members, SessionViewMember{ID: at, Depth: depth, ContextOnly: !matched[at], Pinned: pinned})
 			family.Pinned = family.Pinned || pinned
+			if matched[at] && presentationNeedsYou(member) {
+				needsYou = true
+				if since := presentationWaitingSince(member); !since.IsZero() && (waitingSince.IsZero() || since.Before(waitingSince)) {
+					waitingSince = since
+				}
+			}
 			if matched[at] && member.LastActive.After(family.activity) {
 				family.activity = member.LastActive
 			}
@@ -191,6 +216,17 @@ func (p *sessionViewPlan) families(scope string, filters SessionViewFilters) []S
 		}
 		walk(id, 0)
 		family.WorkingSubagents = p.working[id]
+		family.key = sessionViewKey{Band: sessionBandIdle, At: family.activity, ID: id}
+		switch {
+		case needsYou:
+			family.key.Band, family.key.At = sessionBandNeedsYou, row.RegisteredAt
+			if !waitingSince.IsZero() {
+				family.key.At = waitingSince
+			}
+		case family.Pinned || p.held(family.activity):
+			family.key.Band, family.key.At = sessionBandActive, row.RegisteredAt
+		}
+		family.Pinned = family.key.Band != sessionBandIdle
 		families = append(families, family)
 	}
 	return families
@@ -218,7 +254,7 @@ func (p *sessionViewPlan) summary(families []SessionViewFamily) SessionViewSumma
 			}
 			row := p.rows[member.ID]
 			result.QueuedMessages += row.QueueCount
-			attention = attention || (row.Attention != nil && row.Attention.Kind != AttentionReplacedRequest)
+			attention = attention || presentationNeedsYou(row)
 		}
 		if attention {
 			result.AttentionFamilies++

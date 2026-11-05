@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,7 @@ func (p *sessionViewPlan) deadline(at time.Time) {
 func (p *sessionViewPlan) deadlines(row dashboardSession) {
 	if !row.LastActive.IsZero() {
 		p.deadline(row.LastActive.Add(24*time.Hour + time.Nanosecond))
+		p.deadline(row.LastActive.Add(sessionHold))
 	}
 	if row.UsageLimit != nil {
 		p.deadline(row.UsageLimit.ResetsAt)
@@ -44,9 +46,7 @@ func (p *sessionViewPlan) orderProjects() {
 		count := countViewFamilies([]SessionViewFamily{family})
 		project.Counts.Families += count.Families
 		project.Counts.Sessions += count.Sessions
-		if family.activity.After(project.activity) {
-			project.activity = family.activity
-		}
+		project.active = project.active || family.Pinned
 	}
 	for _, project := range projects {
 		p.view.Projects = append(p.view.Projects, *project)
@@ -56,8 +56,14 @@ func (p *sessionViewPlan) orderProjects() {
 		if (a.ID == "") != (b.ID == "") {
 			return a.ID != ""
 		}
-		if !a.activity.Equal(b.activity) {
-			return a.activity.After(b.activity)
+		if a.active != b.active {
+			return a.active
+		}
+		if folded, other := strings.ToLower(a.Name), strings.ToLower(b.Name); folded != other {
+			return folded < other
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
 		}
 		return a.ID < b.ID
 	})
@@ -70,13 +76,7 @@ func (p *sessionViewPlan) orderProjects() {
 		if a.ProjectID != b.ProjectID {
 			return rank[a.ProjectID] < rank[b.ProjectID]
 		}
-		if a.Pinned != b.Pinned {
-			return a.Pinned
-		}
-		if !a.activity.Equal(b.activity) {
-			return a.activity.After(b.activity)
-		}
-		return a.ID < b.ID
+		return a.key.before(b.key)
 	})
 	ordinary := map[string]int{}
 	for _, family := range p.view.Families {
@@ -91,9 +91,6 @@ func (p *sessionViewPlan) orderProjects() {
 			index := rank[family.ProjectID]
 			p.view.Projects[index].CollapsedFamilyIDs = append(p.view.Projects[index].CollapsedFamilyIDs, family.ID)
 		}
-	}
-	for i := range p.view.Families {
-		p.view.Families[i].key = sessionViewKey{Activity: p.view.Families[i].activity, ID: p.view.Families[i].ID}
 	}
 	sort.Slice(p.view.Families, func(i, j int) bool {
 		return p.view.Families[i].key.before(p.view.Families[j].key)
