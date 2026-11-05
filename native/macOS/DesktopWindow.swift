@@ -195,7 +195,7 @@ struct SessionSidebar: View {
                     }
                     ForEach(tree.projects) { project in
                         let expanded = expandedProjects.contains(project.id)
-                        let shown = expanded ? project : project.collapsed(keeping: pane.selectedSessionID)
+                        let shown = project.shown(expanded: expanded, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
                             ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
@@ -217,8 +217,8 @@ struct SessionSidebar: View {
                                     familyRows(family, attention: tree.attention)
                                 }
                             }
-                            if project.familyTotal > shown.sessionCount || expanded && project.familyTotal > project.collapsed.count {
-                                Button(expanded ? "Show less" : "Show \(project.familyTotal - shown.sessionCount) more") {
+                            if let more = project.moreLabel(expanded: expanded, keeping: pane.selectedSessionID) {
+                                Button(more) {
                                     if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
                                 }
                                 .buttonStyle(.plain)
@@ -358,7 +358,7 @@ extension SessionSidebar {
         }
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
-            let shown = expandedProjects.contains(project.id) ? project : project.collapsed(keeping: pane.selectedSessionID)
+            let shown = project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID)
             for family in shown.checkouts.flatMap(\.families) {
                 let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
                 ids += rows.filter { !ids.contains($0) }

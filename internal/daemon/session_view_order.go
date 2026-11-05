@@ -71,16 +71,14 @@ func (p *sessionViewPlan) orderProjects() {
 		}
 		return a.key.before(b.key)
 	})
-	ordinary := map[string]int{}
+	shown := map[string]int{}
 	for _, family := range p.view.Families {
 		selected := false
 		for _, member := range family.Members {
 			selected = selected || member.ID == p.view.Filters.SelectedID
 		}
-		if !family.Pinned {
-			ordinary[family.ProjectID]++
-		}
-		if family.Pinned || ordinary[family.ProjectID] <= 5 || selected {
+		shown[family.ProjectID]++
+		if family.Pinned || shown[family.ProjectID] <= 5 || selected {
 			index := rank[family.ProjectID]
 			p.view.Projects[index].CollapsedFamilyIDs = append(p.view.Projects[index].CollapsedFamilyIDs, family.ID)
 		}

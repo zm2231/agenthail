@@ -45,7 +45,20 @@ struct SessionTreeTest {
         expect(ids(tree) == ["zeta", "old", "alpha", "busy"], "families keep daemon order inside each checkout, a family without a row is skipped: \(ids(tree))")
         expect(tree.projects[1].checkouts.map(\.label) == ["main", "feat/x"], "checkouts appear in the order their first family does")
         expect(tree.counts[.running] == 1 && tree.counts[.all] == 4 && tree.counts[.archived] == nil, "counts are the daemon's: \(tree.counts)")
-        expect(tree.projects[0].pinned == ["zeta"], "pinned comes from the view")
+        let eight = ["w1", "w2", "i1", "i2", "i3", "i4", "i5", "i6"]
+        let fiveView = view(eight.map { family($0, project: "five", pinned: $0.hasPrefix("w")) }, projects: [("five", ["w1", "w2", "i1", "i2", "i3"])])
+        let five = SessionTree.ordered(list: fiveView, current: nil, rows: rows(eight.map { session($0, project: "five") }), attention: [:]).projects[0]
+        expect(five.collapsed(keeping: nil).checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3"], "two pinned and six idle collapse to the daemon's five")
+        expect(five.collapsed(keeping: "i6").checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3", "i6"], "a selected sixth idle family is added in its place")
+        expect(five.moreLabel(expanded: false, keeping: nil) == "Show 3 more" && five.moreLabel(expanded: false, keeping: "i6") == "Show 2 more" && five.moreLabel(expanded: true, keeping: nil) == "Show less", "the more row counts what collapse hides")
+        expect(five.shown(expanded: true, keeping: nil).sessionCount == 8, "an expanded project shows every family")
+        let small = SessionTree.ordered(list: view([family("a", project: "small"), family("b", project: "small")], projects: [("small", ["a", "b"])]), current: nil, rows: rows([session("a", project: "small"), session("b", project: "small")]), attention: [:]).projects[0]
+        expect(small.moreLabel(expanded: false, keeping: nil) == nil && small.moreLabel(expanded: true, keeping: nil) == nil, "a project within five has no more row")
+        let pinnedIDs = (0..<250).map { "p\($0)" }
+        let pagedView = ScopePage.View(counts: [:], surfaces: [], projects: [ViewProject(id: "paged", name: "paged", counts: ScopePage.Count(families: 250, sessions: 250), collapsedFamilyIds: pinnedIDs)], families: pinnedIDs.prefix(50).map { family($0, project: "paged", pinned: true) })
+        let paged = SessionTree.ordered(list: pagedView, current: nil, rows: rows(pinnedIDs.prefix(50).map { session($0, project: "paged") }), attention: [:]).projects[0]
+        expect(paged.moreLabel(expanded: true, keeping: nil) == "Show less", "an expanded project with pages still to load can fold back")
+        expect(paged.moreLabel(expanded: false, keeping: nil) == "Show 200 more" && paged.shown(expanded: false, keeping: nil).sessionCount == 50, "a collapsed paged project shows its loaded collapsed families: \(String(describing: paged.moreLabel(expanded: false, keeping: nil)))")
         let collapsed = tree.projects[1].collapsed(keeping: nil)
         expect(collapsed.checkouts.flatMap(\.families).map(\.id) == ["old"], "collapse shows exactly the daemon's collapsed families")
         expect(tree.projects[1].collapsed(keeping: "busy").checkouts.flatMap(\.families).map(\.id) == ["old", "busy"], "the selected family stays visible in its daemon place")
