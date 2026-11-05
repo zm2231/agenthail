@@ -237,7 +237,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			return nil, err
 		}
 	}
-	ctx = surface.WithSourceSessionID(ctx, sourceID)
+	ctx = surface.WithAuthor(surface.WithSourceSessionID(ctx, sourceID), author)
 	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, err
 		}
 	}
-	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
+	ctx = surface.WithAuthor(surface.WithSourceSessionID(ctx, options.SourceSessionID), options.Author)
 	if err := d.ensureDeliverable(ctx, adapter, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err

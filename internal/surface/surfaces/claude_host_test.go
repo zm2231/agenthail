@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -221,6 +222,24 @@ func TestOnlyThePersonAndAgenthailSteerAHostSessionsOwnTurn(t *testing.T) {
 	turns := fixture.Turns(t, target)
 	if len(turns) != 2 || turns[0].Text != surface.CLILabel+"from the CLI" || hasOrigin(turns[0]) || turns[1].Text != "from the person" || !hasOrigin(turns[1]) {
 		t.Fatalf("turns = %+v, want the CLI's steer under its label and the person's as theirs, and nothing of the agent's", turns)
+	}
+}
+
+func TestThePersonsWordsRelayedByVoiceSteerAHostSessionAsTheirs(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	operator, target := uuid.NewString(), uuid.NewString()
+	fixture.Open(t, client, operator)
+	fixture.Open(t, client, target)
+	listedSession(t, c, operator)
+	sess := listedSession(t, c, target)
+	ctx := surface.WithSourceSessionID(context.Background(), operator)
+	if _, err := (delivery.Dispatcher{}).Steer(ctx, c, sess, "use the staging database", surface.AuthorPerson); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the steer", 15*time.Second, func() bool { return len(fixture.Turns(t, target)) == 1 })
+	if turn := fixture.Turns(t, target)[0]; turn.Text != "use the staging database" || !hasOrigin(turn) {
+		t.Fatalf("turn = %+v, want the person's words as their own turn", turn)
 	}
 }
 

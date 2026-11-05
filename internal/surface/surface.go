@@ -675,6 +675,20 @@ func SourceSessionID(ctx context.Context) string {
 	return id
 }
 
+type authorContextKey struct{}
+
+func WithAuthor(ctx context.Context, author Author) context.Context {
+	return context.WithValue(ctx, authorContextKey{}, author)
+}
+
+func ContextAuthor(ctx context.Context) Author {
+	if ctx == nil {
+		return ""
+	}
+	author, _ := ctx.Value(authorContextKey{}).(Author)
+	return author
+}
+
 type replyTargetContextKey struct{}
 
 // WithReplyTarget carries how the target's host addresses the sender, so a

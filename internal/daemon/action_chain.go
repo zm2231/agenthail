@@ -27,6 +27,11 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	if json.Unmarshal(raw, &request) != nil {
 		return d.decodeAction(ctx, p, raw, key)
 	}
+	if author, _ := request["author"].(string); p.Kind == principalSession && author != "" {
+		return replyWith(func(w http.ResponseWriter) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a session cannot name an author; its messages are its own")
+		})
+	}
 	host, rewritten, err := d.routeActionRequest(ctx, request)
 	if err != nil {
 		return replyWith(func(w http.ResponseWriter) {
