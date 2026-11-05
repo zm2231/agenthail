@@ -205,6 +205,11 @@ func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *test
 	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
 	turn := f.host.Turns(t, spec.SessionID)[0]
 
+	coordinator, err := f.registry.Session(spec.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalSource(f.daemon, *coordinator, nil).append(liveEvent(typedPrompt(turn.UUID, "first", turn.Text, time.Now())))
 	handler := f.daemon.dashboardHandler(&dashboardServer{token: "test-token"})
 	for _, copy := range []ledgerCaptureRequest{
 		{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text},

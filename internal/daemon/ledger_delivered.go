@@ -44,6 +44,27 @@ func (w *deliveredWords) addStart(uuid, turn, words string, at time.Time) {
 	w.hold(startingSession, deliveredEntry{uuid: uuid, turn: strings.TrimSpace(turn), words: words, at: at})
 }
 
+// settleStart moves a first turn to the session that took it, so no other
+// session's prompt can claim it, and drops it when the start made none.
+func (w *deliveredWords) settleStart(uuid, sessionID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	starting := w.bySession[startingSession]
+	for i, entry := range starting {
+		if entry.uuid != uuid {
+			continue
+		}
+		w.bySession[startingSession] = append(starting[:i:i], starting[i+1:]...)
+		if len(w.bySession[startingSession]) == 0 {
+			delete(w.bySession, startingSession)
+		}
+		if sessionID != "" {
+			w.bySession[sessionID] = append(w.bySession[sessionID], entry)
+		}
+		return
+	}
+}
+
 func (w *deliveredWords) hold(sessionID string, entry deliveredEntry) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

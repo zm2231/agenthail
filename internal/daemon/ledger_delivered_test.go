@@ -162,3 +162,18 @@ func TestDeliveredWordsAreForgottenOnceNoHookCanStillAsk(t *testing.T) {
 		t.Fatalf("kept %d sessions' deliveries past the time any hook could claim them", len(w.bySession))
 	}
 }
+
+func TestAFirstTurnWhoseStartFailedIsNeverClaimedByItsRetry(t *testing.T) {
+	var w deliveredWords
+	start := time.Now()
+	w.addStart("failed", "[started] hello", "hello", start)
+	w.settleStart("failed", "")
+	w.addStart("retried", "[started] hello", "hello", start.Add(time.Second))
+	w.settleStart("retried", "lead")
+	if got, words, ok := w.claim("lead", "prompt", "", "[started] hello", start.Add(2*time.Second)); !ok || got != "retried" || words != "hello" {
+		t.Fatalf("claim = %q %q %v, want the retried start", got, words, ok)
+	}
+	if _, _, ok := w.claim("other", "elsewhere", "", "[started] hello", start.Add(2*time.Second)); ok {
+		t.Fatal("another session's prompt claimed a settled first turn")
+	}
+}
