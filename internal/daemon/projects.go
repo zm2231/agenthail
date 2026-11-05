@@ -716,6 +716,11 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogPro
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
+	if id, kept, err := d.Registry.RemovedProjectLedger(record.WorkspaceRoot); err != nil {
+		return CatalogProject{}, false, err
+	} else if kept {
+		record.ID = id
+	}
 	err = d.Registry.AddProject(record)
 	var taken *registry.WorkspaceTakenError
 	if errors.As(err, &taken) {

@@ -28,7 +28,7 @@ func TestTheReplicaChecksItsLogAgainstTheOwnersAndFindsTheFirstDifference(t *tes
 	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Search"}, nil)
 	capturePrompt(t, mac, "local-a", "p-two", "second words")
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	testkit.Eventually(t, "the replica reports a matching log", 20*time.Second, func() bool {
 		view := syncViewOf(t, mac)
 		return view.Log == "match" && view.LogThrough == view.Cursor && view.Cursor > 0

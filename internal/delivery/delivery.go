@@ -43,6 +43,27 @@ type PersonCaptureContext struct {
 
 type PersonCaptureFunc func(PersonCaptureContext)
 
+// PersonStartContext is a conversation the person's message starts: Turn is
+// the first prompt the new session receives, and Message is the person's
+// part of it.
+type PersonStartContext struct {
+	IntentUUID string
+	Turn       string
+	Message    string
+}
+
+// PersonStartFunc holds a person's first words before the session that takes
+// them exists, so its prompt hook records them as the person's. The start
+// then settles them on the session it made, or on "" when it made none.
+type PersonStartFunc func(PersonStartContext) (settle func(sessionID string))
+
+func (d Dispatcher) CapturePersonStart(sourceID, intentUUID, turn, message string) func(sessionID string) {
+	if d.PersonStart == nil || sourceID != surface.PersonSessionID || intentUUID == "" {
+		return func(string) {}
+	}
+	return d.PersonStart(PersonStartContext{IntentUUID: intentUUID, Turn: turn, Message: message})
+}
+
 func (d Dispatcher) capturePerson(sourceID string, session *surface.Session, intentUUID, message string) {
 	if d.PersonCapture != nil && sourceID == surface.PersonSessionID && intentUUID != "" {
 		d.PersonCapture(PersonCaptureContext{Target: *session, IntentUUID: intentUUID, Message: message})
@@ -70,6 +91,7 @@ type Dispatcher struct {
 	Registry         *registry.Registry
 	ProblemCommitted func()
 	PersonCapture    PersonCaptureFunc
+	PersonStart      PersonStartFunc
 	// Oversees reports whether an agent is the session's lead or the session
 	// that started it; without it no agent steers.
 	Oversees func(sourceID string, session surface.Session) bool

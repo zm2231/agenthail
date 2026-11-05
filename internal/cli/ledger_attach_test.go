@@ -15,10 +15,16 @@ import (
 
 func ledgerWriteFixture(t *testing.T, respond func(path string, body map[string]any) (int, any)) (*App, *[]map[string]any) {
 	t.Helper()
+	return ledgerWriteFixtureFor(t, registry.ProjectRecord{ID: "proj", Title: "proj", Key: "repo:github.com/acme/widget"}, respond)
+}
+
+func ledgerWriteFixtureFor(t *testing.T, project registry.ProjectRecord, respond func(path string, body map[string]any) (int, any)) (*App, *[]map[string]any) {
+	t.Helper()
 	dir := t.TempDir()
 	s1 := surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle}
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"s1": s1}})
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "repo:github.com/acme/widget"}); err != nil {
+	project.WorkspaceRoot = dir
+	if err := store.AddProject(project); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RegisterSession(s1); err != nil {

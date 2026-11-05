@@ -32,7 +32,7 @@ func TestAnImportOnAHostThatDoesNotKeepTheLedgerLandsOnTheOwnerOnce(t *testing.T
 	if n := countEvents(t, owner.reg, ledger.EventWorkItem, ""); n != 2 {
 		t.Fatalf("the owner holds %d work items after two imports", n)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	board, err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Board(widgetKey)
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type ledgerGoalRequest struct {
@@ -85,7 +86,7 @@ func (d *Daemon) ledgerProjectKnown(key, sessionID string) (bool, error) {
 		return false, err
 	}
 	for _, p := range projects {
-		if p.Key == key {
+		if p.Key == key || p.Added && registry.LedgerProjectKey(p.ID) == key {
 			return true, nil
 		}
 	}

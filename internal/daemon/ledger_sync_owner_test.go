@@ -61,7 +61,7 @@ func TestALocalFailureAfterTheClaimAbortsIt(t *testing.T) {
 	if code, result, body := assignOwner(t, mac); code != http.StatusOK || !result.Confirmed {
 		t.Fatalf("retry after the failure: status=%d body=%s", code, body)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 }
 
 func TestALostConfirmStillLandsOnce(t *testing.T) {
@@ -78,7 +78,7 @@ func TestALostConfirmStillLandsOnce(t *testing.T) {
 			testkit.Eventually(t, "the owner confirms through sync", 20*time.Second, func() bool {
 				return ownerOf(t, owner) == owner.daemon.hostIdentity().ID
 			})
-			sameLedgerOnBothHosts(t, mac, owner)
+			sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 			for _, ref := range []string{before, after} {
 				if n := countEvents(t, owner.reg, ledger.EventUtterance, ref); n != 1 {
 					t.Fatalf("%s landed %d times on the owner", ref, n)
@@ -152,7 +152,7 @@ func TestAClaimLostBeforeConfirmStillConvergesWhicheverSideHeldHistory(t *testin
 				testkit.Eventually(t, "the owner confirms through sync", 30*time.Second, func() bool {
 					return ownerOf(t, owner) == owner.daemon.hostIdentity().ID
 				})
-				sameLedgerOnBothHosts(t, mac, owner)
+				sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 				for _, ref := range []string{history, after} {
 					if n := countEvents(t, owner.reg, ledger.EventUtterance, ref); n != 1 {
 						t.Fatalf("%s landed %d times on the owner", ref, n)
