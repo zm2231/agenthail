@@ -329,6 +329,7 @@ struct SessionPreview: View {
         let picture = #"{"id":21,\#(common),"status":"pending","heldBy":"busy","author":"person","message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]}"#
         let rows: [String]
         switch UserDefaults.standard.string(forKey: "preview-tail") {
+        case "none": rows = []
         case "many": rows = [picture, own(22, "Then rerun the suite."), own(23, "Add a note to the changelog."), own(24, "Close the old issue once it's green."), own(25, "And tag the release.")]
         case "peer": rows = [own(21, "Keep the regression check with the fix."), peer(22, "Check the release notes."), peer(23, "The build finished."), peer(24, "Ready for review."), peer(25, "One more thing.")]
         case "dead": rows = [#"{"id":21,"sessionId":"demo","target":"Make the build reliable","evidence":"unknown","attempts":2,"queuedAt":"2026-09-12T04:00:00.000000000Z","status":"dead","author":"person","lastError":"delivery outcome is unknown: the connection dropped","message":"Rerun the suite with the fix."}"#]

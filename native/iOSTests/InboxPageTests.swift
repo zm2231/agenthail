@@ -99,7 +99,7 @@ final class InboxPageTests: XCTestCase {
         InboxHostProtocol.requests = []
         let started = Date()
         var partials: [(TimeInterval, Int)] = []
-        let page = try await InboxPage.load(from: [host("slow"), host("older"), host("fast")], sessionID: nil) { partial in
+        let page = try await InboxPage.load(from: [host("slow"), host("older"), host("fast")]) { partial in
             partials.append((Date().timeIntervalSince(started), partial.messages.count))
         }
         let elapsed = Date().timeIntervalSince(started)
@@ -113,7 +113,7 @@ final class InboxPageTests: XCTestCase {
     }
 
     func testCurrentIsTheActiveQueueAndHistoryLeavesOutWhatCurrentShows() async throws {
-        let page = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        let page = try await InboxPage.load(from: [host("older"), host("fast")])
         XCTAssertEqual(page.active.map(\.listID), ["older/9"], "a finished row an older computer still sends is not current")
         XCTAssertEqual(page.history.map(\.listID), ["older/19", "fast/5", "older/18"])
     }
@@ -130,34 +130,34 @@ final class InboxPageTests: XCTestCase {
     }
 
     func testAComputerTooOldForTheInboxIsNamedAndOthersStillList() async throws {
-        let page = try await InboxPage.load(from: [host("dated"), host("fast")], sessionID: nil)
+        let page = try await InboxPage.load(from: [host("dated"), host("fast")])
         XCTAssertEqual(page.outdated, ["dated"])
         XCTAssertEqual(page.unreachable, [])
         XCTAssertEqual(page.messages.map(\.listID), ["fast/5"])
         XCTAssertEqual(page.active.map(\.listID), ["dated/9"], "its waiting rows are still its own")
 
-        let alone = try await InboxPage.load(from: [host("dated")], sessionID: nil)
+        let alone = try await InboxPage.load(from: [host("dated")])
         XCTAssertEqual(alone.outdated, ["dated"], "being the only computer is not a failure")
     }
 
     func testARemoteHostBehindAnOlderComputerShowsNoneOfThatComputersRows() async throws {
         InboxHostProtocol.requests = []
-        let page = try await InboxPage.load(from: [host("dated", remote: "peer")], sessionID: nil)
+        let page = try await InboxPage.load(from: [host("dated", remote: "peer")])
         XCTAssertEqual(page.outdated, ["dated"])
         XCTAssertEqual(page.active, [])
         XCTAssertEqual(Set(InboxHostProtocol.requests), ["dated.invalid/api/v1/queue?host=peer", "dated.invalid/api/v1/inbox?host=peer"])
     }
 
-    func testASessionInboxAsksForThatSessionAndPagesOlderHistory() async throws {
+    func testTheInboxPagesOlderHistory() async throws {
         InboxHostProtocol.requests = []
-        let first = try await InboxPage.load(from: [host("older")], sessionID: "s1")
-        XCTAssertEqual(Set(InboxHostProtocol.requests), ["older.invalid/api/v1/queue?sessionId=s1", "older.invalid/api/v1/inbox?sessionId=s1"])
+        let first = try await InboxPage.load(from: [host("older")])
+        XCTAssertEqual(Set(InboxHostProtocol.requests), ["older.invalid/api/v1/queue?", "older.invalid/api/v1/inbox?"])
         XCTAssertEqual(first.messages.map(\.sessionId), ["older::s1", "older::s1", "older::s1"])
         XCTAssertTrue(first.hasOlder)
 
         InboxHostProtocol.requests = []
-        let older = try await InboxPage.load(from: [host("older")], sessionID: "s1", before: first.cursors)
-        XCTAssertEqual(InboxHostProtocol.requests, ["older.invalid/api/v1/inbox?before=18&sessionId=s1"])
+        let older = try await InboxPage.load(from: [host("older")], before: first.cursors)
+        XCTAssertEqual(InboxHostProtocol.requests, ["older.invalid/api/v1/inbox?before=18"])
         let merged = first.appending(older)
         XCTAssertEqual(merged.messages.map(\.listID), ["older/20", "older/19", "older/18", "older/3"])
         XCTAssertFalse(merged.hasOlder)
@@ -170,11 +170,11 @@ final class InboxPageTests: XCTestCase {
 
     func testAHostThatFailsKeepsItsLoadedRowsAndCursor() async throws {
         defer { InboxHostProtocol.failing = [] }
-        let first = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        let first = try await InboxPage.load(from: [host("older"), host("fast")])
         XCTAssertEqual(first.cursors, ["older": 18])
 
         InboxHostProtocol.failing = ["older.invalid"]
-        let refresh = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        let refresh = try await InboxPage.load(from: [host("older"), host("fast")])
         XCTAssertEqual(refresh.unreachable, ["older"])
         let refreshed = first.refreshed(with: refresh)
         XCTAssertEqual(refreshed.messages.map(\.listID), ["older/20", "older/19", "fast/5", "older/18"])
@@ -183,7 +183,7 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(refreshed.unreachable, ["older"])
 
         do {
-            _ = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil, before: refreshed.cursors)
+            _ = try await InboxPage.load(from: [host("older"), host("fast")], before: refreshed.cursors)
             XCTFail("load older from only a failing host throws, leaving the page as it was")
         } catch {}
 
@@ -193,7 +193,7 @@ final class InboxPageTests: XCTestCase {
         XCTAssertEqual(twoHosts.appending(partlyFailed).cursors, ["older": 18], "a host that failed keeps its cursor; one that answered with no more pages drops it")
 
         InboxHostProtocol.failing = []
-        let back = try await InboxPage.load(from: [host("older"), host("fast")], sessionID: nil)
+        let back = try await InboxPage.load(from: [host("older"), host("fast")])
         XCTAssertEqual(refreshed.refreshed(with: back).unreachable, [])
     }
 
@@ -262,19 +262,10 @@ final class InboxPageTests: XCTestCase {
         model.setHostSnapshot(HostCatalogTests.snapshot([]), host: "hdesk")
 
         InboxHostProtocol.requests = []
-        let all = try await model.inboxPage(sessionID: nil)
+        let all = try await model.inboxPage()
         XCTAssertEqual(Set(InboxHostProtocol.requests.filter { $0.contains("/inbox") }), ["fast.invalid/api/v1/inbox?", "older.invalid/api/v1/inbox?", "fast.invalid/api/v1/inbox?host=hserver"])
         XCTAssertTrue(Set(all.messages.map(\.listID)).isSuperset(of: ["hlaptop/5", "hserver/5", "hdesk/19"]))
         XCTAssertTrue(all.messages.contains { $0.sessionId == "hserver::s1" })
-
-        InboxHostProtocol.requests = []
-        _ = try await model.inboxPage(sessionID: "hdesk::s1")
-        XCTAssertEqual(Set(InboxHostProtocol.requests), ["older.invalid/api/v1/queue?sessionId=s1", "older.invalid/api/v1/inbox?sessionId=s1"], "a session's inbox asks only its owner, by its own id")
-
-        InboxHostProtocol.requests = []
-        let remote = try await model.inboxPage(sessionID: "hserver::s1")
-        XCTAssertEqual(Set(InboxHostProtocol.requests), ["fast.invalid/api/v1/queue?sessionId=hserver::s1", "fast.invalid/api/v1/inbox?sessionId=hserver::s1"])
-        XCTAssertEqual(remote.messages.map(\.listID), ["hserver/5"])
 
         InboxHostProtocol.actions = []
         try await model.updateQueue(id: 9, hostID: "hserver", retry: true)

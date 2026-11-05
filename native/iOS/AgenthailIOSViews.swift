@@ -536,13 +536,20 @@ struct SessionScreen: View {
         }
     }
 
+    private func goToLatest() {
+        followingLatest = true
+        jumps += 1
+        position.scrollTo(edge: .bottom)
+        Task { await settleAtLatest() }
+    }
+
+    private var showQueuedRow: (() -> Void)? {
+        guard queueTail.lastShownID != nil else { return nil }
+        return { goToLatest() }
+    }
+
     private var jumpToLatest: some View {
-        Button {
-            followingLatest = true
-            jumps += 1
-            position.scrollTo(edge: .bottom)
-            Task { await settleAtLatest() }
-        } label: {
+        Button(action: goToLatest) {
             Image(systemName: "arrow.down")
                 .font(.body.weight(.semibold))
                 .frame(width: 44, height: 44)
@@ -706,7 +713,7 @@ struct SessionScreen: View {
                             .padding()
                     } else {
                         TurnNoticeCard(sessionID: liveSession.id, notice: liveSession.composerTurnNotice)
-                        IOSComposer(model: model, draft: model.draft, session: session, detail: detail)
+                        IOSComposer(model: model, draft: model.draft, session: session, detail: detail, showQueuedRow: showQueuedRow)
                     }
                 }
             }
@@ -784,6 +791,7 @@ struct IOSComposer: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: SessionState
     let detail: SessionDetail
+    let showQueuedRow: (() -> Void)?
     @State private var showingModels = false
     @State private var showingTurnSettings = false
     @State private var showingPrompts = false
@@ -900,7 +908,7 @@ struct IOSComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
-                    ComposerReceipt(model: model, sessionID: session.id, status: status)
+                    ComposerReceipt(status: status, showQueuedRow: showQueuedRow)
                 }
                 ComposerSendStatus(model: model, session: session)
                 if !model.composerAttachments.isEmpty {
@@ -1445,14 +1453,6 @@ struct SessionInspector: View {
                     } else { Text("This agent has not reported context usage.").foregroundStyle(PhonePalette.muted) }
                 }
                 SessionEditingControls(model: model, detail: detail)
-                Section {
-                    NavigationLink {
-                        QueueListView(model: model, sessionID: session.id) { id in
-                            dismiss()
-                            model.openSession(id)
-                        }
-                    } label: { Label("Session inbox", systemImage: "tray") }
-                }
                 if let goal = detail.goal {
                     Section("Goal") {
                         if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }

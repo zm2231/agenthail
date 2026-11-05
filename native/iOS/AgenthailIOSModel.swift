@@ -501,15 +501,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents.children(of: sessionID))
     }
 
-    func inboxPage(sessionID: String?, before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        if let sessionID {
-            guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
-                throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
-            }
-            let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
-            let name = catalog.hosts.first { $0.id == owner }?.name ?? connection.name
-            return try await InboxPage.load(from: [InboxPage.Host(id: owner, name: name, api: connection.api)], sessionID: route.sessionID, before: cursors, partial: partial)
-        }
+    func inboxPage(before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
         let direct = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
         let remote = catalog.hosts.compactMap { host -> InboxPage.Host? in
             guard let target = catalog.target(forHost: host.id), let peer = target.remote, let connection = connections[target.hostID] else { return nil }
@@ -517,7 +509,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         let hosts = direct + remote
         guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return try await InboxPage.load(from: hosts, sessionID: nil, before: cursors, partial: partial)
+        return try await InboxPage.load(from: hosts, before: cursors, partial: partial)
     }
 
     func editSession(id: String, action: String, text: String = "") async throws {

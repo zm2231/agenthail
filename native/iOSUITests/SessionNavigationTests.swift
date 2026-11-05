@@ -70,7 +70,6 @@ final class SessionNavigationTests: XCTestCase {
         menu.tapWhenReady()
         app.buttons["Session details"].tapWhenReady()
         XCTAssertFalse(app.buttons["Call this session"].exists)
-        let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
         let inspectorAnchor = app.staticTexts["session-inspector-anchor"]
         XCTAssertTrue(inspectorAnchor.waitForExistence(timeout: 5))
@@ -78,21 +77,9 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertNotNil(inspector)
         guard let inspector else { return }
         for _ in 0..<5 {
-            if waitUntilHittable(inbox, timeout: 2) { break }
+            XCTAssertFalse(app.buttons["Session inbox"].exists)
             inspector.swipeUp()
         }
-        XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
-        inbox.tapWhenReady()
-        let inboxEntry = app.buttons["inbox-session-1"]
-        inboxEntry.tapWhenReady()
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Session details"].exists)
-        let receipt = app.buttons["latest-instruction"]
-        XCTAssertTrue(receipt.waitForExistence(timeout: 5))
-        receipt.tapWhenReady()
-        inboxEntry.tapWhenReady()
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Session inbox"].exists)
     }
 
     func testInboxHistoryShowsANewMessageWithinSeconds() {
@@ -107,10 +94,5 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["The signing step passes now."].exists, "a peer message reads as its body")
         XCTAssertFalse(app.buttons["inbox-message-11"].exists, "a message waiting in the queue stays in Current")
         XCTAssertTrue(app.buttons["inbox-message-14"].waitForExistence(timeout: 12), "History reloads while it is on screen")
-    }
-
-    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let predicate = NSPredicate(format: "hittable == true")
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 }
