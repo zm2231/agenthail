@@ -70,16 +70,16 @@ func TestDeliveredWordsMatchByTextOnlyWhileRecent(t *testing.T) {
 	start := time.Now()
 	w.add("s", "u-old", "same", start)
 	w.add("s", "u-new", "same", start.Add(time.Minute))
-	if got, ok := w.claim("s", "p1", "", "same", start.Add(deliveredTextWindow+30*time.Second)); !ok || got != "u-new" {
+	if got, _, ok := w.claim("s", "p1", "", "same", start.Add(deliveredTextWindow+30*time.Second)); !ok || got != "u-new" {
 		t.Fatalf("claim = %q %v, want the recent delivery only", got, ok)
 	}
-	if _, ok := w.claim("s", "p2", "", "same", start.Add(deliveredTextWindow+30*time.Second)); ok {
+	if _, _, ok := w.claim("s", "p2", "", "same", start.Add(deliveredTextWindow+30*time.Second)); ok {
 		t.Fatal("an expired delivery matched by text")
 	}
-	if got, ok := w.claim("s", "p3", "u-old", "different", start.Add(time.Hour)); !ok || got != "u-old" {
+	if got, _, ok := w.claim("s", "p3", "u-old", "different", start.Add(time.Hour)); !ok || got != "u-old" {
 		t.Fatalf("the uuid claim is not bound by the text window: %q %v", got, ok)
 	}
-	if _, ok := w.claim("other", "p4", "", "same", start); ok {
+	if _, _, ok := w.claim("other", "p4", "", "same", start); ok {
 		t.Fatal("matched another session's delivery")
 	}
 	for i := range deliveredPerSession + 1 {

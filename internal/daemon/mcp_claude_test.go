@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -178,5 +179,54 @@ func TestAPersonsMessageThatStartsACoordinatorIsThePersonsTurn(t *testing.T) {
 	turns := f.host.Turns(t, spec.SessionID)
 	if len(turns) != 1 || turnOrigin(t, turns[0]) != "human" {
 		t.Fatalf("turns = %+v, want one human turn", turns)
+	}
+}
+
+func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	root, err := canonicalCatalogPath(f.host.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "repo:example.com/lead"
+	if err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", Key: key, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	store := ledger.NewStore(f.registry.WriteDB(), f.registry.ReadDB())
+	if err := store.Enable(key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-new","surface":"claude","cwd":%q,"name":"captain"}`, f.host.Cwd))
+	f.action(t, `{"action":"coordinator-send","name":"captain","message":"hello","author":"person"}`)
+	spec, err := f.registry.CoordinatorNamed("captain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
+	turn := f.host.Turns(t, spec.SessionID)[0]
+
+	handler := f.daemon.dashboardHandler(&dashboardServer{token: "test-token"})
+	for _, copy := range []ledgerCaptureRequest{
+		{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text},
+		{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text, MessageUUID: turn.UUID},
+	} {
+		if resp := ledgerPost(t, handler, copy); resp.Ref != ledger.DeliveryRef(turn.UUID) {
+			t.Fatalf("a hook copy of the first turn named %q, want the delivery %s", resp.Ref, turn.UUID)
+		}
+	}
+	events, err := store.Events(key, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, e := range withoutCapture(events) {
+		var u ledger.UtterancePayload
+		if err := json.Unmarshal(e.Payload, &u); err != nil {
+			t.Fatal(err)
+		}
+		texts = append(texts, u.Text)
+	}
+	if len(texts) != 1 || texts[0] != "hello" {
+		t.Fatalf("captured %q, want the person's words once", texts)
 	}
 }

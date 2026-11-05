@@ -66,11 +66,11 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	now := time.Now()
-	ref, surfaceName := ledger.PromptRef(req.PromptID), "terminal"
-	if uuid, delivered := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now); delivered {
-		ref, surfaceName = ledger.DeliveryRef(uuid), string(session.Surface)
+	ref, surfaceName, words := ledger.PromptRef(req.PromptID), "terminal", req.Prompt
+	if uuid, delivered, ok := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now); ok {
+		ref, surfaceName, words = ledger.DeliveryRef(uuid), string(session.Surface), delivered
 	}
-	record, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: req.Prompt, At: now, CapturedBy: ledger.CapturedByHook})
+	record, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: words, At: now, CapturedBy: ledger.CapturedByHook})
 	if err != nil {
 		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, record.key, err)
 		writeAPIError(w, http.StatusInternalServerError, "capture_failed", "The prompt was not recorded in the ledger.")

@@ -365,6 +365,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if !queued || messageUUID == "" {
 		messageUUID = uuid.NewString()
 	}
+	s.Dispatcher.CapturePersonStart(sender, messageUUID, first, message)
 	session, sent, startErr := starter.StartSession(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), options)
 	if session == nil {
 		if startErr == nil {
