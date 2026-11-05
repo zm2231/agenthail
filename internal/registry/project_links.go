@@ -149,7 +149,6 @@ func (r *Registry) ProjectHistory(id string) ([]string, error) {
 		{
 			{"a ledger board", `SELECT COUNT(*) FROM ledger_events WHERE project_key=?`},
 			{"ledger grants", `SELECT COUNT(*) FROM ledger_grants WHERE project_key=?`},
-			{"an enabled ledger", `SELECT COUNT(*) FROM ledger_state WHERE project_key=? AND enabled=1`},
 		},
 	} {
 		for _, c := range group {

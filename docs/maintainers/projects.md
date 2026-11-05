@@ -118,8 +118,9 @@ one ledger:
   record of the link decides over the `linkedFrom` a paired host's row
   arrived with, so a host that has not yet taken an unlink cannot keep the
   projects joined.
-- A project that already has a lead, past leads, a ledger board, ledger grants
-  or an enabled ledger is refused as the joined side (`409 project_history`):
+- A project that already has a lead, past leads, a ledger board (enabling
+  the ledger starts one) or ledger grants is refused as the joined side
+  (`409 project_history`):
   when only it has that, the message names the link the other way round, and
   when both do, merging them is not supported. A host that adopts a link onto
   such a project holds it: the project stays its own, with `linkHeld` naming

@@ -23,7 +23,7 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 			return nil, ledgerAccess{}, err
 		}
 		if project != nil && project.Key != "" {
-			targets = append(targets, ledgerTarget{key: project.Key, localID: project.LocalID})
+			targets = append(targets, ledgerTarget{key: project.Key, projectID: project.ID})
 			listed[project.Key] = true
 		}
 	}
@@ -60,35 +60,45 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 	return targets, access, nil
 }
 
-// ledgerSince is the earliest grant that puts sessionID in the project's ledger scope.
-func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, access ledgerAccess) (time.Time, bool, error) {
-	scope, err := store.Scope(target.key)
-	if err != nil || scope.State == ledger.LedgerDisabled {
-		return time.Time{}, false, err
+// ledgerScope is when the person's words to a session start counting in a project, and whether the session is asked to attach them.
+type ledgerScope struct {
+	since   time.Time
+	inScope bool
+	attach  bool
+}
+
+// ledgerSince is the earliest grant that puts sessionID in the project's ledger scope. Enabling the project or granting the session asks it to attach;
+// leading the project alone only captures.
+func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, access ledgerAccess) (ledgerScope, error) {
+	captured, err := store.Scope(target.key)
+	if err != nil || captured.State == ledger.LedgerDisabled {
+		return ledgerScope{}, err
 	}
-	since, inScope := scope.Since, scope.State == ledger.LedgerEnabled
+	scope := ledgerScope{since: captured.Since, inScope: captured.State == ledger.LedgerEnabled}
+	scope.attach = scope.inScope
 	consider := func(at time.Time) {
-		if !inScope || at.Before(since) {
-			since, inScope = at, true
+		if !scope.inScope || at.Before(scope.since) {
+			scope.since, scope.inScope = at, true
 		}
 	}
 	if at, ok := access.grants[target.key]; ok {
 		consider(at)
+		scope.attach = true
 	}
-	if target.localID == "" {
-		return since, inScope, nil
+	if target.projectID == "" {
+		return scope, nil
 	}
 	lineage := append([]registry.ForkAncestor{{SessionID: sessionID}}, access.ancestors...)
 	for _, member := range lineage {
-		at, coordinator, err := d.Registry.CoordinatorSince(target.localID, member.SessionID)
+		at, coordinator, err := d.Registry.CoordinatorSince(target.projectID, member.SessionID)
 		if err != nil {
-			return time.Time{}, false, err
+			return ledgerScope{}, err
 		}
 		if coordinator {
 			consider(latest(at, member.Since))
 		}
 	}
-	return since, inScope, nil
+	return scope, nil
 }
 
 func latest(a, b time.Time) time.Time {

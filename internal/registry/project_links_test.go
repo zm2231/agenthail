@@ -1,8 +1,11 @@
 package registry
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/ledger"
 )
 
 func TestProjectLinksKeepTheLaterRecordWhicheverOrderTheyArrive(t *testing.T) {
@@ -33,5 +36,19 @@ func TestProjectLinksKeepTheLaterRecordWhicheverOrderTheyArrive(t *testing.T) {
 				t.Fatalf("a link made on a host whose clock is behind lost to the record it replaces: %+v err=%v", relinked, err)
 			}
 		})
+	}
+}
+
+func TestAProjectWhoseLedgerWasEnabledHoldsHistoryALinkWouldStrand(t *testing.T) {
+	const fork = "repo:github.com/example/fork"
+	r := openTestRegistry(t)
+	if held, err := r.ProjectHistory(fork); err != nil || len(held) != 0 {
+		t.Fatalf("a fresh project holds %v (err %v)", held, err)
+	}
+	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(fork); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := r.ProjectHistory(fork); err != nil || !slices.Equal(held, []string{"a ledger board"}) {
+		t.Fatalf("an enabled project holds %v (err %v), want its ledger board", held, err)
 	}
 }

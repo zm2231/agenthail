@@ -6,13 +6,16 @@ Every change is an event in an append-only log; the board you read is rebuilt fr
 
 ## Capture and scope
 
-Capture is off until you turn it on.
+Every project with a lead captures the person's words to that lead, from the moment it became the lead, and asks nothing of it: the words are recorded, and the lead attaches them only if it chooses to. Its forks are captured the same way from their creation. The bare `agenthail ledger` command lists the newest five of those words with a count; `--all` lists every one.
 
 ```
-agenthail ledger enable              # capture the person's words in this project
-agenthail ledger enable @session     # only for one session, and the forks made from it afterwards
-agenthail ledger disable [@session]  # stop capturing
+agenthail ledger enable              # capture the person's words to every session in this project, and ask each to attach them
+agenthail ledger enable @session     # the same for one session, and the forks made from it afterwards
+agenthail ledger disable             # capture nothing in this project, not even the lead's words
+agenthail ledger disable @session    # take back a session's grant
 ```
+
+A project's enable or disable is an event in its ledger, so it holds on every host that keeps or replicates the ledger. A session's grant stays on the host where the session runs, since that is where its words are captured.
 
 Words are captured from three sources, and each message is recorded once even when more than one source sees it:
 
@@ -24,7 +27,7 @@ A captured message is an *utterance*, identified by a ref such as `claude-prompt
 
 ## Attaching words: goals, asks and clauses
 
-The session the person spoke to attaches each message, so the ledger records what it means. After capture, the session is told the utterance ref. It replies with the readback that `attach` prints, so the person sees how their words were recorded.
+In an enabled project, or for a granted session, the session the person spoke to attaches each message, so the ledger records what it means. After capture, the session is told the utterance ref. It replies with the readback that `attach` prints, so the person sees how their words were recorded.
 
 ```
 agenthail ledger goal "Search"                                   # create a goal, or show it
@@ -69,7 +72,7 @@ The bare `agenthail ledger` command shows goals, open asks, decisions and words 
 
 ### The turn gate
 
-At the end of a turn, a session that owns clauses or has unattached words is held until it does one of these:
+At the end of a turn, a session that owns clauses or has unattached words in a project that asks it to attach (enabled, or granted to the session) is held until it does one of these:
 
 - attaches the words;
 - reports progress on its clauses;

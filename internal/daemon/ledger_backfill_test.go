@@ -169,7 +169,7 @@ func TestPersonSendToTheCoordinatorIsCapturedInUnsetProject(t *testing.T) {
 	p := addLedgerProject(t, r, "proj-unset", "unset-send-key")
 	coordinator := p.session(t, r, "coord")
 	worker := p.session(t, r, "worker")
-	makeCoordinator(t, r, "proj-unset", p, "coord")
+	makeCoordinator(t, r, p, "coord")
 	fake := &daemonSurface{sessions: map[string]surface.Session{"coord": coordinator, "worker": worker}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	for _, target := range []surface.Session{coordinator, worker} {
@@ -254,7 +254,7 @@ func TestBackfillStartsTheCoordinatorAtItsAssignment(t *testing.T) {
 	s := p.session(t, r, "late-coordinator")
 	source := journalSource(d, s, nil)
 	history := time.Now().Add(-time.Hour)
-	makeCoordinator(t, r, "proj-coord", p, s.ID)
+	makeCoordinator(t, r, p, s.ID)
 	source.appendSeedItems([]surface.TimelineItem{typedPrompt("old", "p-old", "older history", history), typedPrompt("new", "p-new", "as coordinator", time.Now().Add(time.Second))})
 	if events := p.events(t); len(events) != 1 || events[0].Ref != ledger.PromptRef("p-new") {
 		t.Fatalf("want only prompts after the session became coordinator, got %+v", events)

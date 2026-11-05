@@ -34,13 +34,21 @@ func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
 		return
 	}
 	store := d.ledgerStore()
-	targets, _, err := d.ledgerTargets(store, session)
+	targets, access, err := d.ledgerTargets(store, session)
 	if err != nil {
 		d.log.Printf("ledger G2: projects of %s: %s", session.ID, err)
 		return
 	}
 	var blocked []ledger.GateResult
 	for _, target := range targets {
+		scope, err := d.ledgerSince(store, target, session.ID, access)
+		if err != nil {
+			d.log.Printf("ledger G2: scope of %s in %s: %s", session.ID, target.key, err)
+			continue
+		}
+		if !scope.attach {
+			continue
+		}
 		result, err := store.GateTurn(target.key, session.ID, turnID, time.Now())
 		if err != nil {
 			d.log.Printf("ledger G2: gate %s in %s: %s", session.ID, target.key, err)

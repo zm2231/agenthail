@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -74,18 +76,28 @@ func (p ledgerProject) session(t *testing.T, r *registry.Registry, id string) su
 	return s
 }
 
+// events leaves out the capture events that enabling or disabling the project wrote.
 func (p ledgerProject) events(t *testing.T) []ledger.Event {
 	t.Helper()
 	events, err := p.store.Events(p.key, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return events
+	return withoutCapture(events)
 }
 
-func makeCoordinator(t *testing.T, r *registry.Registry, projectID string, p ledgerProject, sessionID string) {
+func withoutCapture(events []ledger.Event) []ledger.Event {
+	return slices.DeleteFunc(events, func(e ledger.Event) bool { return e.Type == ledger.EventCapture })
+}
+
+// makeCoordinator makes the session lead the project at p.dir the way 'agenthail coordinator' does, under the project's ID.
+func makeCoordinator(t *testing.T, r *registry.Registry, p ledgerProject, sessionID string) {
 	t.Helper()
-	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: projectID, ProjectRoot: p.dir, Name: "coord-" + projectID, Surface: "claude", Cwd: p.dir}, registry.CoordinatorChange{SessionID: sessionID}); err != nil {
+	project, err := ResolvePathProject(context.Background(), r, p.dir)
+	if err != nil || project == nil {
+		t.Fatalf("project of %s: %v %v", p.dir, project, err)
+	}
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: p.dir, Name: "coord-" + sessionID, Surface: "claude", Cwd: p.dir}, registry.CoordinatorChange{SessionID: sessionID}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -126,7 +138,7 @@ func TestLedgerAPICapturesOnlyTheCoordinatorInUnsetProject(t *testing.T) {
 	p := addLedgerProject(t, r, "proj-3", "unset-key")
 	p.session(t, r, "coord-1")
 	p.session(t, r, "worker-1")
-	makeCoordinator(t, r, "proj-3", p, "coord-1")
+	makeCoordinator(t, r, p, "coord-1")
 	if !ledgerPost(t, handler, ledgerCaptureRequest{SessionID: "coord-1", PromptID: "p-3", Prompt: "coordinator capture"}).Captured {
 		t.Fatal("coordinator prompt not captured in an unset project")
 	}

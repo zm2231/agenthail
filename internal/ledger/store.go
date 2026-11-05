@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -15,80 +14,6 @@ type Store struct {
 
 func NewStore(db, read *sql.DB) *Store {
 	return &Store{db: db, read: read}
-}
-
-const (
-	LedgerUnset    = 0
-	LedgerEnabled  = 1
-	LedgerDisabled = 2
-)
-
-func (s *Store) Enabled(projectKey string) (bool, error) {
-	if projectKey == "" {
-		return false, nil
-	}
-	var enabled int
-	err := s.read.QueryRow(`SELECT enabled FROM ledger_state WHERE project_key=?`, projectKey).Scan(&enabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return enabled == LedgerEnabled, nil
-}
-
-func (s *Store) EnabledProjects() (map[string]bool, error) {
-	rows, err := s.read.Query(`SELECT project_key FROM ledger_state WHERE enabled=?`, LedgerEnabled)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	keys := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		keys[key] = true
-	}
-	return keys, rows.Err()
-}
-
-type Scope struct {
-	State int
-	Since time.Time
-}
-
-func (s *Store) Scope(projectKey string) (Scope, error) {
-	var state int
-	var since int64
-	err := s.read.QueryRow(`SELECT enabled,since_ms FROM ledger_state WHERE project_key=?`, projectKey).Scan(&state, &since)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Scope{State: LedgerUnset}, nil
-	}
-	if err != nil {
-		return Scope{}, err
-	}
-	return Scope{State: state, Since: time.UnixMilli(since).UTC()}, nil
-}
-
-func (s *Store) Enable(projectKey string) error {
-	if projectKey == "" {
-		return fmt.Errorf("project key is required")
-	}
-	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled,since_ms) VALUES(?,?,?)
-		ON CONFLICT(project_key) DO UPDATE SET since_ms=CASE WHEN enabled=excluded.enabled THEN since_ms ELSE excluded.since_ms END, enabled=excluded.enabled`,
-		projectKey, LedgerEnabled, time.Now().UnixMilli())
-	return err
-}
-
-func (s *Store) Disable(projectKey string) error {
-	if projectKey == "" {
-		return fmt.Errorf("project key is required")
-	}
-	_, err := s.db.Exec(`INSERT INTO ledger_state(project_key,enabled) VALUES(?,?) ON CONFLICT(project_key) DO UPDATE SET enabled=?`, projectKey, LedgerDisabled, LedgerDisabled)
-	return err
 }
 
 func (s *Store) AppendEvent(event Event) (Event, error) {
