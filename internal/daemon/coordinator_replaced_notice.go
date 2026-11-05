@@ -67,7 +67,7 @@ func (d *Daemon) announceReplacement(ctx context.Context, entry registry.Coordin
 	}
 	if entry.NotifySender && coordinator.ChangedByAgent(entry.ChangedBy) {
 		message := fmt.Sprintf("[agenthail] Your message to @%s started a new conversation, %s, because %s. The previous conversation %s is no longer the lead. Read its reply with 'agenthail last @%s'.", entry.Name, entry.SessionID, replacementWhy(entry), entry.PreviousSessionID, entry.Name)
-		if _, err := d.sendNotice(noticeRecipient{sessionID: entry.ChangedBy, role: "sender"}, surface.Session{ID: entry.SessionID}, message, replacementNoticeKey(entry.ID, "sender")); errors.Is(err, sql.ErrNoRows) {
+		if _, err := d.sendNotice(noticeRecipient{sessionID: entry.ChangedBy, role: "sender"}, message, replacementNoticeKey(entry.ID, "sender")); errors.Is(err, sql.ErrNoRows) {
 			d.log.Printf("the sender %s that replaced @%s no longer exists; nobody to tell", entry.ChangedBy, entry.Name)
 		} else if err != nil {
 			return fmt.Errorf("tell the sender %s: %w", entry.ChangedBy, err)
@@ -112,7 +112,7 @@ func (d *Daemon) tellReplacedLead(ctx context.Context, entry registry.Coordinato
 	message := fmt.Sprintf("[agenthail] You are no longer coordinator @%s. Conversation %s took over at %s because %s. Stop working as the lead and end your turn now; messages for @%s go to %s.", entry.Name, entry.SessionID, entry.At.Local().Format(time.Kitchen), replacementWhy(entry), entry.Name, entry.SessionID)
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	if _, err := d.dispatcher().DeliverWithoutQueue(operationCtx, adapter, old, message, replacementNoticeKey(entry.ID, "previous"), surface.SendOptions{SourceSessionID: entry.SessionID}); err != nil {
+	if _, err := d.dispatcher().DeliverWithoutQueue(operationCtx, adapter, old, message, replacementNoticeKey(entry.ID, "previous"), surface.SendOptions{SourceSessionID: surface.SystemSessionID}); err != nil {
 		d.log.Printf("tell %s it is no longer @%s: %s", entry.PreviousSessionID, entry.Name, err)
 	}
 }

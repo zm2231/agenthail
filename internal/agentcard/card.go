@@ -57,6 +57,7 @@ type Card struct {
 	StartedBy   *Origin             `json:"startedBy,omitempty"`
 	ReportTo    string              `json:"reportTo,omitempty"`
 	Decides     bool                `json:"decides,omitempty"`
+	InboundHeld string              `json:"inboundHeld,omitempty"`
 	Ask         *Ask                `json:"ask,omitempty"`
 	Commands    []Command           `json:"commands,omitempty"`
 }
@@ -70,6 +71,7 @@ type Sources struct {
 	Project      func(ctx context.Context, cwd string) (*Project, error)
 	LeadRef      func(registry.CoordinatorSpec) string
 	PromptsHeld  func(surface.Session) bool
+	InboundHeld  func(surface.Session) string
 	PromptHearer func(ctx context.Context, session surface.Session) string
 }
 
@@ -101,6 +103,9 @@ func (s Sources) For(ctx context.Context, session surface.Session) (Card, error)
 	}
 	if card.Decides, err = s.decides(ctx, card); err != nil {
 		return Card{}, err
+	}
+	if card.Lead != nil && card.Lead.Self && session.RuntimeKind == surface.RuntimeClaudeCLI && s.InboundHeld != nil {
+		card.InboundHeld = s.InboundHeld(session)
 	}
 	card.ReportTo = reportTo(card)
 	card.Commands = commands(card)

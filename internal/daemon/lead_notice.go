@@ -23,7 +23,15 @@ func (d *Daemon) noticeRecipient(session surface.Session) (noticeRecipient, bool
 	return noticeRecipient{sessionID: id, role: role}, ok
 }
 
-func (d *Daemon) sendNotice(to noticeRecipient, from surface.Session, message, key string) (bool, error) {
+func (d *Daemon) oversees(sourceID string, session surface.Session) bool {
+	projectID, where := "", ""
+	if project, err := d.sessionProject(session); err == nil && project != nil {
+		projectID, where = project.ID, project.DisplayName
+	}
+	return d.coordinator().Oversees(sourceID, session.ID, projectID, where)
+}
+
+func (d *Daemon) sendNotice(to noticeRecipient, message, key string) (bool, error) {
 	if used, err := d.Registry.DeliveryKeyUsed(key); err != nil || used {
 		return false, err
 	}
@@ -31,10 +39,10 @@ func (d *Daemon) sendNotice(to noticeRecipient, from surface.Session, message, k
 	if owner, err := d.Registry.SessionHost(to.sessionID); err != nil {
 		return false, err
 	} else if owner != "" {
-		_, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: to.sessionID, Message: message, Key: key, SourceSessionID: from.ID, BusyDelivery: busy})
+		_, err := d.Registry.QueueHostSend(registry.HostSend{SessionID: to.sessionID, Message: message, Key: key, SourceSessionID: surface.SystemSessionID, BusyDelivery: busy})
 		return err == nil, err
 	}
-	_, err := d.Registry.QueueMessageWithOptions(to.sessionID, message, key, surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: busy})
+	_, err := d.Registry.QueueMessageWithOptions(to.sessionID, message, key, surface.SendOptions{SourceSessionID: surface.SystemSessionID, BusyDelivery: busy})
 	return err == nil, err
 }
 
@@ -71,7 +79,7 @@ func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting,
 	if d.taskRequestsRead[session.ID] == (taskRequestRead{waitingID: waiting.ID, reader: to.sessionID}) {
 		return
 	}
-	if _, err := d.sendNotice(to, session, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
+	if _, err := d.sendNotice(to, message, waitingNoticeKey(session.ID, waiting.ID)); err != nil {
 		d.log.Printf("tell the %s that %s is waiting: %s", to.role, d.resolveDisplay(session.ID), err)
 	}
 }

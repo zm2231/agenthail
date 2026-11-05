@@ -131,7 +131,7 @@ func (d *Daemon) noticeStoppedGoal(ctx context.Context, session surface.Session,
 		return nil
 	}
 	message := fmt.Sprintf("[agenthail] %s stopped working on its goal. %s The person was notified too.", name, note)
-	if _, err := d.sendNotice(to, session, message, key); err != nil {
+	if _, err := d.sendNotice(to, message, key); err != nil {
 		d.log.Printf("tell the %s that %s stopped on its goal: %s", to.role, name, err)
 		return err
 	}

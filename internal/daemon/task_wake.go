@@ -39,8 +39,7 @@ func (d *Daemon) deliverTaskWakes() {
 }
 
 func (d *Daemon) wakeTaskParent(task registry.Task) error {
-	child, err := d.Registry.Session(task.Child)
-	if err != nil {
+	if _, err := d.Registry.Session(task.Child); err != nil {
 		return err
 	}
 	d.taskNoticeMu.Lock()
@@ -50,7 +49,7 @@ func (d *Daemon) wakeTaskParent(task registry.Task) error {
 		return err
 	}
 	message := fmt.Sprintf("[agenthail] Task %d (%s) is %s. Read it with agenthail_result {taskId: %d}.", task.ID, d.answerTarget(task.Child), task.State, task.ID)
-	if _, err := d.sendNotice(noticeRecipient{sessionID: task.Parent, role: "spawner"}, *child, message, taskWakeKey(task.ID)); err != nil {
+	if _, err := d.sendNotice(noticeRecipient{sessionID: task.Parent, role: "spawner"}, message, taskWakeKey(task.ID)); err != nil {
 		return err
 	}
 	return d.Registry.ClearTaskWake(task.ID)

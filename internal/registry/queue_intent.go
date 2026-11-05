@@ -44,7 +44,7 @@ func (q queueIntent) attachExisting(tx *sql.Tx, targetSessionID, message string,
 }
 
 func queueNoticeTx(tx *sql.Tx, sessionID, notice, key string) (int64, error) {
-	id, _, err := enqueueMessageTx(tx, time.Now(), sessionID, notice, key, surface.SendOptions{}, 0, QueueOperationMessage, queueIntent{})
+	id, _, err := enqueueMessageTx(tx, time.Now(), sessionID, notice, key, surface.SendOptions{SourceSessionID: surface.SystemSessionID}, 0, QueueOperationMessage, queueIntent{})
 	return id, err
 }
 

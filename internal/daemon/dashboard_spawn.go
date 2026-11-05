@@ -21,6 +21,7 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 			d.publishEvent("state.changed", "", map[string]string{"source": "delivery-problem"})
 		},
 		PersonCapture: d.personCapture,
+		Oversees:      d.oversees,
 	}
 }
 

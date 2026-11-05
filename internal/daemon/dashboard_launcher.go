@@ -58,6 +58,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
+	ctx = surface.WithSourceSessionID(ctx, surface.SendOptions{SourceSessionID: creator, Author: surface.AuthorPerson}.Sender())
 	if len(request.Ceiling) > 0 {
 		ctx = surface.WithStartCeiling(ctx, request.Ceiling)
 	}

@@ -160,8 +160,9 @@ func (h *claudeHost) readState() {
 }
 
 // The intent uuid becomes the transcript record's uuid: the turn is followed
-// by it, and a resend of the same message runs once.
-func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string, images surface.Uploads) (*surface.SendResult, error) {
+// by it, and a resend of the same message runs once. Only a person's turn
+// carries the human origin; any other turn Claude records as the host's.
+func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, message, priority string, images surface.Uploads, person bool) (*surface.SendResult, error) {
 	id := surface.MessageUUID(ctx)
 	if id == "" {
 		id = uuid.NewString()
@@ -170,23 +171,27 @@ func (c *Claude) sendHostTurn(ctx context.Context, sess *surface.Session, messag
 	for _, image := range images {
 		attached = append(attached, claudehost.Image{Path: image.Path, MediaType: image.MediaType})
 	}
-	_, err := c.host.client.Send(ctx, claudehost.SendRequest{
-		SessionID: sess.ID,
-		UUID:      id,
-		Text:      message,
-		Images:    attached,
-		Priority:  priority,
-		Origin:    &claudehost.Origin{Kind: "human"},
-	})
-	if err != nil {
+	request := claudehost.SendRequest{SessionID: sess.ID, UUID: id, Text: message, Images: attached, Priority: priority}
+	if person {
+		request.Origin = &claudehost.Origin{Kind: "human"}
+	}
+	if _, err := c.host.client.Send(ctx, request); err != nil {
 		return nil, claudeHostDeliveryError(err)
 	}
 	return &surface.SendResult{UUID: id, Accepted: true}, nil
 }
 
-func (c *Claude) steerHost(ctx context.Context, sess *surface.Session, message string) error {
-	_, err := c.sendHostTurn(ctx, sess, message, "now", nil)
-	return err
+func (c *Claude) SendAgenthailTurn(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if sess == nil || !claudeHosted(sess) {
+		return nil, surface.DeliveryUnavailable(errors.New("only a session the Claude host runs takes Agenthail's turn"))
+	}
+	if err := c.EnsureWritable(ctx, sess); err != nil {
+		return nil, err
+	}
+	if _, err := c.reach(ctx, sess); err != nil {
+		return nil, err
+	}
+	return c.sendHostTurn(ctx, sess, message, "", nil, false)
 }
 
 func (c *Claude) interruptHost(ctx context.Context, sess *surface.Session) error {

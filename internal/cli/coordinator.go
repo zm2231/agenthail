@@ -27,7 +27,14 @@ const coordinatorUsage = `usage:
   agenthail coordinator clear [--cwd <path>]`
 
 func (a *App) coordinator() coordinator.Service {
-	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: delivery.Dispatcher{Registry: a.registry()}}
+	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: a.dispatcher()}
+}
+
+func (a *App) dispatcher() delivery.Dispatcher {
+	return delivery.Dispatcher{Registry: a.registry(), Oversees: func(sourceID string, session surface.Session) bool {
+		projectID, where := a.sessionProject(context.Background(), session, a.pathProject)
+		return a.coordinator().Oversees(sourceID, session.ID, projectID, where)
+	}}
 }
 
 func (a *App) cmdCoordinator(args []string) error {

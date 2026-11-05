@@ -65,7 +65,8 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	host.Start(t)
 	c := NewClaude(nil, host.Home)
 	turn := uuid.NewString()
-	session, sent, err := c.StartSession(surface.WithMessageUUID(context.Background(), turn), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	ctx := surface.WithSourceSessionID(surface.WithMessageUUID(context.Background(), turn), surface.PersonSessionID)
+	session, sent, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, Name: "builder", PermissionMode: "acceptEdits", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +84,21 @@ func TestClaudeStartsASessionInTheHostWithItsFirstTurn(t *testing.T) {
 	listed := listedSession(t, c, session.ID)
 	if listed.PID != session.PID {
 		t.Fatalf("listed=%+v, want pid %d", listed, session.PID)
+	}
+}
+
+func TestASessionAnAgentStartsDoesNotTakeItsBriefAsThePersonsTurn(t *testing.T) {
+	host := claudehosttest.New(t, "")
+	host.Start(t)
+	c := NewClaude(nil, host.Home)
+	ctx := surface.WithSourceSessionID(context.Background(), "spawner-session")
+	session, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(host.Turns(t, session.ID)) > 0 })
+	if turns := host.Turns(t, session.ID); len(turns) != 1 || turns[0].Text != "build it" || hasOrigin(turns[0]) {
+		t.Fatalf("turns = %+v, want the brief with no human origin", turns)
 	}
 }
 

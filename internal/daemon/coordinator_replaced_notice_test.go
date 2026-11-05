@@ -11,6 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 type desktopNotices struct {
@@ -202,10 +203,16 @@ func TestAReplacedLeadThatStillExistsIsToldToStop(t *testing.T) {
 	}
 	entry := f.handover(t)
 	f.claude.Transcript(goneCoordinator, f.host.Cwd)
+	peers := claudetest.ListenPeerManager(t, f.claude.Home)
 	f.daemon.tellReplacedLead(context.Background(), entry)
-	turns := f.landed(t, goneCoordinator, "You are no longer coordinator @fixture-lead")
-	if !strings.Contains(turns[len(turns)-1].Text, "end your turn") || !strings.Contains(turns[len(turns)-1].Text, entry.SessionID) {
-		t.Fatalf("old lead turns=%+v", turns)
+	sends := peers.Sends()
+	if len(sends) == 0 {
+		t.Fatal("the old lead was not told to stop")
+	}
+	for _, send := range sends {
+		if send.Source != surface.SystemSessionID || !strings.HasPrefix(send.Message, "[agenthail] You are no longer coordinator @fixture-lead") || !strings.Contains(send.Message, "end your turn") || !strings.Contains(send.Message, entry.SessionID) {
+			t.Fatalf("sends=%+v, want Agenthail to tell the old lead to stop", sends)
+		}
 	}
 	if queued := f.queuedFor(t, entry.SessionID); len(queued) != 0 {
 		t.Fatalf("the old lead's notice reached the new lead: %+v", queued)

@@ -112,9 +112,6 @@ func (c *Claude) remoteEvents(ctx context.Context, sess *surface.Session, after 
 
 func (c *Claude) Control(ctx context.Context, sess *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
 	value := strings.TrimSpace(control.Value)
-	if control.Action == "steer" {
-		value = surface.LabelCLI(ctx, value)
-	}
 	if len(control.Images) == 0 || value != "" {
 		if err := validateClaudeControl(control.Action, value); err != nil {
 			return nil, err
@@ -122,6 +119,12 @@ func (c *Claude) Control(ctx context.Context, sess *surface.Session, control sur
 	}
 	if err := c.EnsureWritable(ctx, sess); err != nil {
 		return nil, err
+	}
+	if control.Action == "steer" {
+		if _, err := ownTurn(ctx); err != nil {
+			return nil, err
+		}
+		value = surface.LabelCLI(ctx, value)
 	}
 	if claudeHosted(sess) {
 		return c.hostControl(ctx, sess, control.Action, value, control.Images)
@@ -229,7 +232,11 @@ func (c *Claude) hostControl(ctx context.Context, sess *surface.Session, action,
 		}
 		return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host"}, nil
 	case "steer":
-		sent, err := c.sendHostTurn(ctx, sess, value, "now", images)
+		person, err := ownTurn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		sent, err := c.sendHostTurn(ctx, sess, value, "now", images, person)
 		if err != nil {
 			return nil, err
 		}
