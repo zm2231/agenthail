@@ -36,15 +36,15 @@ const context = {
   labels: { codex: "Codex", claude: "Claude Code" },
   Date: class extends Date { static now() { return now; } },
 };
-await dashboardModules(["session-order", "project-view","session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
+await dashboardModules(["session-order", "project-view", "project-now", "session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
 const run = (code) => vm.runInContext(code, context);
 const ids = (list) => list.map((session) => session.id).join(",");
 
 const contents = run("projectContents(app.state.projects[0])");
 assert.equal(contents.leadSession.id, "lead");
-assert.equal(ids(contents.running), "build", "only working sessions are running; a queued idle one is not");
-assert.equal(ids(contents.running), ids(sessions.filter((session) => session.project.id === project.id && !session.subagent && run("sessionRunning")(session))), "Running agrees with the list's running rule");
-assert.equal(ids(contents.recent), "queued,photos,buildbox::ingest", "Recent keeps the daemon's order across computers and leaves out the lead");
+const nowIDs = (now) => ids(now.groups.flatMap((group) => group.sessions));
+assert.equal(nowIDs(contents.now), "build,photos,queued,buildbox::ingest", "Now is every running and current row, working first, then newest, each computer's rows together, and leaves out the lead");
+assert.equal(run("sessionRunning")(sessions[2]), false, "a queued idle session isn't running");
 assert.equal(ids(contents.earlier), "old,older");
 for (const hidden of ["child", "shelved", "elsewhere"]) assert(!JSON.stringify(contents).includes(`"${hidden}"`), `${hidden} does not belong in the project`);
 
@@ -61,7 +61,10 @@ assert.equal(run('leadNote({ name: "ended", sessionId: "s1" })'), "not running �
 
 let html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /<h1>fieldnotes<\/h1><span class="project-note">7 sessions on 2 computers<\/span>/);
-assert.match(html, /Running now · 1/);
+assert.match(html, /<h2>Now · 4<\/h2>/);
+assert.doesNotMatch(html, /Running now|Recent/, "Now replaces both cards");
+assert.match(html, /<h3 class="project-now-group">No folder · this computer<\/h3>/, "rows on two computers are separate groups, named by computer");
+assert.match(html, /<h3 class="project-now-group">No folder · buildbox<\/h3>/);
 assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "the lead says when it was last active, once");
 assert.match(html, /<button class="primary-button" type="button" data-project-resume="lead" data-lifecycle="true">Resume<\/button>/);
 assert.match(html, /data-project-start="repo:github.com\/demo\/fieldnotes" data-checkout="0">New session/);
@@ -85,13 +88,13 @@ const workingLead = { ...sessions[0], status: "busy", activity: { busySince: at(
 context.app.state.sessions = [workingLead, ...sessions.slice(1)];
 const pinned = run("projectContents(app.state.projects[0], app.state.sessions)");
 assert.equal(pinned.leadSession.id, "lead");
-assert.equal(ids(pinned.running), "build", "a working lead stays pinned and is not repeated in Running");
+assert(!nowIDs(pinned.now).split(",").includes("lead"), "a working lead stays pinned and is not repeated in Now");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Working 12m</);
 const delegating = { ...sessions[0], subagents: { count: 1, working: 1 } };
 context.app.state.sessions = [delegating, ...sessions.slice(1)];
 const delegated = run("projectContents(app.state.projects[0], app.state.sessions)");
-assert.equal(ids(delegated.running), "build", "a lead whose subagent works stays pinned, not in Running");
+assert(!nowIDs(delegated.now).split(",").includes("lead"), "a lead whose subagent works stays pinned, not in Now");
 assert.equal(actions(delegating), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: true }, { kind: "open" }]), "an idle lead with a working subagent can still be resumed");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "an idle lead with a working subagent reads as idle");

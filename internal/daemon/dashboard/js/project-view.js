@@ -3,6 +3,7 @@ import { escape, labels, timeAgo } from "./format.js";
 import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 import { projectSessions } from "./session-order.js";
+import { projectNow } from "./project-now.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -33,8 +34,7 @@ export function projectContents(project) {
   return {
     lead,
     leadSession: leadID ? app.state.sessions.find((session) => session.id === leadID) || null : null,
-    running: members.filter(sessionRunning),
-    recent: members.filter((session) => session.current && !sessionRunning(session)),
+    now: projectNow(members.filter((session) => sessionRunning(session) || session.current), new Set((project.checkouts || []).map((checkout) => checkout.host.id)).size),
     earlier: members.filter((session) => !session.current && !sessionRunning(session)),
   };
 }
@@ -79,6 +79,11 @@ function rows(sessions, empty) {
     : `<p class="project-empty">${escape(empty)}</p>`;
 }
 
+function nowRows(now) {
+  if (!now.count) return rows([], "Nothing in the last day");
+  return now.groups.map((group) => `${now.showsGroups ? `<h3 class="project-now-group">${escape(group.title)}</h3>` : ""}${rows(group.sessions, "")}`).join("");
+}
+
 function leadCard(project, contents) {
   const { lead, leadSession } = contents;
   if (!lead) {
@@ -109,13 +114,12 @@ function folders(project) {
 export function renderProjectView(project) {
   const contents = projectContents(project);
   const computers = new Set((project.checkouts || []).map((checkout) => checkout.host.id)).size;
-  const count = contents.running.length + contents.recent.length + contents.earlier.length + (contents.leadSession ? 1 : 0);
+  const count = contents.now.count + contents.earlier.length + (contents.leadSession ? 1 : 0);
   const id = escape(project.id);
   const firstCheckout = (project.checkouts || []).findIndex((checkout) => !checkout.archived);
   const showEarlier = app.projectEarlier === project.id;
   const left = [
-    contents.running.length ? card(`Running now · ${contents.running.length}`, rows(contents.running, "")) : "",
-    card("Recent · last 24 hours", rows(contents.recent, "Nothing in the last day"), showEarlier ? "" : `<button class="link-button" type="button" data-project-earlier="${id}">Show earlier</button>`),
+    card(contents.now.count ? `Now · ${contents.now.count}` : "Now", nowRows(contents.now), showEarlier ? "" : `<button class="link-button" type="button" data-project-earlier="${id}">Show earlier</button>`),
     showEarlier ? card("Earlier", rows(contents.earlier, "No earlier sessions")) : "",
   ].join("");
   return `<header class="project-view-header"><h1>${escape(project.displayName)}</h1><span class="project-note">${count} ${count === 1 ? "session" : "sessions"}${computers > 1 ? ` on ${computers} computers` : ""}</span><div class="project-actions"><button class="soft-button" type="button" data-project-lead="${id}">${contents.lead ? "Change lead…" : "New lead…"}</button>${firstCheckout >= 0 ? `<button class="primary-button" type="button" data-project-start="${id}" data-checkout="${firstCheckout}">New session</button>` : ""}</div></header><div class="project-view-columns"><div class="project-view-main">${left}</div><div class="project-view-side">${leadCard(project, contents)}${folders(project)}</div></div>`;

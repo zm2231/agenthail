@@ -50,17 +50,24 @@ struct ProjectScreen: View {
         let computers = Set(project.state.checkouts.map(\.host.id)).count
         return List {
             Section("Lead") { leadCard(project, contents) }
-            if !contents.running.isEmpty {
-                Section("Running now · \(contents.running.count)") { ForEach(contents.running) { row($0) } }
-            }
             Section {
-                if contents.recent.isEmpty {
+                if contents.now.count == 0 {
                     Text("Nothing in the last day").foregroundStyle(PhonePalette.muted)
                 }
-                ForEach(contents.recent) { row($0) }
+                ForEach(contents.now.groups) { group in
+                    if contents.now.showsGroups {
+                        Text(group.title)
+                            .font(.footnote.weight(.semibold)).foregroundStyle(PhonePalette.muted)
+                            .lineLimit(1).truncationMode(.middle)
+                            .listRowSeparator(.hidden, edges: .bottom)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("project-now-group-" + group.id)
+                    }
+                    ForEach(group.sessions) { row($0) }
+                }
             } header: {
                 HStack {
-                    Text("Recent")
+                    Text(contents.now.count == 0 ? "Now" : "Now · \(contents.now.count)")
                     Spacer()
                     if !showingEarlier { Button("Earlier") { showingEarlier = true }.textCase(nil).accessibilityIdentifier("project-earlier") }
                 }

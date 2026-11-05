@@ -84,7 +84,7 @@ struct SessionPreview: View {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
             SessionInspector(model: model, session: session, initialDetail: detail)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-project") {
-            ConversationFlow(model: model, initialSessionID: ConversationRoute.project(HostCatalog.qualify("computer", "project-fieldnotes")))
+            ConversationFlow(model: model, initialSessionID: ConversationRoute.project(HostCatalog.qualify("computer", ProjectNowPreview.scenario == nil ? "project-fieldnotes" : ProjectNowPreview.projectID)))
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: session.id)
         } else {
@@ -281,6 +281,10 @@ struct SessionPreview: View {
             recent["lastActive"] = ago(5 * 60)
             timed.append(recent)
             snapshot["sessions"] = timed
+        }
+        if ProjectNowPreview.scenario != nil {
+            snapshot["sessions"] = ProjectNowPreview.sessions(capabilities: capabilities)
+            snapshot["projects"] = [["id": ProjectNowPreview.projectID, "displayName": "fieldnotes", "checkouts": ProjectNowPreview.checkouts]]
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]

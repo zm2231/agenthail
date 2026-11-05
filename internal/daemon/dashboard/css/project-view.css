@@ -89,6 +89,18 @@ button.project-name:hover,
   align-items: start;
   gap: 8px;
 }
+.project-now-group {
+  margin: 10px 0 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-card > header + .project-now-group {
+  margin-top: 0;
+}
 .project-row-time {
   padding-top: 10px;
   color: var(--muted);

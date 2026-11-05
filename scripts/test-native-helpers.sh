@@ -40,6 +40,7 @@ SOURCES=(
   SessionSelection.swift
   ProjectActions.swift
   ProjectContents.swift
+  ProjectNow.swift
   ScopePages.swift
   ScopeReader.swift
   SessionDisplayKind.swift

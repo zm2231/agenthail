@@ -50,6 +50,7 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: ProjectContents.swift
+      - path: ProjectNow.swift
       - path: ScopePages.swift
       - path: ScopeReader.swift
       - path: SessionDisplayKind.swift
