@@ -299,4 +299,24 @@ func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.
 		t.Fatalf("the replica still shows words the owner has attached: %q", text)
 	}
 	sameLedgerOnBothHosts(t, mac, owner)
+	writers := func(node *federationNode) string {
+		t.Helper()
+		var self, writer string
+		if err := node.reg.ReadDB().QueryRow(`SELECT host_id FROM host_identity WHERE id=1`).Scan(&self); err != nil || self == "" {
+			t.Fatalf("host identity %q: %v", self, err)
+		}
+		if err := node.reg.ReadDB().QueryRow(`SELECT COALESCE(GROUP_CONCAT(DISTINCT actor_host_id),'') FROM ledger_events WHERE project_key=? AND type IN (?,?)`, widgetKey, string(ledger.EventWorkItem), string(ledger.EventAttach)).Scan(&writer); err != nil {
+			t.Fatal(err)
+		}
+		if writer == self {
+			return "self"
+		}
+		return writer
+	}
+	if got := writers(owner); got != "self" {
+		t.Fatalf("the work item and attach were written by %q, not planned by the owner", got)
+	}
+	if got := writers(mac); got == "self" {
+		t.Fatal("the replica wrote the work item or attach itself")
+	}
 }
