@@ -66,9 +66,8 @@ final class ProjectContentsTests: XCTestCase {
 
         let contents = ProjectContents.build(listed, sessions: rows)
 
-        XCTAssertEqual(contents.running.map(\.id), rows.filter { SessionTree.includes($0, in: .running) }.map(\.id), "Running disagrees with the session list's Running")
         XCTAssertEqual(contents.running.map(\.id), ["one::busy"], "a queued idle session counted as running")
-        XCTAssertEqual(contents.recent.map(\.id), ["forge::far", "one::photos", "one::queued"], "Recent is not newest first across computers")
+        XCTAssertEqual(contents.recent.map(\.id), ["one::queued", "one::photos", "forge::far"], "Recent does not keep the daemon's order")
     }
 
     func testALeadWithAConversationNeverClaimsItHasNotStarted() {

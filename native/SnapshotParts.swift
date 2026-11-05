@@ -40,9 +40,11 @@ struct ScopePage: Decodable {
     }
 
     struct View: Decodable, Equatable {
-        let counts: [String: Count]
+        var counts: [String: Count]
         let surfaces: [Surface]
         var refreshAt: String? = nil
+        var projects: [ViewProject]
+        var families: [ViewFamily]
     }
 
     let sessions: [SessionState]
@@ -61,6 +63,16 @@ extension AgenthailAPI {
 
     func snapshotBase(fresh: Bool = false, timeout: TimeInterval = 25) async throws -> SnapshotBase {
         try await taggedGet("/api/v1/snapshot?sessions=none" + (fresh ? "&fresh=1" : ""), key: "base", fresh: fresh, timeout: timeout)
+    }
+
+    func snapshotBaseAndCurrent(fresh: Bool = false, timeout: TimeInterval = 25) async throws -> (SnapshotBase, ScopeSessions) {
+        for _ in 0..<3 {
+            async let base = snapshotBase(fresh: fresh, timeout: timeout)
+            async let current = scopeSessions("current", timeout: timeout)
+            let read = try await (base, current)
+            if read.0.hostEpoch == read.1.hostEpoch { return read }
+        }
+        throw AgenthailAPIError.unavailable("The computer restarted while Agenthail was reading it. Trying again.")
     }
 
     func projectActivity(fresh: Bool = false, timeout: TimeInterval = 25) async throws -> [ProjectActivity] {
@@ -82,7 +94,7 @@ extension AgenthailAPI {
                 }
             }
             result.hostEpoch = result.hostEpoch ?? page.hostEpoch
-            result.view = result.view ?? page.view
+            result.view = result.view?.merging(page.view) ?? page.view
             if let seq = page.catalogSeq { result.catalogSeq = min(result.catalogSeq ?? seq, seq) }
             cursor = page.nextCursor
         } while cursor != nil

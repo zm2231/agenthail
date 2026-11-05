@@ -18,7 +18,7 @@ struct CatalogBurstTest {
 
     @MainActor
     static func working(_ model: AgenthailModel) -> [String] {
-        model.sessionTree.projects.flatMap { $0.checkouts.flatMap { $0.families.map(\.root.id) } }.sorted()
+        model.knownSessions.filter(\.isWorking).map(\.id).sorted()
     }
 
     @MainActor

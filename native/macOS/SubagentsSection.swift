@@ -8,7 +8,7 @@ struct SubagentsSection: View {
     var body: some View {
         let sessions = model.knownSessions
         let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } ?? model.fetchedSubagents.session(identity.parentId) }
-        let children = SessionTree.newestFirst(model.subagents(of: session.id))
+        let children = model.inDaemonOrder(model.subagents(of: session.id))
         let current = pane.detail?.session.id == session.id ? pane.detail : nil
         let observed = ClaudeSubagentList(current?.claudeSubagents ?? [], total: current?.claudeSubagentsTotal, expanded: pane.showsAllClaudeSubagents)
         let loading = model.fetchedSubagents.loading(session)

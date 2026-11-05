@@ -45,6 +45,11 @@ SOURCES=(
   SessionDisplayKind.swift
   SessionDetailState.swift
   SnapshotParts.swift
+  ViewOrder.swift
+  SessionTreeOrder.swift
+  SessionAttention.swift
+  OrderHold.swift
+  CatalogNews.swift
   LeadReplacement.swift
   SessionRowTime.swift
   HostNames.swift

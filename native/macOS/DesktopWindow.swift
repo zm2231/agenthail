@@ -195,10 +195,10 @@ struct SessionSidebar: View {
                     }
                     ForEach(tree.projects) { project in
                         let expanded = expandedProjects.contains(project.id)
-                        let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
+                        let shown = expanded ? project : project.collapsed(keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.listedSessionCount)
+                            ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
                                 .opensProject(project.identity?.id, model: model, pane: pane)
                                 .contextMenu {
                                     if let identity = project.identity {
@@ -217,8 +217,8 @@ struct SessionSidebar: View {
                                     familyRows(family, attention: tree.attention)
                                 }
                             }
-                            if project.sessionCount > shown.sessionCount || expanded && project.sessionCount > SessionTree.collapsedSessionLimit {
-                                Button(expanded ? "Show less" : "Show \(project.sessionCount - shown.sessionCount) more") {
+                            if project.familyTotal > shown.sessionCount || expanded && project.familyTotal > project.collapsed.count {
+                                Button(expanded ? "Show less" : "Show \(project.familyTotal - shown.sessionCount) more") {
                                     if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
                                 }
                                 .buttonStyle(.plain)
@@ -263,6 +263,7 @@ struct SessionSidebar: View {
                 .padding(.bottom, DesktopSpace.l)
             }
             .scrollScrim()
+            .holdsOrder(model)
         }
         .glassPane(.sidebar, fallback: DesktopPalette.side, gaps: [])
         .background {
@@ -289,7 +290,7 @@ extension SessionSidebar {
                 sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
             }
             if local.isEmpty {
-                Text("No matching sessions.")
+                Text(model.reader.searchPending(query) ? "Searching" : "No matching sessions.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 14)
@@ -344,11 +345,7 @@ extension SessionSidebar {
 
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let local = SessionTree.newestFirst(model.knownSessions.filter { session in
-            [session.title, session.name, session.project?.displayName, session.checkout?.branch]
-                .compactMap { $0 }
-                .contains { $0.localizedCaseInsensitiveContains(query) }
-        })
+        let local = model.pages.found
         let localIDs = Set(local.map(\.id))
         let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) } : []
         return (local, remote)
@@ -361,7 +358,7 @@ extension SessionSidebar {
         }
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
-            let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
+            let shown = expandedProjects.contains(project.id) ? project : project.collapsed(keeping: pane.selectedSessionID)
             for family in shown.checkouts.flatMap(\.families) {
                 let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
                 ids += rows.filter { !ids.contains($0) }

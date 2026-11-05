@@ -1,6 +1,6 @@
 import Foundation
 
-/// A host from before subagent paging sends its whole list and no total.
+/// The daemon's page of a session's Claude subagents, in the daemon's order.
 struct ClaudeSubagentList: Equatable {
     static let recentShown = 8
 
@@ -10,21 +10,10 @@ struct ClaudeSubagentList: Equatable {
     let total: Int
 
     init(_ links: [ClaudeSubagentLink], total reported: Int?, expanded: Bool) {
-        let ordered = links.enumerated().sorted { lhs, rhs in
-            let (a, b) = (lhs.element, rhs.element)
-            if (a.working == true) != (b.working == true) { return a.working == true }
-            let (aTime, bTime) = (Self.time(a.lastActive), Self.time(b.lastActive))
-            if aTime != bTime { return aTime > bTime }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-        working = ordered.filter { $0.working == true }.count
-        total = max(reported ?? ordered.count, ordered.count)
-        shown = expanded ? ordered : Array(ordered.prefix(working + Self.recentShown))
+        working = links.filter { $0.working == true }.count
+        total = max(reported ?? links.count, links.count)
+        shown = expanded ? links : Array(links.prefix(working + Self.recentShown))
         earlier = total - shown.count
-    }
-
-    private static func time(_ value: String?) -> Date {
-        value.flatMap(SessionTree.parseTimestamp) ?? .distantPast
     }
 
     var summary: String {

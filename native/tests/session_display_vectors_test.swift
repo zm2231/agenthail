@@ -19,9 +19,6 @@ struct SessionDisplayVectorsTest {
             let want = vector["kind"] as! String
             let got = SessionDisplayKind.of(session, now: now)
             if got.rawValue != want { failures.append("\(name): Swift says \(got.rawValue), vectors say \(want)") }
-            if !SessionStatusFilter.allCases.filter({ $0.matches(session, now: now) }).elementsEqual([got]) {
-                failures.append("\(name): the status filter does not pick exactly its kind")
-            }
             let kind = SessionDisplayKind(rawValue: want)!
             if !SessionRowTime.status(session, now: now).hasPrefix(kind.label) {
                 failures.append("\(name): the row says \(SessionRowTime.status(session, now: now)), not \(want)")

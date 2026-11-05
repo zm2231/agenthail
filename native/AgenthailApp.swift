@@ -500,7 +500,8 @@ private struct SessionMenuSection: Identifiable {
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
         let attention = model.sessionAttention
         let needsYou = model.sessionTree.needsYou
-        let others = SessionTree.newestFirst(model.sessionFamilies.filter { attention[$0.root.id] == nil }, by: SessionTree.activity)
+        let rows = Dictionary(model.knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let others = (model.currentView?.families ?? []).compactMap { SessionTree.family(from: $0, rows: rows) }.filter { attention[$0.root.id] == nil }
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(needsYou.prefix(limit)), reasons: attention.mapValues(\.reason)),
             SessionMenuSection(title: "Working", sessions: Array(others.filter(working).map(\.root).prefix(limit))),
