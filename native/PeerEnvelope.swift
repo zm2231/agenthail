@@ -4,6 +4,15 @@ struct PeerEnvelope: Equatable {
     let sender: String?
     let body: String
 
+    var senderName: String? {
+        sender.map { name in
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("agenthail/"), let colon = trimmed.range(of: ": ") else { return trimmed }
+            let suffix = trimmed[colon.upperBound...].trimmingCharacters(in: .whitespaces)
+            return suffix.isEmpty ? trimmed : suffix
+        }
+    }
+
     var summary: String {
         guard let sender else { return body }
         return "From \(sender): \(body)"

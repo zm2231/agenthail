@@ -241,7 +241,7 @@ struct SessionPreview: View {
             ["id": "h0123456789ab::remote-demo-2", "project": ["id": "h0123456789ab::project-agenthail", "displayName": "agenthail", "rootPath": "/home/demo/work/agenthail", "kind": "git"], "host": ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "connected"], "name": "Tighten the release notes", "surface": "claude", "cwd": "/home/demo/work/agenthail/.worktrees/release-notes", "status": "idle", "lastActive": "2026-09-12T03:30:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities, "claudeConfigRoot": ["name": "work", "root": "/home/dev/.work/.claude"]]
         ]
         let projects: [[String: Any]] = [["id": "project-fieldnotes", "displayName": "fieldnotes", "checkouts": [["host": ["id": "computer", "name": "computer", "state": "local"], "projectId": "project-fieldnotes", "rootPath": "/Users/demo/projects/fieldnotes", "added": true]], "coordinators": [["name": "release-lead", "surface": "codex", "sessionId": "codex-demo"]]]]
-        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
+        var snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": previewSnapshotQueue,"channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24, "projects": projects]
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--preview-waiting") }) {
             snapshot["busyDelivery"] = "steer"
             var waitingSessions = sessions
@@ -319,6 +319,30 @@ struct SessionPreview: View {
     private nonisolated static let steerRowCommon = #""sessionId":"demo","target":"Make the build reliable","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z","heldBy":"busy""#
     private nonisolated static let refusedSteerRow = #"{"id":12,\#(steerRowCommon),"message":"Then rerun the suite with the larger model.","model":"gpt-5.6-sol"}"#
     nonisolated static let steerRowsJSON = #"{"items":[{"id":11,\#(steerRowCommon),"message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]},\#(refusedSteerRow)],"nextBefore":null}"#
+    nonisolated static var tailRowsJSON: String {
+        let common = #""sessionId":"demo","target":"Make the build reliable","evidence":"queued","attempts":0,"queuedAt":"2026-09-12T04:00:00.000000000Z""#
+        func own(_ id: Int, _ message: String) -> String { #"{"id":\#(id),\#(common),"status":"pending","heldBy":"busy","author":"person","message":"\#(message)"}"# }
+        func peer(_ id: Int, _ message: String) -> String {
+            let envelope = #"<cross-session-message from=\"uds:/tmp/helper.sock\" from-name=\"agenthail/claude: @helper\">\#(message)</cross-session-message>"#
+            return #"{"id":\#(id),\#(common),"status":"pending","heldBy":"busy","author":"agent","message":"\#(envelope)"}"#
+        }
+        let picture = #"{"id":21,\#(common),"status":"pending","heldBy":"busy","author":"person","message":"This is the failing screen, match the spacing.","attachments":[{"id":"upload:1","name":"failing-screen.png","mediaType":"image/png","bytes":2048,"width":800,"height":600}]}"#
+        let rows: [String]
+        switch UserDefaults.standard.string(forKey: "preview-tail") {
+        case "many": rows = [picture, own(22, "Then rerun the suite."), own(23, "Add a note to the changelog."), own(24, "Close the old issue once it's green."), own(25, "And tag the release.")]
+        case "peer": rows = [own(21, "Keep the regression check with the fix."), peer(22, "Check the release notes."), peer(23, "The build finished."), peer(24, "Ready for review."), peer(25, "One more thing.")]
+        case "dead": rows = [#"{"id":21,"sessionId":"demo","target":"Make the build reliable","evidence":"unknown","attempts":2,"queuedAt":"2026-09-12T04:00:00.000000000Z","status":"dead","author":"person","lastError":"delivery outcome is unknown: the connection dropped","message":"Rerun the suite with the fix."}"#]
+        default: rows = [picture]
+        }
+        return #"{"items":[\#(rows.joined(separator: ","))],"nextBefore":null}"#
+    }
+
+    nonisolated static var previewSnapshotQueue: [[String: Any]] {
+        guard ProcessInfo.processInfo.arguments.contains("--preview-tail"), !ProcessInfo.processInfo.arguments.contains("--preview-tail-late") else { return [] }
+        let page = (try? JSONSerialization.jsonObject(with: Data(tailRowsJSON.utf8))) as? [String: Any]
+        return (page?["items"] as? [[String: Any]]) ?? []
+    }
+
     nonisolated static let steerRowsAfterSteerJSON = #"{"items":[\#(refusedSteerRow)],"nextBefore":null}"#
 
     nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
@@ -349,6 +373,9 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     private let feed = PreviewStreamFeed()
 
     nonisolated(unsafe) private static var steered = false
+    nonisolated(unsafe) private static var tailCleared = false
+    nonisolated(unsafe) private static var sessionFetches = 0
+    private var reopenDelayed = false
 
     private static func actionBody(_ request: URLRequest) -> [String: Any] {
         var data = request.httpBody
@@ -364,6 +391,23 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
+        if request.url?.path == "/api/v1/session", ProcessInfo.processInfo.arguments.contains("--preview-reopen-slow"), !reopenDelayed {
+            Self.sessionFetches += 1
+            if Self.sessionFetches > 1 {
+                reopenDelayed = true
+                DispatchQueue.global().asyncAfter(deadline: .now() + 6) { [self] in startLoading() }
+                return
+            }
+        }
+        if request.url?.path == "/api/v1/queue", ProcessInfo.processInfo.arguments.contains("--preview-tail-slow") {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { [self] in
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: Data(SessionPreview.tailRowsJSON.utf8))
+                client?.urlProtocolDidFinishLoading(self)
+            }
+            return
+        }
         if request.url?.path == "/api/v1/actions" {
             if ProcessInfo.processInfo.arguments.contains("--preview-send-lost") {
                 client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
@@ -442,6 +486,14 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             body = #"{"files":[\#(files.joined(separator: ","))],"truncated":false}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/projects/activity": body = SessionPreview.projectActivityJSON
+        case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
+            let action = Self.actionBody(request)
+            if action["action"] as? String == "queue-cancel" { Self.tailCleared = !ProcessInfo.processInfo.arguments.contains("--preview-tail-keeps") }
+            body = #"{"ok":true,"result":{"evidence":"submitted"}}"#
+        case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-tail-fails-after-action") && Self.tailCleared:
+            status = 503; body = #"{"error":{"message":"unavailable"}}"#
+        case "/api/v1/queue" where ProcessInfo.processInfo.arguments.contains("--preview-tail"):
+            body = Self.tailCleared || requestQuery.first(where: { $0.name == "sessionId" })?.value == "codex-demo" ? #"{"items":[],"nextBefore":null}"# : SessionPreview.tailRowsJSON
         case "/api/v1/actions" where ProcessInfo.processInfo.arguments.contains("--preview-steer-rows"):
             let action = Self.actionBody(request)
             if action["action"] as? String == "queue-cancel" {

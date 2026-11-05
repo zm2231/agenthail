@@ -489,6 +489,8 @@ struct SessionScreen: View {
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
     @State private var followingLatest = true
     @State private var atLatest = true
+    @State private var queueTail = QueueTail()
+    @State private var landed = false
     @State private var overflows = false
     @State private var jumps = 0
     @State private var userScrolling = false
@@ -519,7 +521,7 @@ struct SessionScreen: View {
     }
 
     private func scrollToLatest() {
-        if overflows, let id = latestRowID {
+        if overflows, let id = queueTail.lastShownID ?? latestRowID {
             position.scrollTo(id: id, anchor: .bottom)
         } else {
             position.scrollTo(edge: .bottom)
@@ -616,7 +618,10 @@ struct SessionScreen: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Group { transcriptRows }.transcriptScrimRow()
+                Group {
+                    transcriptRows
+                    if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly) }
+                }.transcriptScrimRow()
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) { position.scrollTo(y: $0) }
@@ -650,13 +655,14 @@ struct SessionScreen: View {
                 userScrolling = false
             }
         }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentSize.height - geometry.visibleRect.maxY < 60
-        } action: { _, value in
+        // A distance, not a Bool: a Bool that flips back during landing never delivers its action, leaving atLatest stale.
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height - geometry.visibleRect.maxY
+        } action: { _, distance in
 #if DEBUG
             guard !ProcessInfo.processInfo.arguments.contains("--preview-session") || PreviewStream.follows else { return }
 #endif
-            atLatest = value
+            atLatest = distance < 60
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height > geometry.visibleRect.height
@@ -750,15 +756,21 @@ struct SessionScreen: View {
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
             atLatest = !startsAtOldest
+            landed = false
             await model.loadSession(session.id)
             if startsAtOldest, let first = items.first {
                 position.scrollTo(id: first.id, anchor: .top)
-            } else {
+            } else if followingLatest {
                 scrollToLatest()
             }
+            landed = true
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
+        }
+        .modifier(QueueTailTracking(model: model, tail: $queueTail, session: session, timeline: items))
+        .onChange(of: queueTail.shownIDs) { _, _ in
+            if landed, followingLatest { scrollToLatest() }
         }
         .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
             if followingLatest { scrollToLatest() }

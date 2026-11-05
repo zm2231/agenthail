@@ -536,32 +536,44 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         await refreshSession(id)
     }
 
-    func updateQueue(_ item: QueueState, retry: Bool) async throws {
+    @discardableResult
+    func updateQueue(_ item: QueueState, retry: Bool) async throws -> Bool {
         try await updateQueue(id: item.id, hostID: item.hostID, retry: retry)
     }
 
-    func updateQueue(id: Int64, hostID: String?, retry: Bool) async throws {
+    @discardableResult
+    func updateQueue(id: Int64, hostID: String?, retry: Bool) async throws -> Bool {
         guard let hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let (api, target) = try reach(hostID)
         let key = "queue:\(hostID)/\(id)"
-        guard !pendingControls.contains(key) else { return }
+        guard !pendingControls.contains(key) else { return false }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
         try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: id, host: target.remote)
         await connections[target.hostID]?.refresh(fresh: true)
+        return true
     }
 
     /// Cancels a queued message and puts it back ahead of its session's draft.
-    func takeBack(_ item: QueueState) async throws {
+    @discardableResult
+    func takeBack(_ item: QueueState) async throws -> Bool {
         guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let (api, target) = try reach(hostID)
         let key = "queue:\(item.listID)"
-        guard !pendingControls.contains(key) else { return }
+        guard !pendingControls.contains(key) else { return false }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
         let cancelled = try await api.cancelQueued(item, host: target.remote)
         await connections[target.hostID]?.refresh(fresh: true)
         returnToDraft(cancelled.message ?? item.message, attachments: cancelled.attachments ?? [], id: draftKey(for: item))
+        return true
+    }
+
+    func sessionQueue(_ sessionID: String) async throws -> [QueueState] {
+        let (api, route) = try resolve(sessionID)
+        let owner = HostCatalog.owner(of: sessionID) ?? route.hostID
+        let items = try await api.activeQueue(sessionID: route.sessionID, timeout: InboxPage.hostTimeout)
+        return items.map { InboxPage.qualified($0, host: owner) }
     }
 
     func queueSteer(_ item: QueueState) -> (capabilities: Capabilities, refusal: String?)? {
@@ -573,14 +585,15 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         return (session.capabilities, QueueSteer.refusal(item, capabilities: session.capabilities))
     }
 
-    func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws {
-        guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return }
+    @discardableResult
+    func steerQueued(_ item: QueueState, capabilities: Capabilities) async throws -> Bool {
+        guard QueueSteer.refusal(item, capabilities: capabilities) == nil else { return false }
         guard let hostID = item.hostID else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
         let (ownerAPI, target) = try reach(hostID)
         let id = draftKey(for: item)
         let (api, route) = try resolve(id)
         let key = "queue:\(item.listID)"
-        guard !pendingControls.contains(key) else { return }
+        guard !pendingControls.contains(key) else { return false }
         pendingControls.insert(key)
         defer { pendingControls.remove(key) }
         let cancelled = try await ownerAPI.cancelQueued(item, host: target.remote)
@@ -596,6 +609,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         await connections[route.hostID]?.refresh(fresh: true)
         await refreshSession(id)
+        return true
     }
 
     private func returnToDraft(_ message: String, attachments: [QueueAttachment], id: String) {

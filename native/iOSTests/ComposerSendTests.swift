@@ -187,6 +187,27 @@ final class ComposerSendTests: XCTestCase {
 
     private let rowImage = #","attachments":[{"id":"up-3","name":"row.png","mediaType":"image/png","bytes":1}]"#
 
+    func testARowActionAlreadyRunningReportsThatNothingWasDone() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        let item = try queuedItem(session)
+        model.pendingControls.insert("queue:\(item.listID)")
+        ComposerSendProtocol.state.script([])
+        let steered = try await model.steerQueued(item, capabilities: takesImages)
+        let edited = try await model.takeBack(item)
+        let cancelled = try await model.updateQueue(item, retry: false)
+        XCTAssertFalse(steered)
+        XCTAssertFalse(edited)
+        XCTAssertFalse(cancelled)
+        XCTAssertTrue(ComposerSendProtocol.state.attempts.isEmpty)
+    }
+
+    func testARowActionThatRanReportsIt() async throws {
+        let (model, session) = try makeModel(store: temporaryStore())
+        ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(200, sentReceipt)])
+        let steered = try await model.steerQueued(queuedItem(session), capabilities: takesImages)
+        XCTAssertTrue(steered)
+    }
+
     func testSteeringAQueuedImageSendsItIntoTheTurnByItsUpload() async throws {
         let (model, session) = try makeModel(store: temporaryStore())
         ComposerSendProtocol.state.script([.answer(200, #"{"ok":true}"#), .answer(200, sentReceipt)])
