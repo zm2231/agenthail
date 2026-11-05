@@ -67,15 +67,13 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 	record, err := d.Registry.AddHost(registry.PairedHost{ID: version.HostID, Name: name, Endpoint: link.Endpoint, Address: address, Token: token})
 	if err != nil {
 		d.federation.lifecycle.Unlock()
-		d.revokeRemoteDevice(token, link.Endpoint, address)
-		writeAPIError(w, http.StatusConflict, "host_pairing_conflict", err.Error())
+		writeAPIError(w, http.StatusConflict, "host_pairing_conflict", d.discardPairing(err.Error(), version.HostName, token, link.Endpoint, address))
 		return
 	}
 	if err := d.attachHostLocked(record); err != nil {
 		_, _ = d.Registry.RemoveHost(record.ID)
 		d.federation.lifecycle.Unlock()
-		d.revokeRemoteDevice(token, link.Endpoint, address)
-		writeAPIError(w, http.StatusInternalServerError, "host_attach_failed", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "host_attach_failed", d.discardPairing(err.Error(), version.HostName, token, link.Endpoint, address))
 		return
 	}
 	d.federation.lifecycle.Unlock()
@@ -90,15 +88,13 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) repairHostLocked(w http.ResponseWriter, existing registry.PairedHost, name, endpoint, address, token string) {
 	if name != "" && name != existing.Name {
 		d.federation.lifecycle.Unlock()
-		d.revokeRemoteDevice(token, endpoint, address)
-		writeAPIError(w, http.StatusConflict, "host_pairing_conflict", fmt.Sprintf("host %s is already paired as %s; pair it again without --name", existing.ID, existing.Name))
+		writeAPIError(w, http.StatusConflict, "host_pairing_conflict", d.discardPairing(fmt.Sprintf("host %s is already paired as %s; pair it again without --name", existing.ID, existing.Name), existing.Name, token, endpoint, address))
 		return
 	}
 	record, previous, err := d.Registry.RepairHost(registry.PairedHost{ID: existing.ID, Endpoint: endpoint, Address: address, Token: token})
 	if err != nil {
 		d.federation.lifecycle.Unlock()
-		d.revokeRemoteDevice(token, endpoint, address)
-		writeAPIError(w, http.StatusInternalServerError, "host_repair_failed", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "host_repair_failed", d.discardPairing(err.Error(), existing.Name, token, endpoint, address))
 		return
 	}
 	if err := d.attachHostLocked(record); err != nil {
@@ -108,17 +104,29 @@ func (d *Daemon) repairHostLocked(w http.ResponseWriter, existing registry.Paire
 			err = errors.Join(err, restoreErr)
 		}
 		d.federation.lifecycle.Unlock()
-		d.revokeRemoteDevice(token, endpoint, address)
-		writeAPIError(w, http.StatusInternalServerError, "host_attach_failed", err.Error())
+		writeAPIError(w, http.StatusInternalServerError, "host_attach_failed", d.discardPairing(err.Error(), existing.Name, token, endpoint, address))
 		return
 	}
 	d.federation.lifecycle.Unlock()
 	view := hostView{PairedHost: record}
 	if err := d.revokeRemoteDevice(previous.Token, previous.Endpoint, previous.Address); err != nil {
-		view.Notice = fmt.Sprintf("the token this host held before could not be revoked on %s: %s; find it there with 'agenthail devices list' and run 'agenthail devices remove <id>'", record.Name, err)
+		view.Notice = unrevokedToken("the token this host held before", record.Name, err)
 	}
 	d.publishEvent("host.paired", record.ID, map[string]any{"id": record.ID, "name": record.Name})
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"host": view, "repaired": true})
+}
+
+// discardPairing revokes a token a pairing just redeemed and could not keep,
+// and adds to message how to remove it by hand when the host refuses.
+func (d *Daemon) discardPairing(message, hostName, token, endpoint, address string) string {
+	if err := d.revokeRemoteDevice(token, endpoint, address); err != nil {
+		return message + "; " + unrevokedToken("the token this pairing was just given", hostName, err)
+	}
+	return message
+}
+
+func unrevokedToken(which, hostName string, err error) string {
+	return fmt.Sprintf("%s could not be revoked on %s: %s; find it there with 'agenthail devices list' and run 'agenthail devices remove <id>'", which, hostName, err)
 }
 
 func (d *Daemon) revokeRemoteDevice(token, endpoint, address string) error {

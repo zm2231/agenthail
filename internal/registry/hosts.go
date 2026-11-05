@@ -191,7 +191,7 @@ func (r *Registry) RepairHost(host PairedHost) (PairedHost, PairedHost, error) {
 	return repaired, previous, nil
 }
 
-const pairedHostColumns =`host_id,name,endpoint,address,token,state,last_error,last_contact_at,created_at,catalog_epoch,catalog_seq`
+const pairedHostColumns = `host_id,name,endpoint,address,token,state,last_error,last_contact_at,created_at,catalog_epoch,catalog_seq`
 
 func scanPairedHost(row rowScanner) (PairedHost, error) {
 	var host PairedHost
