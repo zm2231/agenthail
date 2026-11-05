@@ -105,17 +105,36 @@ func (a *App) callerCard() (agentcard.Card, error) {
 }
 
 func (a *App) cardSources() agentcard.Sources {
+	project := func(ctx context.Context, cwd string) (*agentcard.Project, error) {
+		found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
+		if err != nil || found == nil {
+			return nil, err
+		}
+		return &agentcard.Project{ID: found.ID, Name: found.DisplayName, Root: found.RootPath}, nil
+	}
+	projects := map[string]*agentcard.Project{}
 	return agentcard.Sources{
-		Registry: a.registry(),
-		Project: func(ctx context.Context, cwd string) (*agentcard.Project, error) {
-			found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
-			if err != nil || found == nil {
-				return nil, err
-			}
-			return &agentcard.Project{ID: found.ID, Name: found.DisplayName, Root: found.RootPath}, nil
-		},
+		Registry:    a.registry(),
+		Project:     project,
 		LeadRef:     a.coordinator().Ref,
 		PromptsHeld: claudePromptsHeld,
+		PromptHearer: func(ctx context.Context, session surface.Session) string {
+			projectID, where := "", ""
+			if stored := daemon.StoredSessionProject(a.registry(), session.ID); stored != nil {
+				projectID, where = stored.ID, stored.DisplayName
+			} else {
+				found, seen := projects[session.Cwd]
+				if !seen && session.Cwd != "" {
+					found, _ = project(ctx, session.Cwd)
+					projects[session.Cwd] = found
+				}
+				if found != nil {
+					projectID, where = found.ID, found.Name
+				}
+			}
+			hearer, _, _ := a.coordinator().PromptHearer(session.ID, projectID, where)
+			return hearer
+		},
 	}
 }
 

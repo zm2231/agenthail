@@ -14,12 +14,15 @@ An agent Agenthail manages has no other way to learn its alias, who started it, 
 | `lead` | `ProjectCoordinators` for that project; `self` when the coordinator's alias points at this session; `leadProblem` when two hosts both have one |
 | `startedBy` | `session_origins` |
 | `reportTo` | the creator when an agent started the session, else `@lead` unless the session is the coordinator |
+| `decides` | true for the coordinator itself, and for a session that started one Agenthail would tell when it is blocked (`coordinator.Service.PromptHearer`, the same rule the daemon's notices follow) |
 | `ask` | the runtime's question tool, whether Agenthail can answer it, and whether a paired phone has a push target |
 | `commands` | the few commands that act on the fields above, with exact syntax |
 
 `ask.answerable` is true for a Claude host session, and for a terminal Claude whose config root has the `PermissionRequest` hook (`agenthail hooks install`). A `claude --bg` job and Codex sessions are notified but answered where they run.
 
 The brief sends questions where reports go. A session that reports to an agent (its creator or `@lead`) is told to ask that agent with `agenthail send`. One that reports to the person (they started it with no coordinator, or it is the coordinator) is told to use its runtime's question tool, which Agenthail shows as Needs you and on the phone, unless its own instructions forbid it; then it asks in its reply.
+
+A session with `decides` is told that the person has it answer those sessions' permission prompts and questions itself, every time, and that this authority comes from the person through Agenthail rather than from the peer whose notice reports the prompt. It reads the request with `agenthail requests <target> --json`, allows what fits the session's task, denies what is unsafe with the safe form in the reason, and goes to the person only when the effect is hard to undo or reaches outside the task, or it can't judge it. The card names Claude's rm guard, which can fire even in bypass mode, as the common case. The blocked notice reaches the lead as a peer message from the blocked session, or as a plain turn when steered into a busy lead, so the authority has to come from the card.
 
 `agenthail whoami --json` prints the card; `agenthail help agent` renders it (`agentcard.Render`). A caller Agenthail cannot name gets `resolved: false` and the reason, never an error.
 

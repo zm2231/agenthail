@@ -141,7 +141,7 @@ undone.
   primary root, the one its daemon's `CLAUDE_CONFIG_DIR` names, `~/.claude`
   when unset, and Claude is launched without naming a root. With
   `--root <name>` it is that root of the target, which must be configured
-  there and signed in directly, not through an account proxy. The target
+  there. A root behind an account proxy is accepted. The target
   answers the prepare with the root it will use; a source whose target
   answers without it (an Agenthail too old to choose) fails the move before
   any file leaves, so a move never lands in another root than the one named.
@@ -179,7 +179,9 @@ what step 1 added. A resume whose outcome is unknown leaves the conversation
 in the target root and the move done. A daemon that stopped mid-move settles
 it when it starts: a move whose transcript reached the target finishes there,
 and any other goes back to the source root. A root behind an account proxy
-is refused as a target, because the proxy chooses the account itself.
+is a valid target: the session continues under whichever account the proxy
+chooses, which is how a person out of quota on a signed-in root reaches the
+pool.
 
 A move to another host carries no project config; the target's root starts
 without the source's trust, allowed tools or local MCP servers.
@@ -198,7 +200,9 @@ root other than the stop's, with a reading, under 90% of its session and week
 offered. The offers are computed for every waiting stop at once and kept
 five seconds, or until a stop changes. The `limit-move` action
 (`configRoot` optional, defaulting to the offer) runs the move above, and
-refuses a session whose stop is not waiting. It claims the waiting stop
+refuses a session whose stop is not waiting or a `configRoot` behind a proxy,
+so a stale or hand-built offer never lands in a proxy root;
+`agenthail move --root` is the way there. It claims the waiting stop
 first; while the claim holds, `limit-resume` and `limit-resume-cancel` on
 that session are refused, so a cancel either lands before the move starts or
 after it finishes. Nothing moves a stopped session unless the person asks.

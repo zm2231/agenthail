@@ -82,7 +82,7 @@ func TestAWorkersPermissionPromptGoesToItsLeadOnceWithHowToAnswer(t *testing.T) 
 	if len(notices) != 1 || notices[0].SessionID != "lead" || notices[0].Status != "pending" {
 		t.Fatalf("notices=%+v", notices)
 	}
-	for _, want := range []string{"Bash: rm -rf build", "agenthail answer @builder", "--request approve-1", "person was notified"} {
+	for _, want := range []string{"Bash: rm -rf build", "Read the request first: agenthail requests @builder --json", "agenthail answer @builder", "--request approve-1", "Answer it yourself now", "don't wait for them"} {
 		if !strings.Contains(notices[0].Message, want) {
 			t.Fatalf("the notice %q does not say %q", notices[0].Message, want)
 		}

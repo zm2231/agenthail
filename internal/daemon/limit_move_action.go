@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -16,6 +18,19 @@ func (d *Daemon) releaseMovedLimitStop(sessionID string) {
 		return
 	}
 	d.logLimitResume(d.releaseLimitStop(stop, limitWaiting, true, time.Now()))
+}
+
+func (d *Daemon) claudeRootProxy(choice string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path, err := surface.ResolveClaudeConfigRoot(home, choice)
+	if err != nil {
+		return ""
+	}
+	root, _ := surface.ClaudeConfigRootFor(d.currentClaudeConfigRoots(), path)
+	return root.Proxy
 }
 
 func (d *Daemon) doLimitMove(ctx context.Context, sessionID, root string, stopTerminal bool) (actionResult, error) {
@@ -34,6 +49,9 @@ func (d *Daemon) doLimitMove(ctx context.Context, sessionID, root string, stopTe
 	}
 	if root == "" {
 		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", "no other Claude account has room for this session now")
+	}
+	if proxy := d.claudeRootProxy(root); proxy != "" {
+		return actionResult{}, actionFailed(http.StatusConflict, "move_refused", fmt.Sprintf("Claude config directory %s runs through the %s proxy, which chooses its own account, so a usage-limit move does not offer it; move the session there with agenthail move <session> --root %s", root, proxy, root))
 	}
 	result, err := d.moveSessionToRoot(context.WithoutCancel(ctx), sessionMoveRequest{SessionID: sessionID, Root: root, StopTerminal: stopTerminal})
 	var refused MoveRefusedError

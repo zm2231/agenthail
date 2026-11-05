@@ -70,7 +70,7 @@ func validateCommandFlags(command string, args []string) error {
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
 		"hosts":   {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"move":    {values: map[string]bool{"--to": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
+		"move":    {values: map[string]bool{"--to": true, "--root": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
 		"devices": {values: map[string]bool{"--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"person":  {bools: map[string]bool{"--reset": true, "--json": true}},
