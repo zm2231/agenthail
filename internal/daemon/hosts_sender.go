@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -84,8 +83,8 @@ func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target
 	if !qualified {
 		return false, fmt.Errorf("host_mismatch: a host names its sender qualified with its own host id")
 	}
-	if principalHost == "" {
-		return false, errUnboundHostToken
+	if _, err := d.boundHost(ctx); err != nil {
+		return false, err
 	}
 	if hostRef != principalHost {
 		return false, fmt.Errorf("host_mismatch: a host may only name its own sessions as the sender")
@@ -106,8 +105,6 @@ func (d *Daemon) routeSender(ctx context.Context, request map[string]any, target
 	request["sourceSessionId"] = sender
 	return true, nil
 }
-
-var errUnboundHostToken = errors.New("this host was paired before hosts could name their sessions as senders; pair it again: run 'agenthail hosts invite' on this machine, then 'agenthail hosts add <pairing-link>' on the other host")
 
 func (d *Daemon) senderName(sessionID string) string {
 	if alias, err := d.Registry.ReverseAlias(sessionID); err == nil && alias != "" {

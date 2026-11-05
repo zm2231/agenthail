@@ -1392,7 +1392,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a forwarded relay needs its idempotency key\"}}\n"
   },
   "api/action relay leg not from a host": {
-    "status": 400,
+    "status": 403,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -1401,7 +1401,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"relayHops is set only by a paired host forwarding a relay\"}}\n"
+    "body": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Only a paired host can make this request.\"}}\n"
   },
   "api/action relay leg past the hop limit": {
     "status": 400,
@@ -3828,7 +3828,7 @@
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"a forwarded relay needs its idempotency key\"}}\n"
   },
   "api/v1/actions relay leg not from a host": {
-    "status": 400,
+    "status": 403,
     "header": {
       "Cache-Control": [
         "no-store"
@@ -3837,7 +3837,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"relayHops is set only by a paired host forwarding a relay\"}}\n"
+    "body": "{\"error\":{\"code\":\"forbidden\",\"message\":\"Only a paired host can make this request.\"}}\n"
   },
   "api/v1/actions relay leg past the hop limit": {
     "status": 400,

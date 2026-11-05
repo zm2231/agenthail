@@ -10,6 +10,7 @@ type hostView struct {
 	registry.PairedHost
 	Detail       string `json:"detail,omitempty"`
 	Notice       string `json:"notice,omitempty"`
+	Problem      string `json:"problem,omitempty"`
 	SessionCount int    `json:"sessionCount"`
 }
 
@@ -77,6 +78,7 @@ func (d *Daemon) hostViews() ([]hostView, error) {
 		if host, found := d.pairedHost(record.ID); found {
 			view.State, view.Detail = host.status()
 			view.Notice = host.notice()
+			view.Problem = host.pairingProblem()
 		}
 		views = append(views, view)
 	}
