@@ -49,8 +49,8 @@ final class ActivityReadingTests: XCTestCase {
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
         let chip = app.buttons["file-chip-Reconnect.swift"]
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "the run that edited a file shows it as a chip")
-        for _ in 0..<4 where !chip.isHittable { timeline.swipeDown() }
-        chip.tapWhenReady()
+        chip.scrollIntoMiddle(of: timeline)
+        chip.tapWhenStill()
         let added = app.staticTexts.matching(NSPredicate(format: "label == %@", "Added: await session.restorePendingBuild()")).firstMatch
         XCTAssertTrue(added.waitForExistence(timeout: 5), "tapping a file chip shows the lines it added")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Removed: let session = restore()")).firstMatch.exists, "and the lines it removed")

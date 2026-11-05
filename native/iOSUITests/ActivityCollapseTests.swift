@@ -43,9 +43,7 @@ final class ActivityCollapseTests: XCTestCase {
         activity.tapWhenReady()
         let tool = app.buttons["tool-run-2"]
         XCTAssertTrue(tool.waitForExistence(timeout: 5))
-        // The failed tool above opens on its own and can push this line under the composer, where a tap
-        // reaches the composer even though the line reports itself hittable.
-        for _ in 0..<6 where tool.frame.maxY > timeline.frame.maxY - 200 { timeline.swipeUp() }
+        tool.scrollIntoMiddle(of: timeline)
         tool.tapWhenStill()
         let collapse = app.buttons["collapse-tool-run-2"]
         for _ in 0..<6 where !collapse.isHittable { timeline.swipeUp() }
