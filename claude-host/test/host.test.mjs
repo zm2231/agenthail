@@ -330,6 +330,20 @@ test('a new credential that the agenthail server refuses is reported, not taken 
   c.close();
 });
 
+test('a session opened in the default Claude config root runs its Claude with CLAUDE_CONFIG_DIR unset, whatever the host was started with', async () => {
+  const f = fixture();
+  const home = path.join(f.cwd, 'home');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  await startHost(f, { env: { HOME: home, CLAUDE_CONFIG_DIR: path.join(f.cwd, 'claude-other') } });
+  const c = new Client(f.socket);
+  await c.call('open', { sessionId: randomUUID(), cwd: f.cwd, configDir: path.join(home, '.claude') });
+  await c.call('commands', { cwd: f.cwd, configDir: path.join(home, '.claude') });
+  const spawned = fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(spawned.length, 2);
+  assert.deepEqual(spawned.map((s) => s.configDir), [null, null]);
+  c.close();
+});
+
 test('a session opened in a Claude config root runs its Claude there', async () => {
   const f = fixture();
   await startHost(f);

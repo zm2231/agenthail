@@ -45,10 +45,10 @@ func (c *Claude) listingConfigDir(sess *surface.Session) (string, error) {
 			return "", err
 		}
 	}
-	if root == "" || filepath.Clean(root) == filepath.Clean(surface.ClaudeConfigDir(c.home)) {
-		return "", nil
+	if root == "" {
+		root = surface.ClaudeConfigDir(c.home)
 	}
-	return root, nil
+	return filepath.Clean(root), nil
 }
 
 func claudeRuntimeCommands(commands []claudehost.Command) *surface.RuntimeCommands {

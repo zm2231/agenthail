@@ -131,11 +131,11 @@ func validateClaudeStart(options surface.SessionStartOptions) error {
 	return nil
 }
 
-// startRoot is the config root a new conversation runs under, "" for the
-// primary.
+// startRoot is the config root a new conversation runs under. An empty choice
+// is this process's primary root, the one its placement offered as primary.
 func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) {
 	if options.ConfigRoot == "" {
-		return "", nil
+		return filepath.Clean(surface.ClaudeConfigDir(c.home)), nil
 	}
 	root, err := surface.ResolveClaudeConfigRoot(c.home, options.ConfigRoot)
 	if err != nil {
@@ -160,7 +160,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
 		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
-		ConfigDir: surface.ClaudeLaunchConfigDir(c.home, root),
+		ConfigDir: root,
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if err != nil {

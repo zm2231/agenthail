@@ -50,9 +50,8 @@ func TestClaudeHostedCreationRunsUnderTheChosenRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inherited, set := os.LookupEnv("CLAUDE_CONFIG_DIR")
-	if spawns := host.Spawns(t, primary.ID); len(spawns) != 1 || (spawns[0].ConfigDir != nil) != set || set && *spawns[0].ConfigDir != inherited {
-		t.Fatalf("spawns=%+v, want the primary root left to the host's own CLAUDE_CONFIG_DIR", spawns)
+	if spawns := host.Spawns(t, primary.ID); len(spawns) != 1 || spawns[0].ConfigDir != nil {
+		t.Fatalf("spawns=%+v, want the default root reached with CLAUDE_CONFIG_DIR unset", spawns)
 	}
 
 	if _, _, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd, ConfigRoot: "nobody"}); err == nil || !strings.Contains(err.Error(), "no configured Claude config directory") {
