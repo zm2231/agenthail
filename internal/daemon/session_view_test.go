@@ -28,7 +28,7 @@ func TestPresentationScopesCountsAndCollapse(t *testing.T) {
 		t.Fatalf("counts=%+v", got)
 	}
 	got := plan.view.Projects[0].CollapsedFamilyIDs
-	want := []string{"6", "old-queue", "old-working", "0", "1", "2", "3", "4"}
+	want := []string{"6", "old-queue", "old-working", "0", "1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collapsed=%v want=%v", got, want)
 	}
