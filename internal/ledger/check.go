@@ -28,24 +28,24 @@ type CheckOutcome struct {
 	Cuts   []string `json:"cuts,omitempty"`
 }
 
-type checkEvent struct {
+type plannedWrite struct {
 	typ     EventType
 	payload any
 }
 
-func (s *Store) writeCheck(projectKey, actor string, now time.Time, plan func(*Board, *idIssuer) ([]checkEvent, error)) error {
+func (s *Store) writeEvents(projectKey, actor string, now time.Time, plan func(*Board, *idIssuer) ([]plannedWrite, error)) error {
 	board, release, err := s.lockBoard(projectKey)
 	if err != nil {
 		return err
 	}
 	defer release()
-	if err := s.commitCheck(board, projectKey, actor, now, plan); err != nil {
+	if err := s.commitEvents(board, projectKey, actor, now, plan); err != nil {
 		return err
 	}
 	return s.catchUp(board, projectKey)
 }
 
-func (s *Store) commitCheck(board *Board, projectKey, actor string, now time.Time, plan func(*Board, *idIssuer) ([]checkEvent, error)) error {
+func (s *Store) commitEvents(board *Board, projectKey, actor string, now time.Time, plan func(*Board, *idIssuer) ([]plannedWrite, error)) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (s *Store) commitCheck(board *Board, projectKey, actor string, now time.Tim
 
 func (s *Store) StartCheck(projectKey, goalID, run string, now time.Time) (CheckInput, error) {
 	var input CheckInput
-	err := s.writeCheck(projectKey, run, now, func(board *Board, _ *idIssuer) ([]checkEvent, error) {
+	err := s.writeEvents(projectKey, run, now, func(board *Board, _ *idIssuer) ([]plannedWrite, error) {
 		in, ok := board.checkInput(goalID)
 		if !ok {
 			return nil, refuse("%q is not a goal in %s", goalID, projectKey)
@@ -88,14 +88,14 @@ func (s *Store) StartCheck(projectKey, goalID, run string, now time.Time) (Check
 		for i, u := range in.Utterances {
 			ids[i] = u.ID
 		}
-		return []checkEvent{{EventGate, CheckPayload{Gate: GateCheck, Run: run, GoalID: goalID, SessionID: run, Result: CheckStarted, Utterances: ids}}}, nil
+		return []plannedWrite{{EventGate, CheckPayload{Gate: GateCheck, Run: run, GoalID: goalID, SessionID: run, Result: CheckStarted, Utterances: ids}}}, nil
 	})
 	return input, err
 }
 
 func (s *Store) ReportCheck(req CheckReport, now time.Time) (CheckOutcome, error) {
 	outcome := CheckOutcome{Run: req.Run}
-	err := s.writeCheck(req.ProjectKey, req.SessionID, now, func(board *Board, ids *idIssuer) ([]checkEvent, error) {
+	err := s.writeEvents(req.ProjectKey, req.SessionID, now, func(board *Board, ids *idIssuer) ([]plannedWrite, error) {
 		run, err := board.openRun(req.Run, req.SessionID)
 		if err != nil {
 			return nil, err
@@ -104,7 +104,7 @@ func (s *Store) ReportCheck(req CheckReport, now time.Time) (CheckOutcome, error
 			return nil, refuse("a check report is either --none or at least one --missing")
 		}
 		outcome.GoalID, outcome.Result = run.GoalID, CheckNone
-		var events []checkEvent
+		var events []plannedWrite
 		for _, m := range req.Missing {
 			breadth := strings.TrimSpace(m.Breadth)
 			if breadth == "" {
@@ -118,24 +118,24 @@ func (s *Store) ReportCheck(req CheckReport, now time.Time) (CheckOutcome, error
 				return nil, err
 			}
 			outcome.Cuts = append(outcome.Cuts, id)
-			events = append(events, checkEvent{EventCut, CutPayload{CutID: id, Target: run.GoalID, AuthorSession: req.SessionID, CheckRun: run.Run, FromUtterance: m.From,
+			events = append(events, plannedWrite{EventCut, CutPayload{CutID: id, Target: run.GoalID, AuthorSession: req.SessionID, CheckRun: run.Run, FromUtterance: m.From,
 				Reason: fmt.Sprintf("the checker found %q in %s missing from the clauses", breadth, m.From)}})
 		}
 		if len(outcome.Cuts) > 0 {
 			outcome.Result = CheckReported
 		}
-		return append(events, checkEvent{EventGate, CheckPayload{Gate: GateCheck, Run: run.Run, GoalID: run.GoalID, SessionID: run.SessionID, Result: outcome.Result, Utterances: run.Utterances, Cuts: outcome.Cuts}}), nil
+		return append(events, plannedWrite{EventGate, CheckPayload{Gate: GateCheck, Run: run.Run, GoalID: run.GoalID, SessionID: run.SessionID, Result: outcome.Result, Utterances: run.Utterances, Cuts: outcome.Cuts}}), nil
 	})
 	return outcome, err
 }
 
 func (s *Store) FinishCheck(projectKey, run, result, reason string, now time.Time) error {
-	return s.writeCheck(projectKey, run, now, func(board *Board, _ *idIssuer) ([]checkEvent, error) {
+	return s.writeEvents(projectKey, run, now, func(board *Board, _ *idIssuer) ([]plannedWrite, error) {
 		r := board.checks.runs[run]
 		if r == nil || r.Result != CheckStarted {
 			return nil, nil
 		}
-		return []checkEvent{{EventGate, CheckPayload{Gate: GateCheck, Run: run, GoalID: r.GoalID, SessionID: r.SessionID, Result: result, Utterances: r.Utterances, Reason: reason}}}, nil
+		return []plannedWrite{{EventGate, CheckPayload{Gate: GateCheck, Run: run, GoalID: r.GoalID, SessionID: r.SessionID, Result: result, Utterances: r.Utterances, Reason: reason}}}, nil
 	})
 }
 

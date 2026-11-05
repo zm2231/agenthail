@@ -12,7 +12,7 @@ import (
 
 const maxWorkNoteRunes = 4000
 
-var workLogTypes = []string{"progress", "blocker", "decision", "hypothesis", "tried", "result"}
+var WorkLogTypes = []string{"progress", "blocker", "decision", "hypothesis", "tried", "result"}
 
 type WorkEntry struct {
 	At      time.Time `json:"at"`
@@ -54,10 +54,10 @@ func (b *Board) planWorkNote(req WorkRequest) (EventType, any, string, error) {
 	}
 	payload.LogType = req.LogType
 	if payload.LogType == "" {
-		payload.LogType = workLogTypes[0]
+		payload.LogType = WorkLogTypes[0]
 	}
-	if !slices.Contains(workLogTypes, payload.LogType) {
-		return "", nil, "", refuse("unknown log type %q; use %s", payload.LogType, strings.Join(workLogTypes, ", "))
+	if !slices.Contains(WorkLogTypes, payload.LogType) {
+		return "", nil, "", refuse("unknown log type %q; use %s", payload.LogType, strings.Join(WorkLogTypes, ", "))
 	}
 	return EventWorkLog, payload, fmt.Sprintf("%s log on %s", payload.LogType, item.ID), nil
 }
