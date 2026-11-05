@@ -40,9 +40,6 @@ struct SessionTree: Equatable {
         /// The daemon's project, or nil for the group of sessions without one.
         let identity: ProjectIdentity?
         var checkouts: [Checkout]
-        /// Families that are working, queued or need attention. Collapsing a
-        /// project never hides them.
-        var pinned: Set<String> = []
         var collapsed: Set<String> = []
         var counts = ScopePage.Count(families: 0, sessions: 0)
 
@@ -57,6 +54,16 @@ struct SessionTree: Equatable {
 
         func hostLabel(of checkout: Checkout) -> String? {
             checkout.host.flatMap { HostNames.labels(checkouts.compactMap(\.host))[$0.id] }
+        }
+
+        func shown(expanded: Bool, keeping selectedID: String?) -> Project {
+            expanded ? self : collapsed(keeping: selectedID)
+        }
+
+        func moreLabel(expanded: Bool, keeping selectedID: String?) -> String? {
+            let count = shown(expanded: expanded, keeping: selectedID).sessionCount
+            guard familyTotal > count || expanded && familyTotal > collapsed.count else { return nil }
+            return expanded ? "Show less" : "Show \(familyTotal - count) more"
         }
 
         /// The daemon's collapsed families, and the family holding the selection in its place.

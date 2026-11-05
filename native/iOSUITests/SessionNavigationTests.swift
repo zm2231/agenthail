@@ -4,17 +4,30 @@ import XCTest
 final class SessionNavigationTests: XCTestCase {
     func testVoiceEntryPreservesTabNavigation() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry", "--preview-crowded"]
         app.launch()
         XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
-        let workspace = app.buttons["project-computer::project-fieldnotes"]
+        let workspace = app.descendants(matching: .any)["project-computer::project-fieldnotes"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["session-computer::codex-demo"].waitForExistence(timeout: 5))
-        workspace.tapWhenReady()
-        XCTAssertFalse(app.buttons["session-computer::codex-demo"].exists)
-        XCTAssertTrue(app.buttons["session-computer::demo"].exists, "a collapsed project keeps its working session")
-        workspace.tapWhenReady()
-        XCTAssertTrue(app.buttons["session-computer::codex-demo"].waitForExistence(timeout: 5))
+        XCTAssertFalse((workspace.value as? String ?? "").contains("collapsed"), "the header does not toggle, so it does not say collapsed: \(String(describing: workspace.value))")
+        XCTAssertTrue(app.buttons["session-computer::demo"].exists, "a project shows its working session")
+        XCTAssertTrue(app.buttons["session-computer::crowded-3"].exists, "a project shows the daemon's five")
+        XCTAssertFalse(app.buttons["session-computer::crowded-4"].exists, "a sixth idle session waits behind Show more")
+        let more = app.buttons["more-computer::project-fieldnotes"]
+        XCTAssertEqual(more.label, "Show 3 more")
+        app.swipeUp()
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "show more"
+        shot.lifetime = .keepAlways
+        add(shot)
+        more.tapWhenReady()
+        XCTAssertTrue(app.buttons["session-computer::crowded-4"].waitForExistence(timeout: 5), "Show more expands the project in place")
+        for _ in 0..<3 where !more.isHittable { app.swipeUp() }
+        XCTAssertEqual(more.label, "Show less")
+        more.tapWhenReady()
+        XCTAssertTrue(app.buttons["session-computer::crowded-3"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["session-computer::crowded-4"].exists, "Show less folds the project back to five")
+        for _ in 0..<3 where !app.buttons["voice-entry"].isHittable { app.swipeDown() }
         app.buttons["voice-entry"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Sample conversation"].exists, "the preview voice entry must not dial a paired host")
