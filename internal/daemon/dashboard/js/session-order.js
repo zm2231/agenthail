@@ -1,7 +1,17 @@
 import { app } from "./state.js";
 import { responseError } from "./http.js";
 
-const orderScopes = ["current", "all", "archived"];
+export function neededOrderScopes() {
+  const listing = app.inboxMode !== "current";
+  const scopes = ["current"];
+  if (listing || app.selectedProject) scopes.push("all");
+  if (app.inboxMode === "projects" || (listing && app.showArchived)) scopes.push("archived");
+  return scopes;
+}
+
+export function orderIsMissing() {
+  return neededOrderScopes().some((scope) => !app.sessionOrderRead?.includes(scope));
+}
 
 async function readScope(scope) {
   const view = { projects: [], families: [], refreshAt: null };
@@ -26,8 +36,10 @@ async function readScope(scope) {
 }
 
 export async function loadSessionOrder() {
-  const views = await Promise.all(orderScopes.map(readScope));
-  app.sessionOrder = Object.fromEntries(orderScopes.map((scope, index) => [scope, views[index]]));
+  const scopes = neededOrderScopes();
+  const views = await Promise.all(scopes.map(readScope));
+  app.sessionOrder = { ...app.sessionOrder, ...Object.fromEntries(scopes.map((scope, index) => [scope, views[index]])) };
+  app.sessionOrderRead = scopes;
   return views.map((view) => view.refreshAt).filter(Boolean).map(Date.parse).reduce((first, at) => Math.min(first, at), Infinity);
 }
 
