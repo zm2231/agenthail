@@ -25,6 +25,43 @@ func (s Service) ProjectLead(projectID, where string) (registry.CoordinatorSpec,
 	return registry.CoordinatorSpec{}, fmt.Errorf("%s has coordinators %s; resolve it with 'agenthail coordinator set --replace' on one host", where, s.Refs(specs))
 }
 
+// A coordinator that has never started a conversation leads nothing yet, so the spawner hears instead.
+func (s Service) PromptHearer(sessionID, projectID, where string) (string, string, bool) {
+	if _, coordinates := s.Of(sessionID); !coordinates && projectID != "" {
+		if spec, err := s.ProjectLead(projectID, where); err == nil {
+			if lead := s.LeadSession(spec); lead != "" && lead != sessionID {
+				return lead, "lead", true
+			}
+		}
+	}
+	origin, found, err := s.Registry.SessionOrigin(sessionID)
+	if err != nil || !found || origin.CreatorID == "" || origin.CreatorID == sessionID {
+		return "", "", false
+	}
+	return origin.CreatorID, "spawner", true
+}
+
+func (s Service) LeadSession(spec registry.CoordinatorSpec) string {
+	if spec.HostID == "" {
+		id, err := s.Registry.CoordinatorSessionID(spec)
+		if err != nil {
+			return ""
+		}
+		return id
+	}
+	id := spec.SessionID
+	if host, target, ok := hosts.Split(id); ok {
+		if host != spec.HostID {
+			return ""
+		}
+		id = target
+	}
+	if owner, err := s.Registry.SessionHost(id); err != nil || id == "" || owner != spec.HostID {
+		return ""
+	}
+	return id
+}
+
 // Ref is how a person names a coordinator: @name on this host, host::@name
 // on a paired host.
 func (s Service) Ref(spec registry.CoordinatorSpec) string {

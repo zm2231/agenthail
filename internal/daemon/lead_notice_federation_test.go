@@ -24,7 +24,7 @@ func TestAPromptReachesAPairedHostsLeadOnceAcrossARestart(t *testing.T) {
 	local.daemon.discoverCatalog(context.Background())
 	testkit.Eventually(t, "the remote coordinator mirrored with its session", 10*time.Second, func() bool {
 		specs, _ := local.reg.ProjectCoordinators("repo:github.com/example/widget")
-		return len(specs) == 1 && specs[0].HostID != "" && local.daemon.leadSession(specs[0]) != ""
+		return len(specs) == 1 && specs[0].HostID != "" && local.daemon.coordinator().LeadSession(specs[0]) != ""
 	})
 	worker, err := local.reg.Session("local-a")
 	if err != nil {
