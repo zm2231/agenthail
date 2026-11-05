@@ -115,12 +115,9 @@ func TestClaudeSessionInThePrimaryConfigRootIsStoppedAndResumedWithoutNamingIt(t
 			if err != nil || result["unchanged"] != false {
 				t.Fatalf("result=%v err=%v", result, err)
 			}
-			// The test host runs with the test's own environment, so a resume
-			// that names no config dir leaves the CLI with exactly that.
-			inherited, set := os.LookupEnv("CLAUDE_CONFIG_DIR")
 			spawns := host.Spawns(t, fixtureConversation)
-			if len(spawns) != 1 || (spawns[0].ConfigDir != nil) != set || set && *spawns[0].ConfigDir != inherited {
-				t.Fatalf("spawns=%+v, want one resume with the host's own CLAUDE_CONFIG_DIR", spawns)
+			if len(spawns) != 1 || (spawns[0].ConfigDir != nil) != want.Set || want.Set && *spawns[0].ConfigDir != want.Dir {
+				t.Fatalf("spawns=%+v, want one resume with CLAUDE_CONFIG_DIR %+v", spawns, want)
 			}
 			dirs := fixture.ConfigDirs()
 			if len(dirs) == 0 {

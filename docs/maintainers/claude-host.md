@@ -410,9 +410,14 @@ prompt. Measured with Claude Code 2.1.305, Claude Code's prompt added about
 2,200 input tokens to each request, read from the prompt cache after the first.
 
 `Claude.reach` resumes a conversation no process holds with `open({resume})`
-and waits until the host lists the process. When the conversation lives in a
-Claude config root other than the primary one, the open carries
-`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`.
+and waits until the host lists the process. A resume, a new session and a
+command listing carry the root as `configDir`, the primary one included, whatever the
+caller's own `CLAUDE_CONFIG_DIR` or the host's. The host runs that Claude
+with `CLAUDE_CONFIG_DIR` unset when the root is `~/.claude`, since Claude Code
+on macOS keys its keychain credentials on whether the variable is set, and
+set to the root otherwise. The host decides from its own `HOME`, not the
+daemon's record, because a restarted daemon keeps a running host of its
+build, with the environment that host started with.
 Claude restores a resumed conversation's title from its transcript (the last
 `custom-title` record) but names the resumed process anew, with
 `nameSource: "derived"`, so the open carries that title as `name` and the

@@ -11,6 +11,7 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
@@ -502,10 +503,7 @@ async function open(params) {
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
-        env: {
-          ...(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }),
-          ...(params.configDir ? { CLAUDE_CONFIG_DIR: params.configDir } : {}),
-        },
+        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }, params.configDir),
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
@@ -557,6 +555,24 @@ function runnableCommands(commands, terminal) {
 const listings = new Map();
 let listingQueue = Promise.resolve();
 
+// inRoot is env for a Claude run against configDir, or env itself when no
+// root is asked for. The default root is reached with CLAUDE_CONFIG_DIR unset,
+// whatever the host's own: Claude Code on macOS keys its keychain credentials
+// on whether the variable is set.
+function inRoot(env, configDir) {
+  if (!configDir) return env;
+  const { CLAUDE_CONFIG_DIR: _, ...rest } = env;
+  return rootIdentity(configDir) === rootIdentity(path.join(os.homedir(), '.claude')) ? rest : { ...rest, CLAUDE_CONFIG_DIR: configDir };
+}
+
+function rootIdentity(dir) {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+}
+
 async function listCommands({ cwd, configDir } = {}) {
   if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) {
     throw new HostError('invalid', `cwd must be an existing absolute directory: ${cwd}`);
@@ -603,7 +619,7 @@ async function listFolder(cwd, configDir) {
       cwd,
       sessionId: LISTING_SESSION_PREFIX + randomUUID().slice(-12),
       abortController: abort,
-      env: { ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false', ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}) },
+      env: inRoot({ ...process.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false' }, configDir),
       pathToClaudeCodeExecutable: args.claude,
       settingSources: ['user', 'project', 'local'],
       extraArgs: { 'strict-mcp-config': null, settings: JSON.stringify({ disableAllHooks: true }) },
