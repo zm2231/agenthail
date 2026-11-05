@@ -92,8 +92,9 @@ func TestTheLedgerReadRouteServesEachViewWithAnETagOfItsContent(t *testing.T) {
 	}
 	every, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work")
 	open, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&state=open")
-	if len(every["work"].([]any)) != 3 || len(open["work"].([]any)) != 2 {
-		t.Fatalf("unfiltered work %v, open work %v", every["work"], open["work"])
+	unsettled, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&all=false")
+	if len(every["work"].([]any)) != 3 || len(open["work"].([]any)) != 2 || len(unsettled["work"].([]any)) != 2 {
+		t.Fatalf("unfiltered work %v, open work %v, all=false %v", every["work"], open["work"], unsettled["work"])
 	}
 	work, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&q=index")
 	if items, _ := work["work"].([]any); len(items) != 1 || items[0].(map[string]any)["id"] != index.ID {

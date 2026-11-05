@@ -18,6 +18,8 @@ import (
 
 const ledgerHTTPPageBudget = 1 << 20
 
+var ledgerWorkFilters = []string{"q", "state", "type", "priority", "label", "assignee", "clause", "found", "all", "sort"}
+
 func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any, error) {
 	if last, ok := d.ledgerSync.last(key); ok {
 		req.Sync = &ledger.SyncHealth{OwnerHead: last.Head, Error: last.Error}
@@ -52,7 +54,15 @@ func ledgerReadQuery(query url.Values) (ledger.ReadRequest, error) {
 		}
 		req.Limit = limit
 	}
-	w := &req.Work
+	filtered := false
+	for _, name := range ledgerWorkFilters {
+		filtered = filtered || query.Has(name)
+	}
+	if !filtered {
+		return req, nil
+	}
+	w := &ledger.WorkQuery{}
+	req.Work = w
 	for _, term := range query["q"] {
 		w.Terms = append(w.Terms, strings.Fields(term)...)
 	}

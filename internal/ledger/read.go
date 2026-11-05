@@ -3,7 +3,6 @@ package ledger
 import (
 	"cmp"
 	"encoding/json"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,7 +23,7 @@ type ReadRequest struct {
 	ID     string
 	Limit  int
 	Cursor string
-	Work   WorkQuery
+	Work   *WorkQuery
 	Budget int
 	Sync   *SyncHealth
 }
@@ -83,16 +82,15 @@ func (s *Store) Read(projectKey string, req ReadRequest) (map[string]any, error)
 	case "questions":
 		list = board.Questions()
 	case "work":
-		q := req.Work
-		if q.Sort != "" && q.Sort != "id" {
-			return nil, refuse("the work view pages by id; sort %q is not available here", q.Sort)
-		}
-		q.Sort, q.Limit = "", 0
-		if reflect.ValueOf(q).IsZero() {
+		if req.Work == nil {
 			list = board.WorkItems()
 			break
 		}
-		q.Sort = "id"
+		q := *req.Work
+		if q.Sort != "" && q.Sort != "id" {
+			return nil, refuse("the work view pages by id; sort %q is not available here", q.Sort)
+		}
+		q.Sort, q.Limit = "id", 0
 		if list, err = board.QueryWork(q); err != nil {
 			return nil, err
 		}
