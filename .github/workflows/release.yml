@@ -184,7 +184,7 @@ jobs:
     needs: guard
     if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       matrix:
         arch: [amd64, arm64]
