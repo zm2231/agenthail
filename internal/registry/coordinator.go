@@ -427,6 +427,13 @@ func (r *Registry) ClearCoordinator(projectID, changedBy string, expected time.T
 	if err := recordCoordinatorHistoryTx(tx, projectID, "cleared", previous.Name, "", previous.Name, previous.SessionID, changedBy, time.Now().UTC()); err != nil {
 		return previous, err
 	}
+	if link, found, err := projectLinkTx(tx, projectID); err != nil {
+		return previous, err
+	} else if found && link.Linked {
+		if err := moveLeadHistoryTx(tx, projectID, link.Survivor); err != nil {
+			return previous, err
+		}
+	}
 	payload, _ := json.Marshal(map[string]string{"projectId": projectID})
 	if _, _, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("coordinator.removed:%s:%d", projectID, time.Now().UnixNano()), Type: "coordinator.removed", EntityID: projectID, Payload: payload}); err != nil {
 		return previous, err
