@@ -86,13 +86,22 @@ func TestTheLedgerReadRouteServesEachViewWithAnETagOfItsContent(t *testing.T) {
 		t.Fatalf("a change kept the old ETag: %d %s", w.Code, w.Header().Get("ETag"))
 	}
 
+	shipped := addWork(t, store, p.key, "ship the old search")
+	if _, err := store.Work(ledger.WorkRequest{ProjectKey: p.key, SessionID: "worker", Action: ledger.WorkClose, ItemID: shipped.ID, Reason: "done shipped last week"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	every, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work")
+	open, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&state=open")
+	if len(every["work"].([]any)) != 3 || len(open["work"].([]any)) != 2 {
+		t.Fatalf("unfiltered work %v, open work %v", every["work"], open["work"])
+	}
 	work, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&q=index")
 	if items, _ := work["work"].([]any); len(items) != 1 || items[0].(map[string]any)["id"] != index.ID {
 		t.Fatalf("filtered work %v", work)
 	}
-	page, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&limit=1")
+	page, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&state=open&limit=1")
 	next, _ := page["nextCursor"].(string)
-	rest, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&limit=1&cursor="+next)
+	rest, _ := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key+"&view=work&state=open&limit=1&cursor="+next)
 	if next != index.ID || rest["truncated"] != false || rest["work"].([]any)[0].(map[string]any)["text"] != "keep it fast" {
 		t.Fatalf("pages %v then %v", page, rest)
 	}
@@ -150,52 +159,21 @@ func TestTheLedgerStreamSendsAFewVersionsForAReplayOfThousandsOfEvents(t *testin
 	p := addLedgerProject(t, r, "proj-stream", "stream-key")
 	store := d.ledgerStore()
 	addWork(t, store, p.key, "build the index")
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/ledger/events", nil)
-	request.Header.Set("Authorization", "Bearer test-token")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	changes := make(chan ledgerChange, 64)
-	go func() {
-		defer close(changes)
-		reader := sse.NewReader(response.Body)
-		for {
-			event, err := reader.Next()
-			if err != nil {
-				return
-			}
-			var change ledgerChange
-			if event.Type == "ledger.changed" && json.Unmarshal([]byte(event.Data), &change) == nil {
-				changes <- change
-			}
-		}
-	}()
-	receive := func(within time.Duration) (ledgerChange, bool) {
-		select {
-		case change, open := <-changes:
-			return change, open
-		case <-time.After(within):
-			return ledgerChange{}, false
-		}
-	}
+	receive := openLedgerStream(t, handler)
 	_, etag := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key)
 	if first, ok := receive(5 * time.Second); !ok || first.ProjectKey != p.key || first.Version != etag {
 		t.Fatalf("on connect the stream sent %+v, want %s at %s", first, p.key, etag)
 	}
 
 	const replayed = 3000
+	began := time.Now()
 	for i := range replayed {
 		ref := "claude-prompt:replay-" + strings.Repeat("x", i%7) + string(rune('a'+i%26)) + time.Duration(i).String()
 		if _, _, err := store.RecordUtterance(ledger.Utterance{ProjectKey: p.key, Ref: ref, SpeakerID: "person", TargetID: "lead", Text: "word", CapturedBy: ledger.CapturedByHook}); err != nil {
 			t.Fatal(err)
 		}
 	}
+	took := time.Since(began)
 	var published []ledgerChange
 	for {
 		change, ok := receive(2 * ledgerChangeWait)
@@ -204,8 +182,8 @@ func TestTheLedgerStreamSendsAFewVersionsForAReplayOfThousandsOfEvents(t *testin
 		}
 		published = append(published, change)
 	}
-	if len(published) == 0 || len(published) > 5 {
-		t.Fatalf("%d events gave %d publishes", replayed, len(published))
+	if most := int(took/ledgerChangeWait) + 2; len(published) == 0 || len(published) > most {
+		t.Fatalf("%d events written in %s gave %d publishes, want 1 to %d", replayed, took, len(published), most)
 	}
 	_, now := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key)
 	if last := published[len(published)-1]; last.Version != now {
@@ -271,5 +249,78 @@ func TestAReplicaReadsItsOwnProxiedWriteAndShowsAPullThatFailed(t *testing.T) {
 	}
 	if sync := board(); sync["error"] != nil || sync["behind"] != 0.0 {
 		t.Fatalf("replica sync after recovering %v", sync)
+	}
+}
+
+func openLedgerStream(t *testing.T, handler http.Handler) func(within time.Duration) (ledgerChange, bool) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/ledger/events", nil)
+	request.Header.Set("Authorization", "Bearer test-token")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { response.Body.Close() })
+	changes := make(chan ledgerChange, 64)
+	go func() {
+		defer close(changes)
+		reader := sse.NewReader(response.Body)
+		for {
+			event, err := reader.Next()
+			if err != nil {
+				return
+			}
+			var change ledgerChange
+			if event.Type == "ledger.changed" && json.Unmarshal([]byte(event.Data), &change) == nil {
+				changes <- change
+			}
+		}
+	}()
+	receive := func(within time.Duration) (ledgerChange, bool) {
+		select {
+		case change, open := <-changes:
+			return change, open
+		case <-time.After(within):
+			return ledgerChange{}, false
+		}
+	}
+	return receive
+}
+
+func TestTheLedgerStreamKeepsAReaderThatFallsBehindOnManyProjects(t *testing.T) {
+	d, r, handler := ledgerDaemon(t)
+	store := d.ledgerStore()
+	const projects = 100
+	var keys []string
+	for i := range projects {
+		key := fmt.Sprintf("many-%03d", i)
+		addLedgerProject(t, r, "proj-"+key, key)
+		keys = append(keys, key)
+	}
+	receive := openLedgerStream(t, handler)
+	for _, key := range keys {
+		addWork(t, store, key, "build the index")
+	}
+	time.Sleep(2 * ledgerChangeWait)
+	latest := map[string]string{}
+	for len(latest) < projects {
+		change, ok := receive(5 * time.Second)
+		if !ok {
+			t.Fatalf("the stream ended or went quiet with %d of %d projects seen", len(latest), projects)
+		}
+		latest[change.ProjectKey] = change.Version
+	}
+	for _, key := range keys {
+		if _, etag := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+key); latest[key] != etag {
+			t.Fatalf("%s: the stream's version %s is not the board's ETag %s", key, latest[key], etag)
+		}
+	}
+	addWork(t, store, keys[0], "keep it fast")
+	if change, ok := receive(5 * time.Second); !ok || change.ProjectKey != keys[0] {
+		t.Fatalf("the stream stopped after falling behind: %+v", change)
 	}
 }

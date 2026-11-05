@@ -3,6 +3,7 @@ package ledger
 import (
 	"cmp"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -86,7 +87,12 @@ func (s *Store) Read(projectKey string, req ReadRequest) (map[string]any, error)
 		if q.Sort != "" && q.Sort != "id" {
 			return nil, refuse("the work view pages by id; sort %q is not available here", q.Sort)
 		}
-		q.Sort, q.Limit = "id", 0
+		q.Sort, q.Limit = "", 0
+		if reflect.ValueOf(q).IsZero() {
+			list = board.WorkItems()
+			break
+		}
+		q.Sort = "id"
 		if list, err = board.QueryWork(q); err != nil {
 			return nil, err
 		}

@@ -1,25 +1,31 @@
 package daemon
 
 import (
+	"maps"
+	"slices"
 	"sync"
 	"time"
 )
 
-const ledgerChangeBuffer = 64
-
-// ledgerChangeHub publishes one change per project at most once per wait, after the burst that started it, so replaying thousands of events sends a handful.
+// ledgerChangeHub publishes one change per project at most once per wait, so replaying thousands of events sends a handful.
+// A subscriber keeps only the newest version per project, so one that reads slowly gets the current versions and is never dropped.
 type ledgerChangeHub struct {
 	mu          sync.Mutex
 	wait        time.Duration
 	version     func(key string) (string, error)
 	logf        func(format string, args ...any)
 	pending     map[string]bool
-	subscribers map[uint64]chan ledgerChange
+	subscribers map[uint64]*ledgerSubscriber
 	nextID      uint64
 }
 
+type ledgerSubscriber struct {
+	wake   chan struct{}
+	unread map[string]string
+}
+
 func newLedgerChangeHub(wait time.Duration, version func(string) (string, error), logf func(string, ...any)) *ledgerChangeHub {
-	return &ledgerChangeHub{wait: wait, version: version, logf: logf, pending: map[string]bool{}, subscribers: map[uint64]chan ledgerChange{}}
+	return &ledgerChangeHub{wait: wait, version: version, logf: logf, pending: map[string]bool{}, subscribers: map[uint64]*ledgerSubscriber{}}
 }
 
 func (h *ledgerChangeHub) changed(key string) {
@@ -47,29 +53,39 @@ func (h *ledgerChangeHub) publish(key string) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for id, ch := range h.subscribers {
+	for _, sub := range h.subscribers {
+		sub.unread[key] = version
 		select {
-		case ch <- ledgerChange{ProjectKey: key, Version: version}:
+		case sub.wake <- struct{}{}:
 		default:
-			// A reader this far behind refetches everything when it reconnects.
-			close(ch)
-			delete(h.subscribers, id)
 		}
 	}
 }
 
-func (h *ledgerChangeHub) subscribe() (<-chan ledgerChange, func()) {
+func (h *ledgerChangeHub) subscribe() (uint64, <-chan struct{}, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.nextID++
-	id, ch := h.nextID, make(chan ledgerChange, ledgerChangeBuffer)
-	h.subscribers[id] = ch
-	return ch, func() {
+	id, sub := h.nextID, &ledgerSubscriber{wake: make(chan struct{}, 1), unread: map[string]string{}}
+	h.subscribers[id] = sub
+	return id, sub.wake, func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if _, ok := h.subscribers[id]; ok {
-			close(ch)
-			delete(h.subscribers, id)
-		}
+		delete(h.subscribers, id)
 	}
+}
+
+func (h *ledgerChangeHub) take(id uint64) []ledgerChange {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sub := h.subscribers[id]
+	if sub == nil {
+		return nil
+	}
+	changes := make([]ledgerChange, 0, len(sub.unread))
+	for _, key := range slices.Sorted(maps.Keys(sub.unread)) {
+		changes = append(changes, ledgerChange{ProjectKey: key, Version: sub.unread[key]})
+	}
+	clear(sub.unread)
+	return changes
 }

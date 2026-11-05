@@ -25,7 +25,7 @@ func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any,
 	return d.ledgerStore().Read(key, req)
 }
 
-// ledgerETag is a hash of the exact bytes served, so two different answers never share one.
+// ledgerETag hashes the exact bytes served, so two different answers never share one.
 func ledgerETag(body []byte) string {
 	sum := sha256.Sum256(body)
 	return `"` + base64.RawURLEncoding.EncodeToString(sum[:18]) + `"`
@@ -152,7 +152,8 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
 	}
-	changes, cancel := d.ledgerChanges().subscribe()
+	hub := d.ledgerChanges()
+	id, wake, cancel := hub.subscribe()
 	defer cancel()
 	keys, err := d.ledgerStore().ProjectKeys()
 	if err != nil {
@@ -170,11 +171,13 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	flusher.Flush()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, flusher, changes, func(change ledgerChange, open bool) bool {
+	sse.Follow(r.Context(), w, flusher, wake, func(_ struct{}, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
-		writeLedgerChange(w, change)
+		for _, change := range hub.take(id) {
+			writeLedgerChange(w, change)
+		}
 		flusher.Flush()
 		return true
 	}, authorized)
