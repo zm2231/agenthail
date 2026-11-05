@@ -107,6 +107,57 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Jump to latest"].exists)
     }
 
+    private func open(_ session: XCUIElement, in app: XCUIApplication) {
+        if !session.isHittable { app.navigationBars.buttons.element(boundBy: 0).tapWhenReady() }
+        session.tapWhenReady(timeout: 15)
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
+        sleep(3)
+    }
+
+    private func gapAboveComposer(_ app: XCUIApplication) throws -> CGFloat {
+        let top = app.textViews["composer-input"].frame.minY
+        var pending = [try app.scrollViews["session-timeline"].snapshot()]
+        var lowest: CGFloat = 0
+        while let next = pending.popLast() {
+            if next.elementType == .staticText, next.frame.minY < top { lowest = max(lowest, next.frame.maxY) }
+            pending += next.children
+        }
+        return top - lowest
+    }
+
+    func testSwitchingFromATallQueueToAnEmptySessionLeavesNoRows() throws {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-tail", "-preview-tail", "many", "--preview-theme", "dark", "--preview-reading", "--preview-follow"]
+        app.launch()
+        let queued = app.buttons["session-computer::demo"]
+        let empty = app.buttons["session-computer::codex-demo"]
+
+        open(empty, in: app)
+        XCTAssertFalse(row(25, app).exists, "the empty session shows a queued row")
+        let clear = try gapAboveComposer(app)
+        XCTAssertLessThan(clear, 120, "the empty session is too short to show leftover space")
+
+        open(queued, in: app)
+        XCTAssertTrue(row(25, app).waitForExistence(timeout: 10))
+        app.buttons["queue-tail-more"].tapWhenReady()
+        settle()
+        XCTAssertTrue(row(21, app).exists, "the tall queue is open")
+
+        open(empty, in: app)
+        XCTAssertFalse(row(25, app).exists, "the rows followed to the empty session")
+        XCTAssertFalse(app.buttons["queue-tail-more"].exists)
+        assertAtLatest(app, "after switching to the empty session")
+        XCTAssertEqual(try gapAboveComposer(app), clear, accuracy: 24, "the newest row isn't in place after the switch")
+
+        open(queued, in: app)
+        XCTAssertTrue(row(25, app).waitForExistence(timeout: 10), "the rows are back on their own session")
+        XCTAssertTrue(app.buttons["queue-tail-more"].exists, "and collapsed again")
+    }
+
     func testTheCapShowsThreeAndOpensTheRest() {
         let app = launch("many")
         let more = app.buttons["queue-tail-more"]
