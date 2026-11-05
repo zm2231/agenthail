@@ -111,6 +111,7 @@ func projectLinkSelector(id string) string {
 }
 
 func (d *Daemon) projectLinksChanged() {
+	d.flushCatalog("project links")
 	if err := d.refreshProjectLinks(); err != nil {
 		d.log.Printf("project links: %s", err)
 	}

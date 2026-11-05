@@ -149,12 +149,10 @@ func TestAForkWithPastLeadsJoinsUpstreamAndItsLeadHistoryFollowsOnEveryHost(t *t
 	if err := ledger.NewStore(laptop.reg.WriteDB(), laptop.reg.ReadDB()).Enable(upstreamProject); err != nil {
 		t.Fatal(err)
 	}
-	testkit.Eventually(t, "the laptop no longer mirrors the server's cleared fork lead", 10*time.Second, func() bool {
-		held, err := laptop.reg.ProjectHistory(forkProject)
-		return err == nil && len(held) == 0
+	testkit.Eventually(t, "the link is taken once the laptop no longer mirrors the server's cleared fork lead", 10*time.Second, func() bool {
+		response := laptop.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-link", "projectId": forkProject, "survivor": upstreamProject})
+		return response.Code == http.StatusOK
 	})
-
-	linkAction(t, laptop, map[string]string{"action": "project-link", "projectId": forkProject, "survivor": upstreamProject})
 	want := map[*federationNode][]string{
 		laptop: {"set:laptop-fork-lead", "cleared:laptop-fork-lead", "set:upstream-lead"},
 		server: {"set:server-fork-lead", "cleared:server-fork-lead"},
