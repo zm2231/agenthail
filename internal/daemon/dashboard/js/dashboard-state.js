@@ -16,6 +16,7 @@ import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
 import { scopedSessions } from "./session-scope.js";
+import { loadSessionOrder } from "./session-order.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 
@@ -50,11 +51,14 @@ export async function load(fresh = false, selectDefault = true) {
     }
   }, 2000);
   try {
-    const [, response] = await Promise.all([
+    const [, response, refreshAt] = await Promise.all([
       loadTools(),
       fetch(`/api/state${fresh ? "?fresh=1" : ""}`),
+      loadSessionOrder(),
     ]);
     if (!response.ok) throw await responseError(response);
+    clearTimeout(app.orderRefresh);
+    if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => load(false, false), Math.max(0, refreshAt - Date.now()));
     const state = await response.json();
     app.state = {
       ...state,

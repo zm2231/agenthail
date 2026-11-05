@@ -26,20 +26,25 @@ const projects = [{
   ],
   coordinators: [{ name: "release-lead", surface: "codex", sessionId: "lead" }],
 }];
+const family = (id, ...children) => ({ id, rootId: id, projectId: project.id, members: [{ id, depth: 0, contextOnly: false }, ...children.map((child) => ({ id: child, depth: 1, contextOnly: false }))] });
+const all = {
+  projects: [{ id: project.id, collapsedFamilyIds: [] }],
+  families: [family("queued"), family("build", "child"), family("photos"), family("buildbox::ingest"), family("lead"), family("old"), family("older"), { ...family("elsewhere"), projectId: "repo:github.com/demo/other" }],
+};
 const context = {
-  app: { state: { sessions, projects, attention: [] }, selected: null, selectedProject: null, projectEarlier: null },
+  app: { state: { sessions, projects, attention: [] }, sessionOrder: { all, current: { projects: [], families: [] }, archived: { projects: [], families: [family("shelved")] } }, selected: null, selectedProject: null, projectEarlier: null },
   labels: { codex: "Codex", claude: "Claude Code" },
   Date: class extends Date { static now() { return now; } },
 };
-await dashboardModules(["project-view", "session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
+await dashboardModules(["session-order", "project-view","session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
 const run = (code) => vm.runInContext(code, context);
 const ids = (list) => list.map((session) => session.id).join(",");
 
-const contents = run("projectContents(app.state.projects[0], app.state.sessions)");
+const contents = run("projectContents(app.state.projects[0])");
 assert.equal(contents.leadSession.id, "lead");
 assert.equal(ids(contents.running), "build", "only working sessions are running; a queued idle one is not");
 assert.equal(ids(contents.running), ids(sessions.filter((session) => session.project.id === project.id && !session.subagent && run("sessionRunning")(session))), "Running agrees with the list's running rule");
-assert.equal(ids(contents.recent), "buildbox::ingest,photos,queued", "Recent is newest first across computers and leaves out the lead");
+assert.equal(ids(contents.recent), "queued,photos,buildbox::ingest", "Recent keeps the daemon's order across computers and leaves out the lead");
 assert.equal(ids(contents.earlier), "old,older");
 for (const hidden of ["child", "shelved", "elsewhere"]) assert(!JSON.stringify(contents).includes(`"${hidden}"`), `${hidden} does not belong in the project`);
 

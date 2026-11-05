@@ -4,21 +4,17 @@ import { remoteHostName, shortHostName } from "./hosts.js";
 import { coordinatorChip } from "./project-model.js";
 import { sessionButton } from "./session-row.js";
 import { displayName } from "./session-labels.js";
+import { orderedProjectIDs, projectSessions } from "./session-order.js";
 
-export const collapsedProjectSessions = 5;
-
-export function sessionNeedsYou(session) {
-  return session.status === "busy" || (session.subagents?.working || 0) > 0 || session.queueCount > 0 || (app.state.attention || []).some((item) => item.sessionId === session.id);
-}
-
-export function projectSection(project, sessions) {
+export function projectSection(project, scope, matches = () => true) {
   const expanded = app.expandedProjects.has(project.id);
-  const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
-  const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
+  const ordered = projectSessions(scope, project.id).filter(matches);
+  const collapsed = projectSessions(scope, project.id, true).filter(matches);
+  const shown = expanded ? ordered : collapsed;
   const hidden = ordered.length - shown.length;
   const host = (project.checkouts || []).filter((checkout) => checkout.host.state !== "local").map((checkout) => `<span class="host-badge" title="${escape(`On ${checkout.host.name}${checkout.archived ? " (archived there)" : ""}`)}">${escape(shortHostName(checkout.host.name))}</span>`).join("");
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header${app.selectedProject === project.id ? " selected" : ""}"><button class="project-name" type="button" data-project-open="${escape(project.id)}" title="${escape(`Open ${project.displayName}`)}">${escape(project.displayName)}</button><span class="project-count" title="${ordered.length} ${ordered.length === 1 ? "session" : "sessions"}">${ordered.length}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header${app.selectedProject === project.id ? " selected" : ""}"><button class="project-name" type="button" data-project-open="${escape(project.id)}" title="${escape(`Open ${project.displayName}`)}">${escape(project.displayName)}</button><span class="project-count" title="${ordered.length} ${ordered.length === 1 ? "session" : "sessions"}">${ordered.length}</span>${host}${coordinatorChip(project.coordinators || [])}${project.archived ? "" : `<button class="link-button" type="button" data-project-message="${escape(project.id)}" data-project-name="${escape(project.displayName)}" title="${escape(`Send one message to every active conversation in ${project.displayName}`)}">Message</button>`}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button>${projectMenu(project)}</header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsed.length ?`<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 
 export function projectMenu(project) {
@@ -41,23 +37,23 @@ export function projectMenu(project) {
   return `<details class="project-menu"><summary class="link-button" aria-label="${escape(`More for ${project.displayName}`)}">…</summary><div class="project-menu-items" data-pane="float" role="menu">${items.join("")}</div></details>`;
 }
 
+function inDaemonOrder(projects, scope) {
+  const byID = new Map(projects.map((project) => [project.id, project]));
+  const ordered = orderedProjectIDs(scope).filter((id) => byID.has(id)).map((id) => byID.get(id));
+  const placed = new Set(ordered.map((project) => project.id));
+  return [...ordered, ...projects.filter((project) => !placed.has(project.id))];
+}
+
 export function renderProjects(query) {
-  const byProject = new Map();
-  const projectArchived = new Map((app.state.projects || []).map((project) => [project.id, project.archived]));
-  for (const session of app.state.sessions) {
-    if (!session.project) continue;
-    if (session.archived && !projectArchived.get(session.project.id)) continue;
-    if (query && !`${displayName(session)} ${session.project.displayName} ${remoteHostName(session)}`.toLowerCase().includes(query)) continue;
-    if (!byProject.has(session.project.id)) byProject.set(session.project.id, []);
-    byProject.get(session.project.id).push(session);
-  }
+  const session = (row) => !query || `${displayName(row)} ${row.project?.displayName || ""} ${remoteHostName(row)}`.toLowerCase().includes(query);
+  const scopeOf = (project) => (project.archived ? "archived" : "all");
   const projects = app.state.projects || [];
-  const matches = (project) => !query || byProject.has(project.id) || project.displayName.toLowerCase().includes(query);
-  const active = projects.filter((project) => !project.archived && matches(project));
-  const archived = projects.filter((project) => project.archived && matches(project));
-  const sections = active.map((project) => projectSection(project, byProject.get(project.id) || [])).join("");
+  const matches = (project) => !query || project.displayName.toLowerCase().includes(query) || projectSessions(scopeOf(project), project.id).some(session);
+  const active = inDaemonOrder(projects.filter((project) => !project.archived && matches(project)), "all");
+  const archived = inDaemonOrder(projects.filter((project) => project.archived && matches(project)), "archived");
+  const sections = active.map((project) => projectSection(project, "all", session)).join("");
   const archivedSections = archived.length
-    ? `<details class="archived-projects" ${app.openArchivedProjects ? "open" : ""}><summary>Archived (${archived.length})</summary>${archived.map((project) => projectSection(project, byProject.get(project.id) || [])).join("")}</details>`
+    ? `<details class="archived-projects" ${app.openArchivedProjects ? "open" : ""}><summary>Archived (${archived.length})</summary>${archived.map((project) => projectSection(project, "archived", session)).join("")}</details>`
     : "";
   return { html: '<div class="projects-toolbar"><button class="link-button" type="button" data-project-new>Add project…</button></div>' + sections + archivedSections, count: active.length };
 }
