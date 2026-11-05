@@ -4,10 +4,13 @@ import { selectSession } from "./session-selection.js";
 import { startLiveStream, stopLiveStream } from "./session-stream.js";
 import { loadSettings } from "./settings.js";
 import { refreshShownProject } from "./project-pane.js";
+import { listOrderScopes, orderReady } from "./session-order.js";
+import { ensureSessionOrder } from "./dashboard-state.js";
 
 export function showView(name) {
   const allowed = ["overview", "conversations", "operations"];
   const view = allowed.includes(name) ? name : "overview";
+  app.view = view;
   document
     .querySelectorAll("[data-view-panel]")
     .forEach((panel) =>
@@ -20,10 +23,11 @@ export function showView(name) {
     );
   document.documentElement.toggleAttribute("data-session-open", view === "conversations");
   if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
-  if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView()) {
+  if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView() && orderReady(listOrderScopes())) {
     const first = scopedSessions()[0] || app.state.sessions[0];
     if (first) selectSession(first.id);
   }
+  ensureSessionOrder();
   syncConversationLayout();
   refreshShownProject();
   if (view === "conversations") startLiveStream();

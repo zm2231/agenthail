@@ -8,9 +8,9 @@ const pages = {
   "/api/state?scope=all&limit=200&cursor=next%20page": { view: { projects: [], families: [family("b"), family("a")], refreshAt: null } },
   "/api/state?scope=archived&limit=200": { view: { projects: [], families: [], refreshAt: null } },
 };
-const requested = [];
+let requested = [];
 const context = {
-  app: { state: { sessions: [{ id: "a" }, { id: "b" }] } },
+  app: { view: "conversations", inboxMode: "current", showArchived: false, selectedProject: null, state: { sessions: [{ id: "a" }, { id: "b" }] } },
   fetch: async (path) => {
     requested.push(path);
     return { ok: true, json: async () => pages[path] };
@@ -18,12 +18,49 @@ const context = {
   responseError: async () => new Error("refused"),
 };
 await dashboardModules(["session-order"], context);
-const refreshAt = await context.loadSessionOrder();
-assert.deepEqual(requested.sort(), Object.keys(pages).sort(), "every scope is read, following its cursor to the end");
-assert.equal(refreshAt, Date.parse("2026-11-05T12:05:00Z"), "the earliest refresh deadline across scopes is returned");
+const { app } = context;
+
+let refreshAt = await context.loadSessionOrder();
+assert.deepEqual(requested, ["/api/state?scope=current&limit=200"], "the Current list reads Current only, never walking All or Archived");
+assert.equal(refreshAt, Date.parse("2026-11-05T12:10:00Z"));
+assert.equal(context.orderIsMissing(), false);
+
+app.inboxMode = "all";
+assert.equal(context.orderIsMissing(), true, "a list that shows All needs All read");
+assert.equal(context.orderReady(["all"]), false, "a list whose order was never read is not ready to render");
+for (const view of ["overview", "operations"]) {
+  app.view = view;
+  assert.deepEqual([...context.neededOrderScopes()], ["current"], `a hidden list in All mode is not walked while ${view} is shown`);
+}
+app.view = "conversations";
+requested = [];
+refreshAt = await context.loadSessionOrder();
+assert.deepEqual(requested.sort(), Object.keys(pages).filter((path) => !path.includes("archived")).sort(), "All is read to its last page once it is shown");
+assert.equal(refreshAt, Date.parse("2026-11-05T12:05:00Z"), "the earliest refresh deadline across the read scopes is returned");
 assert.equal(context.orderedSessions("all").map((row) => row.id).join(","), "b,a", "a family repeated on a later page is listed once, where it first appeared");
 assert.equal(context.projectSessions("all", "p", true).map((row) => row.id).join(","), "b,a");
 assert.deepEqual(context.orderedProjectIDs("all"), ["p"], "the project order comes from the first page");
+
+app.showArchived = true;
+assert.deepEqual([...context.neededOrderScopes()],["current", "all", "archived"], "showing archived sessions reads Archived");
+app.showArchived = false;
+app.inboxMode = "projects";
+assert.deepEqual([...context.neededOrderScopes()],["current", "all", "archived"], "the projects list reads All and Archived for its archived section");
+app.inboxMode = "current";
+app.selectedProject = "p";
+assert.deepEqual([...context.neededOrderScopes()], ["current", "all"], "an open project page reads All");
+app.view = "overview";
+assert.deepEqual([...context.neededOrderScopes()], ["current"], "a project left open behind Overview is not walked");
+app.view = "conversations";
+
+app.selectedProject = null;
+requested = [];
+await context.loadSessionOrder();
+assert.deepEqual(requested, ["/api/state?scope=current&limit=200"], "leaving All stops reading it");
+assert.equal(context.orderedSessions("all").map((row) => row.id).join(","), "b,a", "the last All order is kept for when All is shown again");
+app.inboxMode = "all";
+assert.equal(context.orderIsMissing(), true, "returning to All reads it again");
+
 context.fetch = async () => ({ ok: false });
 await assert.rejects(context.loadSessionOrder(), /refused/, "a refused view fails the load rather than showing a partial order");
 console.log("dashboard session order tests passed");
