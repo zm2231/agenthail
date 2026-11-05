@@ -19,6 +19,7 @@ type CatalogSessionState struct {
 	ObservedAt            time.Time
 	ProjectionFingerprint string
 	Freshness             CatalogFreshness
+	RegisteredAt          time.Time
 	// HostQueueCount is the queue count the owning host reported for a
 	// mirrored row; the projection adds this daemon's held sends to it.
 	HostQueueCount int
@@ -733,7 +734,7 @@ func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool,
 }
 
 const catalogSessionSelect = `SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,cs.background_tasks,cs.usage_limit,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `,s.registered_at
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id`
 
 const catalogSnapshotOrder = `

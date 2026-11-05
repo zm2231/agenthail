@@ -40,7 +40,7 @@ type SessionViewProject struct {
 	Name               string           `json:"name"`
 	Counts             SessionViewCount `json:"counts"`
 	CollapsedFamilyIDs []string         `json:"collapsedFamilyIds"`
-	activity           time.Time
+	active             bool
 }
 
 type SessionViewSummary struct {

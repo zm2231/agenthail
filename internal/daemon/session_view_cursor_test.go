@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,7 +37,8 @@ func TestSessionViewKeysBreakTiesByIDAndSurviveTheirEncoding(t *testing.T) {
 	if rest := familiesAfter(plan.view.Families, &last.After); len(rest) != 0 {
 		t.Fatalf("past the last family, the walk returned %+v", rest)
 	}
-	for _, raw := range []string{"", "e30", "not-base64!"} {
+	activityCursor := base64.RawURLEncoding.EncodeToString([]byte(`{"scope":"all","filters":{},"after":{"activity":"2026-11-02T12:00:00Z","id":"a"}}`))
+	for _, raw := range []string{"", "e30", "not-base64!", activityCursor} {
 		if _, ok := decodeSessionViewCursor(raw); ok {
 			t.Fatalf("cursor %q decoded", raw)
 		}
@@ -56,7 +58,7 @@ func TestSessionViewPagesSurviveASessionMovingMidWalk(t *testing.T) {
 		}
 	}
 	for i := range 5 {
-		record(fmt.Sprint("s", i), now.Add(-time.Duration(i)*time.Minute))
+		record(fmt.Sprint("s", i), now.Add(-time.Hour-time.Duration(i)*time.Minute))
 	}
 	page := func(cursor string) SessionViewSnapshot {
 		t.Helper()
@@ -88,7 +90,7 @@ func TestSessionViewPagesSurviveASessionMovingMidWalk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record("s4", now.Add(time.Minute))
+	record("s4", now.Add(-30*time.Minute))
 
 	second := page(first.NextCursor)
 	if got := fmt.Sprint(ids(second)); got != "[s2 s3]" || second.NextCursor != "" {

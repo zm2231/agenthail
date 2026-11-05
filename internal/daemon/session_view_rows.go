@@ -81,7 +81,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 	row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot, row.ConfiguredModel, row.PendingModel = nil, nil, nil, nil, "", ""
 	row.Name, row.Surface, row.Status, row.Cwd = record.Name, surface.SurfaceKind(record.Surface), surface.SessionStatus(record.Status), record.Cwd
 	row.LastActive, row.RuntimeKind, row.Source, row.Transport = record.LastActive, surface.RuntimeKind(record.RuntimeKind), record.Source, record.Transport
-	row.UnavailableReason, row.QueueCount = record.UnavailableReason, record.QueueCount
+	row.UnavailableReason, row.QueueCount, row.RegisteredAt = record.UnavailableReason, record.QueueCount, record.RegisteredAt
 	if record.Subagent == nil {
 		row.Subagent = nil
 	} else {

@@ -40,7 +40,8 @@ type dashboardSession struct {
 	Activity          *surface.Activity          `json:"activity,omitempty"`
 	Plan              *surface.Plan              `json:"plan,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
-	QueueCount        int                        `json:"queueCount"`
+	RegisteredAt      time.Time                  `json:"registeredAt,omitzero"`
+	QueueCount       int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
 	Archived          bool                       `json:"archived,omitempty"`

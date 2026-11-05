@@ -205,7 +205,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &mirrored) != nil {
 				continue
 			}
-			mirrored.ObservedAt = record.ObservedAt
+			mirrored.ObservedAt, mirrored.RegisteredAt = record.ObservedAt, record.RegisteredAt
 			mirrored.Freshness = &record.Freshness
 			mirrored.HiddenSubagents, mirrored.LiveHiddenSubagents = catalogSnapshot.Listing.HiddenSubagents(session.ID), catalogSnapshot.Listing.LiveHiddenSubagents(session.ID)
 			mirrored.Subagents = addSubagentRollups(mirrored.ObservedSubagents, mirrored.LiveHiddenSubagents)
@@ -228,7 +228,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
 		if record, found := catalogSessions[session.ID]; found {
-			entry.Freshness = &record.Freshness
+			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt
 		}
 		entry.QueueCount = counts[session.ID]
 		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {

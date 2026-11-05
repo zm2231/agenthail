@@ -42,6 +42,34 @@ func TestPresentationMirrorsQualifyMembersAndReformatStatus(t *testing.T) {
 	}
 }
 
+func TestPresentationMirrorKeepsTheOwnersRegistrationTime(t *testing.T) {
+	d, store, _, _, _ := daemonFixture(t)
+	hostID := "h0123456789ab"
+	if _, err := store.AddHost(registry.PairedHost{ID: hostID, Name: "peer", Endpoint: "https://peer.example", Address: "100.64.0.2", Token: "synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	owner := time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC)
+	session := surface.Session{ID: "remote", Name: "remote", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}
+	publish := func(registered time.Time) time.Time {
+		t.Helper()
+		row := dashboardSession{ID: hostID + "::remote", Name: "remote", Surface: session.Surface, Status: session.Status, RegisteredAt: registered}
+		if err := d.applyMirroredProjection(hostID, session, row, json.RawMessage(`null`), json.RawMessage(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+		state, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "all", Limit: 200})
+		if err != nil || len(state.Sessions) != 1 {
+			t.Fatalf("state=%+v err=%v", state, err)
+		}
+		return state.Sessions[0].RegisteredAt
+	}
+	if got := publish(owner); !got.Equal(owner) {
+		t.Fatalf("mirror registered at %v, owner registered at %v", got, owner)
+	}
+	if got := publish(time.Time{}); !got.Equal(owner) {
+		t.Fatalf("a row without the owner's time replaced it with %v", got)
+	}
+}
+
 func TestPresentationOldIdleLimitIsCurrentAndPinned(t *testing.T) {
 	d, store, _, _, _ := daemonFixture(t)
 	row := dashboardSession{ID: "limited", Name: "Limited", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, UsageLimit: &surface.UsageLimit{}}

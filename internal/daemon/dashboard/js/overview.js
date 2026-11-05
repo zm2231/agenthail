@@ -1,7 +1,7 @@
 import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { escape, labels, surfaceIcon, timeAgo } from "./format.js";
-import { sessionIsCurrent } from "./session-scope.js";
+import { orderedSessions } from "./session-order.js";
 import { backgroundWaiting, presenceLabel, presenceTone } from "./presence.js";
 import { displayName } from "./session-labels.js";
 
@@ -71,17 +71,7 @@ export function renderOverview() {
       })
       .join("") ||
     '<div class="empty-state compact">No surfaces are connected yet.</div>';
-  const recent = [...sessions]
-    .filter(sessionIsCurrent)
-    .sort((a, b) => {
-      const rank = { working: 0, queued: 1, open: 2, recent: 3 };
-      const reasonOrder =
-        (rank[a.currentReason] ?? 9) - (rank[b.currentReason] ?? 9);
-      return (
-        reasonOrder || new Date(b.lastActive || 0) - new Date(a.lastActive || 0)
-      );
-    })
-    .slice(0, 8);
+  const recent = orderedSessions("current").slice(0, 8);
   $("#recent-activity").innerHTML =
     recent
       .map(

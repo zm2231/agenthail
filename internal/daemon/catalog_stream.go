@@ -650,8 +650,16 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
+	registered, err := d.Registry.SessionRegisteredAt(session.ID)
+	if err != nil {
+		return false
+	}
+	if registered.IsZero() {
+		registered = observedAt.UTC().Truncate(time.Second)
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
+		row.RegisteredAt = registered
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {
@@ -663,7 +671,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			return false
 		}
 		projection := row
-		projection.ObservedAt = time.Time{}
+		projection.ObservedAt, projection.RegisteredAt = time.Time{}, time.Time{}
 		fingerprint, err := json.Marshal(projection)
 		if err != nil {
 			return false

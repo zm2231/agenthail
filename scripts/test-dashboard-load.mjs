@@ -12,6 +12,7 @@ const selected = [];
 const context = {
   app: { loading: false, hasState: false, audit: {} },
   loadTools: () => loadRenderer(),
+  loadSessionOrder: async () => Infinity,
   fetch: (path) => { calls.push(path); return new Promise((resolve) => { releaseState = resolve; }); },
   $: (selector) => { if (!elements.has(selector)) elements.set(selector, {}); return elements.get(selector); },
   renderOverview: () => { rendered++; },
