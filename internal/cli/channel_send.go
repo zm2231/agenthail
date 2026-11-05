@@ -29,7 +29,7 @@ func (c cliBroadcastDelivery) Session(ctx context.Context, sessionID, message, s
 	if err != nil {
 		return nil, err
 	}
-	return delivery.Dispatcher{Registry: c.app.registry()}.DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
+	return c.app.dispatcher().DeliverWithOptions(ctx, adapter, session, message, "", surface.SendOptions{SourceSessionID: source})
 }
 
 func (c cliBroadcastDelivery) Coordinator(ctx context.Context, spec registry.CoordinatorSpec, message, source string) (*delivery.Receipt, string, error) {

@@ -56,7 +56,7 @@ func (a *App) cmdGoal(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	dispatcher := delivery.Dispatcher{Registry: a.registry()}
+	dispatcher := a.dispatcher()
 	controller, typed := surf.(surface.GoalController)
 	switch action {
 	case "clear":

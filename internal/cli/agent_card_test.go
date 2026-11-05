@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +145,36 @@ func TestTheLeadIsToldItAnswersItsSessionsPrompts(t *testing.T) {
 	}
 	if text := helpAgentAs(t, app, "planner-conversation"); strings.Contains(text, "permission prompts") {
 		t.Fatalf("the planner's brief claims its worker's prompts:\n%s", text)
+	}
+}
+
+func TestATerminalLeadIsToldWhenClaudesSettingsHoldItsMessages(t *testing.T) {
+	app, _, cwd := cardFixture(t)
+	t.Setenv("HOME", mustEvalSymlinks(t, t.TempDir()))
+	spec, err := app.Registry.Coordinator("project-card")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Registry.SetCoordinator(spec, registry.CoordinatorChange{SessionID: "planner-conversation", Replace: true}); err != nil {
+		t.Fatal(err)
+	}
+	if card := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); !strings.Contains(card.InboundHeld, "including Agenthail's notices") || !strings.Contains(card.InboundHeld, `"crossSessionInbound": "accept"`) {
+		t.Fatalf("a terminal lead with no crossSessionInbound setting was not told: %+v", card)
+	}
+	if text := helpAgentAs(t, app, "planner-conversation"); !strings.Contains(text, "don't change their settings yourself") {
+		t.Fatalf("the lead's brief does not leave the settings to the person:\n%s", text)
+	}
+	if err := os.MkdirAll(filepath.Join(cwd, ".claude"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".claude", "settings.json"), []byte(`{"crossSessionInbound":"accept"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if card := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "planner-conversation"); card.InboundHeld != "" {
+		t.Fatalf("a lead whose project accepts other sessions' messages was told they are held: %+v", card)
+	}
+	if card := callerCardJSON(t, app, "CLAUDE_CODE_SESSION_ID", "lead-conversation"); card.InboundHeld != "" {
+		t.Fatalf("a session that is not the lead was told about the lead's settings: %+v", card)
 	}
 }
 

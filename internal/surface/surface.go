@@ -632,11 +632,27 @@ type Author string
 
 const AuthorPerson Author = "person"
 
+// No request may declare AuthorAgenthail; it is derived from the system sender.
+const AuthorAgenthail Author = "agenthail"
+
+func (o SendOptions) RouteAuthor() Author {
+	if o.SourceSessionID == SystemSessionID {
+		return AuthorAgenthail
+	}
+	return o.Author
+}
+
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
 	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
 }
+
+type AgenthailTurnSender interface {
+	SendAgenthailTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
+}
+
+var ErrNotOwnTurn = errors.New("another session's words never become a Claude session's own turn; they go to its peer socket")
 
 // ImageRouter is implemented by an adapter whose runtime takes images as
 // model input on some routes. Every other route receives each upload as its
@@ -659,6 +675,20 @@ func SourceSessionID(ctx context.Context) string {
 	return id
 }
 
+type authorContextKey struct{}
+
+func WithAuthor(ctx context.Context, author Author) context.Context {
+	return context.WithValue(ctx, authorContextKey{}, author)
+}
+
+func ContextAuthor(ctx context.Context) Author {
+	if ctx == nil {
+		return ""
+	}
+	author, _ := ctx.Value(authorContextKey{}).(Author)
+	return author
+}
+
 type replyTargetContextKey struct{}
 
 // WithReplyTarget carries how the target's host addresses the sender, so a
@@ -673,6 +703,22 @@ func ReplyTarget(ctx context.Context) string {
 	}
 	target, _ := ctx.Value(replyTargetContextKey{}).(string)
 	return target
+}
+
+type senderContextKey struct{}
+
+// WithSender carries the agent session a message is from, so a surface that
+// delivers it outside the peer transport can still say whose words it is.
+func WithSender(ctx context.Context, sender Session) context.Context {
+	return context.WithValue(ctx, senderContextKey{}, sender)
+}
+
+func Sender(ctx context.Context) (Session, bool) {
+	if ctx == nil {
+		return Session{}, false
+	}
+	sender, ok := ctx.Value(senderContextKey{}).(Session)
+	return sender, ok
 }
 
 type personNameContextKey struct{}

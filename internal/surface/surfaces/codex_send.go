@@ -24,6 +24,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err := refuseCodexComposerCommand(message); err != nil {
 		return nil, err
 	}
+	message = surface.LabelSender(ctx, message)
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)

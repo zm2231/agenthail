@@ -104,54 +104,81 @@ func (a *App) callerCard() (agentcard.Card, error) {
 	return card, nil
 }
 
-func (a *App) cardSources() agentcard.Sources {
-	project := func(ctx context.Context, cwd string) (*agentcard.Project, error) {
-		found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
-		if err != nil || found == nil {
-			return nil, err
-		}
-		return &agentcard.Project{ID: found.ID, Name: found.DisplayName, Root: found.RootPath}, nil
+func (a *App) pathProject(ctx context.Context, cwd string) (*agentcard.Project, error) {
+	found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
+	if err != nil || found == nil {
+		return nil, err
 	}
+	return &agentcard.Project{ID: found.ID, Name: found.DisplayName, Root: found.RootPath}, nil
+}
+
+func (a *App) sessionProject(ctx context.Context, session surface.Session, project func(context.Context, string) (*agentcard.Project, error)) (string, string) {
+	if stored := daemon.StoredSessionProject(a.registry(), session.ID); stored != nil {
+		return stored.ID, stored.DisplayName
+	}
+	if session.Cwd == "" {
+		return "", ""
+	}
+	if found, _ := project(ctx, session.Cwd); found != nil {
+		return found.ID, found.Name
+	}
+	return "", ""
+}
+
+func (a *App) cardSources() agentcard.Sources {
 	projects := map[string]*agentcard.Project{}
+	cached := func(ctx context.Context, cwd string) (*agentcard.Project, error) {
+		found, seen := projects[cwd]
+		if !seen {
+			found, _ = a.pathProject(ctx, cwd)
+			projects[cwd] = found
+		}
+		return found, nil
+	}
 	return agentcard.Sources{
 		Registry:    a.registry(),
-		Project:     project,
+		Project:     a.pathProject,
 		LeadRef:     a.coordinator().Ref,
 		PromptsHeld: claudePromptsHeld,
+		InboundHeld: claudeInboundHeld,
 		PromptHearer: func(ctx context.Context, session surface.Session) string {
-			projectID, where := "", ""
-			if stored := daemon.StoredSessionProject(a.registry(), session.ID); stored != nil {
-				projectID, where = stored.ID, stored.DisplayName
-			} else {
-				found, seen := projects[session.Cwd]
-				if !seen && session.Cwd != "" {
-					found, _ = project(ctx, session.Cwd)
-					projects[session.Cwd] = found
-				}
-				if found != nil {
-					projectID, where = found.ID, found.Name
-				}
-			}
+			projectID, where := a.sessionProject(ctx, session, cached)
 			hearer, _, _ := a.coordinator().PromptHearer(session.ID, projectID, where)
 			return hearer
 		},
 	}
 }
 
+func claudeSessionRoots(session surface.Session) []string {
+	home, _ := os.UserHomeDir()
+	roots, err := surface.ClaudeConfigRoots(home)
+	if err != nil {
+		return nil
+	}
+	for _, root := range roots {
+		if session.Transcript != "" && strings.HasPrefix(session.Transcript, filepath.Join(root, "projects")+string(filepath.Separator)) {
+			return []string{root}
+		}
+	}
+	return roots
+}
+
+func claudeInboundHeld(session surface.Session) string {
+	for _, root := range claudeSessionRoots(session) {
+		if held := surface.ReadClaudeInbound(root, session.Cwd).HoldsLeadMessages(root); held != "" {
+			return held
+		}
+	}
+	return ""
+}
+
 // claudePromptsHeld reports whether the prompt hook is installed in the
 // config root a terminal Claude session lives in, or in every root when its
 // transcript does not say which.
 func claudePromptsHeld(session surface.Session) bool {
-	home, _ := os.UserHomeDir()
-	roots, err := surface.ClaudeConfigRoots(home)
-	if err != nil || len(roots) == 0 {
+	roots := claudeSessionRoots(session)
+	if len(roots) == 0 {
 		return false
-	}
-	for _, root := range roots {
-		if session.Transcript != "" && strings.HasPrefix(session.Transcript, filepath.Join(root, "projects")+string(filepath.Separator)) {
-			roots = []string{root}
-			break
-		}
 	}
 	for _, root := range roots {
 		state, err := claudehooks.StateAt(filepath.Join(root, "settings.json"), claudehooks.Prompt)

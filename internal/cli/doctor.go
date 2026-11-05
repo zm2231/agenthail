@@ -142,7 +142,9 @@ func (a *App) cmdDoctor(args []string) error {
 		failures++
 	}
 	claudeHookStates := map[string]string{}
+	claudeInbound := map[string]surface.ClaudeInbound{}
 	for _, root := range claudeRoots {
+		claudeInbound[root] = surface.ReadClaudeInbound(root, "")
 		state, err := claudehooks.AllStateAt(filepath.Join(root, "settings.json"))
 		if err != nil {
 			state = claudehooks.Missing
@@ -233,7 +235,7 @@ func (a *App) cmdDoctor(args []string) error {
 	projectNotes, heldLinks, projectsErr := a.doctorProjectNotes(callCtx)
 	cancel()
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(hostProblems) == 0, "projectLinks": projectNotes, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(hostProblems) == 0, "projectLinks": projectNotes, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -294,6 +296,9 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 			if state, ok := remoteControl[root]; ok {
 				fmt.Printf("  remote control at startup: %s\n", state)
+			}
+			if held := claudeInbound[root].HoldsLeadMessages(root); held != "" {
+				fmt.Printf("  cross-session messages: %s\n", held)
 			}
 		}
 		for _, problem := range hookProblems {

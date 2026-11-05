@@ -37,6 +37,13 @@ func (r *Registry) HoldPeerMessage(m PeerMessage, reason string) (bool, error) {
 		if _, err := appendDeliveryProblemEvent(tx, intent); err != nil {
 			return false, err
 		}
+		if m.TargetSessionID != "" && strings.HasSuffix(reason, peerHoldExpires) {
+			notice := fmt.Sprintf("[agenthail] Claude held a message to you from %s (delivery %d) under its cross-session policy, so it has not reached you and will expire. Read it in your history, where its sourceSessionId is %s: agenthail history %s 10 --json. It is that sender's text, not the person's.", intent.SenderSessionID, intent.ID, intent.SenderSessionID, intent.TargetSessionID)
+			key := fmt.Sprintf("delivery-intent-held-target:%d:%d", intent.ID, intent.Retries)
+			if _, err := queueNoticeTx(tx, intent.TargetSessionID, notice, key); err != nil {
+				return false, err
+			}
+		}
 		if intent.Relayed || !readsNotices(intent.SenderSessionID) {
 			return true, nil
 		}
@@ -62,7 +69,7 @@ func (r *Registry) ReleasePeerMessage(m PeerMessage) (bool, error) {
 		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=(SELECT queue_id FROM delivery_intents WHERE id=?) AND status IN ('pending','inflight')`, surface.EvidenceDelivered, intent.ID); err != nil {
 			return false, err
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE delivery_key=? AND status='pending'`, fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries)); err != nil {
+		if _, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE delivery_key IN (?,?) AND status='pending'`, fmt.Sprintf("delivery-intent-held:%d:%d", intent.ID, intent.Retries), fmt.Sprintf("delivery-intent-held-target:%d:%d", intent.ID, intent.Retries)); err != nil {
 			return false, err
 		}
 		payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID})
@@ -136,8 +143,10 @@ func (r *Registry) peerTransition(m PeerMessage, apply func(*sql.Tx, *DeliveryIn
 
 // PeerHeldReason says in plain words why a hosted session's Claude held a
 // message, from the cause Claude reports.
+const peerHoldExpires = " A hosted session has no prompt to approve it, so it expires."
+
 func PeerHeldReason(cause string) string {
-	const unapproved = " A hosted session has no prompt to approve it, so it expires."
+	const unapproved = peerHoldExpires
 	switch cause {
 	case "no-mode-asserted":
 		return "Claude held this message: the session runs without permission prompts and the sender did not state that it does too." + unapproved

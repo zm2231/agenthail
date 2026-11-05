@@ -27,18 +27,44 @@ func (s Service) ProjectLead(projectID, where string) (registry.CoordinatorSpec,
 
 // A coordinator that has never started a conversation leads nothing yet, so the spawner hears instead.
 func (s Service) PromptHearer(sessionID, projectID, where string) (string, string, bool) {
-	if _, coordinates := s.Of(sessionID); !coordinates && projectID != "" {
-		if spec, err := s.ProjectLead(projectID, where); err == nil {
-			if lead := s.LeadSession(spec); lead != "" && lead != sessionID {
-				return lead, "lead", true
-			}
-		}
+	if lead := s.leadOf(sessionID, projectID, where); lead != "" {
+		return lead, "lead", true
 	}
+	if starter := s.starterOf(sessionID); starter != "" {
+		return starter, "spawner", true
+	}
+	return "", "", false
+}
+
+// Oversees reports whether sourceID may steer sessionID mid-turn: it is the
+// session's lead or the session that started it.
+func (s Service) Oversees(sourceID, sessionID, projectID, where string) bool {
+	if sourceID == "" || sourceID == sessionID {
+		return false
+	}
+	return sourceID == s.starterOf(sessionID) || sourceID == s.leadOf(sessionID, projectID, where)
+}
+
+func (s Service) leadOf(sessionID, projectID, where string) string {
+	if _, coordinates := s.Of(sessionID); coordinates || projectID == "" {
+		return ""
+	}
+	spec, err := s.ProjectLead(projectID, where)
+	if err != nil {
+		return ""
+	}
+	if lead := s.LeadSession(spec); lead != sessionID {
+		return lead
+	}
+	return ""
+}
+
+func (s Service) starterOf(sessionID string) string {
 	origin, found, err := s.Registry.SessionOrigin(sessionID)
-	if err != nil || !found || origin.CreatorID == "" || origin.CreatorID == sessionID {
-		return "", "", false
+	if err != nil || !found || origin.CreatorID == sessionID {
+		return ""
 	}
-	return origin.CreatorID, "spawner", true
+	return origin.CreatorID
 }
 
 func (s Service) LeadSession(spec registry.CoordinatorSpec) string {

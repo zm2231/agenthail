@@ -195,10 +195,18 @@ func checkMessageAuthor(d *Daemon, request dashboardActionRequest) error {
 	if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
 		return invalidRequest("a person's message cannot also name a source session")
 	}
-	if request.SourceSessionID != "" {
-		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
-			return invalidRequest("source session not found")
-		}
+	return d.knownSource(request.SourceSessionID)
+}
+
+func (d *Daemon) knownSource(source string) error {
+	if source == "" {
+		return nil
+	}
+	if err := d.Registry.EnsureSender(source); err != nil {
+		return err
+	}
+	if _, err := d.Registry.Session(source); err != nil {
+		return invalidRequest("source session not found")
 	}
 	return nil
 }

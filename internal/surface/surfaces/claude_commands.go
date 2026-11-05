@@ -24,7 +24,7 @@ func claudeCommandMarkup(text string) bool {
 
 func IsTypedHumanPrompt(text string) bool {
 	text = strings.TrimSpace(text)
-	if text == "" || surface.IsCodexInjectedContext(text) || claudeCommandMarkup(text) {
+	if text == "" || surface.IsCodexInjectedContext(text) || surface.IsAgenthailNotice(text) || claudeCommandMarkup(text) {
 		return false
 	}
 	for _, prefix := range []string{"<system", "<realtime_delegation>", "<task-notification>", "<cross-session-message", "<local-command-caveat>", "<artifact-content-authored-by-others", "[Request interrupted", "[Request to", "This session is being continued from a previous conversation"} {

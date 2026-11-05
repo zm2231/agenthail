@@ -133,13 +133,25 @@ surface's health; report an unavailable surface from there when it matters.
 | Goal pause, resume, token budget | no | yes | no |
 
 Claude's control capabilities depend on its transport. Native UDS messages
-cannot execute slash commands, steer a running turn, or correlate message IDs
-with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
-the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, steer and the `control` commands (context, usage, status, effort,
-rename) require a Remote Control attachment. A session the Claude host runs has
-no Remote Control: it takes interrupt, steer, model and permission-mode changes
-through the host, and has no compact or `control` commands.
+cannot execute slash commands or correlate message IDs with transcript turns
+for `send --reply` / `--stream`. Use `last` to inspect the transcript or native
+`SendMessage` for an explicit reply. A socket message to a busy session is not
+a steer, but it does not wait for the turn to end either: Claude queues it and
+the model reads it with the result of the tool call that is running (observed
+with Claude Code 2.1.316). Compact, model, interrupt, steer and the `control`
+commands (context, usage, status, effort, rename) require a Remote Control
+attachment. A session the Claude host runs has no Remote Control: it takes
+interrupt, steer, model and permission-mode changes through the host, and has
+no compact or `control` commands.
+
+An agent's words never become a Claude session's own turn; only the person,
+Agenthail and the CLI run outside any session (under its label) write one.
+An agent's `steer` to a Claude session with a socket is sent over the socket, and the
+receipt says so: "Sent to @x's Claude socket, not steered". An agent steers
+only a session it leads or started; anyone else's steer is sent as a queued
+message, and the receipt says that too. A Claude session without a socket
+takes no agent message until it has one: the message waits in the queue, and
+is never posted as a Remote Control turn.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. A message Claude holds becomes a delivery problem with status `held`,
@@ -389,7 +401,7 @@ id; check the session before retrying. Arbitrary slash commands are not exposed.
 
 `compact` is a typed control, never a queued message. Claude sessions with a Remote Control attachment compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 
-Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket; bridge-only sessions receive every send through Remote Control. Do not set `author: person` on a message an agent wrote.
+Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket. A bridge-only session takes the person's and Agenthail's messages through Remote Control; any other message waits in the queue until the session has a socket. Do not set `author: person` on a message an agent wrote.
 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is
@@ -437,8 +449,10 @@ through stdin.
 Each project may have a coordinator, the agent the person sends the project's
 work to, on this machine or a paired host. Report to your project's coordinator
 with `agenthail send @lead "..."`; `agenthail coordinator --json` shows its host,
-name and current session. A send to the coordinator steers it
-when busy (or queues when steering is unavailable), resumes it when ended, and
+name and current session. A send to a busy coordinator reaches a Claude
+coordinator over its socket and waits for a Codex coordinator's turn to end,
+since an agent steers only a session it leads or started. It resumes the
+coordinator when ended, and
 starts a new conversation from its saved instructions when the conversation is
 gone. Do not set or clear the coordinator unless the person asks.
 

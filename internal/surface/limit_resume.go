@@ -22,6 +22,16 @@ func LimitResumeNotice() string {
 	return `<agenthail-notice kind="` + NoticeLimitResume + `">` + LimitResumeText + `</agenthail-notice>`
 }
 
+// NoticePrefix opens every notice the daemon writes from a request's fields.
+// Only a turn that reaches the session unwrapped and without the person's
+// origin is Agenthail's; an agent's text is always wrapped.
+const NoticePrefix = "[agenthail] "
+
+func IsAgenthailNotice(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, NoticePrefix) || strings.HasPrefix(text, "[agenthail delivery ")
+}
+
 // ParseNotice reports the kind and text of an Agenthail notice.
 func ParseNotice(text string) (kind, body string, ok bool) {
 	match := noticeEnvelope.FindStringSubmatch(text)

@@ -40,6 +40,9 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
+	if _, err := ownTurn(ctx); err != nil {
+		return nil, surface.DeliveryUnavailable(fmt.Errorf("%w: %w; %s has no messaging socket yet", surface.ErrDeliveryHeld, surface.ErrNotOwnTurn, sess.ID))
+	}
 	return c.postWhenIdle(ctx, sess, message, nil)
 }
 
@@ -104,6 +107,9 @@ func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Rou
 	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
 		return surface.RouteHumanTurn
 	}
+	if author == surface.AuthorAgenthail && sess != nil && claudeHosted(sess) {
+		return surface.RouteAgenthailTurn
+	}
 	if sess != nil && sess.Transport == "uds" {
 		return surface.RoutePeer
 	}
@@ -130,7 +136,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 		return nil, err
 	}
 	if claudeHosted(sess) {
-		return c.sendHostTurn(ctx, sess, message, "", images)
+		return c.sendHostTurn(ctx, sess, message, "", images, true)
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))

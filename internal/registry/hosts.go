@@ -45,17 +45,17 @@ type HostIdentity struct {
 }
 
 type PairedHost struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Endpoint      string `json:"endpoint"`
-	Address       string `json:"address"`
-	Token         string `json:"-"`
-	State         string `json:"state"`
-	LastError     string `json:"lastError,omitempty"`
-	ConnectedAt   string `json:"connectedAt,omitempty"`
-	CreatedAt     string `json:"createdAt"`
-	CatalogEpoch  string `json:"-"`
-	CatalogSeq    uint64 `json:"-"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Endpoint     string `json:"endpoint"`
+	Address      string `json:"address"`
+	Token        string `json:"-"`
+	State        string `json:"state"`
+	LastError    string `json:"lastError,omitempty"`
+	ConnectedAt  string `json:"connectedAt,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	CatalogEpoch string `json:"-"`
+	CatalogSeq   uint64 `json:"-"`
 }
 
 func ValidHostName(name string) bool {
@@ -778,6 +778,11 @@ func (r *Registry) ForwardSender(request map[string]any, source string) (bool, e
 	case surface.CLISessionID:
 		delete(request, "author")
 		delete(request, "personName")
+		return true, nil
+	case surface.SystemSessionID:
+		delete(request, "author")
+		delete(request, "personName")
+		request["sourceSessionId"] = surface.SystemSessionID
 		return true, nil
 	}
 	return false, nil

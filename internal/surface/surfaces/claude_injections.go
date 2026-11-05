@@ -38,6 +38,9 @@ func claudePromptOrigin(origin map[string]any, text string) string {
 	if kind := str(origin, "kind"); kind != "" {
 		return kind
 	}
+	if surface.IsAgenthailNotice(text) {
+		return claudeOriginNotice
+	}
 	if strings.HasPrefix(strings.TrimSpace(text), "<task-notification>") {
 		return claudeOriginTaskNotification
 	}
@@ -100,7 +103,10 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		}
 		return item
 	case claudeOriginNotice:
-		notice, body, _ := surface.ParseNotice(text)
+		notice, body, enveloped := surface.ParseNotice(text)
+		if !enveloped {
+			body = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), surface.NoticePrefix))
+		}
 		title := "Agenthail notice"
 		if notice == surface.NoticeLimitResume {
 			title = "Resumed after usage limit"

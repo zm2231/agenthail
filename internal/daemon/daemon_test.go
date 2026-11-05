@@ -350,6 +350,9 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	if err := r.RecordSessionOrigin(registry.OriginOf(to.ID, from.ID)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}

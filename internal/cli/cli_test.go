@@ -234,6 +234,9 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.RecordSessionOrigin(registry.OriginOf("target", "source")); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "source")
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"steer", "target", "focus now"})

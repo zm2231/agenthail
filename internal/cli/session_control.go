@@ -326,7 +326,7 @@ func (a *App) cmdSteer(args []string) error {
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.registry()}).Steer(ctx, surf, sess, message, "")
+	receipt, err := a.dispatcher().Steer(ctx, surf, sess, message, "")
 	if err != nil {
 		return err
 	}
@@ -338,15 +338,16 @@ func (a *App) cmdSteer(args []string) error {
 }
 
 func printSteerReceipt(receipt delivery.Receipt, target string) {
-	switch {
-	case receipt.Evidence == surface.EvidenceQueued:
-		fmt.Printf("Queued #%d for %s, which is waiting on you; it delivers after you answer.\n", receipt.QueueID, target)
-	case receipt.Status == string(registry.DeliveryIntentSubmitted):
-		fmt.Printf("Submitted to %s.\n", target)
-	case receipt.Evidence == surface.EvidenceTransportAccepted:
-		fmt.Printf("Steer sent to %s (request %s).\n", target, receipt.RequestID)
-	default:
-		fmt.Printf("Sent to %s.\n", target)
+	detail := receipt.Detail
+	if detail == "" {
+		detail = fmt.Sprintf("Sent to %s.", target)
+	}
+	if receipt.QueueID != 0 {
+		detail += fmt.Sprintf(" Queue item #%d.", receipt.QueueID)
+	}
+	fmt.Println(detail)
+	if receipt.Notice != "" {
+		fmt.Println(receipt.Notice)
 	}
 }
 

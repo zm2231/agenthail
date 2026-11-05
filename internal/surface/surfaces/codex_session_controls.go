@@ -70,6 +70,7 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 	if err := refuseCodexComposerCommand(message); err != nil {
 		return err
 	}
+	message = surface.LabelSender(ctx, message)
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
