@@ -297,7 +297,7 @@ func (a *App) ledgerDisable(store *ledger.Store, args []string) error {
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
 	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
 	"approve": true, "reject": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
-	"ready": true, "next": true, "critical-path": true}
+	"ready": true, "next": true, "critical-path": true, "search": true}
 
 func workArgs(args []string, i int) []string {
 	if args[i] == "list" {
@@ -337,6 +337,9 @@ func (a *App) ledgerShow(store *ledger.Store, args []string, id string) error {
 	}
 	if _, ok := board.WorkItem(id); ok {
 		return a.ledgerWorkShow(store, w, id)
+	}
+	if item, ok := board.WorkItemByOrigin(id); ok {
+		return a.ledgerWorkShow(store, w, item.ID)
 	}
 	for _, ask := range board.AllAsks() {
 		if ask.ID == id {

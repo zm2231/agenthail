@@ -107,3 +107,52 @@ func TestLedgerTakesTDStyleShortFormsForWorkItems(t *testing.T) {
 		t.Fatalf("show of an unknown id: %v", err)
 	}
 }
+
+func TestLedgerSearchFindsItemsAndShowTakesATDID(t *testing.T) {
+	app, _ := ledgerWriteFixture(t, func(string, map[string]any) (int, any) { return http.StatusOK, nil })
+	store := ledger.NewStore(app.registry().WriteDB(), app.registry().ReadDB())
+	const key = "repo:github.com/acme/widget"
+	for _, f := range []ledger.WorkFields{{Type: ledger.WorkBug, Priority: "P1", Labels: []string{"index"}}, {Priority: "P3"}} {
+		if _, err := store.Work(ledger.WorkRequest{ProjectKey: key, SessionID: "s1", Action: ledger.WorkAdd, Text: "index " + string(f.Priority), Fields: f}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Work(ledger.WorkRequest{ProjectKey: key, SessionID: "s1", Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "obsolete"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ImportWork(ledger.WorkImportRequest{ProjectKey: key, SessionID: "s1", Items: []ledger.WorkImport{{ImportedFrom: "td:td-50b9b1", Text: "from td"}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"search", "INDEX"}, "widget-W1 widget-W2"},
+		{[]string{"search", "index", "--priority", "P0,P1"}, "widget-W1"},
+		{[]string{"search", "index", "--state", "open"}, "widget-W2"},
+		{[]string{"list", "--sort", "priority", "--limit", "1"}, "widget-W3"},
+		{[]string{"list", "--all", "--label", "index"}, "widget-W1"},
+		{[]string{"work", "search", "td-50b9b1"}, "widget-W3"},
+	} {
+		out, err := captureStdout(t, func() error { return app.cmdLedger(c.args) })
+		if err != nil {
+			t.Fatalf("ledger %v: %v", c.args, err)
+		}
+		var ids []string
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			ids = append(ids, strings.Fields(line)[0])
+		}
+		if got := strings.Join(ids, " "); got != c.want {
+			t.Errorf("ledger %v listed %q, want %q", c.args, got, c.want)
+		}
+	}
+	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"show", "td-50b9b1"}) })
+	if err != nil || !strings.HasPrefix(out, "widget-W3 [open]") || !strings.Contains(out, "imported from td:td-50b9b1") {
+		t.Fatalf("show by td id printed %q, err %v", out, err)
+	}
+	for _, args := range [][]string{{"search"}, {"list", "--sort", "random"}, {"list", "--limit", "many"}} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil {
+			t.Errorf("ledger %v was accepted", args)
+		}
+	}
+}

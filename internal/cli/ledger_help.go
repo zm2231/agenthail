@@ -3,9 +3,15 @@ package cli
 const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger help prints this):
 
  Work items (each is also "ledger work <command>"):
-  ledger list [--mine] [--found] [--state <s>] [--type <t>] [--priority <p>] [--label <l>] [--all]
-                                 List unfinished work items; --all adds done and closed ones
-  ledger show <item_id|ask_id>   Everything about one item in one read: fields, the clause with the person's
+  ledger list [filters] [--all] List unfinished work items; --all adds done and closed ones
+  ledger search <words>... [filters]
+                                 Items with every word in their id, td id, text, description, acceptance,
+                                 labels, comments or logs, in any state but deleted
+                                 Filters: --state <s,...> --type <t,...> --priority <P0,...> --label <l> (repeat:
+                                 all must match) --assignee <session> | --mine, --clause <id>, --found,
+                                 --sort id|priority|created|updated, --limit <n>
+  ledger show <item_id|td_id|ask_id>
+                                 Everything about one item in one read: fields, the clause with the person's
                                  words, where it was found, dependencies both ways, handoff and timeline
   ledger add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature]
              [--priority P0-P3] [--description "..."] [--acceptance "..."] [--label <l>]...
