@@ -27,7 +27,7 @@ func mcpRefusalFor(err error) *mcpRefusal {
 	return &mapped
 }
 
-var refusedConflicts = []string{"conflict", "daemon_session", "coordinator_exists", "no_lead", "fork_turn_unknown", "not_replaced"}
+var refusedConflicts = []string{"conflict", "daemon_session", "coordinator_exists", "no_lead", "fork_turn_unknown", "not_replaced", "project_history", "project_linked", "project_not_linked"}
 
 func mcpCodeFor(status int, code string) (mcpRefusal, bool) {
 	switch {
