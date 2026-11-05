@@ -96,7 +96,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
 	}
-	capture, coverage := "coordinator", "capturing the coordinator's prompts only; enable with: agenthail ledger enable"
+	capture, coverage := "lead", "capturing the person's words to the project's lead; nothing asks it to attach them. To ask every session to attach each message: agenthail ledger enable"
 	if scope.State == ledger.LedgerEnabled {
 		capture = "enabled"
 		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
@@ -152,10 +152,20 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if hookErr != nil {
 		fmt.Printf("prompt hooks: unknown (%s)\n", hookErr)
 	}
-	fmt.Println(g2Line(g2, g2Err))
-	view.print(attachment)
+	if scope.State == ledger.LedgerEnabled {
+		fmt.Println(g2Line(g2, g2Err))
+		view.print(attachment, 0)
+		return nil
+	}
+	shown := ledgerLeadWordsShown
+	if hasFlag(args, "--all") {
+		shown = 0
+	}
+	view.print(attachment, shown)
 	return nil
 }
+
+const ledgerLeadWordsShown = 5
 
 func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)

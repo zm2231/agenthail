@@ -75,14 +75,14 @@ func TestALogLongerThanOnePageIsCheckedThroughItsEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	head, err := store.LatestSeq(widgetKey)
-	if err != nil {
-		t.Fatal(err)
-	}
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
 	testkit.Eventually(t, "the replica checks the whole pulled log", 30*time.Second, func() bool {
+		head, err := store.LatestSeq(widgetKey)
+		if err != nil {
+			t.Fatal(err)
+		}
 		view := syncViewOf(t, mac)
-		return view.Log == "match" && view.LogThrough == head
+		return head > int64(ledgerPullPage) && view.Log == "match" && view.LogThrough == head
 	})
 }
 

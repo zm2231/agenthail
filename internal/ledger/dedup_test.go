@@ -152,3 +152,22 @@ func TestEnableKeepsItsGrantTimeUntilDisabled(t *testing.T) {
 		t.Fatalf("re-enable after disable kept the old grant %v", reenabled.Since)
 	}
 }
+
+func TestConcurrentEnablesWriteOneCaptureEvent(t *testing.T) {
+	db := openTestDB(t)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ledger.NewStore(db, db).Enable("p"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key='p' AND type='capture'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("capture events = %d err %v, want 1", n, err)
+	}
+}

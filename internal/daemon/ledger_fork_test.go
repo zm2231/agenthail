@@ -65,7 +65,7 @@ func TestAForkOfTheCoordinatorIsCapturedInTheUnsetProject(t *testing.T) {
 	_, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-cfork", "cfork-key")
 	p.session(t, r, "coord")
-	makeCoordinator(t, r, "proj-cfork", p, "coord")
+	makeCoordinator(t, r, p, "coord")
 	registerFork(t, r, "coord-fork", "coord", p.dir)
 	p.session(t, r, "bystander")
 

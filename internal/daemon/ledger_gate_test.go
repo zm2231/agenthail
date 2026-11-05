@@ -24,6 +24,11 @@ type gateFixture struct {
 
 func newGateFixture(t *testing.T, via registry.OriginVia, runtime surface.RuntimeKind) gateFixture {
 	t.Helper()
+	return gateFixtureIn(t, via, runtime, true)
+}
+
+func gateFixtureIn(t *testing.T, via registry.OriginVia, runtime surface.RuntimeKind, enabled bool) gateFixture {
+	t.Helper()
 	r, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)
@@ -32,8 +37,10 @@ func newGateFixture(t *testing.T, via registry.OriginVia, runtime surface.Runtim
 	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
 	p := addLedgerProject(t, r, "proj-g2", "repo:github.com/acme/widget")
-	if err := p.store.Enable(p.key); err != nil {
-		t.Fatal(err)
+	if enabled {
+		if err := p.store.Enable(p.key); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: runtime, Cwd: p.dir, Status: surface.StatusIdle}
 	if err := r.RegisterSession(s); err != nil {
@@ -164,5 +171,21 @@ func TestG2DefersWhenThePersonJustSpokeToTheSession(t *testing.T) {
 	}
 	if gates := daemonEvents(t, f.r, "ledger.gate"); len(gates) != 1 || !strings.Contains(string(gates[0].Payload), ledger.GateDeferredPerson) {
 		t.Fatalf("gate events = %+v", gates)
+	}
+}
+
+func TestG2LeavesALeadAloneInAProjectNobodyEnabled(t *testing.T) {
+	f := gateFixtureIn(t, registry.OriginCoordinator, surface.RuntimeClaudeHost, false)
+	makeCoordinator(t, f.r, f.project, f.session.ID)
+	if got := ledgerPost(t, f.d.dashboardHandler(&dashboardServer{token: "test-token"}), ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-0", Prompt: "and the docs"}); !got.Captured || got.Attach {
+		t.Fatalf("the lead's words in a project nobody enabled: %+v", got)
+	}
+	u := ledger.Utterance{ProjectKey: f.project.key, Ref: "claude-prompt:1", SpeakerID: surface.PersonSessionID, TargetID: f.session.ID, Text: "build search", At: time.Now().Add(-time.Hour), CapturedBy: ledger.CapturedByHook}
+	if _, _, err := f.project.store.RecordUtterance(u); err != nil {
+		t.Fatal(err)
+	}
+	f.completeTurn(t, "turn-1")
+	if len(f.fake.sent) != 0 || f.r.QueueCount(f.session.ID) != 0 {
+		t.Fatalf("a lead that is only captured was gated: %q", f.fake.sent)
 	}
 }

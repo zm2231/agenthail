@@ -325,3 +325,48 @@ func TestTwoProjectsAdoptToDifferentOwners(t *testing.T) {
 		t.Fatalf("moving an owned ledger: %v", err)
 	}
 }
+
+func TestCaptureStateFollowsTheOwnersOrderOnBothHosts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(mac, owner syncHost) error
+		want  int
+	}{
+		{"the owner disables, then the mac's enable replays", func(mac, owner syncHost) error {
+			if err := owner.store.Disable(project); err != nil {
+				return err
+			}
+			return mac.store.Enable(project)
+		}, ledger.LedgerEnabled},
+		{"the mac enables, then the owner disables after the replay", func(mac, owner syncHost) error {
+			if err := mac.store.Enable(project); err != nil {
+				return err
+			}
+			syncOnce(t, project, mac, owner)
+			return owner.store.Disable(project)
+		}, ledger.LedgerDisabled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mac, owner := newSyncHost(t), newSyncHost(t)
+			searchAsk(t, mac.store)
+			adopt(t, project, mac, owner)
+			for _, host := range []syncHost{mac, owner} {
+				if _, err := host.store.Scope(project); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tc.write(mac, owner); err != nil {
+				t.Fatal(err)
+			}
+			syncOnce(t, project, mac, owner)
+			sameLedger(t, project, mac, owner)
+			for name, host := range map[string]syncHost{"mac": mac, "owner": owner} {
+				for _, store := range []*ledger.Store{host.store, ledger.NewStore(host.db, host.db)} {
+					if scope, err := store.Scope(project); err != nil || scope.State != tc.want {
+						t.Fatalf("%s scope = %+v err %v, want state %d", name, scope, err, tc.want)
+					}
+				}
+			}
+		})
+	}
+}

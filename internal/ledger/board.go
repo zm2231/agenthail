@@ -110,6 +110,7 @@ type Board struct {
 	replaying          bool
 	attachedBy         map[string][]string
 	retractions        []Retraction
+	capture            Scope
 	applied            int64
 }
 
@@ -140,6 +141,7 @@ func (b *Board) reset() {
 	b.orphaned = map[string]string{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
+	b.capture = Scope{}
 	b.applied = 0
 }
 
@@ -228,6 +230,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyCutWithdrawn(event.Payload)
 	case EventReclassified:
 		err = b.applyReclassified(event.Payload)
+	case EventCapture:
+		err = b.applyCapture(event)
 	}
 	return err
 }

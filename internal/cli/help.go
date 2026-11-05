@@ -148,7 +148,7 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks status codex            Show whether they are installed
 
 Intent ledger:
-  ledger                         Show goals, open asks, decisions and unattached words for the current project
+  ledger [--all]                 Show goals, open asks, decisions and unattached words for the current project
   ledger goals                   List goals with the clauses gathered under each
   ledger goal <name>             Create a goal, or show the one with that name
   ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."]
@@ -196,9 +196,10 @@ Intent ledger:
                                  Declare what a clause you own is waiting on
   ledger asks                    List all asks
   ledger ask <ask_id>            Show one ask with its clauses
-  ledger enable [@session]       Capture the person's words in this project, or for one session
-                                 and the forks made from it afterwards
-  ledger disable [@session]      Stop capturing
+  ledger enable [@session]       Capture the person's words to every session in this project and ask
+                                 each to attach them, or only for one session and its later forks;
+                                 without it, only the lead's words are captured and nothing is asked
+  ledger disable [@session]      Capture nothing in this project, or take back a session's grant
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it

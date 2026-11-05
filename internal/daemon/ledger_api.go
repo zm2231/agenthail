@@ -19,6 +19,7 @@ type ledgerCaptureRequest struct {
 
 type ledgerCaptureResponse struct {
 	Captured   bool     `json:"captured"`
+	Attach     bool     `json:"attach,omitempty"`
 	ProjectKey string   `json:"projectKey,omitempty"`
 	Ref        string   `json:"ref,omitempty"`
 	Unattached []string `json:"unattached,omitempty"`
@@ -69,17 +70,20 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 	if uuid, delivered := d.delivered.claim(session.ID, req.MessageUUID, req.Prompt, now); delivered {
 		ref, surfaceName = ledger.DeliveryRef(uuid), string(session.Surface)
 	}
-	key, captured, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: req.Prompt, At: now, CapturedBy: ledger.CapturedByHook})
+	record, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: req.Prompt, At: now, CapturedBy: ledger.CapturedByHook})
 	if err != nil {
-		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, key, err)
+		d.log.Printf("ledger capture: record prompt %s for %s in project %s: %s", ref, req.SessionID, record.key, err)
 		writeAPIError(w, http.StatusInternalServerError, "capture_failed", "The prompt was not recorded in the ledger.")
 		return
 	}
-	if !captured {
+	switch {
+	case !record.captured:
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
-		return
+	case !record.attach:
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: record.key, Ref: ref})
+	default:
+		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, Attach: true, ProjectKey: record.key, Ref: ref, Unattached: d.unattachedBefore(record.key, session.ID, ref)})
 	}
-	writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{Captured: true, ProjectKey: key, Ref: ref, Unattached: d.unattachedBefore(key, session.ID, ref)})
 }
 
 func (d *Daemon) registerLedgerRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
