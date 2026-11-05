@@ -14,7 +14,7 @@ func TestCatalogProjectsAreListedByNameNotActivity(t *testing.T) {
 	}
 	listed := func(rows ...dashboardSession) []string {
 		var names []string
-		for _, project := range catalogProjects(rows, nil, nil, nil, local, func(string) dashboardHost { return local }) {
+		for _, project := range catalogProjects(rows, nil, nil, projectLinkSet{}, nil, local, func(string) dashboardHost { return local }) {
 			names = append(names, project.DisplayName)
 		}
 		return names
