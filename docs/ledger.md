@@ -136,6 +136,21 @@ To pick up work:
 - `agenthail ledger work next` shows the first of those.
 - `agenthail ledger work critical-path` shows the longest chain of unfinished items.
 
+### Moving over from td
+
+`agenthail ledger import td [<path>]` reads a td database, read-only, and brings its open, in-progress, blocked and in-review issues over as found work. Each item keeps its title, type, priority, description, acceptance criteria and labels, plus its comments, logs, handoffs and reviews, at their original times and with the td session that wrote them. `--all` also brings closed issues, as done. The default path is `.todos/issues.db` in the current directory or the nearest parent that has one, and `--dry-run` shows what would come over without writing anything.
+
+The import maps td onto the ledger as follows:
+
+- An epic becomes a `feature` labelled `epic` that waits on each of its child issues.
+- td dependencies become dependencies. One that would make a cycle is skipped and listed.
+- `P4` becomes `P3`.
+- In-progress and in-review issues come over open: their claims were td sessions, which cannot submit or hand off in the ledger.
+- A log type the ledger does not have becomes a progress log whose text starts with that type.
+- Deleted issues, points, sprints, minor flags, due and defer dates, and td's notes, boards, file links and work sessions are not carried over. The import lists how many of each it left behind.
+
+Each item records the td issue it came from (`imported from td:td-1a2b3c` in `ledger work <item>`), and running the import again skips issues already imported, so an interrupted import can simply be rerun. Imported items are found work until they are linked to a clause of the person's.
+
 ## Keeping a ledger on another host
 
 By default each host keeps its own ledger. To share one project's ledger between two paired hosts, say a laptop and a server, make one of them the **owner**:

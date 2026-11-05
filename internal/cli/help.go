@@ -188,6 +188,11 @@ Intent ledger:
   ledger work handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
                                  Hand off a claimed item with its state; it reopens for the next session
   ledger work critical-path      Longest chain of unfinished work items
+  ledger import td [<path>] [--all] [--dry-run]
+                                 Bring a td database's open issues over as found work, with their comments,
+                                 logs, handoffs, reviews and dependencies; --all adds closed ones as done.
+                                 The default path is .todos/issues.db here or above. Running it again skips
+                                 what is already imported
   ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
                                  syncs its log back; without a host, show the owner, sync cursor and replay backlog
   ledger digest [--through N]    Hash of this host's ledger log in owner order through owner position N (default:

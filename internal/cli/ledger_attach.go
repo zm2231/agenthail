@@ -25,7 +25,7 @@ var ledgerWriteValueFlags = map[string]bool{"--as": true, "--to": true, "--claus
 var ledgerRepeatableFlags = map[string]bool{"--clause": true, "--done": true, "--remaining": true, "--decisions": true, "--uncertain": true,
 	"--covers": true, "--missing": true, "--in": true, "--label": true, "--unlabel": true}
 
-var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true, "--none": true, "--all": true, "--found": true}
+var ledgerWriteBoolFlags = map[string]bool{"--adopt": true, "--reject": true, "--ack": true, "--json": true, "--keeps-breadth": true, "--mine": true, "--none": true, "--all": true, "--found": true, "--dry-run": true}
 
 func parseLedgerWrite(args []string) (ledgerWriteArgs, error) {
 	parsed := ledgerWriteArgs{values: map[string][]string{}, bools: map[string]bool{}}

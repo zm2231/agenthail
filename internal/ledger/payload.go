@@ -96,6 +96,8 @@ type WorkItemPayload struct {
 	Text      string `json:"text"`
 	CreatedBy string `json:"createdBy"`
 	WorkFields
+	ImportedFrom string       `json:"importedFrom,omitempty"`
+	History      *WorkHistory `json:"history,omitempty"`
 }
 
 type WorkItemStatePayload struct {
