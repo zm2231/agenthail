@@ -63,10 +63,10 @@ private struct TranscriptScrimOriginModifier: ViewModifier {
     @Environment(\.backdropPlace) private var place
 
     func body(content: Content) -> some View {
-        if scrim != nil, let anchor = place.anchor {
-            content.background { ScrimRowsOrigin(rows: anchor.rows).allowsHitTesting(false).accessibilityHidden(true) }
-        } else {
-            content
+        content.background {
+            if scrim != nil, let anchor = place.anchor {
+                ScrimRowsOrigin(rows: anchor.rows).allowsHitTesting(false).accessibilityHidden(true)
+            }
         }
     }
 }
