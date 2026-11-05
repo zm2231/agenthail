@@ -7,7 +7,16 @@
     "open": true,
     "current": true,
     "lastActive": "2026-11-05T10:00:00Z",
-    "capabilities": { "send": false, "stream": false, "reply": false, "goal": false, "compact": false, "model": false, "interrupt": false, "steer": false },
+    "capabilities": {
+      "send": false,
+      "stream": false,
+      "reply": false,
+      "goal": false,
+      "compact": false,
+      "model": false,
+      "interrupt": false,
+      "steer": false
+    },
     "readOnly": false,
     "readOnlyReason": ""
   },
@@ -16,74 +25,443 @@
       "name": "several checkouts sort by what needs the person",
       "computers": 1,
       "sessions": [
-        { "id": "idle-new", "lastActive": "2026-11-05T11:00:00Z", "checkout": { "id": "checkout-main", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": false } },
-        { "id": "working", "status": "busy", "lastActive": "2026-11-05T09:00:00Z", "checkout": { "id": "checkout-export", "path": "/work/widget/.worktrees/export", "branch": "feat/export", "isMain": false, "dirty": false } },
-        { "id": "waiting", "status": "busy", "lastActive": "2026-11-05T08:00:00Z", "waitingOn": { "id": "w1", "kind": "question", "answerable": true }, "checkout": { "id": "checkout-search", "path": "/work/widget/.worktrees/search", "branch": "fix/search", "isMain": false, "dirty": true } },
-        { "id": "working-too", "status": "busy", "lastActive": "2026-11-05T10:30:00Z", "checkout": { "id": "checkout-search", "path": "/work/widget/.worktrees/search", "branch": "fix/search", "isMain": false, "dirty": true } },
-        { "id": "idle-old", "lastActive": "2026-11-05T07:00:00Z", "checkout": { "id": "checkout-main", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": false } }
+        {
+          "id": "idle-new",
+          "lastActive": "2026-11-05T11:00:00Z",
+          "checkout": {
+            "id": "checkout-main",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "working",
+          "status": "busy",
+          "lastActive": "2026-11-05T09:00:00Z",
+          "checkout": {
+            "id": "checkout-export",
+            "path": "/work/widget/.worktrees/export",
+            "branch": "feat/export",
+            "isMain": false,
+            "dirty": false
+          }
+        },
+        {
+          "id": "waiting",
+          "status": "busy",
+          "lastActive": "2026-11-05T08:00:00Z",
+          "waitingOn": {
+            "id": "w1",
+            "kind": "question",
+            "answerable": true
+          },
+          "checkout": {
+            "id": "checkout-search",
+            "path": "/work/widget/.worktrees/search",
+            "branch": "fix/search",
+            "isMain": false,
+            "dirty": true
+          }
+        },
+        {
+          "id": "working-too",
+          "status": "busy",
+          "lastActive": "2026-11-05T10:30:00Z",
+          "checkout": {
+            "id": "checkout-search",
+            "path": "/work/widget/.worktrees/search",
+            "branch": "fix/search",
+            "isMain": false,
+            "dirty": true
+          }
+        },
+        {
+          "id": "idle-old",
+          "lastActive": "2026-11-05T07:00:00Z",
+          "checkout": {
+            "id": "checkout-main",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
       ],
       "showsGroups": true,
       "groups": [
-        { "id": "checkout-search", "title": "fix/search · modified", "sessions": ["waiting", "working-too"] },
-        { "id": "checkout-export", "title": "feat/export", "sessions": ["working"] },
-        { "id": "checkout-main", "title": "main", "sessions": ["idle-new", "idle-old"] }
+        {
+          "id": "checkout-search",
+          "title": "fix/search · modified",
+          "sessions": [
+            "waiting",
+            "working-too"
+          ]
+        },
+        {
+          "id": "checkout-export",
+          "title": "feat/export",
+          "sessions": [
+            "working"
+          ]
+        },
+        {
+          "id": "checkout-main",
+          "title": "main",
+          "sessions": [
+            "idle-new",
+            "idle-old"
+          ]
+        }
       ]
     },
     {
       "name": "a single checkout has no groups to show",
       "computers": 1,
       "sessions": [
-        { "id": "older", "lastActive": "2026-11-05T07:00:00Z", "checkout": { "id": "checkout-one", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": true } },
-        { "id": "newer", "lastActive": "2026-11-05T09:00:00Z", "checkout": { "id": "checkout-one", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": true } }
+        {
+          "id": "older",
+          "lastActive": "2026-11-05T07:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": true
+          }
+        },
+        {
+          "id": "newer",
+          "lastActive": "2026-11-05T09:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": true
+          }
+        }
       ],
       "showsGroups": false,
       "groups": [
-        { "id": "checkout-one", "title": "main · modified", "sessions": ["newer", "older"] }
+        {
+          "id": "checkout-one",
+          "title": "main · modified",
+          "sessions": [
+            "newer",
+            "older"
+          ]
+        }
       ]
     },
     {
       "name": "the same branch on two computers is two groups, and an unreachable computer sorts last",
       "computers": 2,
       "sessions": [
-        { "id": "far::busy", "status": "busy", "host": { "id": "far", "name": "build-server.example.net", "state": "unreachable" }, "lastActive": "2026-11-05T12:00:00Z", "checkout": { "id": "far::checkout-a", "path": "/srv/widget", "branch": "main", "isMain": true, "dirty": true } },
-        { "id": "near", "host": { "id": "desk", "name": "desk", "state": "local" }, "lastActive": "2026-11-05T06:00:00Z", "checkout": { "id": "checkout-a", "path": "/srv/widget", "branch": "main", "isMain": true, "dirty": false } },
-        { "id": "other::idle", "host": { "id": "other", "name": "laptop.example.net", "state": "connected" }, "lastActive": "2026-11-05T05:00:00Z", "checkout": { "id": "other::checkout-a", "path": "/srv/widget", "branch": "main", "isMain": true, "dirty": true } }
+        {
+          "id": "far::busy",
+          "status": "busy",
+          "host": {
+            "id": "far",
+            "name": "build-server.example.net",
+            "state": "unreachable"
+          },
+          "lastActive": "2026-11-05T12:00:00Z",
+          "checkout": {
+            "id": "far::checkout-a",
+            "path": "/srv/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": true
+          }
+        },
+        {
+          "id": "near",
+          "host": {
+            "id": "desk",
+            "name": "desk",
+            "state": "local"
+          },
+          "lastActive": "2026-11-05T06:00:00Z",
+          "checkout": {
+            "id": "checkout-a",
+            "path": "/srv/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "other::idle",
+          "host": {
+            "id": "other",
+            "name": "laptop.example.net",
+            "state": "connected"
+          },
+          "lastActive": "2026-11-05T05:00:00Z",
+          "checkout": {
+            "id": "other::checkout-a",
+            "path": "/srv/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": true
+          }
+        }
       ],
       "showsGroups": true,
       "groups": [
-        { "id": "checkout-a", "title": "main · this computer", "sessions": ["near"] },
-        { "id": "other::checkout-a", "title": "main · laptop · modified", "sessions": ["other::idle"] },
-        { "id": "far::checkout-a", "title": "main · build-server · unreachable", "sessions": ["far::busy"] }
+        {
+          "id": "checkout-a",
+          "title": "main · this computer",
+          "sessions": [
+            "near"
+          ]
+        },
+        {
+          "id": "other::checkout-a",
+          "title": "main · laptop · modified",
+          "sessions": [
+            "other::idle"
+          ]
+        },
+        {
+          "id": "far::checkout-a",
+          "title": "main · build-server · unreachable",
+          "sessions": [
+            "far::busy"
+          ]
+        }
       ]
     },
     {
       "name": "a folder outside a repository is named by its folder",
       "computers": 1,
       "sessions": [
-        { "id": "notes", "checkout": { "id": "checkout-notes", "path": "/home/demo/notes", "isMain": false, "dirty": false } },
-        { "id": "detached", "lastActive": "2026-11-05T09:00:00Z", "checkout": { "id": "checkout-detached", "path": "/work/widget", "detachedHead": "0123456789abcdef", "isMain": false, "dirty": false } },
-        { "id": "gone", "lastActive": "2026-11-05T08:00:00Z", "cwd": "/work/removed" },
-        { "id": "nowhere", "lastActive": "2026-11-05T07:00:00Z" }
+        {
+          "id": "notes",
+          "checkout": {
+            "id": "checkout-notes",
+            "path": "/home/demo/notes",
+            "isMain": false,
+            "dirty": false
+          }
+        },
+        {
+          "id": "detached",
+          "lastActive": "2026-11-05T09:00:00Z",
+          "checkout": {
+            "id": "checkout-detached",
+            "path": "/work/widget",
+            "detachedHead": "0123456789abcdef",
+            "isMain": false,
+            "dirty": false
+          }
+        },
+        {
+          "id": "gone",
+          "lastActive": "2026-11-05T08:00:00Z",
+          "cwd": "/work/removed"
+        },
+        {
+          "id": "nowhere",
+          "lastActive": "2026-11-05T07:00:00Z"
+        }
       ],
       "showsGroups": true,
       "groups": [
-        { "id": "checkout-notes", "title": "notes", "sessions": ["notes"] },
-        { "id": "checkout-detached", "title": "0123456", "sessions": ["detached"] },
-        { "id": "|/work/removed", "title": "removed", "sessions": ["gone"] },
-        { "id": "|", "title": "No folder", "sessions": ["nowhere"] }
+        {
+          "id": "checkout-notes",
+          "title": "notes",
+          "sessions": [
+            "notes"
+          ]
+        },
+        {
+          "id": "checkout-detached",
+          "title": "0123456",
+          "sessions": [
+            "detached"
+          ]
+        },
+        {
+          "id": "|/work/removed",
+          "title": "removed",
+          "sessions": [
+            "gone"
+          ]
+        },
+        {
+          "id": "|",
+          "title": "No folder",
+          "sessions": [
+            "nowhere"
+          ]
+        }
       ]
     },
     {
       "name": "a working subagent keeps its idle parent running, and ties break by id",
       "computers": 1,
       "sessions": [
-        { "id": "b", "checkout": { "id": "checkout-one", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": false } },
-        { "id": "a", "checkout": { "id": "checkout-one", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": false } },
-        { "id": "parent", "lastActive": "2026-11-05T01:00:00Z", "subagents": { "count": 1, "working": 1 }, "checkout": { "id": "checkout-one", "path": "/work/widget", "branch": "main", "isMain": true, "dirty": false } }
+        {
+          "id": "b",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "a",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "parent",
+          "lastActive": "2026-11-05T01:00:00Z",
+          "subagents": {
+            "count": 1,
+            "working": 1
+          },
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
       ],
       "showsGroups": false,
       "groups": [
-        { "id": "checkout-one", "title": "main", "sessions": ["parent", "a", "b"] }
+        {
+          "id": "checkout-one",
+          "title": "main",
+          "sessions": [
+            "parent",
+            "a",
+            "b"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dates before 2000, unknown dates and differences under a millisecond sort the same everywhere",
+      "computers": 1,
+      "sessions": [
+        {
+          "id": "z-1999",
+          "lastActive": "1999-06-01T00:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "a-zero",
+          "lastActive": "0001-01-01T00:00:00Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "m-none",
+          "lastActive": null,
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "b-later",
+          "lastActive": "2026-11-05T10:00:00.123900000Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "a-earlier",
+          "lastActive": "2026-11-05T10:00:00.123100000Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "c-newest",
+          "lastActive": "2026-11-05T10:00:00.124Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "z-tie",
+          "lastActive": "2026-11-05T10:00:00.123999999Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        },
+        {
+          "id": "a-tie",
+          "lastActive": "2026-11-05T10:00:00.124000000Z",
+          "checkout": {
+            "id": "checkout-one",
+            "path": "/work/widget",
+            "branch": "main",
+            "isMain": true,
+            "dirty": false
+          }
+        }
+      ],
+      "showsGroups": false,
+      "groups": [
+        {
+          "id": "checkout-one",
+          "title": "main",
+          "sessions": [
+            "a-tie",
+            "c-newest",
+            "a-earlier",
+            "b-later",
+            "z-tie",
+            "a-zero",
+            "m-none",
+            "z-1999"
+          ]
+        }
       ]
     }
   ]

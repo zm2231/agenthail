@@ -8,6 +8,8 @@ struct ProjectNow: Equatable {
         var sessions: [SessionState]
     }
 
+    private static let knownSince: TimeInterval = 946_684_800
+
     private(set) var groups: [Group] = []
 
     var count: Int { groups.reduce(0) { $0 + $1.sessions.count } }
@@ -46,8 +48,16 @@ struct ProjectNow: Equatable {
         return left.id < right.id
     }
 
-    private static func active(_ session: SessionState) -> Date {
-        session.lastActive.flatMap(SessionTree.parseTimestamp) ?? .distantPast
+    private static func active(_ session: SessionState) -> Int64 {
+        guard let at = session.lastActive.map(toMilliseconds).flatMap(SessionTree.parseTimestamp), at.timeIntervalSince1970 >= knownSince else { return 0 }
+        return Int64((at.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    private static func toMilliseconds(_ timestamp: String) -> String {
+        guard let dot = timestamp.firstIndex(of: ".") else { return timestamp }
+        let start = timestamp.index(after: dot)
+        let end = timestamp[start...].firstIndex { !$0.isNumber } ?? timestamp.endIndex
+        return String(timestamp[..<start] + timestamp[start..<end].prefix(3) + timestamp[end...])
     }
 
     private static func key(_ session: SessionState) -> String {
