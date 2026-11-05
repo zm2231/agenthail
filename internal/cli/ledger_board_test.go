@@ -182,7 +182,13 @@ func TestLedgerBoardKeepsWithdrawnCutsAndMarksDefaultedDecisions(t *testing.T) {
 
 func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
 	app, calls := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
-		return http.StatusOK, body
+		answer := map[string]any{"projectKey": body["projectKey"]}
+		if session, ok := body["sessionId"]; ok {
+			answer["sessionId"], answer["granted"] = session, body["enabled"]
+		} else {
+			answer["enabled"], answer["attach"] = body["enabled"], body["attach"]
+		}
+		return http.StatusOK, answer
 	})
 	run := func(args ...string) string {
 		t.Helper()
@@ -215,6 +221,17 @@ func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
 	}
 	if len(*calls) != len(want) {
 		t.Fatalf("a refused enable reached the daemon: %v", *calls)
+	}
+	printed := map[string][]string{
+		`{"attach":"checkpoints","enabled":true,"projectKey":"repo:github.com/acme/widget"}`: {"enable", "--attach", "checkpoints", "--json"},
+		`{"granted":true,"projectKey":"repo:github.com/acme/widget","sessionId":"s1"}`:       {"enable", "s1", "--json"},
+		`{"granted":false,"projectKey":"repo:github.com/acme/widget","sessionId":"s1"}`:      {"disable", "s1", "--json"},
+		`{"enabled":false,"projectKey":"repo:github.com/acme/widget"}`:                       {"disable", "--json"},
+	}
+	for want, args := range printed {
+		if out := run(args...); strings.Join(strings.Fields(out), "") != want {
+			t.Errorf("%v printed %s, want %s", args, out, want)
+		}
 	}
 }
 

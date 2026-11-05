@@ -283,11 +283,11 @@ func (a *App) ledgerDisable(args []string) error {
 }
 
 type ledgerScopeAnswer struct {
-	ProjectKey string            `json:"projectKey"`
-	Enabled    *bool             `json:"enabled,omitempty"`
 	Attach     ledger.AttachMode `json:"attach,omitempty"`
-	SessionID  string            `json:"sessionId,omitempty"`
+	Enabled    *bool             `json:"enabled,omitempty"`
 	Granted    *bool             `json:"granted,omitempty"`
+	ProjectKey string            `json:"projectKey"`
+	SessionID  string            `json:"sessionId,omitempty"`
 }
 
 func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.AttachMode) (*ledgerScopeAnswer, error) {

@@ -15,11 +15,11 @@ type ledgerScopeRequest struct {
 }
 
 type ledgerScopeResponse struct {
-	ProjectKey string            `json:"projectKey"`
-	Enabled    *bool             `json:"enabled,omitempty"`
 	Attach     ledger.AttachMode `json:"attach,omitempty"`
-	SessionID  string            `json:"sessionId,omitempty"`
+	Enabled    *bool             `json:"enabled,omitempty"`
 	Granted    *bool             `json:"granted,omitempty"`
+	ProjectKey string            `json:"projectKey"`
+	SessionID  string            `json:"sessionId,omitempty"`
 }
 
 func (d *Daemon) apiLedgerScopeHandler(w http.ResponseWriter, r *http.Request) {
