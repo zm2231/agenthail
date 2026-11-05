@@ -83,14 +83,16 @@ func TestWorkQueriesSortByWhenItemsWereCreatedAndLastTouched(t *testing.T) {
 	for i, text := range []string{"oldest", "middle", "newest"} {
 		items = append(items, ledger.WorkImport{ImportedFrom: "td:td-" + text, Text: text, CreatedAt: t0.Add(time.Duration(i) * time.Hour)})
 	}
-	if _, err := s.ImportWork(ledger.WorkImportRequest{ProjectKey: project, SessionID: "s1", Items: items}, time.Now()); err != nil {
+	if _, err := s.ImportWork(ledger.WorkImportRequest{ProjectKey: project, SessionID: "s1", Items: items}, t0.Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := queried(t, board(t, s), ledger.WorkQuery{Sort: "created"}); got != "W3 W2 W1" {
 		t.Fatalf("newest created first: %q", got)
 	}
-	time.Sleep(1100 * time.Millisecond)
-	work(t, s, ledger.WorkRequest{Action: ledger.WorkComment, ItemID: "widget-W1", Text: "still happens"})
+	comment := ledger.WorkRequest{ProjectKey: project, SessionID: "s1", Action: ledger.WorkComment, ItemID: "widget-W1", Text: "still happens"}
+	if _, err := s.Work(comment, t0.Add(25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	if got := queried(t, board(t, s), ledger.WorkQuery{Sort: "updated"}); got != "W1 W2 W3" {
 		t.Fatalf("most recently touched first: %q", got)
 	}

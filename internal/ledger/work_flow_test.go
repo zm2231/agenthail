@@ -86,6 +86,11 @@ func TestAHandoffRecordsItsShapeAndFreesTheItem(t *testing.T) {
 	if next := work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: "helper"}); next.Item.Assignee != "helper" || next.Item.Handoff == nil {
 		t.Fatalf("the next session lost the handoff: %+v", next.Item)
 	}
+	read, _ := board(t, s).QueryWork(ledger.WorkQuery{})
+	read[0].Handoff.Done[0], read[0].Handoff.Remaining = "changed by a reader", nil
+	if again, _ := board(t, s).WorkItem("widget-W1"); again.Handoff.Done[0] != "schema written" || len(again.Handoff.Remaining) != 1 {
+		t.Fatalf("a reader changed the board's handoff: %+v", again.Handoff)
+	}
 }
 
 func TestG2CountsWorkAndWaitingOnOthers(t *testing.T) {
