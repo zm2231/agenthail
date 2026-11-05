@@ -223,6 +223,10 @@ func (a *App) Run(args []string) (err error) {
 		if len(rest) > 0 && rest[0] == "agent" {
 			return a.cmdHelpAgent(rest[1:])
 		}
+		if len(rest) > 0 && rest[0] == "ledger" {
+			fmt.Print(ledgerHelp)
+			return nil
+		}
 		a.usage()
 		return nil
 	default:

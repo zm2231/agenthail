@@ -147,75 +147,9 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks uninstall codex         Remove them
   hooks status codex            Show whether they are installed
 
-Intent ledger:
-  ledger [--all]                 Show goals, open asks, decisions and unattached words for the current project
-  ledger goals                   List goals with the clauses gathered under each
-  ledger goal <name>             Create a goal, or show the one with that name
-  ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."]
-                                 Attach the person's words: new-ask, extends, constrains, refines,
-                                 reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
-                                 decides, conversation; --covers <cut> withdraws a checker's cut
-                                 with a clause from the words it was raised from
-  ledger check <goal_id>         Queue a narrowing check: a sandboxed session compares the goal's
-                                 clauses with the person's words and raises what they miss as cuts
-  ledger propose --to <id|project> --clause "..."
-                                 Propose clauses; they bind once the person adopts them
-  ledger question --to <id|project> "<question>" --recommendation "..." --default "..."
-                  --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]
-                                 Track a question; the person answers with attach --as answers.
-                                 Unanswered, only a --keeps-breadth default applies itself;
-                                 any other waits for the person's ack
-  ledger questions [--all]       List open questions (--all includes answered ones)
-  ledger work [--mine] [--found] [--state <s>] [--type <t>] [--priority <p>] [--label <l>] [--all]
-                                 List unfinished work items; --all adds done and closed ones
-  ledger work add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature]
-                  [--priority P0-P3] [--description "..."] [--acceptance "..."] [--label <l>]...
-                                 Add asked work under a clause, or found work with none; ledger add,
-                                 ledger create, work create and work new are short for it. Closing work
-                                 never closes the clause
-  ledger work edit <item_id> [--text|--type|--priority|--description|--acceptance "..."] [--label|--unlabel <l>]
-                                 Change an item's fields; work update is the same
-  ledger work link <item_id> <clause_id>
-                                 Hang found work off a clause of the person's
-  ledger work <claim|block|unblock|submit|reopen|restore|delete> <item_id> [--reason "..."]
-                                 Move a work item; claim waits for its dependencies, block needs a reason
-  ledger work close <item_id> --reason "duplicate|wontfix|obsolete ..."
-                                 Close work that will not be done, without review
-  ledger work <approve|reject> <item_id> [--utterance <id>] [--reason "..."]
-                                 Review submitted work: another session, or the person's own words
-  ledger work dep <item_id> --on <item_id>
-                                 Record that one work item waits on another
-  ledger work handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
-                                 Hand off a claimed item with its state; it reopens for the next session
-  ledger work critical-path      Longest chain of unfinished work items
-  ledger import td [<path>] [--all] [--dry-run]
-                                 Bring a td database's open issues over as found work, with their comments,
-                                 logs, handoffs, reviews and dependencies; --all adds closed ones as done.
-                                 The default path is .todos/issues.db here or above. Running it again skips
-                                 what is already imported
-  ledger owner [<host>]          Keep this project's ledger on a paired host, which then plans every write and
-                                 syncs its log back; without a host, show the owner, sync cursor and replay backlog
-  ledger digest [--through N]    Hash of this host's ledger log in owner order through owner position N (default:
-                                 the sync cursor, or the log's end on the owner); equal on two hosts means equal logs
-  ledger work <item_id>          Show one work item with its clause, the person's words, dependencies and timeline
-  ledger work ready | next       Open items whose dependencies are settled, most urgent then most-unblocking first
-  ledger work comment <item_id> "<text>"
-                                 Comment on a work item from any session
-  ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
-                                 Add to the running log of an item you hold
-  ledger own <clause_id> [--session <id>]
-                                 Take ownership of a clause (or give it to a session)
-  ledger progress <clause_id> --ref <commit|file|PR|evidence>
-                                 Report self-reported progress on a clause you own
-  ledger wait <clause_id> --condition "..." --deadline <30m|4h|2d>
-                                 Declare what a clause you own is waiting on
-  ledger asks                    List all asks
-  ledger ask <ask_id>            Show one ask with its clauses
-  ledger enable [@session]       Capture the person's words to every session in this project and ask
-                                 each to attach them, or only for one session and its later forks;
-                                 without it, only the lead's words are captured and nothing is asked
-  ledger disable [@session]      Capture nothing in this project, or take back a session's grant
-
+`)
+	fmt.Print(ledgerHelp)
+	fmt.Print(`
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
   dashboard disable             Disable the dashboard listener
