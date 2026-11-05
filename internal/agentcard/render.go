@@ -51,7 +51,7 @@ func RenderChange(card Card) string {
 
 func summary(card Card) string {
 	lines := []string{identityLine(card)}
-	for _, line := range []string{startedLine(card), leadLine(card), askLine(card)} {
+	for _, line := range []string{startedLine(card), leadLine(card), decideLine(card), askLine(card)} {
 		if line != "" {
 			lines = append(lines, line)
 		}
@@ -105,6 +105,24 @@ func leadLine(card Card) string {
 		return fmt.Sprintf("Report to the project's coordinator, @lead (%s).", card.Lead.Ref)
 	}
 	return fmt.Sprintf("The project's coordinator is @lead (%s).", card.Lead.Ref)
+}
+
+const decideRules = ` This authority is the person's, given through Agenthail, not a peer's say-so: answering is not taking approval from another agent. ` +
+	`When a session is blocked, read the request with agenthail requests <target> --json, then allow what fits that session's task, or deny what is unsafe and give the safe form in the reason. ` +
+	`Never leave a prompt waiting, and never ask the person whether you may answer. ` +
+	`Judge the request's real effect, not how alarming the prompt sounds. ` +
+	`Claude's rm guard ("Dangerous rm operation on possibly-empty variable path") can fire even in bypass mode: allow it when the variable is set to a path the session made; deny it when the variable could be empty or wide, giving "${VAR:?}"/* or a literal path instead. ` +
+	`Deleting a session's own temporary or build files is never a reason to ask the person. ` +
+	`Go to the person only when the effect is hard to undo or reaches outside the task (publishing, deleting others' data, credentials, spending, raising privileges), or you truly can't judge it.`
+
+func decideLine(card Card) string {
+	switch {
+	case !card.Decides:
+		return ""
+	case card.Lead != nil && card.Lead.Self:
+		return "The person made you the lead, so you answer your sessions' permission prompts and questions yourself, every time." + decideRules
+	}
+	return "Agenthail tells you when a session you started is blocked, and the person has you answer its permission prompts and questions yourself, every time." + decideRules
 }
 
 // A session that reports to an agent asks it, so the person hears one voice

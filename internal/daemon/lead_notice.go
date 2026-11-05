@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -15,44 +14,13 @@ type noticeRecipient struct {
 	role      string
 }
 
-// A coordinator that has never started a conversation leads nothing yet, so the spawner hears instead.
 func (d *Daemon) noticeRecipient(session surface.Session) (noticeRecipient, bool) {
-	service := d.coordinator()
-	if _, coordinates := service.Of(session.ID); !coordinates {
-		if project, err := d.sessionProject(session); err == nil && project != nil {
-			if spec, err := service.ProjectLead(project.ID, project.DisplayName); err == nil {
-				if lead := d.leadSession(spec); lead != "" && lead != session.ID {
-					return noticeRecipient{sessionID: lead, role: "lead"}, true
-				}
-			}
-		}
+	projectID, where := "", ""
+	if project, err := d.sessionProject(session); err == nil && project != nil {
+		projectID, where = project.ID, project.DisplayName
 	}
-	origin, found, err := d.Registry.SessionOrigin(session.ID)
-	if err != nil || !found || origin.CreatorID == "" || origin.CreatorID == session.ID {
-		return noticeRecipient{}, false
-	}
-	return noticeRecipient{sessionID: origin.CreatorID, role: "spawner"}, true
-}
-
-func (d *Daemon) leadSession(spec registry.CoordinatorSpec) string {
-	if spec.HostID == "" {
-		id, err := d.Registry.CoordinatorSessionID(spec)
-		if err != nil {
-			return ""
-		}
-		return id
-	}
-	id := spec.SessionID
-	if host, target, ok := hosts.Split(id); ok {
-		if host != spec.HostID {
-			return ""
-		}
-		id = target
-	}
-	if owner, err := d.Registry.SessionHost(id); err != nil || id == "" || owner != spec.HostID {
-		return ""
-	}
-	return id
+	id, role, ok := d.coordinator().PromptHearer(session.ID, projectID, where)
+	return noticeRecipient{sessionID: id, role: role}, ok
 }
 
 func (d *Daemon) sendNotice(to noticeRecipient, from surface.Session, message, key string) (bool, error) {
@@ -89,7 +57,7 @@ func waitingNotice(name, target string, waiting surface.Waiting, runtime surface
 	if detail := strings.TrimSpace(request.Description); detail != "" && detail != asks {
 		asks += ": " + detail
 	}
-	return fmt.Sprintf("[agenthail] %s is blocked on a prompt: %s\nAnswer it: agenthail answer %s <allow|deny|\"answer\"> --request %s\nThe person was notified too; the first answer settles it.", name, asks, target, request.ID)
+	return fmt.Sprintf("[agenthail] %s is blocked on a prompt: %s\nRead the request first: agenthail requests %s --json\nAnswer it: agenthail answer %s <allow|deny|\"answer\"> --request %s\nAnswer it yourself now. The person was notified too, but don't wait for them: the first answer settles it.", name, asks, target, target, request.ID)
 }
 
 func (d *Daemon) noticeWaiting(session surface.Session, waiting surface.Waiting, request surface.Request, open bool) {

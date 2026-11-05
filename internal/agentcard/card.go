@@ -56,6 +56,7 @@ type Card struct {
 	LeadProblem string              `json:"leadProblem,omitempty"`
 	StartedBy   *Origin             `json:"startedBy,omitempty"`
 	ReportTo    string              `json:"reportTo,omitempty"`
+	Decides     bool                `json:"decides,omitempty"`
 	Ask         *Ask                `json:"ask,omitempty"`
 	Commands    []Command           `json:"commands,omitempty"`
 }
@@ -65,10 +66,11 @@ func Unresolved(reason string) Card { return Card{Reason: reason} }
 // Project returns nil for a folder outside every project. PromptsHeld
 // reports whether Agenthail holds a terminal Claude session's prompts.
 type Sources struct {
-	Registry    *registry.Registry
-	Project     func(ctx context.Context, cwd string) (*Project, error)
-	LeadRef     func(registry.CoordinatorSpec) string
-	PromptsHeld func(surface.Session) bool
+	Registry     *registry.Registry
+	Project      func(ctx context.Context, cwd string) (*Project, error)
+	LeadRef      func(registry.CoordinatorSpec) string
+	PromptsHeld  func(surface.Session) bool
+	PromptHearer func(ctx context.Context, session surface.Session) string
 }
 
 func (s Sources) For(ctx context.Context, session surface.Session) (Card, error) {
@@ -95,6 +97,9 @@ func (s Sources) For(ctx context.Context, session surface.Session) (Card, error)
 		return Card{}, err
 	}
 	if card.Ask, err = s.ask(session); err != nil {
+		return Card{}, err
+	}
+	if card.Decides, err = s.decides(ctx, card); err != nil {
 		return Card{}, err
 	}
 	card.ReportTo = reportTo(card)
@@ -173,6 +178,25 @@ func (s Sources) origin(sessionID string) (*Origin, error) {
 		origin.Ref = stored.CreatorID
 	}
 	return origin, nil
+}
+
+func (s Sources) decides(ctx context.Context, card Card) (bool, error) {
+	if card.Lead != nil && card.Lead.Self {
+		return true, nil
+	}
+	if s.PromptHearer == nil {
+		return false, nil
+	}
+	children, err := s.Registry.SessionChildren(card.Session)
+	if err != nil {
+		return false, fmt.Errorf("read the sessions it started: %w", err)
+	}
+	for _, id := range children {
+		if child, err := s.Registry.Session(id); err == nil && s.PromptHearer(ctx, *child) == card.Session {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s Sources) ask(session surface.Session) (*Ask, error) {

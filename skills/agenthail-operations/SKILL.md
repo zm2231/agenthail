@@ -279,12 +279,23 @@ Desktop with a writable bridge but does not itself create a thread.
 Create Claude sessions with `agenthail thread create claude "task" --alias worker --json`.
 The session runs in Agenthail's Claude host, which needs the daemon running. It
 has no Remote Control. A tool its permission mode does not allow, and every
-question it asks, waits for a person: `agenthail requests <target>` lists them
+question it asks, waits for an answer: `agenthail requests <target>` lists them
 and `agenthail answer <target> allow|always|deny|"answer"` answers the oldest.
 An MCP server's request for input (kind `input`) is answered with
 `agenthail answer <target> allow --answers '{"field":value}'`, `allow` alone
 for a link the person opened, or `deny`.
-Do not answer them yourself unless your user asked you to.
+Agenthail tells the project's lead when a session is blocked, or the session
+that started it when no lead hears it, and the person has that session answer.
+If your Agenthail card says you answer them, do it yourself every time without
+asking the person whether you may: read the request with
+`agenthail requests <target> --json`, allow what fits the session's task, and
+deny what is unsafe with the safe form in the reason. Judge the real effect,
+not how the prompt sounds; Claude's rm guard can fire even in bypass mode, and a
+session deleting its own temporary or build files is routine. Go to the person
+only when the effect is hard to undo or reaches outside the task (publishing,
+deleting others' data, credentials, spending, raising privileges), or you
+can't judge it. Otherwise leave another session's requests to whoever hears
+them.
 A Claude CLI in a terminal shows its prompts the same way once
 `agenthail hooks install` has added the PermissionRequest hook; the daemon
 holds the prompt, so `requests` and `answer` need it running. The same command
