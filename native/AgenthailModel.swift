@@ -84,7 +84,7 @@ final class AgenthailModel: ObservableObject {
             scheduleListReread()
         }
     }
-    private var currentViewPosition = CatalogPosition(epoch: nil, cursor: 0)
+    private(set) var currentViewPosition = CatalogPosition(epoch: nil, cursor: 0)
     private var orderReread: Task<Void, Never>?
     private var orderRereadDirty = false
     var listRereadTask: Task<Void, Never>?
@@ -108,7 +108,7 @@ final class AgenthailModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
-    private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
+    private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
     lazy var catalogFeed = makeCatalogFeed()
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
@@ -262,11 +262,10 @@ final class AgenthailModel: ObservableObject {
         guard let api else { return false }
         setLoading(snapshot == nil)
         do {
-            async let base = api.snapshotBase(fresh: fresh)
-            async let current = api.scopeSessions("current")
+            async let parts = api.snapshotBaseAndCurrent(fresh: fresh)
             async let activity = api.projectActivity(fresh: fresh)
             async let history = api.history(limit: 50)
-            let (readBase, readCurrent, readActivity, readHistory) = try await (base, current, activity, history)
+            let ((readBase, readCurrent), readActivity, readHistory) = try await (parts, activity, history)
             let loaded = DashboardSnapshot(base: readBase, current: readCurrent, activity: readActivity, history: readHistory.items)
             adoptRefreshed(loaded)
             adoptCurrentView(readCurrent)

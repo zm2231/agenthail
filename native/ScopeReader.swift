@@ -86,9 +86,10 @@ final class ScopeReader {
         var searched = request
         searched.query = query
         let page = try? await api.scopePage(searched, timeout: source.timeout())
-        guard source.active(), !Task.isCancelled, generation == searchGeneration else { return }
-        pages.setFound(page?.sessions ?? [])
-        foundView = page?.view
+        guard generation == searchGeneration else { return }
+        let answered = source.active() && !Task.isCancelled ? page : nil
+        pages.setFound(answered?.sessions ?? [])
+        foundView = answered?.view
         foundQuery = query
         source.changed()
     }

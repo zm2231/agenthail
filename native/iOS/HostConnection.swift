@@ -175,10 +175,9 @@ final class HostConnection {
         refreshGeneration += 1
         let generation = refreshGeneration
         do {
-            async let base = api.snapshotBase(fresh: fresh, timeout: refreshTimeout)
-            async let current = api.scopeSessions("current", timeout: refreshTimeout)
+            async let parts = api.snapshotBaseAndCurrent(fresh: fresh, timeout: refreshTimeout)
             async let activity = api.projectActivity(fresh: fresh, timeout: refreshTimeout)
-            let readCurrent = try await current
+            let (base, readCurrent) = try await parts
             let loaded = try await DashboardSnapshot(base: base, current: readCurrent, activity: activity)
             guard !stopped else { return false }
             guard generation > appliedGeneration else { return true }

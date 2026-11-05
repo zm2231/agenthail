@@ -24,9 +24,7 @@ struct CommandPalette: View {
     private var entries: [Entry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let attention = Set(model.sessionAttention.keys)
-        let matched = model.paletteSessions(trimmed)
-        let titled: [SessionState] = matched.filter { titleMatch($0, trimmed) }
-        let sessions = (titled + matched.filter { !titleMatch($0, trimmed) })
+        let sessions = model.paletteSessions(trimmed)
             .prefix(trimmed.isEmpty ? 6 : 20)
             .map { session in
                 Entry(
@@ -40,10 +38,6 @@ struct CommandPalette: View {
             }
         let actions = actionEntries.filter { trimmed.isEmpty || $0.title.localizedCaseInsensitiveContains(trimmed) }
         return sessions + actions
-    }
-
-    private func titleMatch(_ session: SessionState, _ query: String) -> Bool {
-        !query.isEmpty && (session.title.localizedCaseInsensitiveContains(query) || session.name.localizedCaseInsensitiveContains(query))
     }
 
     private var actionEntries: [Entry] {
