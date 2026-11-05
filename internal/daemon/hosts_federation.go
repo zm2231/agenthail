@@ -749,6 +749,7 @@ func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session,
 	registered := projection.RegisteredAt
 	projection.ObservedAt, projection.RegisteredAt = time.Time{}, time.Time{}
 	projection.Freshness = nil
+	projection.Placement = ""
 	encoded, err := json.Marshal(projection)
 	if err != nil {
 		return err

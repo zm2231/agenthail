@@ -26,7 +26,9 @@ type placementInputs struct {
 	ProjectID     string
 	ProjectName   string
 	CheckoutID    string
-	ParentID      string
+	Subagent      *surface.Subagent
+	Source        string
+	Delegated     bool
 	Surface       surface.SurfaceKind
 	Search        string
 	IdleAt        time.Time
@@ -50,6 +52,9 @@ func placementOf(row dashboardSession) placementInputs {
 		UsageLimit:    row.UsageLimit != nil,
 		Current:       row.Current,
 		CurrentReason: row.CurrentReason,
+		Subagent:      row.Subagent,
+		Source:        row.Source,
+		Delegated:     row.Delegated,
 		Surface:       row.Surface,
 		Search:        presentationSearch(row),
 	}
@@ -70,9 +75,6 @@ func placementOf(row dashboardSession) placementInputs {
 	}
 	if row.Checkout != nil {
 		inputs.CheckoutID = row.Checkout.ID
-	}
-	if row.Subagent != nil {
-		inputs.ParentID = row.Subagent.ParentID
 	}
 	if !inputs.Working && !inputs.Queued && !inputs.Waiting {
 		inputs.IdleAt = row.LastActive.UTC()

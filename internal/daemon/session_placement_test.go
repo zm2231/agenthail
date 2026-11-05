@@ -43,6 +43,15 @@ var placementInputMutations = []placementMutation{
 		r.Checkout = &catalogCheckout{ID: "c-2", Path: "/w", Branch: "topic"}
 	}},
 	{"Subagent", func(r *dashboardSession, _ time.Time) { r.Subagent = &surface.Subagent{ParentID: "s01", RootID: "s01"} }},
+	{"Subagent", func(r *dashboardSession, _ time.Time) {
+		if r.Subagent != nil {
+			moved := *r.Subagent
+			moved.Depth, moved.Nickname = moved.Depth+1, "scout"
+			r.Subagent = &moved
+		}
+	}},
+	{"Source", func(r *dashboardSession, _ time.Time) { r.Source = "subAgent" }},
+	{"Delegated", func(r *dashboardSession, _ time.Time) { r.Delegated = true }},
 	{"ObservedSubagents", func(r *dashboardSession, _ time.Time) {
 		r.ObservedSubagents = &surface.SubagentRollup{Count: 1, Working: 1}
 	}},
@@ -52,13 +61,40 @@ var placementInputMutations = []placementMutation{
 }
 
 // Attention and ReplacedLead reach clients as delivery.* and coordinator.* events; RegisteredAt never changes after insert.
-var placementIgnored = map[string]bool{
-	"RegisteredAt": true, "Display": true, "Attention": true, "ID": true, "RuntimeKind": true, "ConfiguredModel": true, "PendingModel": true,
-	"ClaudeConfigRoot": true, "Activity": true, "Plan": true, "Open": true, "Capabilities": true, "ReadOnly": true,
-	"ReadOnlyReason": true, "Source": true, "Transport": true, "ForkedFrom": true, "ObservedAt": true,
-	"UnavailableReason": true, "Runtime": true, "Freshness": true, "Delegated": true, "Subagents": true,
-	"Holders": true, "ReplacedLead": true, "HiddenSubagents": true, "LiveHiddenSubagents": true, "Listed": true,
-	"Placement": true,
+var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "ReplacedLead": true, "Display": true, "ID": true, "Placement": true}
+
+var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
+	"RuntimeKind":     func(r *dashboardSession, _ time.Time) { r.RuntimeKind = surface.RuntimeClaudeCLI },
+	"ConfiguredModel": func(r *dashboardSession, _ time.Time) { r.ConfiguredModel = "other" },
+	"PendingModel":    func(r *dashboardSession, _ time.Time) { r.PendingModel = "next" },
+	"ClaudeConfigRoot": func(r *dashboardSession, _ time.Time) {
+		r.ClaudeConfigRoot = &surface.SessionConfigRoot{Name: "work", Root: "/w/.claude"}
+	},
+	"Activity": func(r *dashboardSession, now time.Time) {
+		r.Activity = &surface.Activity{BusySince: now.Add(-time.Hour), LastProgressAt: now.Add(-20 * time.Minute), NoProcess: true}
+	},
+	"Plan":              func(r *dashboardSession, _ time.Time) { r.Plan = &surface.Plan{Done: 1, Total: 3} },
+	"Open":              func(r *dashboardSession, _ time.Time) { r.Open = !r.Open },
+	"Capabilities":      func(r *dashboardSession, _ time.Time) { r.Capabilities.Send = !r.Capabilities.Send },
+	"ReadOnly":          func(r *dashboardSession, _ time.Time) { r.ReadOnly = !r.ReadOnly },
+	"ReadOnlyReason":    func(r *dashboardSession, _ time.Time) { r.ReadOnlyReason = "elsewhere" },
+	"Transport":         func(r *dashboardSession, _ time.Time) { r.Transport = "desktop" },
+	"ForkedFrom":        func(r *dashboardSession, _ time.Time) { r.ForkedFrom = "s05" },
+	"ObservedAt":        func(r *dashboardSession, now time.Time) { r.ObservedAt = now },
+	"UnavailableReason": func(r *dashboardSession, _ time.Time) { r.UnavailableReason = "gone" },
+	"Runtime": func(r *dashboardSession, _ time.Time) {
+		r.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: true}
+	},
+	"Freshness": func(r *dashboardSession, _ time.Time) { r.Freshness = &registry.CatalogFreshness{Stale: true} },
+	"Subagents": func(r *dashboardSession, _ time.Time) { r.Subagents = &surface.SubagentRollup{Count: 4, Working: 2} },
+	"Holders":   func(r *dashboardSession, _ time.Time) { r.Holders = []surface.Holder{{}} },
+	"HiddenSubagents": func(r *dashboardSession, _ time.Time) {
+		r.HiddenSubagents = &surface.SubagentRollup{Count: 3, Working: 1}
+	},
+	"LiveHiddenSubagents": func(r *dashboardSession, _ time.Time) {
+		r.LiveHiddenSubagents = &surface.SubagentRollup{Count: 2, Working: 1}
+	},
+	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
@@ -69,8 +105,15 @@ func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
 	fields := reflect.TypeFor[dashboardSession]()
 	for i := range fields.NumField() {
 		name := fields.Field(i).Name
-		if inputs[name] == placementIgnored[name] {
-			t.Errorf("dashboardSession.%s must be either a placement input with a mutation or listed as ignored", name)
+		_, ignored := placementIgnoredMutations[name]
+		classes := 0
+		for _, in := range []bool{inputs[name], ignored, placementExempt[name]} {
+			if in {
+				classes++
+			}
+		}
+		if classes != 1 {
+			t.Errorf("dashboardSession.%s must be exactly one of: a placement input, an ignored field with a mutation, or exempt", name)
 		}
 	}
 }
@@ -126,20 +169,8 @@ func TestSessionPlacementChangesWithEveryOrderInput(t *testing.T) {
 }
 
 func TestSessionViewIgnoresFieldsPlacementLeavesOut(t *testing.T) {
-	ignored := map[string]func(*dashboardSession, time.Time){
-		"Activity": func(r *dashboardSession, now time.Time) {
-			r.Activity = &surface.Activity{BusySince: now.Add(-time.Hour), LastProgressAt: now.Add(-20 * time.Minute), NoProcess: true}
-		},
-		"Plan":              func(r *dashboardSession, _ time.Time) { r.Plan = &surface.Plan{Done: 1, Total: 3} },
-		"Open":              func(r *dashboardSession, _ time.Time) { r.Open = !r.Open },
-		"ObservedAt":        func(r *dashboardSession, now time.Time) { r.ObservedAt = now },
-		"UnavailableReason": func(r *dashboardSession, _ time.Time) { r.UnavailableReason = "gone" },
-		"Subagents":         func(r *dashboardSession, _ time.Time) { r.Subagents = &surface.SubagentRollup{Count: 4, Working: 2} },
-		"Holders":           func(r *dashboardSession, _ time.Time) { r.Holders = []surface.Holder{{}} },
-		"Listed":            func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
-	}
-	for _, target := range []string{"s02", "s00"} {
-		for field, mutate := range ignored {
+	for _, target := range []string{"s02", "s00", "child"} {
+		for field, mutate := range placementIgnoredMutations {
 			f := newOrderFixture()
 			before := viewSignature(t, f)
 			mutate(f.rows[target], f.now)
