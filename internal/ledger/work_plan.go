@@ -98,7 +98,7 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 			return "", nil, "", refuse("close needs --reason starting with done (and what finished it), %s; claimed work is finished through submit and review", strings.Join(workCloseReasons, ", "))
 		}
 		payload.Assignee = ""
-	case WorkDelete, WorkRestore:
+	case WorkDelete, WorkRestore, WorkReopen:
 		payload.Assignee = ""
 	}
 	return EventWorkItemState, payload, readback, nil

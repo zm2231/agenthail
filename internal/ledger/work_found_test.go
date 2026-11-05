@@ -116,8 +116,17 @@ func TestUnclaimedWorkClosesAsDoneWithWhatFinishedIt(t *testing.T) {
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W3"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W3", Reason: "done: PR #14"}, "submit and review")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkApprove, ItemID: "widget-W3", SessionID: "reviewer"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkReopen, ItemID: "widget-W3"})
+	if again := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W3", Reason: "done: PR #15"}); again.Item.State != ledger.WorkDone || again.Item.Reviewer != "" {
+		t.Fatalf("a done close kept an earlier review: %+v", again.Item)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkReopen, ItemID: "widget-W3"})
 	if closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W3", Reason: "obsolete, superseded"}); closed.Item.State != ledger.WorkClosed {
-		t.Fatalf("a claimed item can still be closed as obsolete: %+v", closed.Item)
+		t.Fatalf("closed as obsolete = %+v", closed.Item)
+	}
+	if closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W2", Reason: "wontfix"}); closed.Item.State != ledger.WorkClosed {
+		t.Fatalf("a claimed item can still be closed as wontfix: %+v", closed.Item)
 	}
 }
 
@@ -125,7 +134,7 @@ func TestEveryWorkActionTakesAnImportedItemsTDID(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
 	if _, err := s.ImportWork(ledger.WorkImportRequest{ProjectKey: project, SessionID: "s1", Items: []ledger.WorkImport{
-		{ImportedFrom: "td:td-aa11", Text: "schema"}, {ImportedFrom: "td:td-bb22", Text: "index"}}}, time.Now()); err != nil {
+		{ImportedFrom: "td:td-aa11", Text: "schema"}, {ImportedFrom: "td:td-bb22", Text: "index"}, {ImportedFrom: "td:widget-C1", Text: "named like a clause"}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "td-bb22", DependsOn: "td:td-aa11"})
@@ -138,6 +147,12 @@ func TestEveryWorkActionTakesAnImportedItemsTDID(t *testing.T) {
 	ctx, ok := board(t, s).WorkContext("td-bb22")
 	if !ok || len(ctx.DependsOn) != 1 || ctx.DependsOn[0].ID != "widget-W1" || found.Item.From != "widget-W1" {
 		t.Fatalf("td ids were stored instead of item ids: %+v %+v", ctx, found.Item)
+	}
+	if ctx, _ := board(t, s).WorkContext("td-aa11"); len(ctx.Dependents) != 1 || ctx.Dependents[0].ID != "widget-W2" {
+		t.Fatalf("an item shown by its td id lost what waits on it: %+v", ctx.Dependents)
+	}
+	if clause := work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "from the clause", Fields: ledger.WorkFields{From: "widget-C1"}}); clause.Item.From != "widget-C1" {
+		t.Fatalf("a td id shadowed a clause: %+v", clause.Item)
 	}
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "td-bb"}, "is not a work item")
 }

@@ -160,9 +160,7 @@ func (b *Board) applyWorkItemState(event Event) error {
 		return nil
 	}
 	item.State, item.Assignee, item.Reason = p.ToState, p.Assignee, p.Reason
-	if p.Reviewer != "" {
-		item.Reviewer = p.Reviewer
-	}
+	item.Reviewer = p.Reviewer
 	if p.Handoff != nil {
 		item.Handoff = p.Handoff
 	}

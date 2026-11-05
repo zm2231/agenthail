@@ -177,7 +177,11 @@ func (b *Board) workItem(ref string) *WorkItem {
 }
 
 func (b *Board) canonicalWorkRefs(req WorkRequest) WorkRequest {
-	for _, ref := range []*string{&req.ItemID, &req.DependsOn, &req.Fields.From} {
+	refs := []*string{&req.ItemID, &req.DependsOn}
+	if b.clauses[req.Fields.From] == nil {
+		refs = append(refs, &req.Fields.From)
+	}
+	for _, ref := range refs {
 		if item := b.workItem(*ref); item != nil {
 			*ref = item.ID
 		}
