@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -158,7 +159,7 @@ func (d *Daemon) apiLedgerAttachHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	req := body.AttachRequest
 	if len(body.Fragments) > 0 {
-		if req.As != "" || req.UtteranceID != "" || len(req.Clauses) > 0 || req.To != "" {
+		if !reflect.DeepEqual(req, ledger.AttachRequest{ProjectKey: req.ProjectKey, SessionID: req.SessionID}) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "Give the fragments, or one attach, not both.")
 			return
 		}

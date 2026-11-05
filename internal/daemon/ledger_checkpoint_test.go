@@ -53,8 +53,15 @@ func TestAProjectThatAttachesAtCheckpointsAsksNothingPerMessage(t *testing.T) {
 	if text := checkpoint(t, f); text != "" {
 		t.Fatalf("attached words still shown at the checkpoint: %q", text)
 	}
-	if code, _ := ledgerWrite(t, handler, "/api/v1/ledger/attach", map[string]any{"projectKey": f.project.key, "sessionId": f.session.ID, "as": "extends", "fragments": []ledger.AttachRequest{{UtteranceID: "x", As: ledger.AsConversation}}}, nil); code != 400 {
-		t.Fatalf("one attach and fragments together: %d", code)
+	before := len(f.project.events(t))
+	for field, value := range map[string]any{"as": "extends", "utteranceId": "claude-prompt:2", "askType": "decision", "source": "proposed", "adopt": true, "reject": true, "ack": true, "delegate": "worker", "covers": []string{"widget-T1"}, "clauses": []string{"x"}, "to": "project"} {
+		request := map[string]any{"projectKey": f.project.key, "sessionId": f.session.ID, field: value, "fragments": []ledger.AttachRequest{{UtteranceID: "claude-prompt:2", As: ledger.AsConversation}}}
+		if code, _ := ledgerWrite(t, handler, "/api/v1/ledger/attach", request, nil); code != 400 {
+			t.Errorf("%s beside fragments: %d, want refused", field, code)
+		}
+	}
+	if after := len(f.project.events(t)); after != before {
+		t.Fatalf("a refused batch wrote %d events", after-before)
 	}
 
 	if got := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-1", Prompt: "and the changelog"}); !got.Captured || got.Attach || len(got.Unattached) != 0 {
@@ -68,6 +75,28 @@ func TestAProjectThatAttachesAtCheckpointsAsksNothingPerMessage(t *testing.T) {
 	}
 	if text := checkpoint(t, f); text != "" {
 		t.Fatalf("checkpoints shown in prompt mode: %q", text)
+	}
+}
+
+func TestASessionGrantedIntoACheckpointProjectSeesItsWordsThere(t *testing.T) {
+	f := newGateFixture(t, registry.OriginAgent, surface.RuntimeClaudeHost)
+	other := addLedgerProject(t, f.r, "proj-other", "repo:github.com/acme/infra")
+	if err := other.store.Enable(other.key, ledger.AttachAtCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.store.GrantSession(other.key, f.session.ID); err != nil {
+		t.Fatal(err)
+	}
+	u := ledger.Utterance{ProjectKey: other.key, Ref: "claude-prompt:9", SpeakerID: surface.PersonSessionID, TargetID: f.session.ID, Text: "rotate keys", At: time.Now().Add(-time.Hour), CapturedBy: ledger.CapturedByHook}
+	if _, _, err := other.store.RecordUtterance(u); err != nil {
+		t.Fatal(err)
+	}
+	if text := checkpoint(t, f); !strings.Contains(text, "in repo:github.com/acme/infra") || !strings.Contains(text, "claude-prompt:9: rotate keys") {
+		t.Fatalf("checkpoint for a granted project = %q", text)
+	}
+	f.completeTurn(t, "turn-1")
+	if len(f.fake.sent) != 0 {
+		t.Fatalf("G2 held a granted session for words in a checkpoint project: %q", f.fake.sent)
 	}
 }
 
