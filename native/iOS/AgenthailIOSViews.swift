@@ -216,7 +216,7 @@ struct ConversationListView: View {
     @State private var scope = SessionFilter.recent
     @State private var showingNewSession = false
     @State private var search = ""
-    @State private var collapsedProjects: Set<String> = []
+    @State private var expandedProjects: Set<String> = []
     @State private var expandedFamilies: Set<String> = []
     @State private var projectSheet: ProjectSheet?
     @State private var projectConfirmation: ProjectConfirmation?
@@ -264,36 +264,41 @@ struct ConversationListView: View {
                 }
             }
             ForEach(tree.projects) { project in
-                let collapsed = collapsedProjects.contains(project.id)
+                let expanded = expandedProjects.contains(project.id)
                 Section {
-                    ForEach((collapsed ? project.collapsed(keeping: selectedID) : project).checkouts.flatMap(\.families)) { family in familyRows(family) }
+                    ForEach(project.shown(expanded: expanded, keeping: selectedID).checkouts.flatMap(\.families)) { family in familyRows(family) }
+                    if let more = project.moreLabel(expanded: expanded, keeping: selectedID) {
+                        Button(more) {
+                            if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(PhonePalette.accentText)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .listRowBackground(GlassRowBackground(selected: false))
+                        .accessibilityIdentifier("more-" + project.id)
+                    }
                 } header: {
                     HStack(spacing: 10) {
-                        Button {
-                            if !collapsedProjects.insert(project.id).inserted { collapsedProjects.remove(project.id) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
-                                Text(project.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
-                                if let host = project.hostLabel, model.showsHostNames {
-                                    IOSHostBadge(name: host)
-                                }
-                                Spacer(minLength: 0)
-                                Text("\(project.counts.sessions)")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(PhonePalette.muted)
-                                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                                    .font(.caption.weight(.semibold))
+                        HStack(spacing: 8) {
+                            Image(systemName: project.identity == nil ? "tray" : project.archived ? "archivebox" : "folder")
+                            Text(project.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            if let host = project.hostLabel, model.showsHostNames {
+                                IOSHostBadge(name: host)
                             }
-                            .glassLabel()
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                            Spacer(minLength: 0)
+                            Text("\(project.counts.sessions)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(PhonePalette.muted)
                         }
-                        .buttonStyle(.plain)
+                        .glassLabel()
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                         .foregroundStyle(.primary)
                         .textCase(nil)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isHeader)
                         .contextMenu {
                             if let identity = project.identity {
                                 Button(project.archived ? "Unarchive Project" : "Archive Project", systemImage: "archivebox") {
@@ -305,7 +310,7 @@ struct ConversationListView: View {
                             }
                         }
                         .accessibilityLabel(project.hostLabel.map { "Project \(project.name) on \($0)" } ?? "Project \(project.name)")
-                        .accessibilityValue(project.sessionCountLabel + (collapsed ? ", collapsed" : ", expanded"))
+                        .accessibilityValue(project.sessionCountLabel)
                         .accessibilityIdentifier("project-" + project.id)
                         if let identity = project.identity, model.projects[identity.id] != nil {
                             openProjectButton(identity.id, name: project.name)

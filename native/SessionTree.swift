@@ -56,6 +56,16 @@ struct SessionTree: Equatable {
             checkout.host.flatMap { HostNames.labels(checkouts.compactMap(\.host))[$0.id] }
         }
 
+        func shown(expanded: Bool, keeping selectedID: String?) -> Project {
+            expanded ? self : collapsed(keeping: selectedID)
+        }
+
+        func moreLabel(expanded: Bool, keeping selectedID: String?) -> String? {
+            let count = shown(expanded: expanded, keeping: selectedID).sessionCount
+            if expanded { return familyTotal > collapsed.count ? "Show less" : nil }
+            return familyTotal > count ? "Show \(familyTotal - count) more" : nil
+        }
+
         /// The daemon's collapsed families, and the family holding the selection in its place.
         func collapsed(keeping selectedID: String?) -> Project {
             var copy = self

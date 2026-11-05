@@ -50,6 +50,10 @@ struct SessionTreeTest {
         let five = SessionTree.ordered(list: fiveView, current: nil, rows: rows(eight.map { session($0, project: "five") }), attention: [:]).projects[0]
         expect(five.collapsed(keeping: nil).checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3"], "two pinned and six idle collapse to the daemon's five")
         expect(five.collapsed(keeping: "i6").checkouts.flatMap(\.families).map(\.id) == ["w1", "w2", "i1", "i2", "i3", "i6"], "a selected sixth idle family is added in its place")
+        expect(five.moreLabel(expanded: false, keeping: nil) == "Show 3 more" && five.moreLabel(expanded: false, keeping: "i6") == "Show 2 more" && five.moreLabel(expanded: true, keeping: nil) == "Show less", "the more row counts what collapse hides")
+        expect(five.shown(expanded: true, keeping: nil).sessionCount == 8, "an expanded project shows every family")
+        let small = SessionTree.ordered(list: view([family("a", project: "small"), family("b", project: "small")], projects: [("small", ["a", "b"])]), current: nil, rows: rows([session("a", project: "small"), session("b", project: "small")]), attention: [:]).projects[0]
+        expect(small.moreLabel(expanded: false, keeping: nil) == nil && small.moreLabel(expanded: true, keeping: nil) == nil, "a project within five has no more row")
         let collapsed = tree.projects[1].collapsed(keeping: nil)
         expect(collapsed.checkouts.flatMap(\.families).map(\.id) == ["old"], "collapse shows exactly the daemon's collapsed families")
         expect(tree.projects[1].collapsed(keeping: "busy").checkouts.flatMap(\.families).map(\.id) == ["old", "busy"], "the selected family stays visible in its daemon place")
