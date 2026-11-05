@@ -67,7 +67,7 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 	}
 	now := time.Now()
 	ref, surfaceName := ledger.PromptRef(req.PromptID), "terminal"
-	if uuid, delivered := d.delivered.claim(session.ID, req.MessageUUID, req.Prompt, now); delivered {
+	if uuid, delivered := d.delivered.claim(session.ID, req.PromptID, req.MessageUUID, req.Prompt, now); delivered {
 		ref, surfaceName = ledger.DeliveryRef(uuid), string(session.Surface)
 	}
 	record, err := d.recordPersonWords(*session, ledger.Utterance{Ref: ref, Surface: surfaceName, Text: req.Prompt, At: now, CapturedBy: ledger.CapturedByHook})

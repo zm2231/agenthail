@@ -365,7 +365,7 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	if !queued || messageUUID == "" {
 		messageUUID = uuid.NewString()
 	}
-	session, sent, startErr := starter.StartSession(surface.WithMessageUUID(ctx, messageUUID), options)
+	session, sent, startErr := starter.StartSession(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")

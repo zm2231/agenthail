@@ -70,16 +70,16 @@ func TestDeliveredWordsMatchByTextOnlyWhileRecent(t *testing.T) {
 	start := time.Now()
 	w.add("s", "u-old", "same", start)
 	w.add("s", "u-new", "same", start.Add(time.Minute))
-	if got, ok := w.claim("s", "", "same", start.Add(deliveredTextWindow+30*time.Second)); !ok || got != "u-new" {
+	if got, ok := w.claim("s", "p1", "", "same", start.Add(deliveredTextWindow+30*time.Second)); !ok || got != "u-new" {
 		t.Fatalf("claim = %q %v, want the recent delivery only", got, ok)
 	}
-	if _, ok := w.claim("s", "", "same", start.Add(deliveredTextWindow+30*time.Second)); ok {
+	if _, ok := w.claim("s", "p2", "", "same", start.Add(deliveredTextWindow+30*time.Second)); ok {
 		t.Fatal("an expired delivery matched by text")
 	}
-	if got, ok := w.claim("s", "u-old", "different", start.Add(time.Hour)); !ok || got != "u-old" {
+	if got, ok := w.claim("s", "p3", "u-old", "different", start.Add(time.Hour)); !ok || got != "u-old" {
 		t.Fatalf("the uuid claim is not bound by the text window: %q %v", got, ok)
 	}
-	if _, ok := w.claim("other", "", "same", start); ok {
+	if _, ok := w.claim("other", "p4", "", "same", start); ok {
 		t.Fatal("matched another session's delivery")
 	}
 	for i := range deliveredPerSession + 1 {
@@ -87,5 +87,58 @@ func TestDeliveredWordsMatchByTextOnlyWhileRecent(t *testing.T) {
 	}
 	if len(w.bySession["full"]) != deliveredPerSession {
 		t.Fatalf("kept %d entries for one session", len(w.bySession["full"]))
+	}
+}
+
+// A Claude host runs its own copy of the prompt hook and also loads the
+// person's settings, so the copy installed there reports the same prompt.
+func TestEveryHookCopyOfADeliveredPromptNamesTheDelivery(t *testing.T) {
+	for _, order := range []struct {
+		name  string
+		first string
+	}{{"host copy first", "with-uuid"}, {"installed copy first", "without-uuid"}} {
+		t.Run(order.name, func(t *testing.T) {
+			d, r, handler := ledgerDaemon(t)
+			p := addLedgerProject(t, r, "proj-copies", "copies-key")
+			if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
+				t.Fatal(err)
+			}
+			hosted := p.session(t, r, "hosted")
+			intent := uuid.NewString()
+			d.personCapture(delivery.PersonCaptureContext{Target: hosted, IntentUUID: intent, Message: "ship it"})
+			copies := map[string]ledgerCaptureRequest{
+				"with-uuid":    {SessionID: hosted.ID, PromptID: "claude-prompt", Prompt: "ship it", MessageUUID: intent},
+				"without-uuid": {SessionID: hosted.ID, PromptID: "claude-prompt", Prompt: "ship it"},
+			}
+			second := "without-uuid"
+			if order.first == second {
+				second = "with-uuid"
+			}
+			for _, copy := range []string{order.first, second} {
+				if resp := ledgerPost(t, handler, copies[copy]); !resp.Captured || resp.Ref != ledger.DeliveryRef(intent) {
+					t.Fatalf("the %s hook copy named %q, want the delivery", copy, resp.Ref)
+				}
+			}
+			if events := p.events(t); len(events) != 1 {
+				t.Fatalf("one delivered prompt recorded %d utterances", len(events))
+			}
+		})
+	}
+}
+
+func TestEveryHookCopyOfATypedPromptIsOneUtterance(t *testing.T) {
+	_, r, handler := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-typed", "typed-key")
+	if err := p.store.Enable(p.key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	terminal := p.session(t, r, "terminal")
+	for range 2 {
+		if resp := ledgerPost(t, handler, ledgerCaptureRequest{SessionID: terminal.ID, PromptID: "typed", Prompt: "ship it"}); resp.Ref != ledger.PromptRef("typed") {
+			t.Fatalf("a typed prompt named %q", resp.Ref)
+		}
+	}
+	if events := p.events(t); len(events) != 1 {
+		t.Fatalf("one typed prompt recorded %d utterances", len(events))
 	}
 }

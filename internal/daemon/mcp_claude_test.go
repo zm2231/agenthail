@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func spawnBearer(t *testing.T, spawn claudehosttest.Spawn) string {
@@ -159,5 +160,23 @@ func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *tes
 	}
 	if replaced := f.replacedTokens(t, spec.SessionID); len(replaced) != 0 {
 		t.Fatalf("the coordinator's credential was swapped after its first turn began: %d swaps", len(replaced))
+	}
+}
+
+func TestAPersonsMessageThatStartsACoordinatorIsThePersonsTurn(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	f.addProject(t)
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-new","surface":"claude","cwd":%q,"name":"captain"}`, f.host.Cwd))
+	if sent := f.action(t, `{"action":"coordinator-send","name":"captain","message":"hello","author":"person"}`); sent["started"] != true {
+		t.Fatalf("send did not start the coordinator: %s", redacted(sent))
+	}
+	spec, err := f.registry.CoordinatorNamed("captain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
+	turns := f.host.Turns(t, spec.SessionID)
+	if len(turns) != 1 || turnOrigin(t, turns[0]) != "human" {
+		t.Fatalf("turns = %+v, want one human turn", turns)
 	}
 }
