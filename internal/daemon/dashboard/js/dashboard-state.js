@@ -16,7 +16,7 @@ import { loadAudit } from "./audit.js";
 import { renderChat } from "./chat.js";
 import { mobileConversationView } from "./navigation.js";
 import { scopedSessions } from "./session-scope.js";
-import { loadSessionOrder } from "./session-order.js";
+import { loadSessionOrder, orderIsMissing } from "./session-order.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 
@@ -38,9 +38,14 @@ export function renderAll() {
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+export function ensureSessionOrder() {
+  if (app.hasState && orderIsMissing()) load();
+}
+
 export async function load(fresh = false, selectDefault = true) {
   if (app.loading) return;
   app.loading = true;
+  let loaded = false;
   const slowTimer = setTimeout(() => {
     if (app.loading && !app.hasState) {
       $("#sync").textContent = "Still connecting";
@@ -93,6 +98,7 @@ export async function load(fresh = false, selectDefault = true) {
       }
     }
     renderAll();
+    loaded = true;
     if (followSelection) await selectSession(followSelection);
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
@@ -113,5 +119,6 @@ export async function load(fresh = false, selectDefault = true) {
   } finally {
     clearTimeout(slowTimer);
     app.loading = false;
+    if (loaded) ensureSessionOrder();
   }
 }
