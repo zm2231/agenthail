@@ -14,7 +14,7 @@ struct ClaudeSubagentList: Equatable {
             let (a, b) = (lhs.element, rhs.element)
             if (a.working == true) != (b.working == true) { return a.working == true }
             let (aTime, bTime) = (Self.time(a.lastActive), Self.time(b.lastActive))
-            if aTime != bTime { return aTime > bTime }
+            if a.working != true, aTime != bTime { return aTime > bTime }
             return lhs.offset < rhs.offset
         }.map(\.element)
         working = ordered.filter { $0.working == true }.count

@@ -576,6 +576,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var replacedLead: [CoordinatorTenure]? = nil
     var claudeConfigRoot: SessionConfigRoot? = nil
     var runtimeKind: String? = nil
+    var placement: String? = nil
     /// The turn notice, with the app's own remedy when it can adopt the session.
     var composerTurnNotice: String {
         let notice = capabilities.turnNotice

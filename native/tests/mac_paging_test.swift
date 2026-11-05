@@ -14,8 +14,14 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         #"{"id":"\#(id)","surface":"claude","name":"\#(name ?? id)","status":"\#(status)","lastActive":"2026-11-03T11:00:00Z","queueCount":0,"open":true,"current":\#(current),"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}"#
     }
 
+    static func order(_ ids: [String]) -> String {
+        let families = ids.map { #"{"id":"\#($0)","rootId":"\#($0)","projectId":"","checkoutId":"","members":[{"id":"\#($0)","depth":0,"contextOnly":false,"pinned":false}],"pinned":false,"workingSubagents":0}"# }
+        let collapsed = ids.map { #""\#($0)""# }.joined(separator: ",")
+        return #""projects":[{"id":"","name":"No project","counts":{"families":\#(ids.count),"sessions":\#(ids.count)},"collapsedFamilyIds":[\#(collapsed)]}],"families":[\#(families.joined(separator: ","))]"#
+    }
+
     static func page(_ ids: [String], next: String?, current: Bool = false, refreshAt: String? = nil) -> String {
-        let view = #"{"counts":{"running":{"families":1,"sessions":1},"current":{"families":2,"sessions":2},"recent":{"families":3,"sessions":3},"all":{"families":5,"sessions":5},"archived":{"families":1,"sessions":1}},"surfaces":[{"surface":"claude","counts":{}},{"surface":"codex","counts":{}}]\#(refreshAt.map { #","refreshAt":"\#($0)""# } ?? "")}"#
+        let view = #"{"counts":{"running":{"families":1,"sessions":1},"current":{"families":2,"sessions":2},"recent":{"families":3,"sessions":3},"all":{"families":5,"sessions":5},"archived":{"families":1,"sessions":1}},"surfaces":[{"surface":"claude","counts":{}},{"surface":"codex","counts":{}}],\#(order(ids))\#(refreshAt.map { #","refreshAt":"\#($0)""# } ?? "")}"#
         return #"{"sessions":[\#(ids.map { row($0, current: current) }.joined(separator: ","))],"hostEpoch":"\#(epoch)","catalogSeq":5,"view":\#(view)\#(next.map { #","nextCursor":"\#($0)""# } ?? "")}"#
     }
 

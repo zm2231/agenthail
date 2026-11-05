@@ -24,17 +24,9 @@ struct CommandPalette: View {
     private var entries: [Entry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let attention = Set(model.sessionAttention.keys)
-        let sessions = model.paletteSessions(trimmed)
-            .map { (session: $0, activity: SessionTree.activity($0)) }
-            .sorted { lhs, rhs in
-                let left = (titleMatch(lhs.session, trimmed), attention.contains(lhs.session.id), lhs.session.isWorking)
-                let right = (titleMatch(rhs.session, trimmed), attention.contains(rhs.session.id), rhs.session.isWorking)
-                if left.0 != right.0 { return left.0 }
-                if left.1 != right.1 { return left.1 }
-                if left.2 != right.2 { return left.2 }
-                return lhs.activity > rhs.activity
-            }
-            .map(\.session)
+        let matched = model.paletteSessions(trimmed)
+        let titled: [SessionState] = matched.filter { titleMatch($0, trimmed) }
+        let sessions = (titled + matched.filter { !titleMatch($0, trimmed) })
             .prefix(trimmed.isEmpty ? 6 : 20)
             .map { session in
                 Entry(

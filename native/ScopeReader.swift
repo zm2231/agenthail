@@ -14,6 +14,7 @@ final class ScopeReader {
     private(set) var pages = ScopePages()
     private(set) var pageError: String?
     private(set) var views: [ScopeRequest: ScopePage.View] = [:]
+    private(set) var foundView: ScopePage.View?
     private var reads: [ScopeRequest: Task<Void, Never>] = [:]
     private var searchGeneration: UInt64 = 0
     private var rereadTask: Task<Void, Never>?
@@ -53,8 +54,10 @@ final class ScopeReader {
             let page = try await api.scopePage(request, cursor: read.cursor, timeout: source.timeout())
             guard source.active(), !Task.isCancelled else { return }
             pageError = nil
-            if let view = page.view { views[request] = view }
-            if pages.append(page, to: request, after: read) { adoptCurrent() }
+            if pages.append(page, to: request, after: read) {
+                views[request] = read.cursor == nil ? page.view : views[request]?.merging(page.view) ?? page.view
+                adoptCurrent()
+            }
         } catch {
             guard source.active(), !Task.isCancelled else { return }
             pageError = error.localizedDescription
@@ -66,8 +69,9 @@ final class ScopeReader {
         searchGeneration += 1
         let generation = searchGeneration
         guard !query.isEmpty, source.reachable(), let api = source.api() else {
-            if !pages.found.isEmpty {
+            if !pages.found.isEmpty || foundView != nil {
                 pages.setFound([])
+                foundView = nil
                 source.changed()
             }
             return
@@ -77,6 +81,7 @@ final class ScopeReader {
         let page = try? await api.scopePage(searched, timeout: source.timeout())
         guard source.active(), !Task.isCancelled, generation == searchGeneration else { return }
         pages.setFound(page?.sessions ?? [])
+        foundView = page?.view
         source.changed()
     }
 
@@ -115,7 +120,7 @@ final class ScopeReader {
                 let page = try await api.scopePage(request, cursor: cursor, limit: 200, timeout: source.timeout())
                 rows += page.sessions
                 cursor = page.nextCursor
-                view = view ?? page.view
+                view = view?.merging(page.view) ?? page.view
             } while cursor != nil && rows.count < start.rows
         } catch {
             return

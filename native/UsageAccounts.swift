@@ -61,8 +61,8 @@ struct UsageAccount: Equatable, Identifiable {
     }
 
     func activeSessions(_ sessions: [SessionState]) -> [SessionState] {
-        sessions.filter { owns($0) && ($0.isWorking || $0.current) }
-            .sorted { ($0.isWorking ? 0 : 1, $1.lastActive ?? "") < ($1.isWorking ? 0 : 1, $0.lastActive ?? "") }
+        let owned = sessions.filter { owns($0) && ($0.isWorking || $0.current) }
+        return owned.filter(\.isWorking) + owned.filter { !$0.isWorking }.sorted { ($0.lastActive ?? "") > ($1.lastActive ?? "") }
     }
 
     func problemTone(_ sessions: [SessionState]) -> UsageProblemTone? {

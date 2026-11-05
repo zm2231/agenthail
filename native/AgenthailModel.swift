@@ -62,19 +62,31 @@ final class AgenthailModel: ObservableObject {
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent {
         didSet {
+            orderHold.release()
             listChanged()
             rederive()
         }
     }
     @Published var sessionRefinement = SessionRefinement() {
         didSet {
+            orderHold.release()
             listChanged()
             rederive()
         }
     }
     private(set) lazy var reader = makeReader()
     var pages: ScopePages { reader.pages }
-    private(set) var currentView: ScopePage.View?
+    private(set) var currentView: ScopePage.View? {
+        didSet {
+            guard oldValue != currentView else { return }
+            objectWillChange.send()
+            rederive()
+            scheduleListReread()
+        }
+    }
+    private var currentViewPosition = CatalogPosition(epoch: nil, cursor: 0)
+    private var orderReread: Task<Void, Never>?
+    private var orderRereadDirty = false
     var listRereadTask: Task<Void, Never>?
     var findTask: Task<Void, Never>?
     var spotlightCatalog: SpotlightCatalog?
@@ -118,9 +130,9 @@ final class AgenthailModel: ObservableObject {
     func sessionName(_ id: String) -> String {
         knownSessions.first { $0.id == id }?.displayName ?? id
     }
-    private(set) var sessionFamilies: [SessionFamily] = []
     private(set) var sessionAttention: [String: SessionAttention] = [:]
-    private(set) var sessionTree = SessionTree.build([], filter: .recent, attention: [:])
+    private(set) var sessionTree = SessionTree.empty
+    private var orderHold = OrderHold()
 
     /// Rebuilds the sidebar's sessions, attention and tree when one of their
     /// inputs changes, so views read them instead of rebuilding them.
@@ -128,14 +140,21 @@ final class AgenthailModel: ObservableObject {
         let listed = reader.joined(snapshot?.sessions ?? [])
         let listedIDs = Set(listed.map(\.id))
         knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
-        sessionFamilies = SessionFamilies.build(knownSessions)
         sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
-        if sessionRefinement.isActive, let request = listRequest {
-            let paged = Set((pages.listings[request]?.rows ?? []).map(\.id))
-            let families = sessionFamilies.filter { family in family.sessions.contains { paged.contains($0.id) } }
-            sessionTree = SessionTree.build(knownSessions, families: families, filter: sessionFilter == .archived ? .archived : .all, attention: sessionAttention)
+        let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
+        sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention)
+    }
+
+    /// Keeps the sidebar's order while the person aims at it; rows still update in place.
+    func holdOrder(_ holding: Bool) {
+        guard holding != orderHold.held else { return }
+        if holding {
+            orderHold.hold(list: listView, current: currentView, rows: Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
         } else {
-            sessionTree = SessionTree.build(knownSessions, families: sessionFamilies, filter: sessionFilter, refinement: sessionRefinement, attention: sessionAttention)
+            orderHold.release()
+            objectWillChange.send()
+            rederive()
         }
     }
 
@@ -249,7 +268,7 @@ final class AgenthailModel: ObservableObject {
             async let history = api.history(limit: 50)
             let (readBase, readCurrent, readActivity, readHistory) = try await (base, current, activity, history)
             let loaded = DashboardSnapshot(base: readBase, current: readCurrent, activity: readActivity, history: readHistory.items)
-            currentView = readCurrent.view
+            adoptCurrentView(readCurrent)
             adoptRefreshed(loaded)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
@@ -261,6 +280,39 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    /// Takes a Current view unless one from a later catalog position is already shown.
+    func adoptCurrentView(_ read: ScopeSessions, mergingRows: Bool = false) {
+        guard let view = read.view else { return }
+        let seq = read.catalogSeq ?? 0
+        if read.hostEpoch == currentViewPosition.epoch, seq < currentViewPosition.cursor { return }
+        currentViewPosition = CatalogPosition(epoch: read.hostEpoch, cursor: seq)
+        if mergingRows, var merged = snapshot {
+            let held = Set(merged.sessions.map(\.id))
+            merged.sessions += read.sessions.filter { !held.contains($0.id) }
+            if merged.sessions.count != snapshot?.sessions.count { snapshot = merged }
+        }
+        currentView = view
+    }
+
+    /// Rereads the order after news: one request in flight, and one more if news arrived meanwhile.
+    func rereadOrder() {
+        guard orderReread == nil else {
+            orderRereadDirty = true
+            return
+        }
+        orderReread = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            reader.rereadAll()
+            if let api, let read = try? await api.scopeSessions("current") { adoptCurrentView(read, mergingRows: true) }
+            orderReread = nil
+            if orderRereadDirty {
+                orderRereadDirty = false
+                rereadOrder()
+            }
+        }
     }
 
     func adoptRefreshed(_ loaded: DashboardSnapshot) {
@@ -1192,13 +1244,14 @@ final class AgenthailModel: ObservableObject {
 
     func applyCatalogEvents(_ events: [CatalogStreamEvent]) {
         guard let current = snapshot else { return }
+        let fresh = events.filter { $0.stream == "catalog" && $0.seq > catalogPosition.cursor }
+        let news = CatalogNews.moves(fresh, held: Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
         let batch = current.applyingCatalog(events, after: catalogPosition.cursor)
         catalogPosition.cursor = batch.cursor
-        var reread = batch.sessionsChanged && sessionRefinement.isActive
         for removal in batch.removals {
             fetchedSubagents.sessionRemoved(removal.id, unlisted: removal.unlisted)
             if let next = removal.rekeyedTo { rekeys.record([removal.id: next]) }
-            if reader.removed(removal.id, unlisted: removal.unlisted) { reread = true }
+            _ = reader.removed(removal.id, unlisted: removal.unlisted)
         }
         if batch.changed {
             snapshot = batch.snapshot
@@ -1208,7 +1261,7 @@ final class AgenthailModel: ObservableObject {
             }
             reconcilePanes()
         }
-        if reread { reader.rereadAll() }
+        if news { rereadOrder() }
         spotlightCatalog?.apply(upserted: batch.upserted, removed: batch.removals.map(\.id))
         if batch.needsSnapshot { Task { await refresh(fresh: true) } }
     }

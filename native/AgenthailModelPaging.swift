@@ -3,31 +3,46 @@ import Foundation
 extension AgenthailModel {
     var listRequest: ScopeRequest? {
         let refinement = sessionRefinement
-        guard refinement.isActive || sessionFilter.pagedScope != nil else { return nil }
+        guard refinement.isActive || sessionFilter != .recent else { return nil }
         return ScopeRequest(scope: sessionFilter.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
     }
+
+    var listView: ScopePage.View? { listRequest.map { reader.views[$0] } ?? currentView }
 
     var listHasMore: Bool { listRequest.map { pages.hasMore($0) } ?? false }
 
     var filterCounts: [SessionFilter: Int] {
-        let local = sessionTree.counts
-        if sessionRefinement.isActive {
-            guard let view = listRequest.flatMap({ reader.views[$0] }) else { return [:] }
-            return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.compactMap { filter in view.counts[filter.viewScope].map { (filter, $0.families) } })
+        let view = sessionRefinement.isActive ? listRequest.flatMap { reader.views[$0] } : currentView
+        guard let view else { return [:] }
+        return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.compactMap { filter in view.counts[filter.viewScope].map { (filter, $0.families) } })
+    }
+
+    /// Each known session's place in the daemon's order: Current first, then the loaded listings.
+    var daemonOrder: [String: Int] {
+        var order: [String: Int] = [:]
+        let views = [currentView] + reader.requests.sorted().map { reader.views[$0] }
+        for member in views.compactMap({ $0 }).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
+            order[member.id] = order.count
         }
-        return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { filter in
-            (filter, filter.pagedScope.flatMap { currentView?.counts[$0]?.families } ?? local[filter] ?? 0)
-        })
+        return order
+    }
+
+    func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
+        let order = daemonOrder
+        return sessions.enumerated().sorted { lhs, rhs in
+            let (left, right) = (order[lhs.element.id] ?? Int.max, order[rhs.element.id] ?? Int.max)
+            return left != right ? left < right : lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     func paletteSessions(_ query: String) -> [SessionState] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let found = Set(pages.found.map(\.id))
-        return knownSessions.filter { session in
+        return inDaemonOrder(knownSessions.filter { session in
             trimmed.isEmpty || found.contains(session.id) || [session.title, session.name, session.alias, session.project?.displayName, session.checkout?.branch]
                 .compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(trimmed) }
-        }
+        })
     }
 
     var refinementSurfaces: [String] {
@@ -56,11 +71,12 @@ extension AgenthailModel {
 
     func scheduleListReread() {
         listRereadTask?.cancel()
-        guard let request = listRequest, let raw = reader.views[request]?.refreshAt, let at = TimestampParser.date(raw) else { return }
+        let views = [currentView, listRequest.flatMap { reader.views[$0] }]
+        guard let at = views.compactMap({ $0?.refreshAt.flatMap(TimestampParser.date) }).min() else { return }
         listRereadTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(max(1, at.timeIntervalSinceNow)))
             guard !Task.isCancelled else { return }
-            self?.reader.rereadAll()
+            self?.rereadOrder()
         }
     }
 

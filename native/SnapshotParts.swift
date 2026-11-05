@@ -40,9 +40,11 @@ struct ScopePage: Decodable {
     }
 
     struct View: Decodable, Equatable {
-        let counts: [String: Count]
+        var counts: [String: Count]
         let surfaces: [Surface]
         var refreshAt: String? = nil
+        var projects: [ViewProject]
+        var families: [ViewFamily]
     }
 
     let sessions: [SessionState]
@@ -82,7 +84,7 @@ extension AgenthailAPI {
                 }
             }
             result.hostEpoch = result.hostEpoch ?? page.hostEpoch
-            result.view = result.view ?? page.view
+            result.view = result.view?.merging(page.view) ?? page.view
             if let seq = page.catalogSeq { result.catalogSeq = min(result.catalogSeq ?? seq, seq) }
             cursor = page.nextCursor
         } while cursor != nil
