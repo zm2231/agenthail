@@ -87,3 +87,19 @@ func (p *sessionViewPlan) orderProjects() {
 		return p.view.Families[i].key.before(p.view.Families[j].key)
 	})
 }
+
+func collapsedFamilies(view SessionView) []SessionViewFamily {
+	shown := map[string]bool{}
+	for _, project := range view.Projects {
+		for _, id := range project.CollapsedFamilyIDs {
+			shown[id] = true
+		}
+	}
+	families := make([]SessionViewFamily, 0, len(shown))
+	for _, family := range view.Families {
+		if shown[family.ID] {
+			families = append(families, family)
+		}
+	}
+	return families
+}
