@@ -4,7 +4,7 @@ Agenthail keeps a record of the work in each session it launches, beside the ses
 
 ## What agents actually use
 
-Measured on forge-agents over every Claude transcript in the config root: about 1,400 `agenthail` CLI calls (1,062 of them `send`, 115 `help`) against 9 MCP calls. Two causes, both observed:
+Measured over every Claude transcript in one config root: about 1,400 `agenthail` CLI calls (1,062 of them `send`, 115 `help`) against 9 MCP calls. Two causes, both observed:
 
 - The start card teaches seven CLI lines and no MCP tool (`internal/agentcard/render.go:21-37`).
 - Claude defers every `mcp__agenthail__*` tool behind ToolSearch, so an MCP call costs a load step; Bash is always loaded.
