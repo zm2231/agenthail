@@ -17,7 +17,7 @@ func QueuedReadbackInstruction(ref, projectKey string, unattached []string) stri
 func readback(lead, ref, report string, unattached []string) string {
 	text := fmt.Sprintf(`[intent ledger] %s
   agenthail ledger attach %s --to <goal|ask|clause|item|project> --clause "<their words, broadest reading>" [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation>]
---as is read from --to when left out; the readback says how. Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. %s Never narrow what they asked; anything you leave out is a cut they must ack.`, lead, ref, report)
+Left out, --as is read from --to and the other flags, and the readback says how. Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. %s Never narrow what they asked; anything you leave out is a cut they must ack.`, lead, ref, report)
 	if len(unattached) > 0 {
 		text += "\nStill unattached from earlier: " + strings.Join(unattached, ", ")
 	}

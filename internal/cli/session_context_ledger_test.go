@@ -76,7 +76,7 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 	for _, want := range []string{
 		"utterance claude-prompt:bb6af0fd in test-key",
 		"agenthail ledger attach claude-prompt:bb6af0fd --to",
-		"--as is read from --to when left out",
+		"Left out, --as is read from --to and the other flags",
 		"Put each readback line attach prints in your reply",
 		"Still unattached from earlier: claude-prompt:earlier",
 	} {

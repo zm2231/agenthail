@@ -2,10 +2,10 @@ package ledger
 
 import "fmt"
 
-func (p *attachPlan) inferAs() {
+func (p *attachPlan) inferAs() error {
 	req := &p.req
 	if req.As != "" {
-		return
+		return nil
 	}
 	words := len(req.Clauses) > 0
 	kind := p.board.kindOf(req.To)
@@ -13,8 +13,10 @@ func (p *attachPlan) inferAs() {
 	switch {
 	case req.Delegate != "":
 		req.As, why = AsDelegates, "--session names a delegate"
-	case req.Ack || kind == "cut":
-		req.As, req.Ack, why = AsReacts, true, "--to is a cut"
+	case kind == "cut" && !req.Ack:
+		return refuse("%s is a cut; acking it drops what it cuts for good, so give --ack to ack it", req.To)
+	case req.Ack:
+		req.As, why = AsReacts, "--ack was given"
 	case req.Adopt || req.Reject:
 		req.As, why = AsReacts, "--adopt or --reject was given"
 	case kind == "question":
@@ -24,17 +26,20 @@ func (p *attachPlan) inferAs() {
 	case !words:
 		req.As, why = AsReacts, "no --clause"
 	case kind == "clause" && p.board.workItems[req.To] != nil:
-		req.As, why = AsRefines, "--to "+req.To+" serves a clause"
+		req.As, why = AsExtends, "--to "+req.To+" serves a clause, and new words add to it; --as refines rewords it"
 	case kind == "clause":
-		req.As, why = AsRefines, "--to is a clause"
+		req.As, why = AsExtends, "--to is a clause, and new words add to it; --as refines rewords it"
 	case kind == "ask":
 		req.As, why = AsExtends, "--to is an ask"
 	case req.To == "":
 		req.As, why = AsNewAsk, "no --to"
+	case kind == ProjectTarget:
+		req.As, why = AsNewAsk, "--to is the project"
 	default:
 		req.As, why = AsNewAsk, "--to is a "+kind
 	}
 	p.notes = append(p.notes, fmt.Sprintf("no --as, read as %s: %s", req.As, why))
+	return nil
 }
 
 func (b *Board) kindOf(id string) string {

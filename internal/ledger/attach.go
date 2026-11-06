@@ -134,7 +134,9 @@ func (p *attachPlan) build() error {
 		}
 		p.utterance = u
 	}
-	p.inferAs()
+	if err := p.inferAs(); err != nil {
+		return err
+	}
 	if err := p.resolveTarget(); err != nil {
 		return err
 	}
