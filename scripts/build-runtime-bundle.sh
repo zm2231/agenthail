@@ -45,7 +45,8 @@ tar -xzf "$CACHE/$PYTHON_ARCHIVE" -C "$OUTPUT/runtime"
 
 cp "$ROOT/sidecar/package.json" "$ROOT/sidecar/package-lock.json" "$OUTPUT/"
 PATH="$NODE_DIST/bin:/usr/bin:/bin" "$NODE_DIST/bin/npm" ci --omit=dev --prefix "$OUTPUT"
-PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-claude-host.sh" "$OUTPUT/claude-host"
+PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-node-host.sh" claude-host "$OUTPUT/claude-host"
+PATH="$NODE_DIST/bin:/usr/bin:/bin" NPM="$NODE_DIST/bin/npm" "$ROOT/scripts/stage-node-host.sh" browser-host "$OUTPUT/browser-host"
 rm -rf "$OUTPUT/runtime/python/include" "$OUTPUT/runtime/python/share"
 rm -rf "$OUTPUT/runtime/python/lib/python3.13/ensurepip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip" "$OUTPUT/runtime/python/lib/python3.13/site-packages/pip-"*.dist-info
 rm -rf "$OUTPUT/runtime/python/lib/tcl9" "$OUTPUT/runtime/python/lib/tcl9.0" "$OUTPUT/runtime/python/lib/tk9.0" "$OUTPUT/runtime/python/lib/itcl4.3.5" "$OUTPUT/runtime/python/lib/thread3.0.4"
@@ -60,4 +61,5 @@ find "$OUTPUT" -name .DS_Store -delete
 PYTHONPATH="$OUTPUT/pydeps" "$OUTPUT/runtime/python/bin/python3" -c 'from curl_cffi import requests; print(requests.__name__)'
 (cd "$OUTPUT" && PATH="$OUTPUT/runtime/node/bin:/usr/bin:/bin" "$OUTPUT/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(() => console.log('sweet-cookie'))")
 (cd "$OUTPUT/claude-host" && "$OUTPUT/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(() => console.log('claude-agent-sdk'))")
+(cd "$OUTPUT/browser-host" && "$OUTPUT/runtime/node/bin/node" -e "import('./browser.mjs').then(module => console.log('playwright-core', module.pinnedShell().version))")
 du -sh "$OUTPUT"

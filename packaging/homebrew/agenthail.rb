@@ -17,7 +17,7 @@ class Agenthail < Formula
   def install
     libexec.install "agenthail"
     libexec.install "Agenthail.app" if File.directory?("Agenthail.app")
-    libexec.install "claude-host", "runtime"
+    libexec.install "claude-host", "browser-host", "runtime"
     libexec.install "sidecar/cookie.mjs", "sidecar/package-lock.json", "sidecar/package.json", "sidecar/sidecar.py"
     libexec.install "skills"
 
@@ -104,5 +104,6 @@ class Agenthail < Formula
     assert_predicate testpath/".hermes/skills/agenthail-operations", :symlink?
     assert_match "v22.", shell_output("#{libexec}/runtime/node/bin/node --version")
     assert_path_exists libexec/"claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+    assert_path_exists libexec/"browser-host/node_modules/playwright-core/package.json"
   end
 end

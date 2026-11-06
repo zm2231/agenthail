@@ -84,10 +84,12 @@ jobs:
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
-      - name: Claude host tests
+      - name: Node host tests
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix browser-host
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
       - name: Test source
@@ -112,7 +114,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: claude-host/package-lock.json
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
       - name: Import Developer ID certificates
         env:
           APPLICATION_P12: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
@@ -200,12 +204,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: claude-host/package-lock.json
-      - name: Claude host tests
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
+      - name: Node host tests
         if: matrix.arch == 'amd64'
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix browser-host
       - name: Stage the shipped Node
         if: matrix.arch == 'amd64'
         run: scripts/fetch-node.sh
@@ -240,12 +248,14 @@ jobs:
           test -x "$RUNNER_TEMP/inspect/$name/agenthail"
           test -f "$RUNNER_TEMP/inspect/$name/skills/agenthail-operations/SKILL.md"
           test -f "$RUNNER_TEMP/inspect/$name/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+          test -f "$RUNNER_TEMP/inspect/$name/browser-host/node_modules/playwright-core/package.json"
           test -x "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node"
           file "$RUNNER_TEMP/inspect/$name/agenthail" | grep -q "ELF 64-bit"
           if [ "$ARCH" = "amd64" ]; then
             "$RUNNER_TEMP/inspect/$name/agenthail" version --json | jq -e --arg version "$AGENTHAIL_VERSION" '.version == $version'
             test "$("$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" --version)" = v22.23.1
             (cd "$RUNNER_TEMP/inspect/$name/claude-host" && "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
+            (cd "$RUNNER_TEMP/inspect/$name/browser-host" && "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" -e "import('./browser.mjs').then(module => { if (!module.pinnedShell().version) process.exit(1) })")
           fi
       - uses: actions/upload-artifact@v7
         with:

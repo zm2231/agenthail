@@ -1,0 +1,11 @@
+{
+  "name": "agenthail-browser-host",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.0"
+  }
+}

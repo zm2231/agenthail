@@ -38,6 +38,8 @@ test -f "$root/node_modules/@steipete/sweet-cookie/package.json"
 test -f "$root/claude-host/host.mjs"
 test -f "$root/claude-host/checker.mjs"
 test ! -e "$root/claude-host/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+test -f "$root/browser-host/host.mjs"
+test -f "$root/browser-host/browser.mjs"
 test -f "$root/skills/agenthail-operations/SKILL.md"
 test -x "$payload/usr/local/bin/agenthail"
 test -x "$payload/usr/local/bin/agenthail-uninstall"
@@ -82,6 +84,8 @@ PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/py
 "$root/runtime/node/bin/node" --check "$root/claude-host/host.mjs"
 (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('./checker.mjs').then(module => { if (!module.checkerOptions) process.exit(1) })")
 (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
+"$root/runtime/node/bin/node" --check "$root/browser-host/host.mjs"
+(cd "$root/browser-host" && "$root/runtime/node/bin/node" -e "import('./browser.mjs').then(module => { if (!module.pinnedShell().version) process.exit(1) })")
 
 linkage="$work/linkage.txt"
 while IFS= read -r path; do
