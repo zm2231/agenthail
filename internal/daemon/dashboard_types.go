@@ -36,6 +36,7 @@ type dashboardSession struct {
 	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
+	TurnStop          *surface.TurnStop          `json:"turnStop,omitempty"`
 	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
 	Activity          *surface.Activity          `json:"activity,omitempty"`
 	Plan              *surface.Plan              `json:"plan,omitempty"`

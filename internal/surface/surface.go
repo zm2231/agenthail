@@ -96,6 +96,17 @@ type UsageLimit struct {
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
 }
 
+// TurnStop is a session whose last turn ended on a provider error other than
+// a usage limit, so it does not continue until something sends it a message.
+// Refused marks a turn the provider's safeguards refused; such a conversation
+// refuses every later turn too.
+type TurnStop struct {
+	TurnID  string    `json:"turnId"`
+	At      time.Time `json:"at,omitzero"`
+	Reason  string    `json:"reason"`
+	Refused bool      `json:"refused,omitempty"`
+}
+
 // Lifted reports a limit whose reset time has passed.
 func (l *UsageLimit) Lifted(now time.Time) bool {
 	return l != nil && !l.ResetsAt.IsZero() && !now.Before(l.ResetsAt)
@@ -164,6 +175,14 @@ func SameUsageLimit(left, right *UsageLimit) bool {
 	return left.ResetsAt.Equal(right.ResetsAt)
 }
 
+// SameTurnStop reports whether two readings name the same stopped turn.
+func SameTurnStop(left, right *TurnStop) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
 // SameBackground reports whether two readings list the same background work.
 func SameBackground(left, right *BackgroundTasks) bool {
 	if left == nil || right == nil {
@@ -205,6 +224,7 @@ type Session struct {
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
+	TurnStop              *TurnStop         `json:"turnStop,omitempty"`
 	Activity              *Activity         `json:"activity,omitempty"`
 	Plan                  *Plan             `json:"plan,omitempty"`
 	Transcript            string            `json:"transcript"`
@@ -881,6 +901,7 @@ type TurnObservation struct {
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
+	TurnStop        *TurnStop        `json:"turnStop,omitempty"`
 	Activity        *Activity        `json:"activity,omitempty"`
 	Plan            *Plan            `json:"plan,omitempty"`
 	// LimitStop is a last turn a usage limit refused, kept after the limit

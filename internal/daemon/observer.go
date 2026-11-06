@@ -181,7 +181,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	session.Status = observation.Status
 	session.WaitingOn = observation.WaitingOn
 	session.BackgroundTasks = observation.BackgroundTasks
-	session.UsageLimit = observation.UsageLimit
+	session.UsageLimit, session.TurnStop = observation.UsageLimit, observation.TurnStop
+	if session.TurnStop != nil {
+		d.noticeTurnStop(*session)
+	}
 	session.Activity = observation.Activity
 	session.Plan = observation.Plan
 	if session.Source != source || session.Transport != transport {

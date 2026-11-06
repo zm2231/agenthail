@@ -24,6 +24,7 @@ type placementInputs struct {
 	KeptDown      bool
 	Pinned        bool
 	Snooze        *dashboardSnooze
+	TurnStop      string
 	Current       bool
 	CurrentReason string
 	ProjectID     string
@@ -75,6 +76,9 @@ func placementOf(row dashboardSession) placementInputs {
 	}
 	if row.UsageLimit != nil {
 		inputs.UsageResetsAt = row.UsageLimit.ResetsAt.UTC()
+	}
+	if row.TurnStop != nil {
+		inputs.TurnStop = row.TurnStop.TurnID
 	}
 	if row.Project != nil {
 		inputs.ProjectID, inputs.ProjectName = row.Project.ID, row.Project.DisplayName

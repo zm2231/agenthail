@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,5 +81,40 @@ func TestPresentationOldIdleLimitIsCurrentAndPinned(t *testing.T) {
 	state, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "current", Limit: 200, Filters: SessionViewFilters{Attention: true}})
 	if err != nil || len(state.Sessions) != 1 || state.Sessions[0].Attention.Kind != "usageLimit" || !state.View.Families[0].Pinned {
 		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}
+
+func TestAStoppedSessionShowsAsStoppedAndNeedsThePerson(t *testing.T) {
+	d, store, _, _, _ := daemonFixture(t)
+	stop := &surface.TurnStop{TurnID: "u1", At: time.Now().Add(-time.Minute), Reason: "Claude API error: flagged", Refused: true}
+	row := dashboardSession{ID: "stopped", Name: "Stopped", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, TurnStop: stop}
+	raw, _ := json.Marshal(row)
+	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: surface.Session{ID: row.ID, Name: row.Name, Surface: row.Surface, RuntimeKind: row.RuntimeKind, Status: row.Status, TurnStop: stop}, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: string(raw)}, registry.CatalogEvent{DedupeKey: "stopped", Type: "session.upserted", EntityID: row.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err := store.Session("stopped"); err != nil || stored.TurnStop == nil || !stored.TurnStop.At.Equal(stop.At) || *stored.TurnStop != (surface.TurnStop{TurnID: stop.TurnID, At: stored.TurnStop.At, Reason: stop.Reason, Refused: true}) {
+		t.Fatalf("stored stop = %+v err=%v", stored, err)
+	}
+	hostID := "h0123456789ab"
+	if _, err := store.AddHost(registry.PairedHost{ID: hostID, Name: "peer", Endpoint: "https://peer.example", Address: "100.64.0.2", Token: "synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	remote := surface.Session{ID: "remote", Name: "remote", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
+	mirrored, _ := json.Marshal(dashboardSession{ID: "remote", Name: "remote", Surface: remote.Surface, Status: remote.Status, TurnStop: &surface.TurnStop{TurnID: "turn-1", Reason: "Codex error: exceeded retry limit"}})
+	if _, _, err := store.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: remote, EntityID: hostID + "::remote", Projection: mirrored, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "all", Limit: 200, Filters: SessionViewFilters{Status: "stopped"}})
+	if err != nil || len(state.Sessions) != 2 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	for _, got := range state.Sessions {
+		if got.Display.Kind != "stopped" || got.Display.Label != "Stopped" || got.Attention == nil || got.Attention.Kind != "stopped" {
+			t.Fatalf("%s: display=%+v attention=%+v", got.ID, got.Display, got.Attention)
+		}
+	}
+	reasons := state.Sessions[0].Display.Detail + "\n" + state.Sessions[1].Display.Detail
+	if !strings.Contains(reasons, "start a new one") || !strings.Contains(reasons, "exceeded retry limit") {
+		t.Fatalf("details = %q", reasons)
 	}
 }

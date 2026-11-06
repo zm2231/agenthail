@@ -124,6 +124,7 @@ type Daemon struct {
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
+	turnStopNoticeMu         sync.Mutex
 	taskRequestsRead         map[string]taskRequestRead
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]

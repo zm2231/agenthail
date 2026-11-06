@@ -11,6 +11,7 @@ extension SessionDetail {
         state.waitingOn = session.waitingOn
         state.backgroundTasks = session.backgroundTasks
         state.usageLimit = session.usageLimit
+        state.turnStop = session.turnStop
         state.limitResume = limitResume
         state.activity = session.activity
         state.host = host

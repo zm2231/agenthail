@@ -1717,6 +1717,15 @@ struct IOSSessionRow: View {
             .foregroundStyle(PhonePalette.muted)
             .lineLimit(1)
             .fixedSize()
+        } else if kind == .stopped {
+            HStack(spacing: 4) {
+                Image(systemName: kind.symbol)
+                Text(kind.label)
+            }
+            .font(.caption)
+            .foregroundStyle(PhonePalette.failed)
+            .lineLimit(1)
+            .fixedSize()
         } else if kind == .working {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")

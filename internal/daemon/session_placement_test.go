@@ -28,6 +28,9 @@ var placementInputMutations = []placementMutation{
 	{"UsageLimit", func(r *dashboardSession, now time.Time) {
 		r.UsageLimit = &surface.UsageLimit{ResetsAt: now.Add(time.Hour)}
 	}},
+	{"TurnStop", func(r *dashboardSession, _ time.Time) {
+		r.TurnStop = &surface.TurnStop{TurnID: "u1", Reason: "Claude API error: overloaded"}
+	}},
 	{"LimitResume", func(r *dashboardSession, now time.Time) {
 		r.LimitResume = &dashboardLimitResume{State: registry.LimitResumeWaiting, RefusedAt: now}
 	}},

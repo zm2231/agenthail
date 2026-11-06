@@ -694,7 +694,8 @@ textarea:focus-visible {
 .dot.waiting {
   background: var(--warn);
 }
-.dot.unavailable {
+.dot.unavailable,
+.dot.stopped {
   background: var(--bad);
 }
 .dot.idle {
