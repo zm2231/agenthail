@@ -26,7 +26,7 @@ func TestOpenMovesEachHostsLedgerCaptureIntoTheReplicatedLog(t *testing.T) {
 	if err := r.migrate(true); err != nil {
 		t.Fatal(err)
 	}
-	store := ledger.NewStore(r.db, r.db)
+	store := ledger.NewStore(r.db.raw, r.db.raw)
 	for key, want := range map[string]ledger.Scope{
 		"on":    {State: ledger.LedgerEnabled, Since: since},
 		"off":   {State: ledger.LedgerDisabled},

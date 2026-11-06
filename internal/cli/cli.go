@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -23,6 +24,8 @@ type App struct {
 	OpenCurrentRegistry       func() (*registry.Registry, error)
 	registryMu                sync.Mutex
 	registryErr               error
+	writeDeadline             context.Context
+	releaseWrites             func()
 	Surfaces                  []SurfaceEntry
 	UIDir                     string
 	uiAuthorName              string
@@ -59,6 +62,7 @@ func (a *App) openRegistry() (*registry.Registry, error) {
 		a.registryErr = fmt.Errorf("open registry: %w", a.registryErr)
 	} else {
 		a.Registry.SetBusyPolicy(deliverypolicy.Current)
+		a.registryErr = a.bindWritesLocked()
 	}
 	return a.Registry, a.registryErr
 }

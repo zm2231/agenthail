@@ -127,6 +127,11 @@ func (a *App) cmdThread(args []string) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	var pick *claudepick.Pick
 	if request.surface == surface.KindClaude && request.options.ConfigRoot == "" {
 		chosen, err := a.placeClaudeSession(creator)
@@ -140,8 +145,6 @@ func (a *App) cmdThread(args []string) error {
 		return fmt.Errorf("reserve thread alias: %w", err)
 	}
 	defer func() { _ = a.registry().ReleaseAliasReservation(reservation) }()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
 	var readyErr error

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,7 +28,10 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	operation, target := positional[0], positional[1]
 	var session *surface.Session

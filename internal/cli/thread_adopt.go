@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,7 +38,10 @@ func (a *App) cmdThreadAdopt(args []string) (adoptErr error) {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	session, adapter, remote, err := a.resolveAnyTarget(ctx, positional[1])
 	if err != nil {

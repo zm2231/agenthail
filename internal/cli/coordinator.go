@@ -402,7 +402,10 @@ func withFlagHint(err error) error {
 // that runs the conversation records it, so the conversation can be on any
 // paired host.
 func (a *App) coordinatorSet(target string, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	session, _, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
@@ -423,7 +426,10 @@ func (a *App) coordinatorSet(target string, args []string) error {
 // coordinatorNew records a coordinator whose first message starts its
 // conversation, on this host or the one --host names.
 func (a *App) coordinatorNew(agent string, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	payload, err := a.coordinatorPayload("coordinator-new", args)
 	if err != nil {
@@ -480,7 +486,10 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	client, err := a.daemonAPI()
 	if err != nil {

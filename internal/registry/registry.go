@@ -15,7 +15,7 @@ import (
 )
 
 type Registry struct {
-	db            *sql.DB
+	db            *writeDB
 	read          *sql.DB
 	openLock      *os.File
 	path          string
@@ -129,7 +129,7 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 
 func (r *Registry) prepare() error {
 	var err error
-	if r.journal, err = prepareJournalStatements(r.db, journalStatementSQL); err == nil {
+	if r.journal, err = prepareJournalStatements(r.db.raw, journalStatementSQL); err == nil {
 		r.journalRead, err = prepareJournalStatements(r.read, journalReadStatementSQL)
 	}
 	if err != nil {
@@ -204,7 +204,7 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	return &Registry{db: db, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
+	return &Registry{db: &writeDB{raw: db}, read: read, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}, nil
 }
 
 func closeOpenLock(file *os.File) {
@@ -214,7 +214,7 @@ func closeOpenLock(file *os.File) {
 }
 
 func (r *Registry) Path() string     { return r.path }
-func (r *Registry) WriteDB() *sql.DB { return r.db }
+func (r *Registry) WriteDB() *sql.DB { return r.db.raw }
 func (r *Registry) ReadDB() *sql.DB  { return r.read }
 
 func (r *Registry) Close() error {

@@ -46,7 +46,10 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 
 	fromLabel := flagVal(args, "--from")

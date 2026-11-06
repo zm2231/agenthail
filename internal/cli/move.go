@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,7 +47,10 @@ func (a *App) cmdMove(args []string) (moveErr error) {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	session, _, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
@@ -131,7 +133,10 @@ func (a *App) cmdMoveList(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	api, err := a.daemonAPI()
 	if err != nil {

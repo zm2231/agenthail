@@ -134,7 +134,10 @@ func (a *App) cmdProject(args []string) error {
 		fmt.Println(projectUsage)
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	client, err := a.daemonAPI()
 	if err != nil {
@@ -353,7 +356,10 @@ func (a *App) cmdThreadArchive(args []string) error {
 }
 
 func (a *App) threadSessionAction(target string, payload map[string]any) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return nil, err
+	}
 	defer cancel()
 	session, _, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {

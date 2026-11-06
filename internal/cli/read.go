@@ -25,7 +25,10 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {
@@ -97,7 +100,10 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel, err := a.deadlineContext(timeout)
+	if err != nil {
+		return err
+	}
 	defer cancel()
 	sess, surf, remote, err := a.resolveReadTarget(ctx, positional[0])
 	if err != nil {

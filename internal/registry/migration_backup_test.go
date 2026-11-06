@@ -188,7 +188,7 @@ func TestAFailedPageCopyReportsItsError(t *testing.T) {
 	if err := holder.db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
 		t.Fatalf("journal_mode=%q err=%v", mode, err)
 	}
-	conn, err := holder.db.Conn(context.Background())
+	conn, err := holder.db.raw.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
