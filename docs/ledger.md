@@ -56,6 +56,25 @@ agenthail ledger attach <utterance> --as extends --to <ask> --clause "and the do
 
 `attach` refuses only an id that names nothing, and a request it cannot carry out as written, such as adopting a clause that is not a proposal.
 
+`--as` can be left out. `attach` then reads it from the other flags, and the readback says which relation it chose and why:
+
+| Given | Read as |
+| --- | --- |
+| `--session` | `delegates` |
+| `--ack` | `reacts --ack` |
+| `--adopt` or `--reject` | `reacts` |
+| `--to <question>` | `answers`; with a `--clause` only for a question on an ask, where the answer adds a clause |
+| no `--to` and no `--clause` | `conversation` |
+| `--to` but no `--clause` | `reacts`, which changes nothing |
+| `--to <clause>` or `--to <ask>` with a `--clause` | `extends`: the words become a new clause on the ask |
+| `--to <goal>`, `--to project`, found work, or no `--to`, with a `--clause` | `new-ask` |
+
+A work item counts as the clause it serves. Nothing that rewrites or drops the person's words is guessed: rewording a clause needs `--as refines`, acking a cut needs `--ack`, an answer that rewords a clause or records a decision needs `--as answers`, and constraints and decisions need their `--as`.
+
+```
+agenthail ledger attach <utterance> --to <ask> --clause "and the docs"   # intent ledger: +1 clause on <ask> (...) (no --as, read as extends: --to is an ask)
+```
+
 ### When a session is asked to attach
 
 `agenthail ledger enable` asks each session to attach every message before it replies, and the turn gate below holds it for words it left unattached. `agenthail ledger enable --attach checkpoints` asks nothing per message. Instead, the words a session has not attached yet are shown at points it reaches anyway:

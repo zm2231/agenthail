@@ -128,7 +128,6 @@ func TestLedgerWriteFlagsAreChecked(t *testing.T) {
 		{"attach", "claude-prompt:1", "--as", "extends", "--bogus"},
 		{"attach", "claude-prompt:1", "--as", "extends", "--to", "a", "--to", "b"},
 		{"attach", "--as", "extends"},
-		{"attach", "claude-prompt:1"},
 	} {
 		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil {
 			t.Fatalf("%v accepted", args)
@@ -136,5 +135,14 @@ func TestLedgerWriteFlagsAreChecked(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("invalid commands reached the daemon: %v", *calls)
+	}
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"attach", "claude-prompt:1"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %v", *calls)
+	}
+	if as, _ := (*calls)[0]["as"].(string); (*calls)[0]["utteranceId"] != "claude-prompt:1" || as != "" {
+		t.Fatalf("an attach without --as should reach the daemon for it to read the relation: %v", *calls)
 	}
 }

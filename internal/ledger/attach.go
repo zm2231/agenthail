@@ -58,8 +58,8 @@ func refuse(format string, args ...any) error {
 }
 
 func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
-	if req.ProjectKey == "" || req.SessionID == "" || req.As == "" {
-		return AttachResult{}, refuse("project, acting session and --as are required")
+	if req.ProjectKey == "" || req.SessionID == "" {
+		return AttachResult{}, refuse("project and acting session are required")
 	}
 	board, release, err := s.lockBoard(req.ProjectKey)
 	if err != nil {
@@ -133,6 +133,9 @@ func (p *attachPlan) build() error {
 			return refuse("%s is not a captured person utterance in %s", p.req.UtteranceID, p.req.ProjectKey)
 		}
 		p.utterance = u
+	}
+	if err := p.inferAs(); err != nil {
+		return err
 	}
 	if err := p.resolveTarget(); err != nil {
 		return err
