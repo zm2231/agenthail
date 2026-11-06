@@ -111,10 +111,7 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 	if !ok || str(record, "sessionId") != sess.ID || sess.HolderStart != "" && recordStart(record) != sess.HolderStart {
 		return false
 	}
-	sess.Bridge = ""
-	if !c.localOnly {
-		sess.Bridge = str(record, "bridgeSessionId")
-	}
+	sess.Bridge = c.recordBridge(record)
 	if sess.Transport == "uds" {
 		return c.peerSocket(ctx, record) != ""
 	}

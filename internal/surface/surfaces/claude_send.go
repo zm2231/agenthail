@@ -141,5 +141,17 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
 	}
-	return c.postWhenIdle(ctx, sess, message, images)
+	result, err := c.postWhenIdle(ctx, sess, message, images)
+	if !errors.Is(err, errRemoteControlGone) {
+		return result, err
+	}
+	sess.Bridge = ""
+	if sess.Transport != "uds" {
+		return nil, surface.DeliveryTerminal(fmt.Errorf("%w and Claude conversation %s has no messaging socket to take the message", err, sess.ID), surface.DeliveryTargetMissing)
+	}
+	text, _ := images.Compose(message, false)
+	if err := peerSlashCommand(sess, text); err != nil {
+		return nil, err
+	}
+	return c.sendPeer(ctx, sess, text)
 }
