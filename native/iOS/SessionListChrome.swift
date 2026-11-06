@@ -99,6 +99,7 @@ struct SessionScopeChips: View {
             }
             .padding(.vertical, 2)
         }
+        .scrollClipDisabled()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sessions to show")
     }
