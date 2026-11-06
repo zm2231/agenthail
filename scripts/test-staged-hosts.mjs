@@ -1,6 +1,7 @@
 // Usage: node scripts/test-staged-hosts.mjs INSTALL_ROOT [--files-only]
 import './test-home.mjs';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -11,6 +12,7 @@ const [root, mode] = process.argv.slice(2);
 if (!root) fail('usage: test-staged-hosts.mjs INSTALL_ROOT [--files-only]');
 const source = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const node = path.join(root, 'runtime', 'node', 'bin', 'node');
+const SECRET = randomBytes(32).toString('hex');
 
 for (const host of ['claude-host', 'browser-host']) {
   const shipped = fs.readdirSync(path.join(source, host)).filter(name => name.endsWith('.mjs') || name.startsWith('package'));
@@ -50,6 +52,7 @@ async function claudeHost() {
 async function browserHost() {
   const socket = path.join(work, 'browser.sock');
   const child = start(['browser-host/host.mjs', '--socket', socket, '--browsers', path.join(work, 'browsers'), '--version', 'staged'], ['pipe', 'ignore', 'pipe']);
+  child.stdin.write(SECRET + '\n');
   const hello = await call(child, socket, 'hello');
   if (hello.pid !== child.pid || hello.hostVersion !== 'staged') fail(`browser-host hello: ${JSON.stringify(hello)}`);
   const status = await call(child, socket, 'status');
@@ -94,7 +97,7 @@ function once(socket, method) {
         if (message.error) reject(new Error(message.error.message));
         else resolve(message.result);
       });
-      connection.write(JSON.stringify({ id: 1, method, params: {} }) + '\n');
+      connection.write(JSON.stringify({ id: 1, method, params: {}, token: SECRET }) + '\n');
     });
   });
 }

@@ -67,9 +67,23 @@ export class Tabs {
     return out;
   }
 
+  async guarded(tab, run) {
+    if (tab.dialog) return;
+    let opened;
+    const dialog = new Promise(resolve => { opened = resolve; });
+    tab.page.on('dialog', opened);
+    const work = run();
+    try {
+      await Promise.race([work, dialog]);
+    } finally {
+      tab.page.off('dialog', opened);
+      work.catch(() => {});
+    }
+  }
+
   async goto(tab, url) {
     try {
-      await tab.page.goto(url, { timeout: NAVIGATE_TIMEOUT_MS });
+      await this.guarded(tab, () => tab.page.goto(url, { timeout: NAVIGATE_TIMEOUT_MS }));
     } catch (error) {
       throw failure('navigation_failed', error.message.split('\n')[0]);
     }
@@ -83,34 +97,30 @@ export class Tabs {
 
   async snapshot(params) {
     const tab = this.tab(params);
+    const taken = {};
+    await this.guarded(tab, async () => {
+      const { text, truncated } = clip(await tab.page.ariaSnapshot({ mode: 'ai', timeout: ACTION_TIMEOUT_MS }));
+      taken.snapshot = text;
+      if (truncated) taken.truncated = true;
+      if (params.includeImage) {
+        fs.mkdirSync(this.shots, { recursive: true, mode: 0o700 });
+        const image = path.join(this.shots, `${tab.id}-${Date.now()}.png`);
+        await tab.page.screenshot({ path: image, timeout: ACTION_TIMEOUT_MS });
+        taken.image = image;
+      }
+    });
     const out = await this.describe(tab);
-    if (tab.dialog) return out;
-    const { text, truncated } = clip(await tab.page.ariaSnapshot({ mode: 'ai', timeout: ACTION_TIMEOUT_MS }));
-    out.snapshot = text;
-    if (truncated) out.truncated = true;
-    if (params.includeImage) {
-      fs.mkdirSync(this.shots, { recursive: true, mode: 0o700 });
-      out.image = path.join(this.shots, `${tab.id}-${Date.now()}.png`);
-      await tab.page.screenshot({ path: out.image, timeout: ACTION_TIMEOUT_MS });
-    }
-    return out;
+    return tab.dialog ? out : { ...out, ...taken };
   }
 
   async act(params) {
     const tab = this.tab(params);
     if (!KINDS.has(params.kind)) throw failure('invalid', `kind must be one of ${[...KINDS].join(', ')}`);
     if (tab.dialog) throw failure('dialog_open', 'a dialog is open; answer it with the dialog action first');
-    let opened;
-    const dialog = new Promise(resolve => { opened = resolve; });
-    tab.page.on('dialog', opened);
-    const action = this.perform(tab, params);
     try {
-      await Promise.race([action, dialog]);
+      await this.guarded(tab, () => this.perform(tab, params));
     } catch (error) {
-      throw failure('action_failed', error.message.split('\n')[0]);
-    } finally {
-      tab.page.off('dialog', opened);
-      action.catch(() => {});
+      throw failure(error.code === 'invalid' ? 'invalid' : 'action_failed', error.message.split('\n')[0]);
     }
     return this.describe(tab);
   }
@@ -141,11 +151,13 @@ export class Tabs {
     const tab = this.tab(params);
     const timeout = Math.min(Math.max(Number(params.timeoutMs) || MAX_WAIT_MS, 1), MAX_WAIT_MS);
     try {
-      if (params.text) await tab.page.getByText(params.text).first().waitFor({ timeout });
-      else if (params.ref) await this.locate(tab, params.ref).waitFor({ timeout });
-      else if (params.url) await tab.page.waitForURL(url => url.href.includes(params.url), { timeout });
-      else if (params.idle) await tab.page.waitForLoadState('networkidle', { timeout });
-      else throw failure('invalid', 'wait needs text, ref, url or idle');
+      await this.guarded(tab, async () => {
+        if (params.text) await tab.page.getByText(params.text).first().waitFor({ timeout });
+        else if (params.ref) await this.locate(tab, params.ref).waitFor({ timeout });
+        else if (params.url) await tab.page.waitForURL(url => url.href.includes(params.url), { timeout });
+        else if (params.idle) await tab.page.waitForLoadState('networkidle', { timeout });
+        else throw failure('invalid', 'wait needs text, ref, url or idle');
+      });
     } catch (error) {
       if (error.code === 'invalid') throw error;
       throw failure('timeout', error.message.split('\n')[0]);
@@ -168,7 +180,7 @@ export class Tabs {
     const width = Number(params.width);
     const height = Number(params.height);
     if (!(width >= 200 && width <= 3840 && height >= 200 && height <= 2160)) throw failure('invalid', 'width must be 200 to 3840 and height 200 to 2160');
-    await tab.page.setViewportSize({ width, height });
+    await this.guarded(tab, () => tab.page.setViewportSize({ width, height }));
     return this.describe(tab);
   }
 

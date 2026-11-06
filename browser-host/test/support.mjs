@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const HOST = new URL('../host.mjs', import.meta.url).pathname;
+export const SECRET = 'test-secret-that-only-the-owner-knows';
 
 export function startHost(t, browsers) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bh-'));
@@ -14,6 +15,7 @@ export function startHost(t, browsers) {
     stdio: ['pipe', 'inherit', 'inherit'],
     env: { ...process.env, TMPDIR: dir },
   });
+  child.stdin.write(SECRET + '\n');
   const exited = new Promise(resolve => child.on('exit', resolve));
   t.after(async () => {
     child.stdin.end();
@@ -30,10 +32,14 @@ export function startHost(t, browsers) {
   return { child, socket, exited, dir };
 }
 
-export async function call(socket, method, params = {}) {
+export function call(socket, method, params = {}) {
+  return callWith(SECRET, socket, method, params);
+}
+
+export async function callWith(token, socket, method, params = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await once(socket, method, params);
+      return await once(socket, method, params, token);
     } catch (error) {
       if (attempt > 100 || !['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error;
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -41,7 +47,7 @@ export async function call(socket, method, params = {}) {
   }
 }
 
-function once(socket, method, params) {
+function once(socket, method, params, token) {
   return new Promise((resolve, reject) => {
     const connection = net.connect(socket);
     connection.on('error', reject);
@@ -50,7 +56,7 @@ function once(socket, method, params) {
         connection.destroy();
         resolve(JSON.parse(line));
       });
-      connection.write(JSON.stringify({ id: 1, method, params }) + '\n');
+      connection.write(JSON.stringify({ id: 1, method, params, token }) + '\n');
     });
   });
 }

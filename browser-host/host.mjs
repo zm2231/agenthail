@@ -1,4 +1,5 @@
-// Protocol: docs/maintainers/browser-host.md. Exits when stdin (the daemon) closes.
+// Protocol: docs/maintainers/browser-host.md. The first stdin line is the daemon's secret; exits when stdin closes.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -51,6 +52,10 @@ async function answer(socket, line) {
     socket.write(JSON.stringify({ id: null, error: { code: 'bad_request', message: 'the request is not JSON' } }) + '\n');
     return;
   }
+  if (!authorized(request.token)) {
+    socket.write(JSON.stringify({ id: request.id, error: { code: 'unauthorized', message: 'only the daemon that started this host may call it' } }) + '\n');
+    return;
+  }
   const method = methods[request.method];
   if (!method) {
     socket.write(JSON.stringify({ id: request.id, error: { code: 'unknown_method', message: `no method ${request.method}` } }) + '\n');
@@ -86,10 +91,23 @@ async function stop() {
   process.exit(0);
 }
 
-fs.rmSync(args.socket, { force: true });
-server.listen(args.socket, () => fs.chmodSync(args.socket, 0o600));
+let secret = null;
+function authorized(token) {
+  if (!secret || typeof token !== 'string') return false;
+  const given = Buffer.from(token);
+  return given.length === secret.length && crypto.timingSafeEqual(given, secret);
+}
+
+readline.createInterface({ input: process.stdin }).once('line', line => {
+  secret = Buffer.from(line.trim());
+  if (secret.length < 32) {
+    process.stderr.write('browser host: the secret on stdin is missing or too short\n');
+    process.exit(2);
+  }
+  fs.rmSync(args.socket, { force: true });
+  server.listen(args.socket, () => fs.chmodSync(args.socket, 0o600));
+});
 process.stdin.on('end', stop);
 process.stdin.on('close', stop);
-process.stdin.resume();
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);

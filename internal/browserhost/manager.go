@@ -2,6 +2,7 @@ package browserhost
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ type Manager struct {
 
 	mu     sync.Mutex
 	status Status
+	secret string
 }
 
 func StateDir(home string) string { return filepath.Join(home, ".agenthail", "browser-host") }
@@ -50,7 +52,11 @@ func SocketPath(home string) string { return filepath.Join(StateDir(home), "host
 
 func BrowsersDir(home string) string { return filepath.Join(StateDir(home), "browsers") }
 
-func (m *Manager) Client() Client { return Client{Socket: SocketPath(m.Home)} }
+func (m *Manager) Client() Client {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return Client{Socket: SocketPath(m.Home), Secret: m.secret}
+}
 
 func (m *Manager) LogPath() string { return filepath.Join(StateDir(m.Home), "host.log") }
 
@@ -158,6 +164,16 @@ func (m *Manager) spawn(launch Launch) (*exec.Cmd, io.WriteCloser, error) {
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start the browser host: %w", err)
+	}
+	secret := rand.Text() + rand.Text()
+	m.mu.Lock()
+	m.secret = secret
+	m.mu.Unlock()
+	if _, err := io.WriteString(owner, secret+"\n"); err != nil {
+		owner.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, nil, fmt.Errorf("hand the browser host its secret: %w", err)
 	}
 	return cmd, owner, nil
 }

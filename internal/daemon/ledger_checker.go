@@ -192,7 +192,7 @@ func (d *Daemon) endChecker(ctx context.Context, run string, now time.Time) {
 			d.log.Printf("ledger checks: stop checker %s: %s", run, err)
 		}
 	}
-	if err := d.Registry.ArchiveSession(run, now.UTC()); err != nil {
+	if err := d.archiveSession(run, now.UTC()); err != nil {
 		d.log.Printf("ledger checks: archive checker %s: %s", run, err)
 	}
 }

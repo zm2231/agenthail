@@ -49,7 +49,10 @@ const (
 	StateUnavailable      = "unavailable"
 )
 
-type Client struct{ Socket string }
+type Client struct {
+	Socket string
+	Secret string
+}
 
 func (c Client) Hello(ctx context.Context) (Hello, error) {
 	var hello Hello
@@ -75,7 +78,7 @@ func (c Client) Call(ctx context.Context, method string, params, result any) err
 	if params == nil {
 		params = struct{}{}
 	}
-	request, err := json.Marshal(map[string]any{"id": 1, "method": method, "params": params})
+	request, err := json.Marshal(map[string]any{"id": 1, "method": method, "params": params, "token": c.Secret})
 	if err != nil {
 		return err
 	}

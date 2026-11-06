@@ -134,6 +134,18 @@ func TestAnAgentsTabOutlivesItsTurnStaysPrivateAndClosesWhenTheSessionIsArchived
 	})
 }
 
+func TestAFinishedLedgerCheckerLeavesNoBrowserTabsOpen(t *testing.T) {
+	f := newBrowserFixture(t)
+	eventually(t, "the browser host answers", func() bool { return f.host.Status().State != browserhost.StateUnavailable })
+	browse(t, f.child, map[string]any{"action": "open", "url": f.page})
+	f.d.endChecker(t.Context(), "to", time.Now())
+	eventually(t, "ending the checker closes its tabs", func() bool {
+		var listed map[string]any
+		err := f.host.Client().Call(t.Context(), "tabs.list", map[string]any{"owner": "to"}, &listed)
+		return err == nil && len(tabIDs(listed)) == 0
+	})
+}
+
 func TestAfterTheBrowserHostRestartsASessionsTabsAreGoneAndOpenWorksAgain(t *testing.T) {
 	f := newBrowserFixture(t)
 	eventually(t, "the browser host answers", func() bool { return f.host.Status().State != browserhost.StateUnavailable })

@@ -15,8 +15,15 @@ and on SIGINT, so it never outlives the daemon. `AGENTHAIL_BROWSER_HOST`
 overrides the script path.
 
 The socket is mode 0600. Each connection carries newline-delimited JSON:
-requests `{id, method, params}`, responses `{id, result}` or
+requests `{id, method, params, token}`, responses `{id, result}` or
 `{id, error: {code, message}}`, one line at most 1 MiB.
+
+Agents run as the same user as the daemon, so the socket's mode alone would
+let any of them name another session as `owner`. The daemon writes a fresh
+random secret as the first line of the host's stdin, a pipe only it holds; the
+host listens only after reading it (and exits if it is shorter than 32
+bytes), and answers `unauthorized` to every request whose `token` is not that
+secret, `hello` included.
 
 | Method | Result |
 |---|---|
@@ -54,9 +61,11 @@ keeps the only record of tabs:
   `press`, `scroll`, `upload`) and a `ref` from the latest snapshot, with a
   10-second limit. `tabs.wait` waits for text, a ref, a URL part or network
   idle, at most 30 seconds.
-- A JavaScript dialog is held until `tabs.dialog` accepts or dismisses it. An
-  action that opens one returns at once with `dialog: {type, message}`, and
-  further actions answer `dialog_open` until it is answered.
+- A JavaScript dialog is held until `tabs.dialog` accepts or dismisses it.
+  Any page operation (`open` or `navigate` while the page loads, `snapshot`,
+  `act`, `wait`, `resize`) during which one opens returns at once with
+  `dialog: {type, message}`; `snapshot` then carries no tree, and `act`
+  answers `dialog_open` until the dialog is answered.
 
 ## Chromium on first use
 

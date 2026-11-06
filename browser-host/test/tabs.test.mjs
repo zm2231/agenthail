@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import http from 'node:http';
 import test from 'node:test';
 import { clip } from '../tabs.mjs';
-import { call, startHost } from './support.mjs';
+import { call, callWith, processesUnder, startHost } from './support.mjs';
 
 const PAGE = `<!doctype html><title>Home</title>
 <button onclick="out.textContent = 'clicked ' + nameField.value">Go</button>
@@ -16,6 +17,11 @@ function serve(t) {
     if (request.url === '/login') {
       response.writeHead(200, { 'set-cookie': 'session=secret; Path=/', 'content-type': 'text/html' });
       response.end('<title>Login</title><p>signed in</p>');
+      return;
+    }
+    if (request.url === '/alerts') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end('<title>Alerts</title><script>alert("loading")</script><p>loaded</p><button onclick="setTimeout(() => alert(\'later\'), 200)">Soon</button>');
       return;
     }
     if (request.url === '/whoami') {
@@ -81,6 +87,61 @@ test('an agent opens a page, acts on snapshot refs, waits for text and answers a
   assert.deepEqual(listed.tabs.map(entry => entry.tab), [tab]);
   await ok(host.socket, 'tabs.close', { owner, tab });
   assert.deepEqual((await ok(host.socket, 'tabs.list', { owner })).tabs, []);
+});
+
+test('a client without the daemon\'s secret reaches no tab, even naming its owner', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url });
+  for (const token of [undefined, '', 'guessed-secret-of-the-same-length!!!']) {
+    for (const [method, params] of [['hello', {}], ['tabs.list', { owner }], ['tabs.snapshot', { owner, tab }], ['tabs.close', { owner, tab }], ['tabs.closeOwner', { owner }]]) {
+      const response = await callWith(token, host.socket, method, params);
+      assert.equal(response.error?.code, 'unauthorized', `${method} with token ${JSON.stringify(token)}: ${JSON.stringify(response)}`);
+    }
+  }
+  assert.deepEqual((await ok(host.socket, 'tabs.list', { owner })).tabs.map(entry => entry.tab), [tab]);
+});
+
+test('a dialog opened while a page loads or during a wait is returned at once', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner });
+  const started = Date.now();
+  const navigated = await ok(host.socket, 'tabs.navigate', { owner, tab, url: `${url}/alerts` });
+  assert.deepEqual(navigated.dialog, { type: 'alert', message: 'loading' });
+  const blocked = await ok(host.socket, 'tabs.snapshot', { owner, tab });
+  assert.equal(blocked.snapshot, undefined);
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+  await ok(host.socket, 'tabs.dialog', { owner, tab, accept: true });
+  const { snapshot } = await ok(host.socket, 'tabs.snapshot', { owner, tab });
+  assert.match(snapshot, /loaded/);
+
+  await ok(host.socket, 'tabs.act', { owner, tab, kind: 'click', ref: ref(snapshot, 'button "Soon"') });
+  const waited = Date.now();
+  const interrupted = await ok(host.socket, 'tabs.wait', { owner, tab, text: 'never appears', timeoutMs: 20_000 });
+  assert.deepEqual(interrupted.dialog, { type: 'alert', message: 'later' });
+  assert.ok(Date.now() - waited < 10_000, `wait took ${Date.now() - waited} ms`);
+});
+
+test('when Chromium crashes under a running host its tabs are gone and open starts a new browser', { timeout: 600_000 }, async t => {
+  const url = await serve(t);
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const owner = 'session-a';
+  const { tab } = await ok(host.socket, 'tabs.open', { owner, url });
+  const parentOf = pid => Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
+  const [chromium] = processesUnder(host.dir, 'chrome-headless-shell').filter(pid => parentOf(pid) === host.child.pid);
+  assert.ok(chromium, 'no Chromium under the host');
+  process.kill(chromium, 'SIGKILL');
+  for (let attempt = 0; (await ok(host.socket, 'tabs.list', { owner })).tabs.length > 0; attempt++) {
+    assert.ok(attempt < 100, 'the tab outlived its browser');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal((await call(host.socket, 'tabs.snapshot', { owner, tab })).error.code, 'not_found');
+  const reopened = await ok(host.socket, 'tabs.open', { owner, url });
+  assert.notEqual(reopened.tab, tab);
+  assert.equal(reopened.title, 'Home');
 });
 
 test('each owner has its own cookies and cannot reach another owner\'s tabs', { timeout: 600_000 }, async t => {
