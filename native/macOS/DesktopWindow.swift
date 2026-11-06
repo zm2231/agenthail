@@ -898,15 +898,31 @@ struct TranscriptView: View {
     @State private var following = true
     @State private var underfilled = false
     @State private var paneWidth: CGFloat = 0
+    @State private var tailLayout = TranscriptTailLayout()
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
+
+    private struct TailInputs: Equatable {
+        let session: String
+        let newest: String?
+        let count: Int
+    }
+
+    private func blockRow(_ index: Int, _ block: TranscriptBlock, in blocks: [TranscriptBlock], canResend: Bool) -> some View {
+        TranscriptBlockView(block: block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
+            .equatable()
+            .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
+    }
 
     var body: some View {
         let blocks = TranscriptBlock.build(pane.timelineItems, foldAgents: !expandAgents)
         let canResend = pane.removedSession?.id != session.id && session.capabilities.send && !session.isReadOnly
         let layout = DesktopColumns.transcript(pane: paneWidth)
+        let ids = blocks.map(\.id)
+        let split = tailLayout.tail.split(ids, in: session.id)
         ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
@@ -932,10 +948,15 @@ struct TranscriptView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 }
-                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-                    TranscriptBlockView(block: block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
-                        .equatable()
-                        .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
+                ForEach(Array(blocks.enumerated().prefix(split)), id: \.element.id) { index, block in
+                    blockRow(index, block, in: blocks, canResend: canResend)
+                }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(blocks.enumerated().dropFirst(split)), id: \.element.id) { index, block in
+                    blockRow(index, block, in: blocks, canResend: canResend)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { tailLayout.rows[block.id] = $0 }
+                        .onDisappear { tailLayout.rows[block.id] = nil }
                 }
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
@@ -955,6 +976,7 @@ struct TranscriptView: View {
                     .padding(.top, DesktopSpace.m)
                 }
             }
+            }
             .frame(maxWidth: DesktopColumns.reading)
             .padding(.horizontal, DesktopColumns.gutter)
             .padding(.top, DesktopSpace.l)
@@ -970,6 +992,13 @@ struct TranscriptView: View {
         }
         .clipped()
         .transcriptScrimSource()
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            tailLayout.visible = geometry.visibleRect
+            return true
+        } action: { _, _ in }
+        .onChange(of: TailInputs(session: session.id, newest: ids.last, count: ids.count), initial: true) {
+            tailLayout.tail.update(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible, following: following)
+        }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in

@@ -88,6 +88,7 @@ targets:
       - path: TranscriptScrimMask.swift
       - path: TranscriptScrimRowLayers.swift
       - path: TranscriptScrimRows.swift
+      - path: TranscriptTail.swift
       - path: AgentMessage.swift
       - path: ClampedText.swift
       - path: TurnClock.swift

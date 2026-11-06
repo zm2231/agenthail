@@ -46,6 +46,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
             .onScrollPhaseChange { _, new in
                 phase = new
+                if new == .interacting || new == .decelerating { layout.releaseHold() }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
                     let start = layout.animationStart
@@ -66,6 +67,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
+                if !following, !inserted, resting, let target = layout.heldTarget(new) {
+                    settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
+                    return
+                }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
@@ -77,7 +82,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
                 } else if !following, inserted, resting {
-                    let target = max(new.contentSize.height - (old.contentSize.height - old.contentOffset.y), 0)
+                    let distance = layout.heldFromEnd ?? (old.contentSize.height - old.contentOffset.y)
+                    layout.holdFromEnd(distance, content: new.contentSize.height)
+                    let target = max(new.contentSize.height - distance, 0)
                     settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                 } else if !following, resting, Self.atBottom(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
@@ -91,6 +98,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
             .onChange(of: transcript) {
                 generation &+= 1
+                layout.releaseHold()
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -107,6 +115,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
     private func holdPlace() {
         following = false
+        layout.releaseHold()
         if let geometry = layout.geometry { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
     }
 
@@ -133,6 +142,38 @@ private final class Layout {
     var geometry: ScrollGeometry?
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
+    private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
+
+    var heldFromEnd: CGFloat? {
+        guard let fromEnd, ContinuousClock.now < fromEnd.until else { return nil }
+        return fromEnd.distance
+    }
+
+    func holdFromEnd(_ distance: CGFloat, content: CGFloat) {
+        fromEnd = (distance, .now + .seconds(2), content, true)
+    }
+
+    func releaseHold() {
+        fromEnd = nil
+    }
+
+    /// Earlier rows keep re-measuring after they arrive, moving the rows below them without scrolling, and the geometry action
+    /// can miss such a resize, so the height is compared with the last one handled. Any other move while settled is the reader's.
+    func heldTarget(_ geometry: ScrollGeometry) -> CGFloat? {
+        guard let distance = heldFromEnd else { return nil }
+        let content = geometry.contentSize.height
+        if content != fromEnd?.content {
+            fromEnd?.content = content
+            fromEnd?.landing = true
+            return max(content - distance, 0)
+        }
+        if abs(content - geometry.contentOffset.y - distance) <= 1 {
+            fromEnd?.landing = false
+        } else if fromEnd?.landing == false {
+            releaseHold()
+        }
+        return nil
+    }
 
     func markResized() {
         guard !resized else { return }

@@ -87,6 +87,7 @@ let package = Package(
                 "TranscriptScrimMask.swift",
                 "TranscriptScrimRowLayers.swift",
                 "TranscriptScrimRows.swift",
+                "TranscriptTail.swift",
                 "AgentMessage.swift",
                 "ClampedText.swift",
                 "TurnClock.swift",
