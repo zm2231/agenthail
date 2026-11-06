@@ -13,4 +13,11 @@ for (const name of Object.keys(process.env)) {
     delete process.env[name];
   }
 }
-process.on('exit', () => fs.rmSync(home, { recursive: true, force: true }));
+const removeHome = () => fs.rmSync(home, { recursive: true, force: true });
+process.on('exit', removeHome);
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.once(signal, () => {
+    removeHome();
+    process.kill(process.pid, signal);
+  });
+}

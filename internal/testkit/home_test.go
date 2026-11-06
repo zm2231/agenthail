@@ -70,26 +70,74 @@ func TestEveryTestPackageRunsInItsOwnHome(t *testing.T) {
 	}
 }
 
-var firstImport = regexp.MustCompile(`(?m)^import\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]`)
+var (
+	nodeTestModule = regexp.MustCompile(`['"]node:test['"]`)
+	leadingComment = regexp.MustCompile(`^(?:\s+|//[^\n]*|/\*(?s:.*?)\*/)`)
+	homeStatement  = regexp.MustCompile(`^(?:import\s*|require\(\s*)(['"])([^'"\n]+)['"]`)
+)
+
+func isNodeTest(root, path string, source []byte) bool {
+	name := filepath.Base(path)
+	named := strings.Contains(name, ".test.") || (filepath.Dir(path) == filepath.Join(root, "scripts") && strings.HasPrefix(name, "test-"))
+	return named || nodeTestModule.Match(source)
+}
+
+func importsHomeFirst(path string, source []byte, helper string) bool {
+	text := string(source)
+	if strings.HasPrefix(text, "#!") {
+		_, text, _ = strings.Cut(text, "\n")
+	}
+	for {
+		skip := leadingComment.FindString(text)
+		if skip == "" {
+			break
+		}
+		text = text[len(skip):]
+	}
+	match := homeStatement.FindStringSubmatch(text)
+	return match != nil && filepath.Clean(filepath.Join(filepath.Dir(path), match[2])) == helper
+}
+
+func TestOnlyAFirstStatementImportingTheHelperCounts(t *testing.T) {
+	helper := filepath.Join("/repo", "scripts", "test-home.mjs")
+	for source, want := range map[string]bool{
+		"// Usage: node x\nimport './test-home.mjs';\nimport x from 'y';":            true,
+		"#!/usr/bin/env node\n/* a\nb */\nimport \"./test-home.mjs\"":                true,
+		"require('./test-home.mjs');\nconst test = require('node:test');":            true,
+		"import assert from 'node:assert';\nimport './test-home.mjs';":               false,
+		"import './other.mjs';\nimport './test-home.mjs';":                           false,
+		"import home from './test-home.mjs';":                                        false,
+		"/* import './test-home.mjs' */\nimport assert from 'node:assert';":          false,
+		"// import './test-home.mjs'\nimport assert from 'node:assert';":             false,
+		"const s = `\nimport './test-home.mjs'`;\nimport assert from 'node:assert';": false,
+		"import '../test-home.mjs';":                                                 false,
+	} {
+		if got := importsHomeFirst(filepath.Join("/repo", "scripts", "test-x.mjs"), []byte(source), helper); got != want {
+			t.Errorf("importsHomeFirst(%q) = %v, want %v", source, got, want)
+		}
+	}
+	if !importsHomeFirst(filepath.Join("/repo", "claude-host", "test", "a.test.mjs"), []byte("import '../../scripts/test-home.mjs';"), helper) {
+		t.Error("a nested test's relative import of the helper did not count")
+	}
+}
 
 func TestEveryNodeTestRunsInItsOwnHome(t *testing.T) {
 	var missing []string
 	entries := 0
 	walkModule(t, func(root, path string, entry fs.DirEntry) {
-		name := entry.Name()
-		inTests := filepath.Base(filepath.Dir(path)) == "test" && (strings.HasSuffix(name, ".test.mjs") || strings.HasSuffix(name, ".test.js"))
-		inScripts := filepath.Dir(path) == filepath.Join(root, "scripts") && strings.HasPrefix(name, "test-") && strings.HasSuffix(name, ".mjs") && name != "test-home.mjs"
-		if entry.IsDir() || (!inTests && !inScripts) {
+		if entry.IsDir() || !slices.Contains([]string{".mjs", ".cjs", ".js"}, filepath.Ext(path)) || entry.Name() == "test-home.mjs" {
 			return
 		}
-		entries++
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		relative, _ := filepath.Rel(root, path)
-		match := firstImport.FindSubmatch(source)
-		if match == nil || filepath.Clean(filepath.Join(filepath.Dir(path), string(match[1]))) != filepath.Join(root, "scripts", "test-home.mjs") {
+		if !isNodeTest(root, path, source) {
+			return
+		}
+		entries++
+		if !importsHomeFirst(path, source, filepath.Join(root, "scripts", "test-home.mjs")) {
+			relative, _ := filepath.Rel(root, path)
 			missing = append(missing, relative)
 		}
 	})
