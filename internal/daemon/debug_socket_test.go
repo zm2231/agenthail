@@ -225,3 +225,42 @@ func TestTheDebugSocketSamplesTheDaemonsCPUOneProfileAtATime(t *testing.T) {
 		t.Fatalf("cpu profile has no cpu samples: %v", parsed.SampleType)
 	}
 }
+
+func TestACPUProfileWhoseClientLeftFreesTheProfiler(t *testing.T) {
+	home := debugSocketHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{log: log.New(io.Discard, "", 0)}
+	stop, err := d.startDebugSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := debugClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/profiles/cpu?seconds=300", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response, err := client.Do(request); err == nil {
+		response.Body.Close()
+		t.Fatalf("a 300s profile answered in 300ms: %d", response.StatusCode)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		response, err := client.Get("http://daemon/profiles/cpu?seconds=1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode == http.StatusOK {
+			return
+		}
+		if response.StatusCode != http.StatusConflict || time.Now().After(deadline) {
+			t.Fatalf("the abandoned profile still held the profiler: %d", response.StatusCode)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
