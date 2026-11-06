@@ -15,9 +15,9 @@ func captureOf(t *testing.T, node *federationNode, session, prompt, text string)
 	return captured
 }
 
-func TestTheLeadOfAGitProjectIsCapturedWithoutBeingAskedToAttach(t *testing.T) {
+func TestTheLeadOfAGitProjectIsCapturedAndAskedToAttach(t *testing.T) {
 	mac, _, _ := widgetOnTwoHosts(t)
-	if got := captureOf(t, mac, "lead", "p-1", "build search"); !got.Captured || got.Attach || got.ProjectKey != widgetKey || len(got.Unattached) != 0 {
+	if got := captureOf(t, mac, "lead", "p-1", "build search"); !got.Captured || !got.Attach || got.ProjectKey != widgetKey || len(got.Unattached) != 0 {
 		t.Fatalf("the lead's words in a project nobody enabled: %+v", got)
 	}
 	if got := captureOf(t, mac, "local-a", "p-2", "not the lead"); got.Captured {

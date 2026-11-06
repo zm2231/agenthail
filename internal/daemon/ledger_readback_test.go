@@ -51,3 +51,22 @@ func TestAPersonDeliveryToACodexSessionQueuesItsReadbackOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestACodexLeadInAProjectNobodyEnabledHasItsReadbackQueued(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-lead-readback", "lead-readback-key")
+	lead := surface.Session{ID: "codex-lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: p.dir, Status: surface.StatusIdle}
+	if err := r.RegisterSession(lead); err != nil {
+		t.Fatal(err)
+	}
+	makeCoordinator(t, r, p, lead.ID)
+	intent := uuid.NewString()
+	d.personCapture(delivery.PersonCaptureContext{Target: lead, IntentUUID: intent, Message: "plan the release"})
+	var queued int
+	if err := r.ReadDB().QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND delivery_key=?`, lead.ID, "ledger:readback:"+ledger.DeliveryRef(intent)).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Fatalf("the lead of a project nobody enabled has %d readbacks queued, want 1", queued)
+	}
+}

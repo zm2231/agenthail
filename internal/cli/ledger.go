@@ -101,7 +101,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
 	}
-	capture, coverage := "lead", "capturing the person's words to the project's lead; nothing asks it to attach them. To ask every session to attach each message: agenthail ledger enable"
+	capture, coverage := "lead", "capturing the person's words to the project's lead, which attaches each message; its turn is not held for words it leaves unattached. To ask every session to attach each message: agenthail ledger enable"
 	if scope.State == ledger.LedgerEnabled {
 		capture = "enabled"
 		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
