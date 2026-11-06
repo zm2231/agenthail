@@ -217,12 +217,14 @@ func SameWaiting(left, right *Waiting) bool {
 // conversation and can come and go. ForkedFrom is the conversation this one was
 // branched from.
 type Session struct {
-	ID                    string            `json:"id"`
-	Surface               SurfaceKind       `json:"surface"`
-	Name                  string            `json:"name"`
-	Cwd                   string            `json:"cwd"`
-	PID                   int               `json:"pid"`
-	Status                SessionStatus     `json:"status"`
+	ID      string        `json:"id"`
+	Surface SurfaceKind   `json:"surface"`
+	Name    string        `json:"name"`
+	Cwd     string        `json:"cwd"`
+	PID     int           `json:"pid"`
+	Status  SessionStatus `json:"status"`
+	// Ended means the runtime no longer holds the session. A send resumes it.
+	Ended                 bool              `json:"ended,omitempty"`
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`

@@ -225,8 +225,14 @@ Codex holds, so an omission there still removes the row.
 - The hourly check also restores sessions with no row whose transcript changed in
   the last 30 days, 25 per pass at most, newest first.
 
-A kept row more than a day old with nothing making it current gets
-`catalog_sessions.retired`. A retired row has no parent and adds to no rollup, so
+A session has ended when its runtime no longer holds it: a Claude process
+that exited, or a Codex thread no runtime has loaded (`sessions.ended`). A send
+resumes an ended session, so ending changes no delivery. An ended row more than
+a day old with nothing making it current gets `catalog_sessions.retired`, once
+the pass that owns its surface still lists or keeps it; a paired host's row
+retires on any pass. A subagent retires only once its parent has, so no
+unretired row loses part of its rollup, and a retired row coming back brings its
+whole family back. Retired rows are history, so
 the current listing, the stream, the unpaged snapshot and the `current`, `recent`
 and `running` scopes read past it through a partial index, and their cost does
 not grow with history. Only `all`, `archived`, a search and a paired host's first
@@ -234,7 +240,7 @@ sync read retired rows. The session view still counts them for the All tab,
 recounting only when a retired row or the archive changes. Presence reads a
 retired row that has a queued message, a lead's name, attention, a usage-limit
 stop or a failed send, and reads them all when the archive changes. A row leaves
-history when its session stops being offline or the row becomes current.
+history when its session is held again, its parent changes, or the row becomes current.
 
 ## Behavioral checks
 

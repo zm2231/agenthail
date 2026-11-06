@@ -16,7 +16,7 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 }
 
 func sessionSelect(status string) string {
-	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),` + sessionSubagentSelect
+	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.ended,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),` + sessionSubagentSelect
 }
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
@@ -30,7 +30,7 @@ func scanSession(scanner rowScanner) (surface.Session, error) {
 	var location, waitingOn, background, usageLimit, turnStop []byte
 	var focusable int
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit, &turnStop}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Ended, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit, &turnStop}, subagent.targets()...)...); err != nil {
 		return surface.Session{}, err
 	}
 	session.Surface = surface.SurfaceKind(kind)

@@ -398,6 +398,13 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}
+		for _, ended := range []bool{false, true} {
+			old := surface.Session{ID: fmt.Sprint("old-ended-", ended), Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusNotLoaded, Ended: ended, Cwd: cwd, LastActive: f.clock.Add(-96 * time.Hour)}
+			fake.sessions[old.ID] = old
+			if err := reg.RegisterSession(old); err != nil {
+				t.Fatal(err)
+			}
+		}
 		d.discoverCatalog(f.ctx)
 		lead := registry.CoordinatorSpec{ProjectID: here.ID, ProjectRoot: cwd, Cwd: cwd, Name: "lead-fill", Surface: string(surface.KindCodex), SessionID: "lead-was", ChangedAt: f.clock}
 		stored, err := reg.SetCoordinator(lead, registry.CoordinatorChange{SessionID: "lead-was", Replace: true, OverPeers: true})

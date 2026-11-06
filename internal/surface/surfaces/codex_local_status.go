@@ -45,6 +45,9 @@ func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface
 		session.Status = turn.status
 		advanceBusyActivity(session, info.ModTime())
 	}
+	if session.Status == surface.StatusBusy {
+		session.Ended = false
+	}
 	if turn.newest.After(session.LastActive) {
 		session.LastActive = turn.newest
 	}

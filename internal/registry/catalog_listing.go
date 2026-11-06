@@ -37,7 +37,7 @@ type catalogListingRow struct {
 	retired  bool
 }
 
-const catalogListingSelect = `SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,cs.current FROM catalog_sessions cs `
+const catalogListingSelect = `SELECT s.id,s.host_id,s.parent_session_id,s.source,s.status,s.ended,cs.current FROM catalog_sessions cs `
 
 func catalogListingTx(q catalogQuerier) (CatalogListing, error) {
 	byID := map[string]catalogListingRow{}
@@ -85,12 +85,12 @@ func readCatalogListingRows(q catalogQuerier, byID map[string]catalogListingRow,
 	defer rows.Close()
 	for rows.Next() {
 		var id, hostID, parent, source, status string
-		var current bool
-		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &current); err != nil {
+		var ended, current bool
+		if err := rows.Scan(&id, &hostID, &parent, &source, &status, &ended, &current); err != nil {
 			return err
 		}
 		busy := status == string(surface.StatusBusy)
-		retired := status == string(surface.StatusOffline) && !current
+		retired := ended && !current
 		byID[id] = catalogListingRow{entity: hosts.Qualify(hostID, id), parent: parent, subagent: delegatedColumns(parent, source), active: busy || current, busy: busy, retired: retired}
 	}
 	return rows.Err()

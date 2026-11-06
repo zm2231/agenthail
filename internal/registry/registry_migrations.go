@@ -196,6 +196,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"snoozed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"snoozed_until_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"snooze_wake", `TEXT NOT NULL DEFAULT ''`},
+		{"ended", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err
@@ -446,6 +447,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version >= 1 && version < 59 {
 		if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=CAST(strftime('%s','now') AS INTEGER)*1000 WHERE pinned_at_ms=0 AND id IN (` + localLeadSessions + `)`); err != nil {
+			return err
+		}
+	}
+	if version < 68 {
+		if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE status='offline'`); err != nil {
 			return err
 		}
 	}

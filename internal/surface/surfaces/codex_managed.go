@@ -348,7 +348,7 @@ func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess
 	}
 	result, _ := readResponse["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	sess.Source, sess.Status, sess.WaitingOn = codexSource(thread["source"]), codexStatus(thread["status"]), codexSessionWaiting(sess.ID, thread["status"])
+	sess.Source, sess.Status, sess.Ended, sess.WaitingOn = codexSource(thread["source"]), codexStatus(thread["status"]), codexThreadEnded(thread["status"]), codexSessionWaiting(sess.ID, thread["status"])
 	return nil
 }
 

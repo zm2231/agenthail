@@ -33,6 +33,7 @@ type dashboardSession struct {
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
 	Status            surface.SessionStatus      `json:"status"`
+	Ended             bool                       `json:"ended,omitempty"`
 	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`

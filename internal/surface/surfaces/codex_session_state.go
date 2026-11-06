@@ -38,6 +38,7 @@ func codexSession(thread map[string]any) surface.Session {
 		Name:       surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
 		Cwd:        str(thread, "cwd"),
 		Status:     codexStatus(thread["status"]),
+		Ended:      codexThreadEnded(thread["status"]),
 		Source:     codexSource(thread["source"]),
 		WaitingOn:  codexSessionWaiting(str(thread, "id"), thread["status"]),
 		Subagent:   codexSubagent(thread),
@@ -83,10 +84,31 @@ func codexWaiting(threadID string, kind surface.WaitingKind) *surface.Waiting {
 	return &surface.Waiting{Kind: kind, ID: threadID + ":" + string(kind)}
 }
 
-func codexStatus(s any) surface.SessionStatus {
+// codexThreadStatuses maps every ThreadStatus type of Codex's app-server
+// protocol. A thread no runtime has loaded keeps its own status: the queue
+// loads it before delivery, and it has ended.
+var codexThreadStatuses = map[string]surface.SessionStatus{
+	"active":      surface.StatusBusy,
+	"idle":        surface.StatusIdle,
+	"notLoaded":   surface.StatusNotLoaded,
+	"systemError": surface.StatusUnknown,
+}
+
+func codexStatusType(s any) string {
 	if m, ok := s.(map[string]any); ok {
 		s = m["type"]
 	}
 	str, _ := s.(string)
-	return surface.NormalizeStatus(str)
+	return str
+}
+
+func codexStatus(s any) surface.SessionStatus {
+	if status, ok := codexThreadStatuses[codexStatusType(s)]; ok {
+		return status
+	}
+	return surface.StatusUnknown
+}
+
+func codexThreadEnded(s any) bool {
+	return codexStatusType(s) == "notLoaded"
 }
