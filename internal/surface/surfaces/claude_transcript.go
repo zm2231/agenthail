@@ -48,8 +48,8 @@ type claudeToolCall struct {
 }
 
 type claudeRecord struct {
-	Type       string `json:"type"`
-	UUID       string `json:"uuid"`
+	Type             string `json:"type"`
+	UUID             string `json:"uuid"`
 	ParentUUID       string `json:"parentUuid"`
 	PromptID         string `json:"promptId"`
 	IsCompactSummary bool   `json:"isCompactSummary"`
