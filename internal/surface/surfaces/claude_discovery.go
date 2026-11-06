@@ -113,10 +113,7 @@ func (c *Claude) CatalogWatchDirs() []string {
 func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transcripts func(string) []string) (claudeProcess, bool) {
 	m := record.fields
 	conversation := str(m, "sessionId")
-	bridge := ""
-	if !c.localOnly {
-		bridge = str(m, "bridgeSessionId")
-	}
+	bridge := c.recordBridge(m)
 	socket := c.peerSocket(ctx, m)
 	pid, _ := m["pid"].(float64)
 	hosted := c.host.runs(ctx, int(pid), conversation)

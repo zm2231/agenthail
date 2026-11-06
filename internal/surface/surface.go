@@ -516,6 +516,11 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrRouteChanged is a send that found its route gone before delivering
+// anything. The session it was given now names the route to take, which the
+// caller publishes before sending again.
+var ErrRouteChanged = errors.New("the session's route changed before delivery")
+
 // ErrNothingToSteer is a steer that found the session idle: its turn ended
 // before the steer reached it.
 var ErrNothingToSteer = errors.New("session idle; nothing to steer")
@@ -671,6 +676,16 @@ func (o SendOptions) RouteAuthor() Author {
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
 	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
+}
+
+// RouteRefresher re-reads what a session's live process offers now, so a send
+// routes on that rather than on a row read earlier.
+type RouteRefresher interface {
+	RefreshRoute(ctx context.Context, sess *Session)
+}
+
+func SameRoute(a, b Session) bool {
+	return a.Bridge == b.Bridge && a.Transport == b.Transport && a.PID == b.PID
 }
 
 type AgenthailTurnSender interface {

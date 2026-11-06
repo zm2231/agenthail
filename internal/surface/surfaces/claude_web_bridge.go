@@ -37,6 +37,35 @@ func toCse(bridgeID string) string {
 
 var claudeSendRequest = sidecarRequestWithCookies
 
+// errRemoteControlGone is a Remote Control session claude.ai no longer knows.
+// Claude can keep naming it in its session record after the server drops it.
+var errRemoteControlGone = errors.New("Remote Control session is gone")
+
+func (c *Claude) recordBridge(record map[string]any) string {
+	if c.localOnly {
+		return ""
+	}
+	bridge := str(record, "bridgeSessionId")
+	if bridge == "" {
+		return ""
+	}
+	c.goneMu.Lock()
+	defer c.goneMu.Unlock()
+	if c.goneBridges[toCse(bridge)] {
+		return ""
+	}
+	return bridge
+}
+
+func (c *Claude) forgetBridge(bridge string) {
+	c.goneMu.Lock()
+	defer c.goneMu.Unlock()
+	if c.goneBridges == nil {
+		c.goneBridges = map[string]bool{}
+	}
+	c.goneBridges[toCse(bridge)] = true
+}
+
 func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	return c.postContent(ctx, sess, message)
 }
@@ -98,7 +127,8 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	case http.StatusForbidden:
 		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAccessDenied)
 	case http.StatusNotFound:
-		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)
+		c.forgetBridge(sess.Bridge)
+		return nil, surface.DeliveryTerminal(fmt.Errorf("%w: send failed (HTTP %d): %s", errRemoteControlGone, status, diagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)
 	}
 	if status != http.StatusOK {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
