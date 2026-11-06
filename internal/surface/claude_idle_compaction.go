@@ -86,7 +86,7 @@ func validIdleCompactionMinTokens(minTokens *int64) error {
 	return nil
 }
 
-func idleCompactionEntries(home string)(map[string]idleCompactionEntry, error) {
+func idleCompactionEntries(home string) (map[string]idleCompactionEntry, error) {
 	config, err := ReadAgenthailConfig(home)
 	if err != nil {
 		return nil, err

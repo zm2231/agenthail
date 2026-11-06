@@ -12,7 +12,7 @@ A session's inbox is every message sent to it, whether it was delivered at once 
 
 The dispatcher records an intent before it tries a send (`prepareIntent` in `internal/delivery/delivery.go`), so a message delivered at once has one even though it never gets a queue row.
 
-Every queued message row is written by `enqueueMessageTx` (`internal/registry/registry_queue_enqueue.go`), which writes the row's intent in the same transaction or binds the submitted intent it is given. `TestOnlyTheQueueChokepointWritesMessageRows` fails if non-test code inserts into `message_queue` anywhere else. Its allowlist is `QueueGoal` and `QueueCompact`, which queue commands rather than messages, and `queueHostDeliveryTx`, which holds a send for a session another host owns: that host records the intent when the send reaches it.
+Every queued message row is written by `enqueueMessageTx` (`internal/registry/registry_queue_enqueue.go`), which writes the row's intent in the same transaction or binds the submitted intent it is given. `TestOnlyTheQueueChokepointWritesMessageRows` fails if non-test code inserts into `message_queue` anywhere else. Its allowlist is `QueueGoal` and `queueCompactTx`, which queue commands rather than messages, and `queueHostDeliveryTx`, which holds a send for a session another host owns: that host records the intent when the send reaches it.
 
 An intent's sender is the agent that sent the message, or one of Agenthail's own senders, which a session cannot message:
 

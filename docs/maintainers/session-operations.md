@@ -231,6 +231,36 @@ marks the queue row delivered only after the local transcript records a new
 command, the row becomes `unknown` for operator review instead of being retried
 as either a control or a message.
 
+### Idle compaction
+
+Claude's prompt cache lasts an hour when a request asks for it; a prompt after
+it expires writes the whole context into the cache again. `Daemon.compactIdle`
+(`internal/daemon/idle_compaction.go`) runs every minute and queues a compact
+for each catalog Claude session where all of these hold:
+
+- the session is idle, not ended, waits on nothing and runs no background task;
+- `Claude.IdleCompactionState` reads the transcript tail: the last main-thread
+  assistant record (sidechain and `<synthetic>` records skipped) is 50 to 60
+  minutes old, the newest cache write was to the one-hour cache
+  (`cache_creation.ephemeral_1h_input_tokens`), its input, cache-write and
+  cache-read tokens add up to at least the root's threshold, and no
+  `compact_boundary` follows it;
+- the session's config root has idle compaction on (`claudeIdleCompaction` in
+  `~/.agenthail/config.json`, keyed by root, on at 200000 tokens by default)
+  and no session under the root shows a usage limit that has not reset, since
+  the account would refuse the compact;
+- the session's capabilities include compact: a host session or one with a
+  Remote Control attachment. A terminal session without one cannot compact.
+
+`Registry.QueueIdleCompaction` writes the `idle_compactions` row for the
+session and request time with the queue row, once per request, and queues
+nothing when the session already has a queued or in-flight item. The queue
+delivers it like any compact. The compact's request uuid is stored on that row,
+and `sessionSourceManager.publishedTurn` relabels the compaction whose
+`/compact` record has that uuid from `manual` to `idle` wherever a turn is
+journaled or read from history; the transcript itself records a manual
+compact.
+
 For a `claude-bg` job, Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
 
 Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. The conversation has one row whatever its processes: the process that opened it first is attached to the row, sends to the session reach it, and a later process is addressed by its PID. When a process moves to another conversation (`/branch`, `/clear`, `/resume`), registering it under the new conversation detaches it from the old row; nothing else moves. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.
