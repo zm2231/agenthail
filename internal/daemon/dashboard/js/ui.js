@@ -2,6 +2,7 @@ import { paneAreas } from "./ui-areas.js";
 import { createBackdrop, parseBackground } from "./ui-backdrop.js";
 import { debounced, settledTracker } from "./ui-settled.js";
 import { foregroundOn, luminance, MARGIN, readableOnTint, readableSurface, readableText } from "./ui-contrast.js";
+import { SharedEventSource } from "./shared-stream.js";
 
 const ACCENT_TOKENS = ["--accent", "--accent-soft", "--on-accent"];
 const SURFACES = ["--paper", "--panel", "--raised", "--hover"];
@@ -236,7 +237,7 @@ if (typeof window !== "undefined" && window.document) {
   start({
     document: window.document,
     fetch: window.fetch.bind(window),
-    EventSource: window.EventSource,
+    EventSource: SharedEventSource,
     matchMedia: window.matchMedia.bind(window),
     storage: window.localStorage,
     colourOf: browserColour(window.document),
