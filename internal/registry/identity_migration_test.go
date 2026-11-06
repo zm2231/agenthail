@@ -175,6 +175,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	}
 	exec(`INSERT INTO session_runtime(session_id) VALUES(?),(?),('conversation-native')`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO session_archive(session_id,archived_at_ms) VALUES(?,1)`, rekeyedBridge)
+	exec(`INSERT INTO session_keep_alive(session_id,attempts) VALUES(?,1)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES(?,'hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_credentials(pending_ref,claimed_session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES('ref',?,'pending-hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)
@@ -187,6 +188,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		exec(`INSERT INTO session_journal(session_id,seq,kind,payload,observed_at,bytes,body_ref) VALUES(?,1,'item','{}',?,2,?)`, id, now, "body-"+id)
 		exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES(?,2)`, id)
 		exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,'x',?)`, "body-"+id, id, now)
+		exec(`INSERT INTO session_journal_body_tail(ref,session_id,start,chunk) VALUES(?,?,1,'y')`, "body-"+id, id)
 		exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES(?,'{}','{}',?)`, id, now)
 		exec(`INSERT INTO api_action_reservations(idempotency_key,session_id,action,source_session_id,receipt) VALUES(?,?,'send',?,?)`, "key-"+id, id, id, `{"sessionId":"`+id+`"}`)
 		exec(`INSERT INTO daemon_events(event_type,entity_id,payload,created_at) VALUES('session.status',?,?,?)`, id, []byte(`{"sessionId":"`+id+`"}`), now)

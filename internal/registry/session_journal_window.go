@@ -15,8 +15,8 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	}
 	var earliest, latest sql.NullInt64
 	var prunedSeq, nextSeq uint64
-	if err := r.read.QueryRow(`SELECT (SELECT MIN(seq) FROM session_journal WHERE session_id=?),
-		(SELECT MAX(seq) FROM session_journal WHERE session_id=?),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?),0),COALESCE((SELECT next_seq FROM session_journal_state WHERE session_id=?),0)`, sessionID, sessionID, sessionID, sessionID).Scan(&earliest, &latest, &prunedSeq, &nextSeq); err != nil {
+	read := r.preparedRead()
+	if err := read.QueryRow(journalWindowBoundsSQL, sessionID).Scan(&earliest, &latest, &prunedSeq, &nextSeq); err != nil {
 		return SessionJournalWindow{}, err
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
@@ -30,7 +30,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if window.Gap {
 		return window, nil
 	}
-	rows, err := r.read.Query(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
+	rows, err := read.Query(journalWindowRowsSQL, sessionID, after, limit)
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}

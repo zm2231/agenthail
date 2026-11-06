@@ -221,13 +221,7 @@ struct QueueListView: View {
             if item.status == "pending" {
                 Text(item.holdLabel).font(.footnote).foregroundStyle(PhonePalette.muted)
             }
-            Button { open(item.sessionId) } label: {
-                HStack {
-                    Text(item.target).font(.headline)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.caption)
-                }.frame(minHeight: 44, alignment: .leading)
-            }.buttonStyle(.plain).accessibilityIdentifier("inbox-session-\(item.id)")
+            InboxSessionLink(title: item.target, identifier: "inbox-session-\(item.id)") { open(item.sessionId) }
             if let sender = envelope.sender { Text("From \(sender)").font(.footnote).foregroundStyle(PhonePalette.muted) }
             Text(envelope.body).font(.body).lineLimit(4).textSelection(.enabled)
             if let attachments = item.attachments, !attachments.isEmpty {
