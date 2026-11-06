@@ -44,7 +44,7 @@ final class ActivityPresentationTests: XCTestCase {
     func testTurnDurationJoinsTheReplyItEnds() throws {
         let json = #"[{"id":"m","kind":"message","role":"assistant","title":"assistant","text":"Done.","timestamp":"2026-09-12T04:03:00Z","truncated":false},{"id":"d","kind":"event","title":"Turn duration","text":"1m55s","truncated":false},{"id":"u","kind":"message","role":"user","title":"user","text":"Next","truncated":false},{"id":"d2","kind":"event","title":"Turn duration","text":"12s","truncated":false}]"#
         let groups = TimelineGroup.make(try JSONDecoder().decode([TimelineItem].self, from: Data(json.utf8)))
-        XCTAssertEqual(groups.map(\.id), ["m", "u", "d2"].map(TranscriptRowID.item), "only a reply takes the duration that follows it")
+        XCTAssertEqual(groups.map(\.id), ["m", "u", "d2"].map(TranscriptRowID.group), "only a reply takes the duration that follows it")
         XCTAssertEqual(groups[0].finished, "1m55s")
         XCTAssertNil(groups[1].finished)
         XCTAssertEqual(TurnClock.clock("1m55s"), "1:55")
@@ -53,7 +53,7 @@ final class ActivityPresentationTests: XCTestCase {
     func testStreamedCodexReplyTakesItsTurnDuration() throws {
         let json = #"[{"id":"t","kind":"text","title":"Assistant","text":"Done.","timestamp":"2026-09-12T04:03:00Z","truncated":false},{"id":"d","kind":"event","title":"Turn duration","text":"42s","truncated":false},{"id":"p","kind":"text","role":"peer","title":"peer","text":"Ping","truncated":false},{"id":"d2","kind":"event","title":"Turn duration","text":"3s","truncated":false}]"#
         let groups = TimelineGroup.make(try JSONDecoder().decode([TimelineItem].self, from: Data(json.utf8)))
-        XCTAssertEqual(groups.map(\.id), ["t", "p", "d2"].map(TranscriptRowID.item), "a text reply without a role is the agent's and takes the duration; a peer's does not")
+        XCTAssertEqual(groups.map(\.id), ["t", "p", "d2"].map(TranscriptRowID.group), "a text reply without a role is the agent's and takes the duration; a peer's does not")
         XCTAssertEqual(groups[0].finished, "42s")
         XCTAssertTrue(groups[0].items[0].isSaid)
     }

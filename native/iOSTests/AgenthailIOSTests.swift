@@ -223,10 +223,10 @@ final class AgenthailIOSTests: XCTestCase {
         let reply = TimelineItem(id: "r", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
         let done = TimelineItem(id: "d", kind: "done", role: nil, title: "done", text: "", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
         let groups = TimelineGroup.make([peer("a", "@x"), done, peer("b", "@y"), reply])
-        XCTAssertEqual(groups.map(\.id), [TranscriptRowID.fold(TranscriptRowID.item("a")), TranscriptRowID.item("r")])
+        XCTAssertEqual(groups.map(\.id), [TranscriptRowID.fold(TranscriptRowID.group("a")), TranscriptRowID.group("r")])
         XCTAssertEqual(groups.first?.foldLabel, "2 messages from agents")
-        XCTAssertEqual(TimelineGroup.make([reply, peer("a", "@x"), peer("b", "@y")]).map(\.id), ["r", "a", "b"].map(TranscriptRowID.item))
-        XCTAssertEqual(TimelineGroup.make([peer("a", "@x"), peer("b", "@y"), reply], foldAgents: false).map(\.id), ["a", "b", "r"].map(TranscriptRowID.item))
+        XCTAssertEqual(TimelineGroup.make([reply, peer("a", "@x"), peer("b", "@y")]).map(\.id), ["r", "a", "b"].map(TranscriptRowID.group))
+        XCTAssertEqual(TimelineGroup.make([peer("a", "@x"), peer("b", "@y"), reply], foldAgents: false).map(\.id), ["a", "b", "r"].map(TranscriptRowID.group))
     }
 
     func testConsecutiveSendsShareOneGroupWithTheirResults() throws {
@@ -240,7 +240,7 @@ final class AgenthailIOSTests: XCTestCase {
         }
         let reply = TimelineItem(id: "m", kind: "message", role: "assistant", title: "assistant", text: "ok", timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
         let groups = TimelineGroup.make([send("a"), send("b"), result("a"), result("b"), reply, send("c")])
-        XCTAssertEqual(groups.map(\.id), ["a", "m", "c"].map(TranscriptRowID.item))
+        XCTAssertEqual(groups.map(\.id), ["a", "m", "c"].map(TranscriptRowID.group))
         XCTAssertEqual(groups[0].items.map(\.id), ["a", "b", "ra", "rb"])
         XCTAssertTrue(groups[0].isSend)
     }

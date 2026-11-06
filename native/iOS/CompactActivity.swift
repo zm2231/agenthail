@@ -40,7 +40,7 @@ struct TimelineGroup: Identifiable {
         var sends: [String: Int] = [:]
         for item in items {
             if item.agent?.isSend == true {
-                if groups.last?.isSend != true { groups.append(TimelineGroup(id: TranscriptRowID.item(item.id), items: [])) }
+                if groups.last?.isSend != true { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [])) }
                 groups[groups.count - 1].items.append(item)
                 if let call = item.callId { sends[call] = groups.count - 1 }
                 continue
@@ -52,7 +52,7 @@ struct TimelineGroup: Identifiable {
             let activity = ["toolCall", "toolResult", "reasoning"].contains(item.kind)
             if activity, groups.last?.isActivity == true { groups[groups.count - 1].items.append(item) }
             else if isTurnDuration(item), let last = groups.last, last.isReply, last.items.count == 1 { groups[groups.count - 1].items.append(item) }
-            else { groups.append(TimelineGroup(id: TranscriptRowID.item(item.id), items: [item])) }
+            else { groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item])) }
         }
         return foldAgents ? AgentFoldGroups.folded(groups) : groups
     }
@@ -66,7 +66,7 @@ struct TimelineGroup: Identifiable {
                 groups[index].items.append(item)
             } else {
                 if item.kind == "toolCall", let callID = item.callId { calls[callID] = groups.count }
-                groups.append(TimelineGroup(id: TranscriptRowID.item(item.id), items: [item]))
+                groups.append(TimelineGroup(id: TranscriptRowID.group(item.id), items: [item]))
             }
         }
         return groups

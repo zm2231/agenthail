@@ -158,6 +158,16 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testARunAndItsFirstToolRememberTheirOwnState() throws {
+        let calls = (1...7).map { TimelineItem(id: "c\($0)", kind: "toolCall", role: "assistant", title: "Bash", text: "{}", timestamp: nil, callId: "k\($0)", status: nil, truncated: false, truncationReason: nil, bodyRef: nil) }
+        let run = try XCTUnwrap(TimelineGroup.make(calls).first)
+        XCTAssertTrue(run.folds)
+        let memory = TranscriptRowMemory()
+        memory.set(run.id, open: true, in: "s")
+        XCTAssertNil(memory.isOpen(TranscriptRowID.item(calls[0].id), in: "s"), "opening the run leaves its first tool as it was")
+    }
+
+    @MainActor
     func testCreationNavigatesKnownSessionAndPreservesUnknownReceipt() async throws {
         ParityProtocol.state.reset(unknown: true)
         let model = makeModel()

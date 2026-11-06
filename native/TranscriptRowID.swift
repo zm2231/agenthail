@@ -1,6 +1,7 @@
 enum TranscriptRowID {
     static func item(_ id: String) -> String { "i:" + id }
     static func tools(_ first: String) -> String { "t:" + first }
+    static func group(_ first: String) -> String { "g:" + first }
     static func images(_ message: String) -> String { "m:" + message }
     static func fold(_ first: String) -> String { "f:" + first }
     static func queue(_ listID: String) -> String { "q:" + listID }
