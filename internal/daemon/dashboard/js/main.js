@@ -23,6 +23,8 @@ import { bindSessionOperationEvents } from "./session-operations.js";
 import { start as startUsage } from "./usage.js";
 import { toast } from "./feedback.js";
 import { app } from "./state.js";
+import { startLiveOrder } from "./live-order.js";
+import { rereadSoon } from "./order-refresh.js";
 
 bindVoiceEvents();
 bindConversationEvents();
@@ -56,7 +58,7 @@ window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    load();
+    rereadSoon(0);
     startLiveStream();
   } else {
     stopLiveStream();
@@ -64,6 +66,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 showView(location.hash.slice(1) || "overview");
+startLiveOrder();
 
 const pushedSession = new URLSearchParams(location.search).get("session");
 
@@ -81,6 +84,4 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.startMessages();
 }
 
-setInterval(() => {
-  if (document.visibilityState === "visible") load();
-}, 30000);
+setInterval(() => rereadSoon(0), 30000);
