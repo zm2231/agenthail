@@ -1,4 +1,4 @@
--- schemaVersion 68
+-- schemaVersion 69
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -95,6 +95,9 @@ CREATE UNIQUE INDEX session_journal_provider_key
 
 -- index session_moves_conversation
 CREATE INDEX session_moves_conversation ON session_moves(conversation, role, state);
+
+-- index session_prs_watched
+CREATE INDEX session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked=0;
 
 -- index sessions_parent
 CREATE INDEX sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
@@ -733,6 +736,34 @@ CREATE TABLE session_origins (
 	via TEXT NOT NULL,
 	creator_session_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table session_prs
+CREATE TABLE session_prs (
+	session_id TEXT NOT NULL,
+	repo TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	url TEXT NOT NULL,
+	source TEXT NOT NULL,
+	unlinked INTEGER NOT NULL DEFAULT 0,
+	watch INTEGER NOT NULL DEFAULT 1,
+	title TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT '',
+	head_sha TEXT NOT NULL DEFAULT '',
+	mergeable TEXT NOT NULL DEFAULT '',
+	review TEXT NOT NULL DEFAULT '',
+	checks TEXT NOT NULL DEFAULT '',
+	failed_checks TEXT NOT NULL DEFAULT '',
+	passed_head TEXT NOT NULL DEFAULT '',
+	conflict_head TEXT NOT NULL DEFAULT '',
+	remarks_through_ms INTEGER NOT NULL DEFAULT 0,
+	remark_ids TEXT NOT NULL DEFAULT '',
+	wakes INTEGER NOT NULL DEFAULT 0,
+	comment_wakes INTEGER NOT NULL DEFAULT 0,
+	read_failures INTEGER NOT NULL DEFAULT 0,
+	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
+	linked_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (session_id, repo, number)
 );
 
 -- table session_rekeys

@@ -209,6 +209,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"tasks", `UPDATE OR IGNORE tasks SET child_session_id=?2 WHERE child_session_id=?1`, false},
 		{"tasks", `UPDATE tasks SET parent_session_id=?2 WHERE parent_session_id=?1`, false},
 		{"work_records", `UPDATE OR IGNORE work_records SET session_id=?2 WHERE session_id=?1`, false},
+		{"session_prs", `UPDATE OR IGNORE session_prs SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_ceilings", `INSERT OR IGNORE INTO session_ceilings(session_id,ceiling) SELECT ?2,ceiling FROM session_ceilings WHERE session_id=?1`, false},
 		{"limit_resumes", `UPDATE OR IGNORE limit_resumes SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_context", `INSERT OR IGNORE INTO session_context(session_id,fingerprint,start_key,delivered_at_ms) SELECT ?2,fingerprint,start_key,delivered_at_ms FROM session_context WHERE session_id=?1`, false},
