@@ -69,13 +69,31 @@ func TestARelationLeftOutIsReadFromTheFlagsAndSaidBack(t *testing.T) {
 	refused(t, s, ledger.AttachRequest{UtteranceID: u(16), To: "widget-Z9", Clauses: []string{"x"}}, `"widget-Z9" is not a goal, ask, clause or work item`)
 }
 
-func TestARelationLeftOutOnAQuestionAnswersIt(t *testing.T) {
+func TestARelationLeftOutOnAQuestionAnswersItWithoutRewritingAnything(t *testing.T) {
 	s := newStore(t)
 	searchAsk(t, s)
-	capture(t, s, project, "claude-prompt:2", "full-text")
-	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which kind of search?", DefaultAnswer: "full-text"})
-	result := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", To: q.ID})
-	if result.Readback != "intent ledger: widget-Q1 answered (no --as, read as answers: --to is a question)" {
-		t.Fatalf("readback = %q", result.Readback)
+	for i := 2; i <= 5; i++ {
+		capture(t, s, project, fmt.Sprintf("claude-prompt:%d", i), "full-text")
+	}
+	onClause := askQuestion(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which kind of search?", DefaultAnswer: "full-text"})
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", To: onClause.ID, Clauses: []string{"build full-text search"}},
+		"an answer to widget-Q1 with a --clause rewords widget-C1, so give --as answers to apply it")
+	if c := clause(t, board(t, s), "widget-C1"); c.Text != "build search" {
+		t.Fatalf("a refused answer reworded the clause: %+v", c)
+	}
+	onProject := askQuestion(t, s, ledger.QuestionRequest{To: ledger.ProjectTarget, Text: "which database?", DefaultAnswer: "sqlite"})
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:3", To: onProject.ID, Clauses: []string{"use sqlite"}},
+		"an answer to widget-Q2 with a --clause records a decision on the project, so give --as answers to apply it")
+	onAsk := askQuestion(t, s, ledger.QuestionRequest{To: "widget-A1", Text: "anything else?", DefaultAnswer: "no"})
+	added := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", To: onAsk.ID, Clauses: []string{"rank by recency"}})
+	if got := withoutBoardTail(added.Readback); got != "intent ledger: widget-Q3 answered (+widget-C2 on widget-A1) (no --as, read as answers: --to is a question)" {
+		t.Fatalf("readback = %q", got)
+	}
+	plain := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:5", To: onClause.ID})
+	if got := withoutBoardTail(plain.Readback); got != "intent ledger: widget-Q1 answered (no --as, read as answers: --to is a question)" {
+		t.Fatalf("readback = %q", got)
+	}
+	if c := clause(t, board(t, s), "widget-C1"); c.Text != "build search" {
+		t.Fatalf("an answer without --clause reworded the clause: %+v", c)
 	}
 }

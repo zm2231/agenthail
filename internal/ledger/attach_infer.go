@@ -19,6 +19,8 @@ func (p *attachPlan) inferAs() error {
 		req.As, why = AsReacts, "--ack was given"
 	case req.Adopt || req.Reject:
 		req.As, why = AsReacts, "--adopt or --reject was given"
+	case kind == "question" && words && p.board.asks[p.board.questions[req.To].Target] == nil:
+		return refuse("an answer to %s with a --clause %s, so give --as answers to apply it", req.To, p.answerChange(p.board.questions[req.To]))
 	case kind == "question":
 		req.As, why = AsAnswers, "--to is a question"
 	case !words && req.To == "":
@@ -40,6 +42,13 @@ func (p *attachPlan) inferAs() error {
 	}
 	p.notes = append(p.notes, fmt.Sprintf("no --as, read as %s: %s", req.As, why))
 	return nil
+}
+
+func (p *attachPlan) answerChange(q *Question) string {
+	if p.board.clauses[q.Target] != nil {
+		return "rewords " + q.Target
+	}
+	return "records a decision on " + p.label(q.GoalID)
 }
 
 func (b *Board) kindOf(id string) string {

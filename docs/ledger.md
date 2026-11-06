@@ -63,13 +63,13 @@ agenthail ledger attach <utterance> --as extends --to <ask> --clause "and the do
 | `--session` | `delegates` |
 | `--ack` | `reacts --ack` |
 | `--adopt` or `--reject` | `reacts` |
-| `--to <question>` | `answers` |
+| `--to <question>` | `answers`; with a `--clause` only for a question on an ask, where the answer adds a clause |
 | no `--to` and no `--clause` | `conversation` |
 | `--to` but no `--clause` | `reacts`, which changes nothing |
 | `--to <clause>` or `--to <ask>` with a `--clause` | `extends`: the words become a new clause on the ask |
 | `--to <goal>`, `--to project`, found work, or no `--to`, with a `--clause` | `new-ask` |
 
-A work item counts as the clause it serves. Nothing that rewrites or drops the person's words is guessed: rewording a clause needs `--as refines`, acking a cut needs `--ack`, and constraints and decisions need their `--as`.
+A work item counts as the clause it serves. Nothing that rewrites or drops the person's words is guessed: rewording a clause needs `--as refines`, acking a cut needs `--ack`, an answer that rewords a clause or records a decision needs `--as answers`, and constraints and decisions need their `--as`.
 
 ```
 agenthail ledger attach <utterance> --to <ask> --clause "and the docs"   # intent ledger: +1 clause on <ask> (...) (no --as, read as extends: --to is an ask)

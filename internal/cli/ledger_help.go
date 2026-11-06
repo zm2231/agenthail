@@ -59,7 +59,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  is read from the flags: words on a clause or ask extend the ask,
                                  on a goal or the project start a new ask, on a question answer it;
                                  no --clause is a reaction, and neither --to nor --clause conversation.
-                                 Rewording (refines), acking (--ack) and constrains/decides need saying
+                                 Rewording (refines), acking (--ack), an answer that rewords or decides
+                                 (answers) and constrains/decides need saying
   ledger propose --to <id|project> --clause "..."
                                  Propose clauses; they bind once the person adopts them
   ledger question --to <id|project> "<question>" --recommendation "..." --default "..."
