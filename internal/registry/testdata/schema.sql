@@ -1,4 +1,4 @@
--- schemaVersion 64
+-- schemaVersion 65
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -157,6 +157,12 @@ CREATE TABLE catalog_events (
 	entity_id TEXT NOT NULL,
 	payload BLOB NOT NULL,
 	created_at TEXT NOT NULL
+);
+
+-- table catalog_presentation_version
+CREATE TABLE catalog_presentation_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
 );
 
 -- table catalog_retired_version
@@ -824,6 +830,280 @@ CREATE TABLE turn_ends (
 	answer_message_id TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
 );
+
+-- trigger catalog_presentation_version_aliases_delete
+CREATE TRIGGER catalog_presentation_version_aliases_delete AFTER DELETE ON aliases
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_aliases_insert
+CREATE TRIGGER catalog_presentation_version_aliases_insert AFTER INSERT ON aliases
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_aliases_update
+CREATE TRIGGER catalog_presentation_version_aliases_update AFTER UPDATE ON aliases
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_delete
+CREATE TRIGGER catalog_presentation_version_attention_items_delete AFTER DELETE ON attention_items
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_insert
+CREATE TRIGGER catalog_presentation_version_attention_items_insert AFTER INSERT ON attention_items
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_update
+CREATE TRIGGER catalog_presentation_version_attention_items_update AFTER UPDATE ON attention_items
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_delete
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_delete AFTER DELETE ON catalog_sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_insert
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_insert AFTER INSERT ON catalog_sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_update
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions WHEN NEW.session_id IS NOT OLD.session_id OR NEW.unavailable_reason IS NOT OLD.unavailable_reason OR NEW.waiting_on IS NOT OLD.waiting_on OR NEW.background_tasks IS NOT OLD.background_tasks OR NEW.usage_limit IS NOT OLD.usage_limit OR NEW.turn_stop IS NOT OLD.turn_stop OR NEW.host_queue_count IS NOT OLD.host_queue_count OR NEW.observed_at IS NOT OLD.observed_at OR NEW.projection_generation IS NOT OLD.projection_generation OR NEW.projection_fingerprint IS NOT OLD.projection_fingerprint OR NEW.misses IS NOT OLD.misses OR NEW.discovery_failures IS NOT OLD.discovery_failures OR NEW.retired IS NOT OLD.retired OR NEW.current IS NOT OLD.current OR NEW.host_project IS NOT OLD.host_project
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_delete
+CREATE TRIGGER catalog_presentation_version_coordinator_history_delete AFTER DELETE ON coordinator_history
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_insert
+CREATE TRIGGER catalog_presentation_version_coordinator_history_insert AFTER INSERT ON coordinator_history
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_update
+CREATE TRIGGER catalog_presentation_version_coordinator_history_update AFTER UPDATE ON coordinator_history
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_delete
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_delete AFTER DELETE ON coordinator_replaced
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_insert
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_insert AFTER INSERT ON coordinator_replaced
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_update
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_update AFTER UPDATE ON coordinator_replaced
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_delete
+CREATE TRIGGER catalog_presentation_version_coordinators_delete AFTER DELETE ON coordinators
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_insert
+CREATE TRIGGER catalog_presentation_version_coordinators_insert AFTER INSERT ON coordinators
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_update
+CREATE TRIGGER catalog_presentation_version_coordinators_update AFTER UPDATE ON coordinators
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_delete
+CREATE TRIGGER catalog_presentation_version_delivery_intents_delete AFTER DELETE ON delivery_intents WHEN (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_insert
+CREATE TRIGGER catalog_presentation_version_delivery_intents_insert AFTER INSERT ON delivery_intents WHEN (NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id)))
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_update
+CREATE TRIGGER catalog_presentation_version_delivery_intents_update AFTER UPDATE ON delivery_intents WHEN (NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id))) OR (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_delete
+CREATE TRIGGER catalog_presentation_version_limit_resumes_delete AFTER DELETE ON limit_resumes
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_insert
+CREATE TRIGGER catalog_presentation_version_limit_resumes_insert AFTER INSERT ON limit_resumes
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_update
+CREATE TRIGGER catalog_presentation_version_limit_resumes_update AFTER UPDATE ON limit_resumes
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_delete
+CREATE TRIGGER catalog_presentation_version_message_queue_delete AFTER DELETE ON message_queue
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_insert
+CREATE TRIGGER catalog_presentation_version_message_queue_insert AFTER INSERT ON message_queue
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_update
+CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE ON message_queue
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_delete
+CREATE TRIGGER catalog_presentation_version_projects_delete AFTER DELETE ON projects
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_insert
+CREATE TRIGGER catalog_presentation_version_projects_insert AFTER INSERT ON projects
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_update
+CREATE TRIGGER catalog_presentation_version_projects_update AFTER UPDATE ON projects
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_delete
+CREATE TRIGGER catalog_presentation_version_session_archive_delete AFTER DELETE ON session_archive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_insert
+CREATE TRIGGER catalog_presentation_version_session_archive_insert AFTER INSERT ON session_archive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_update
+CREATE TRIGGER catalog_presentation_version_session_archive_update AFTER UPDATE ON session_archive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_delete
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_delete AFTER DELETE ON session_keep_alive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_insert
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_insert AFTER INSERT ON session_keep_alive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_update
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_delete
+CREATE TRIGGER catalog_presentation_version_session_runtime_delete AFTER DELETE ON session_runtime
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_insert
+CREATE TRIGGER catalog_presentation_version_session_runtime_insert AFTER INSERT ON session_runtime
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_update
+CREATE TRIGGER catalog_presentation_version_session_runtime_update AFTER UPDATE OF session_id,completed_turn_id ON session_runtime WHEN NEW.session_id IS NOT OLD.session_id OR NEW.completed_turn_id IS NOT OLD.completed_turn_id
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_delete
+CREATE TRIGGER catalog_presentation_version_sessions_delete AFTER DELETE ON sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_insert
+CREATE TRIGGER catalog_presentation_version_sessions_insert AFTER INSERT ON sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_update
+CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions WHEN NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.surface IS NOT OLD.surface OR NEW.status IS NOT OLD.status OR NEW.cwd IS NOT OLD.cwd OR NEW.last_active_ms IS NOT OLD.last_active_ms OR NEW.runtime_kind IS NOT OLD.runtime_kind OR NEW.source IS NOT OLD.source OR NEW.transport IS NOT OLD.transport OR NEW.host_id IS NOT OLD.host_id OR NEW.parent_session_id IS NOT OLD.parent_session_id OR NEW.root_session_id IS NOT OLD.root_session_id OR NEW.subagent_depth IS NOT OLD.subagent_depth OR NEW.agent_nickname IS NOT OLD.agent_nickname OR NEW.agent_role IS NOT OLD.agent_role OR NEW.registered_at IS NOT OLD.registered_at OR NEW.pinned_at_ms IS NOT OLD.pinned_at_ms OR NEW.snoozed_at_ms IS NOT OLD.snoozed_at_ms OR NEW.snoozed_until_ms IS NOT OLD.snoozed_until_ms OR NEW.snooze_wake IS NOT OLD.snooze_wake
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_delete
+CREATE TRIGGER catalog_presentation_version_turn_ends_delete AFTER DELETE ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_insert
+CREATE TRIGGER catalog_presentation_version_turn_ends_insert AFTER INSERT ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_update
+CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
 
 -- trigger catalog_retired_version_archived
 CREATE TRIGGER catalog_retired_version_archived AFTER INSERT ON session_archive

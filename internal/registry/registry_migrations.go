@@ -352,6 +352,9 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(catalogRetiredSchema); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(catalogPresentationVersionSchema()); err != nil {
+		return err
+	}
 	if version < 29 {
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET ` + catalogCurrentAssignment("catalog_sessions")); err != nil {
 			return err
