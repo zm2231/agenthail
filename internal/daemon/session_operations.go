@@ -87,6 +87,9 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 		if err == nil {
 			err = d.dispatcher().RegisterReached(&addressed, session)
 		}
+		if err == nil {
+			err = d.recordLifecycleIntent(session.ID, action)
+		}
 	}
 	if err != nil {
 		code := "session_operation_failed"

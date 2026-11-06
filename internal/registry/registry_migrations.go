@@ -191,6 +191,8 @@ func migrateTx(tx *sql.Tx) error {
 		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
+		{"pinned_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err
@@ -415,6 +417,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 54 {
 		if err := moveLedgerCaptureIntoTheLog(tx); err != nil {
+			return err
+		}
+	}
+	if version >= 1 && version < 59 {
+		if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=CAST(strftime('%s','now') AS INTEGER)*1000 WHERE pinned_at_ms=0 AND id IN (`+localLeadSessions+`)`); err != nil {
 			return err
 		}
 	}

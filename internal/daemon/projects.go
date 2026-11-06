@@ -25,6 +25,7 @@ import (
 type catalogViewState struct {
 	archive   registry.ArchiveState
 	attention map[string]bool
+	pins      map[string]registry.SessionPin
 }
 
 func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
@@ -40,7 +41,11 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	for _, item := range items {
 		attention[item.SessionID] = true
 	}
-	return catalogViewState{archive: archive, attention: attention}, nil
+	pins, err := d.Registry.SessionPins()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read pinned sessions: %w", err)
+	}
+	return catalogViewState{archive: archive, attention: attention, pins: pins}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -91,6 +96,8 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 		row.Project = &project
 	}
 	row.Archived = archived
+	pin := view.pins[row.ID]
+	row.PinnedAt, row.KeepAlive = pin.PinnedAt, keepAliveRow(pin.KeepAlive)
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether

@@ -117,6 +117,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 	}
 	if record.HostID == "" {
 		row.Archived = record.Archived
+		row.PinnedAt, row.KeepAlive = record.PinnedAt, keepAliveRow(record.KeepAlive)
 	}
 	return row, nil
 }

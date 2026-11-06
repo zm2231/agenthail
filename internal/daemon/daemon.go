@@ -65,6 +65,7 @@ type Daemon struct {
 	announceMu           sync.Mutex
 	announcing           map[string]string
 	announcingRefusal    map[int64]int64
+	announcingKeepAlive  map[string]bool
 	catalogNudge         chan struct{}
 	presence             catalogPresence
 	leads                leadWatch
@@ -337,6 +338,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
+	go d.runKeepAlive(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)

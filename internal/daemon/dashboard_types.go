@@ -45,6 +45,8 @@ type dashboardSession struct {
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
 	Archived          bool                       `json:"archived,omitempty"`
+	PinnedAt          time.Time                  `json:"pinnedAt,omitzero"`
+	KeepAlive         *dashboardKeepAlive        `json:"keepAlive,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`
