@@ -143,6 +143,44 @@ func viewRow(t *testing.T, d *Daemon, id string) dashboardSession {
 	return dashboardSession{}
 }
 
+func TestInAProjectWithALeadOnlyAgentStartedSessionsAskTheLead(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := newNoticeFixture(t)
+	f.setLead(t, "lead")
+	for id, via := range map[string]registry.OriginVia{"by-person": registry.OriginPerson, "by-voice": registry.OriginVoice} {
+		session := f.worker
+		session.ID = id
+		if err := f.reg.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		f.fake.sessions[id] = session
+		if err := f.reg.RecordSessionOrigin(registry.SessionOrigin{SessionID: id, Via: via}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := mcpServer(t, f.d)
+	asked := map[string]any{}
+	for _, id := range []string{"worker", "by-person", "by-voice"} {
+		session, err := f.reg.Session(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, refused := callMCP(t, mcpSession(t, server, issueMCPToken(t, f.d, *session)), "agenthail_end_turn", deployAsk)
+		if refused {
+			t.Fatalf("%s: %v", id, out)
+		}
+		asked[id] = out["askedSession"]
+	}
+	if asked["worker"] != "lead" || asked["by-person"] != nil || asked["by-voice"] != nil {
+		t.Fatalf("asked %v: the worker asks its lead, the person's and voice's sessions ask the person", asked)
+	}
+	for _, id := range []string{"by-person", "by-voice"} {
+		if row := viewRow(t, f.d, id); row.Attention == nil || row.Attention.Kind != AttentionAsk {
+			t.Fatalf("%s is not in front of the person: %+v", id, row.Attention)
+		}
+	}
+}
+
 func TestAnEndOfTurnTheAgentCanFixIsRefused(t *testing.T) {
 	f := newEndTurnFixture(t)
 	ask := func(question string, options ...any) map[string]any {
