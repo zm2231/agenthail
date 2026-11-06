@@ -49,14 +49,11 @@ func NewPlan(ctx context.Context, spec Spec) (Plan, error) {
 	if err != nil {
 		return Plan{}, ErrNotRepository
 	}
-	common, err := git(ctx, cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	main, err := mainWorktree(ctx, cwd, toplevel)
 	if err != nil {
 		return Plan{}, err
 	}
-	if filepath.Base(common) != ".git" {
-		return Plan{}, fmt.Errorf("%s has no main checkout to hold worktrees", common)
-	}
-	plan := Plan{RepoRoot: filepath.Dir(common), Toplevel: toplevel, Branch: spec.Branch}
+	plan := Plan{RepoRoot: main, Toplevel: toplevel, Branch: spec.Branch}
 	if plan.Branch == "" {
 		plan.Branch = defaultBranch(spec.Name)
 	}
@@ -135,6 +132,30 @@ func Discard(ctx context.Context, plan Plan) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// mainWorktree is the repository's main checkout. A submodule's git
+// directory lives in its superproject's, so its checkout comes from
+// core.worktree rather than beside that directory.
+func mainWorktree(ctx context.Context, cwd, toplevel string) (string, error) {
+	paths, err := git(ctx, cwd, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	gitDir, common, _ := strings.Cut(paths, "\n")
+	if gitDir == common {
+		return toplevel, nil
+	}
+	if filepath.Base(common) == ".git" {
+		return filepath.Dir(common), nil
+	}
+	if configured, err := git(ctx, cwd, "--git-dir="+common, "config", "core.worktree"); err == nil && configured != "" {
+		if !filepath.IsAbs(configured) {
+			configured = filepath.Join(common, configured)
+		}
+		return filepath.EvalSymlinks(configured)
+	}
+	return "", fmt.Errorf("the repository has no main checkout to hold worktrees")
 }
 
 // excludeWorktrees keeps the worktrees folder out of the main checkout's

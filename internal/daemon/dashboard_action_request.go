@@ -13,6 +13,7 @@ type dashboardActionRequest struct {
 	Worktree        string                     `json:"worktree"`
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`
+	ForceIgnored    bool                       `json:"forceIgnored"`
 	Agent           string                     `json:"agent"`
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`

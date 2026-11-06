@@ -1,6 +1,9 @@
 package registry
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	WorkCreating = "creating"
@@ -33,6 +36,7 @@ type WorkRecord struct {
 	SettledReason string
 	Cleanup       string
 	CleanupReason string
+	KeptPaths     []string
 	CreatedAt     time.Time
 	SettledAt     time.Time
 }
@@ -51,7 +55,7 @@ func (r *Registry) DropWork(worktreePath string) error {
 // SettleWork marks a session's active worktree done and due for cleanup; false
 // when the session has none or it was already settled.
 func (r *Registry) SettleWork(sessionID, reason string, at time.Time) (bool, error) {
-	result, err := r.db.Exec(`UPDATE work_records SET state=?,settled_reason=?,settled_at_ms=?,cleanup=?,cleanup_reason='' WHERE session_id=? AND state=?`,
+	result, err := r.db.Exec(`UPDATE work_records SET state=?,settled_reason=?,settled_at_ms=?,cleanup=?,cleanup_reason='',kept_paths='' WHERE session_id=? AND state=?`,
 		WorkSettled, reason, at.UnixMilli(), WorkCleanupPending, sessionID, WorkActive)
 	if err != nil {
 		return false, err
@@ -83,8 +87,16 @@ func (r *Registry) ActivateWork(worktreePath, sessionID string) (bool, error) {
 	return activated == 1, err
 }
 
-func (r *Registry) SetWorkCleanup(worktreePath, cleanup, reason string) error {
-	_, err := r.db.Exec(`UPDATE work_records SET cleanup=?,cleanup_reason=? WHERE worktree_path=?`, cleanup, reason, worktreePath)
+func (r *Registry) SetWorkCleanup(worktreePath, cleanup, reason string, keptPaths []string) error {
+	kept := ""
+	if len(keptPaths) > 0 {
+		encoded, err := json.Marshal(keptPaths)
+		if err != nil {
+			return err
+		}
+		kept = string(encoded)
+	}
+	_, err := r.db.Exec(`UPDATE work_records SET cleanup=?,cleanup_reason=?,kept_paths=? WHERE worktree_path=?`, cleanup, reason, kept, worktreePath)
 	return err
 }
 
@@ -129,7 +141,7 @@ func (r *Registry) SessionWork() (map[string]WorkRecord, error) {
 }
 
 func (r *Registry) workRecords(where string, args ...any) ([]WorkRecord, error) {
-	rows, err := r.read.Query(`SELECT worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,settled_reason,cleanup,cleanup_reason,created_at_ms,settled_at_ms FROM work_records `+where+` ORDER BY created_at_ms`, args...)
+	rows, err := r.read.Query(`SELECT worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,settled_reason,cleanup,cleanup_reason,kept_paths,created_at_ms,settled_at_ms FROM work_records `+where+` ORDER BY created_at_ms`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +150,14 @@ func (r *Registry) workRecords(where string, args ...any) ([]WorkRecord, error) 
 	for rows.Next() {
 		var record WorkRecord
 		var created, settled int64
-		if err := rows.Scan(&record.WorktreePath, &record.SessionID, &record.RepoRoot, &record.Branch, &record.BaseRef, &record.BaseCommit, &record.State, &record.SettledReason, &record.Cleanup, &record.CleanupReason, &created, &settled); err != nil {
+		var kept string
+		if err := rows.Scan(&record.WorktreePath, &record.SessionID, &record.RepoRoot, &record.Branch, &record.BaseRef, &record.BaseCommit, &record.State, &record.SettledReason, &record.Cleanup, &record.CleanupReason, &kept, &created, &settled); err != nil {
 			return nil, err
+		}
+		if kept != "" {
+			if err := json.Unmarshal([]byte(kept), &record.KeptPaths); err != nil {
+				return nil, err
+			}
 		}
 		record.CreatedAt = time.UnixMilli(created).UTC()
 		if settled > 0 {

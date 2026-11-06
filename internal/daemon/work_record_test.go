@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -135,7 +136,20 @@ func TestAPersonCleaningASessionsWorktreeKeepsUncommittedChanges(t *testing.T) {
 	if err := os.Remove(filepath.Join(path, "notes.txt")); err != nil {
 		t.Fatal(err)
 	}
-	if code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started"}); code != http.StatusOK || answer["worktree"].(map[string]any)["cleanup"] != registry.WorkCleanupRemoved {
+	if err := os.WriteFile(filepath.Join(checkout, ".git", "info", "exclude"), []byte("/.worktrees/\nlocal.env\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "local.env"), []byte("TOKEN=x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, answer = workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started"})
+	if cleaned, _ := answer["worktree"].(map[string]any); code != http.StatusOK || cleaned["cleanupReason"] != worktree.KeptIgnored || fmt.Sprint(cleaned["keptPaths"]) != "[local.env]" {
+		t.Fatal(code, answer)
+	}
+	if work := workOf(t, reg, "started"); len(work.KeptPaths) != 1 || work.KeptPaths[0] != "local.env" {
+		t.Fatalf("kept paths not recorded: %+v", work)
+	}
+	if code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started", "forceIgnored": true}); code != http.StatusOK || answer["worktree"].(map[string]any)["cleanup"] != registry.WorkCleanupRemoved {
 		t.Fatal(code, answer)
 	}
 }

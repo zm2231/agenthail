@@ -510,6 +510,7 @@ CREATE TABLE IF NOT EXISTS work_records (
 	settled_reason TEXT NOT NULL DEFAULT '',
 	cleanup TEXT NOT NULL DEFAULT '',
 	cleanup_reason TEXT NOT NULL DEFAULT '',
+	kept_paths TEXT NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL,
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );

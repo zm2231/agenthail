@@ -63,13 +63,13 @@ const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--
        agenthail thread snooze <target> (--until <time|duration> | --until-finished) [--json]
        agenthail thread wake <target> [--json]
        agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]
-       agenthail thread clean <target> [--json]
+       agenthail thread clean <target> [--force-ignored] [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
 --host starts the thread on a paired host; --cwd is then a path on that host.
 --worktree starts the thread in a new git worktree beside the checkout, under .worktrees/, on a new branch (--branch, or ah/<alias>) from --base or the checkout's HEAD.
-clean removes a thread's worktree and branch when nothing in them would be lost, and otherwise keeps them and says why. Reporting a task and archiving do the same.`
+clean removes a thread's worktree and branch when nothing in them would be lost, and otherwise keeps them and says why. Reporting a task and archiving do the same. Ignored files in build and package folders (node_modules, build, dist, target and the like) never keep a worktree; --force-ignored removes it past any other ignored files.`
 
 func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {

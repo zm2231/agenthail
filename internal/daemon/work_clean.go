@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -59,7 +60,7 @@ func (d *Daemon) sweepWork(ctx context.Context, now time.Time) {
 		return
 	}
 	for _, record := range records {
-		if _, err := d.cleanWork(ctx, record.WorktreePath); err != nil {
+		if _, err := d.cleanWork(ctx, record.WorktreePath, worktree.Options{}); err != nil {
 			d.log.Printf("clean worktree %s: %s", record.WorktreePath, err)
 		}
 	}
@@ -102,7 +103,7 @@ func (d *Daemon) reconcileCreatingWork(now time.Time) {
 
 // cleanWork removes settled work when nothing in it would be lost, and keeps
 // it with the reason otherwise. Work whose session is mid-turn waits.
-func (d *Daemon) cleanWork(ctx context.Context, worktreePath string) (registry.WorkRecord, error) {
+func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options worktree.Options) (registry.WorkRecord, error) {
 	d.workClean.Lock()
 	defer d.workClean.Unlock()
 	record, found, err := d.Registry.WorkAt(worktreePath)
@@ -110,29 +111,29 @@ func (d *Daemon) cleanWork(ctx context.Context, worktreePath string) (registry.W
 		return record, err
 	}
 	if d.sessionWorking(record.SessionID) {
-		return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptRunning)
+		return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptRunning, nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, workCleanTimeout)
 	defer cancel()
-	outcome, err := worktree.Clean(ctx, worktree.Record{RepoRoot: record.RepoRoot, WorktreePath: record.WorktreePath, Branch: record.Branch, BaseRef: record.BaseRef, BaseCommit: record.BaseCommit})
+	outcome, err := worktree.Clean(ctx, worktree.Record{RepoRoot: record.RepoRoot, WorktreePath: record.WorktreePath, Branch: record.Branch, BaseRef: record.BaseRef, BaseCommit: record.BaseCommit}, options)
 	if err != nil {
-		return d.setWorkCleanup(record, registry.WorkCleanupKept, fmt.Sprintf("failed: %s", err))
+		return d.setWorkCleanup(record, registry.WorkCleanupKept, fmt.Sprintf("failed: %s", err), nil)
 	}
 	if !outcome.Removed {
-		return d.setWorkCleanup(record, registry.WorkCleanupKept, outcome.KeptReason)
+		return d.setWorkCleanup(record, registry.WorkCleanupKept, outcome.KeptReason, outcome.IgnoredPaths)
 	}
 	if record.SessionID == "" {
 		return record, d.Registry.DropWork(record.WorktreePath)
 	}
-	return d.setWorkCleanup(record, registry.WorkCleanupRemoved, "")
+	return d.setWorkCleanup(record, registry.WorkCleanupRemoved, "", nil)
 }
 
-func (d *Daemon) setWorkCleanup(record registry.WorkRecord, cleanup, reason string) (registry.WorkRecord, error) {
-	if record.Cleanup == cleanup && record.CleanupReason == reason {
+func (d *Daemon) setWorkCleanup(record registry.WorkRecord, cleanup, reason string, keptPaths []string) (registry.WorkRecord, error) {
+	if record.Cleanup == cleanup && record.CleanupReason == reason && slices.Equal(record.KeptPaths, keptPaths) {
 		return record, nil
 	}
-	record.Cleanup, record.CleanupReason = cleanup, reason
-	if err := d.Registry.SetWorkCleanup(record.WorktreePath, cleanup, reason); err != nil {
+	record.Cleanup, record.CleanupReason, record.KeptPaths = cleanup, reason, keptPaths
+	if err := d.Registry.SetWorkCleanup(record.WorktreePath, cleanup, reason, keptPaths); err != nil {
 		return record, err
 	}
 	if record.SessionID != "" {
@@ -154,7 +155,7 @@ func (d *Daemon) sessionWorking(sessionID string) bool {
 
 // doWorkClean is the person settling a session's worktree, or asking again
 // for one that was kept.
-func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string) (actionResult, error) {
+func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string, options worktree.Options) (actionResult, error) {
 	if p.Kind == principalSession {
 		return actionResult{}, actionFailed(http.StatusForbidden, "forbidden", "cleaning a worktree is the person's call")
 	}
@@ -170,11 +171,11 @@ func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string)
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	} else if record.Cleanup == registry.WorkCleanupKept {
-		if err := d.Registry.SetWorkCleanup(record.WorktreePath, registry.WorkCleanupPending, ""); err != nil {
+		if err := d.Registry.SetWorkCleanup(record.WorktreePath, registry.WorkCleanupPending, "", nil); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	}
-	record, err = d.cleanWork(ctx, record.WorktreePath)
+	record, err = d.cleanWork(ctx, record.WorktreePath, options)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
