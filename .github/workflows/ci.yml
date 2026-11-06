@@ -55,6 +55,11 @@ jobs:
             claude-host/package-lock.json
             browser-host/package-lock.json
             sidecar/package-lock.json
+      - uses: actions/cache@v5
+        if: runner.environment != 'self-hosted'
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
       - name: Node host tests
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund

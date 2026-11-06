@@ -21,7 +21,7 @@ function startHost(t, browsers) {
   t.after(async () => {
     child.stdin.end();
     await exited;
-    for (const pid of processesUnder(dir)) {
+    for (const pid of processesUnder(dir, 'chrome-headless-shell')) {
       try {
         process.kill(pid, 'SIGKILL');
       } catch (error) {
@@ -72,11 +72,13 @@ function listeningPids() {
   }
 }
 
-function processesUnder(dir) {
+function processesUnder(dir, executable) {
   const out = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
   return out.split('\n')
-    .filter(line => line.includes(dir + path.sep))
-    .map(line => Number(line.trim().split(/\s+/, 1)[0]))
+    .map(line => line.trim().split(/\s+/))
+    .filter(([pid, command, ...args]) => args.some(arg => arg.includes(dir + path.sep))
+      && (!executable || path.basename(command ?? '') === executable))
+    .map(([pid]) => Number(pid))
     .filter(pid => pid !== process.pid);
 }
 

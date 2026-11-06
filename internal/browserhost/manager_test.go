@@ -102,6 +102,51 @@ func TestTheDaemonRestartsAKilledBrowserHostAndStopsItOnExit(t *testing.T) {
 	}
 }
 
+const silentStatusHost = `
+import net from 'node:net';
+import readline from 'node:readline';
+const socket = process.argv[process.argv.indexOf('--socket') + 1];
+const version = process.argv[process.argv.indexOf('--version') + 1];
+net.createServer(connection => {
+  readline.createInterface({ input: connection }).on('line', line => {
+    if (JSON.parse(line).method === 'hello') {
+      connection.write(JSON.stringify({ id: 1, result: { protocol: 1, hostVersion: version, pid: process.pid } }) + '\n');
+    }
+  });
+}).listen(socket);
+process.stdin.on('close', () => process.exit(0));
+process.stdin.resume();
+`
+
+func TestTheDaemonStopsPromptlyWhenTheBrowserHostNeverAnswersStatus(t *testing.T) {
+	launch := repoLaunch(t)
+	launch.Script = filepath.Join(t.TempDir(), "silent.mjs")
+	if err := os.WriteFile(launch.Script, []byte(silentStatusHost), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{Home: shortHome(t), Launch: func() (Launch, error) { return launch, nil }}
+	stop := running(manager, t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := poll.Until(ctx, 20*time.Millisecond, func() (bool, error) {
+		_, err := manager.Client().Hello(ctx)
+		return err == nil, nil
+	}); err != nil {
+		t.Fatalf("the fake host never answered hello: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the daemon did not stop while the host left status unanswered")
+	}
+}
+
 func TestABrowserHostThatCannotStartIsReportedUnavailableAndRetried(t *testing.T) {
 	fastRestarts(t)
 	launch := repoLaunch(t)

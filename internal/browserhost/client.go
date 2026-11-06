@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"syscall"
+	"time"
 )
 
 const Protocol = 1
@@ -80,19 +81,17 @@ func (c Client) call(ctx context.Context, method string, result any) error {
 		return err
 	}
 	defer conn.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
+	defer context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })()
 	request, err := json.Marshal(map[string]any{"id": 1, "method": method})
 	if err != nil {
 		return err
 	}
 	if _, err := conn.Write(append(request, '\n')); err != nil {
-		return fmt.Errorf("browser host %s: %w", method, err)
+		return c.failed(ctx, method, err)
 	}
 	line, err := bufio.NewReader(io.LimitReader(conn, maxResponseBytes)).ReadBytes('\n')
 	if err != nil {
-		return fmt.Errorf("browser host %s: %w", method, err)
+		return c.failed(ctx, method, err)
 	}
 	var response struct {
 		Result json.RawMessage `json:"result"`
@@ -105,4 +104,11 @@ func (c Client) call(ctx context.Context, method string, result any) error {
 		return response.Error
 	}
 	return json.Unmarshal(response.Result, result)
+}
+
+func (c Client) failed(ctx context.Context, method string, err error) error {
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return fmt.Errorf("browser host %s: %w", method, err)
 }

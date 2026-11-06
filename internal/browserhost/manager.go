@@ -112,7 +112,9 @@ func (m *Manager) runOnce(ctx context.Context) error {
 	if err := m.awaitHello(ctx, launch, cmd.Process.Pid, exited); err != nil {
 		return fmt.Errorf("start the browser host: %w%s", err, m.logTail())
 	}
-	status, err := m.Client().Status(ctx)
+	statusCtx, cancel := context.WithTimeout(ctx, startTimeout)
+	status, err := m.Client().Status(statusCtx)
+	cancel()
 	if err != nil {
 		return err
 	}

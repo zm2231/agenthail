@@ -8,6 +8,7 @@ const run = promisify(execFile);
 const require = createRequire(import.meta.url);
 const SHELL = 'chromium-headless-shell';
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const LDD_TIMEOUT_MS = 10_000;
 const PLAYWRIGHT = path.dirname(require.resolve('playwright-core/package.json'));
 
 export function pinnedShell() {
@@ -57,7 +58,10 @@ export class Browser {
 
   async checkLibraries(executable) {
     if (process.platform !== 'linux') return [];
-    const { stdout } = await run('ldd', [executable]).catch(error => ({ stdout: error.stdout ?? '' }));
+    const { stdout } = await run('ldd', [executable], { timeout: LDD_TIMEOUT_MS }).catch(error => {
+      if (error.killed) throw new Error(`ldd did not finish within ${LDD_TIMEOUT_MS / 1000}s`);
+      return { stdout: error.stdout ?? '' };
+    });
     return missingLibraries(stdout);
   }
 
@@ -65,7 +69,12 @@ export class Browser {
     const executable = this.executable();
     const status = { version: this.shell.version, running: this.browser?.isConnected() ?? false };
     if (!executable) return { ...status, state: this.error ? 'failed' : 'absent', error: this.error || undefined };
-    const missing = await this.checkLibraries(executable);
+    let missing;
+    try {
+      missing = await this.checkLibraries(executable);
+    } catch (error) {
+      return { ...status, state: 'failed', error: error.message };
+    }
     if (missing.length > 0) return { ...status, state: 'missing_libraries', missing, install: this.installCommand() };
     return { ...status, state: this.error ? 'failed' : 'ready', error: this.error || undefined };
   }
