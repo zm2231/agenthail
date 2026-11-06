@@ -33,6 +33,36 @@ func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Sessio
 	}
 }
 
+func (m *sessionSourceManager) journalServable(session *surface.Session, adapter surface.Surface) bool {
+	status, _, _, err := m.registry.SessionJournalSeedCheckpoint(session.ID)
+	if err != nil || status != registry.SessionJournalSeeded || !surface.EffectiveCapabilities(adapter, session).Stream {
+		return false
+	}
+	_, derived := adapter.(surface.TranscriptItemReader)
+	if provider, ok := adapter.(surface.LocalTranscriptProvider); ok && session.Surface == surface.KindCodex && provider.RequiresLocalTranscript(session) {
+		derived = true
+	}
+	if !derived {
+		return true
+	}
+	version, err := m.registry.SessionJournalDerivation(session.ID)
+	return err == nil && version >= max(transcriptJournalDerivation, codexJournalDerivation)
+}
+
+func (m *sessionSourceManager) prime(ctx context.Context, session *surface.Session, adapter surface.Surface) bool {
+	source, release, err := m.holdSource(ctx, session, adapter, "page-prime")
+	if err != nil {
+		return false
+	}
+	defer func() { time.AfterFunc(sessionPageHandoffGrace, release) }()
+	select {
+	case <-source.seeded:
+		return source.seedError() == nil
+	default:
+		return false
+	}
+}
+
 func (m *sessionSourceManager) readHistory(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
 	source, release, err := m.holdSource(ctx, session, adapter, "history-read")
 	if err != nil {

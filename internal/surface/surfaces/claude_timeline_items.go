@@ -125,7 +125,9 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 	typed := str(origin, "kind") == claudeOriginHuman
 	if text, ok := message["content"].(string); ok && text != "" {
 		if callID := str(message, "tool_use_id"); callID != "" {
-			return []surface.TimelineItem{{Kind: "toolResult", Title: "Tool result", Text: text, CallID: callID}}
+			item := surface.TimelineItem{Kind: "toolResult", Title: "Tool result", Text: text, CallID: callID}
+			markToolOutputCut(&item, message)
+			return []surface.TimelineItem{item}
 		}
 		item := surface.TimelineItem{Kind: "message", Role: kind, Title: kind, Text: text}
 		if kind == "user" && !typed {
@@ -160,6 +162,7 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 			item.Title = "Tool result"
 			item.CallID = str(block, "tool_use_id")
 			item.Text = timelineToolResultText(block["content"])
+			markToolOutputCut(&item, block)
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
 			}
@@ -184,4 +187,11 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 		}
 	}
 	return items
+}
+
+func markToolOutputCut(item *surface.TimelineItem, object map[string]any) {
+	if recordCut(object) {
+		item.Truncated = true
+		item.TruncationReason = toolOutputLimit
+	}
 }

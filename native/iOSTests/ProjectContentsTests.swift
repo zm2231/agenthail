@@ -27,7 +27,7 @@ final class ProjectContentsTests: XCTestCase {
         try JSONDecoder().decode([SessionState].self, from: JSONSerialization.data(withJSONObject: rows))
     }
 
-    func testAProjectListsItsLeadOnceAndSplitsRunningRecentAndEarlier() throws {
+    func testAProjectListsItsLeadOnceAndSplitsNowAndEarlier() throws {
         let state = try JSONDecoder().decode(ProjectState.self, from: JSONSerialization.data(withJSONObject: Self.project()))
         let listed = ListedProject(state: state, hostID: "one")
         let rows = try Self.sessions([
@@ -45,12 +45,11 @@ final class ProjectContentsTests: XCTestCase {
 
         XCTAssertEqual(contents.lead?.name, "collab")
         XCTAssertEqual(contents.leadSession?.id, "one::lead-session")
-        XCTAssertEqual(contents.running.map(\.id), ["one::busy"])
-        XCTAssertEqual(contents.recent.map(\.id), ["one::fresh"])
+        XCTAssertEqual(contents.now.groups.flatMap(\.sessions).map(\.id), ["one::busy", "one::fresh"])
         XCTAssertEqual(contents.earlier.map(\.id), ["one::old", "one::older"])
     }
 
-    func testRunningAgreesWithTheSessionListAndRecentIsNewestFirstAcrossComputers() throws {
+    func testNowSortsWorkingFirstThenNewestAndGroupsByComputer() throws {
         let state = try JSONDecoder().decode(ProjectState.self, from: JSONSerialization.data(withJSONObject: Self.project(lead: nil)))
         let listed = ListedProject(state: state, hostID: "one")
         var queued = Self.row("one::queued", current: true, lastActive: "2026-11-01T03:00:00Z")
@@ -66,8 +65,8 @@ final class ProjectContentsTests: XCTestCase {
 
         let contents = ProjectContents.build(listed, sessions: rows)
 
-        XCTAssertEqual(contents.running.map(\.id), ["one::busy"], "a queued idle session counted as running")
-        XCTAssertEqual(contents.recent.map(\.id), ["one::queued", "one::photos", "forge::far"], "Recent does not keep the daemon's order")
+        XCTAssertEqual(contents.now.groups.map { $0.sessions.map(\.id) }, [["one::busy", "one::photos", "one::queued"], ["forge::far"]], "working first, then newest first, and each computer's rows stay together")
+        XCTAssertEqual(rows.filter(ProjectContents.running).map(\.id), ["one::busy"], "a queued idle session counted as running")
     }
 
     func testALeadWithAConversationNeverClaimsItHasNotStarted() {

@@ -84,7 +84,7 @@ struct SessionPreview: View {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
             SessionInspector(model: model, session: session, initialDetail: detail)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-project") {
-            ConversationFlow(model: model, initialSessionID: ConversationRoute.project(HostCatalog.qualify("computer", "project-fieldnotes")))
+            ConversationFlow(model: model, initialSessionID: ConversationRoute.project(HostCatalog.qualify("computer", ProjectNowPreview.scenario == nil ? "project-fieldnotes" : ProjectNowPreview.projectID)))
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: session.id)
         } else {
@@ -282,6 +282,10 @@ struct SessionPreview: View {
             timed.append(recent)
             snapshot["sessions"] = timed
         }
+        if ProjectNowPreview.scenario != nil {
+            snapshot["sessions"] = ProjectNowPreview.sessions(capabilities: capabilities)
+            snapshot["projects"] = [["id": ProjectNowPreview.projectID, "displayName": "fieldnotes", "checkouts": ProjectNowPreview.checkouts]]
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-unreachable") {
             var limited = snapshot["sessions"] as! [[String: Any]]
             limited[0]["waitingOn"] = previewUnreachable
@@ -392,6 +396,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var tailCleared = false
     nonisolated(unsafe) private static var sessionFetches = 0
     private var reopenDelayed = false
+    private var olderDelayed = false
 
     private static func actionBody(_ request: URLRequest) -> [String: Any] {
         var data = request.httpBody
@@ -407,6 +412,12 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
+        if SessionPreview.delaysOlderPage, !olderDelayed, request.url?.path == "/api/v1/session",
+           URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "timelineBefore" && $0.value != "0" }) == true {
+            olderDelayed = true
+            DispatchQueue.global().asyncAfter(deadline: .now() + 4) { [self] in startLoading() }
+            return
+        }
         if request.url?.path == "/api/v1/session", ProcessInfo.processInfo.arguments.contains("--preview-reopen-slow"), !reopenDelayed {
             Self.sessionFetches += 1
             if Self.sessionFetches > 1 {
@@ -532,7 +543,9 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
         case "/api/v1/session":
             let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? "demo"
-            body = SessionPreview.previewDetailJSON.replacingOccurrences(of: "\"id\":\"demo\"", with: "\"id\":\"\(id)\"")
+            let detail = SessionPreview.previewDetailJSON.replacingOccurrences(of: "\"id\":\"demo\"", with: "\"id\":\"\(id)\"")
+            let older = SessionPreview.servesOlderPage && requestQuery.contains { $0.name == "timelineBefore" && $0.value != "0" }
+            body = SessionPreview.servesOlderPage ? SessionPreview.olderPageDetail(base: detail, older: older) : detail
         default: status = 503; body = #"{"error":{"message":"This public preview does not execute actions."}}"#
         }
         }
