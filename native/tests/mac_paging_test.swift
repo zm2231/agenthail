@@ -9,6 +9,7 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var firstAll = ["live", "older"]
     nonisolated(unsafe) static var servedFirstAll = 0
     nonisolated(unsafe) static var baseEpochs: [String] = []
+    nonisolated(unsafe) static var heldFirstAll: DispatchSemaphore?
     static let lock = NSLock()
 
     static func row(_ id: String, status: String = "idle", current: Bool = false, name: String? = nil) -> String {
@@ -51,6 +52,10 @@ final class PagingDaemon: URLProtocol, @unchecked Sendable {
         if query["q"] == "slow" { Thread.sleep(forTimeInterval: 0.3) }
         let plainAll = query["scope"] == "all" && query["q"] == nil && query["status"] == nil
         if plainAll && Self.slowPages.contains(query["cursor"] ?? "first") { Thread.sleep(forTimeInterval: 0.3) }
+        if plainAll && query["cursor"] == nil, let held = Self.lock.withLock({ () -> DispatchSemaphore? in
+            defer { Self.heldFirstAll = nil }
+            return Self.heldFirstAll
+        }) { held.wait() }
         finish(url, body)
         if plainAll && query["cursor"] == nil { Self.lock.withLock { Self.servedFirstAll += 1 } }
     }
@@ -150,11 +155,15 @@ struct MacPagingTest {
         PagingDaemon.firstAll = ["stale"]
         model.sessionFilter = .archived
         let served = PagingDaemon.lock.withLock { PagingDaemon.servedFirstAll }
+        let gate = DispatchSemaphore(value: 0)
+        PagingDaemon.lock.withLock { PagingDaemon.heldFirstAll = gate }
+        Task { @MainActor in usleep(20_000) }
         model.sessionFilter = .all
-        try? await Task.sleep(for: .milliseconds(1))
+        check(await settle { PagingDaemon.lock.withLock { PagingDaemon.heldFirstAll == nil } }, "All asked for its first page")
+        gate.signal()
         let deadline = Date().addingTimeInterval(3)
         while PagingDaemon.lock.withLock({ PagingDaemon.servedFirstAll }) == served && Date() < deadline { usleep(5_000) }
-        check(Date() < deadline, "All asked for its first page")
+        check(Date() < deadline, "the daemon served All's first page")
         usleep(50_000)
         PagingDaemon.firstAll = ["fresh"]
         model.sessionFilter = .archived
