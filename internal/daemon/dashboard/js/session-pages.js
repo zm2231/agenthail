@@ -24,6 +24,7 @@ export async function readListing({ scope, params, wanted = Infinity }) {
     const page = await readJSON(viewPath(scope, { ...params, limit, ...(listing.cursor ? { cursor: listing.cursor } : {}) }));
     if (!listing.view) Object.assign(listing, { view: page.view, counts: page.counts || {}, hostEpoch: page.hostEpoch || "" });
     else if ((page.hostEpoch || "") !== listing.hostEpoch) listing.mixed = true;
+    listing.catalogSeq = Math.min(listing.catalogSeq ?? Infinity, page.catalogSeq ?? 0);
     for (const family of page.view.families) {
       if (seen.has(family.id)) continue;
       seen.add(family.id);

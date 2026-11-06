@@ -10,7 +10,7 @@ for (const target of [null, "first", "second"]) {
     load: async (...args) => { loads.push(args); },
     selectSession: async (...args) => { selections.push(args); },
     renderSessions() {}, resizeComposer() {}, syncConversationLayout() {},
-    showView() {}, startLiveStream() {}, stopLiveStream() {},
+    showView() {}, startLiveStream() {}, stopLiveStream() {}, startLiveOrder() {},
     bindVoiceEvents() {}, bindConversationEvents() {}, bindComposerEvents() {},
     bindChatEvents() {}, bindOperationEvents() {}, bindRequestEvents() {},
     bindSessionEvents() {}, bindStartEvents() {}, bindSettingsEvents() {},
