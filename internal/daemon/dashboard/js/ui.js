@@ -96,7 +96,7 @@ export function backdropLook(values, theme, { sessionOpen, highContrast, reduced
     readable,
     gutter: number("glass.gutter", 0),
     glass: {
-      on: values.glass !== "off" && !reducedTransparency,
+      on: theme === "dark" && values.glass !== "off" && !reducedTransparency,
       tint: readable ? readableSurface(tint, texts, ground, target + MARGIN) : tint,
       edge: colourOf("var(--ink)") || (theme === "dark" ? [1, 1, 1] : [0, 0, 0]),
       washes: readable && accentColour ? [[accentColour, SOFT]] : [],

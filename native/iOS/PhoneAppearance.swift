@@ -385,7 +385,7 @@ private struct PhoneBackdropBody<Content: View>: View {
 
     private func key(_ surface: PhoneAppearance.Surface) -> PhoneAppearance.Key {
         PhoneAppearance.Key(surface: surface, size: frame.size, scale: displayScale, dark: colorScheme == .dark,
-                            solid: appearance.config.solidSurfaces(reduceTransparency: reduceTransparency),
+                            solid: appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency),
                             target: PhoneAppearance.contrastTarget(appearance.config, increased: contrast == .increased),
                             readable: appearance.config.readability || contrast == .increased)
     }

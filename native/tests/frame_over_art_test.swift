@@ -44,41 +44,39 @@ struct FrameOverArtTest {
         let sidebar = CGRect(x: 0, y: 40, width: 160, height: 260)
         let content = CGRect(x: 160, y: 40, width: 320, height: 260)
         var failures = 0
-        if config.gutter != 0 || config.solidSurfaces(reduceTransparency: false) {
-            print("FAIL: the default frame should join glass panes edge to edge, got gutter \(config.gutter)")
+        if config.gutter != 0 || config.solidSurfaces(dark: true, reduceTransparency: false) || !config.solidSurfaces(dark: false, reduceTransparency: false) {
+            print("FAIL: the default frame should join glass panes edge to edge in dark and draw solid panes in light, got gutter \(config.gutter)")
             failures += 1
         }
+        let ground = rgb(DesktopPalette.ground(dark: true))
+        let roles = DesktopGlass.roles(config, dark: true, increased: false).map(rgb)
+        let tint = Float(config.paneOpacity)
+        let panes = [("chrome", chrome), ("sidebar", sidebar), ("content", content)].map { BackdropSpec.Pane(id: $0.0, rect: $0.1, radius: 0, minimum: tint, strength: 1) }
+        let texts = [chrome, sidebar, content].map { $0.insetBy(dx: 8, dy: 8) }
         for name in names {
-            for dark in [true, false] {
-                guard let wallpaper = art("\(name)-\(dark ? "dark" : "light")") else {
-                    print("FAIL: \(name) art did not load")
-                    failures += 1
-                    continue
-                }
-                let ground = rgb(DesktopPalette.ground(dark: dark))
-                let roles = DesktopGlass.roles(config, dark: dark, increased: false).map(rgb)
-                let tint = Float(config.paneOpacity)
-                let panes = [("chrome", chrome), ("sidebar", sidebar), ("content", content)].map { BackdropSpec.Pane(id: $0.0, rect: $0.1, radius: 0, minimum: tint, strength: 1) }
-                let texts = [chrome, sidebar, content].map { $0.insetBy(dx: 8, dy: 8) }
-                let spec = BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: CGFloat(config.glassBlur), paneTint: ground, polarity: dark ? .dark : .light, ground: ground, roles: roles,
-                                        size: size, scale: scale, panes: panes, texts: texts, paneTexts: texts, readability: true)
-                guard let rendered = BackdropRenderer.render(spec) else {
-                    print("FAIL: \(name) \(dark ? "dark" : "light") did not render")
-                    failures += 1
-                    continue
-                }
-                for text in texts {
-                    for (state, plate) in [("", nil), (" selected", (ground, Float(0.6)))] as [(String, (BackdropRGB, Float)?)] {
-                        let contrast = worst(rendered.image, scale: scale, in: text, roles: roles, plate: plate)
-                        if contrast < Float(config.contrastTarget) {
-                            print("FAIL: \(name) \(dark ? "dark" : "light")\(state) text at \(text) reads at \(contrast):1")
-                            failures += 1
-                        }
+            guard let wallpaper = art("\(name)-dark") else {
+                print("FAIL: \(name) art did not load")
+                failures += 1
+                continue
+            }
+            let spec = BackdropSpec(wallpaper: .image(wallpaper), texture: "none", blur: CGFloat(config.glassBlur), paneTint: ground, polarity: .dark, ground: ground, roles: roles,
+                                    size: size, scale: scale, panes: panes, texts: texts, paneTexts: texts, readability: true)
+            guard let rendered = BackdropRenderer.render(spec) else {
+                print("FAIL: \(name) did not render")
+                failures += 1
+                continue
+            }
+            for text in texts {
+                for (state, plate) in [("", nil), (" selected", (ground, Float(0.6)))] as [(String, (BackdropRGB, Float)?)] {
+                    let contrast = worst(rendered.image, scale: scale, in: text, roles: roles, plate: plate)
+                    if contrast < Float(config.contrastTarget) {
+                        print("FAIL: \(name)\(state) text at \(text) reads at \(contrast):1")
+                        failures += 1
                     }
                 }
             }
         }
         if failures > 0 { exit(1) }
-        print("frame over art: every text role reaches the target on every pane over every built-in picture, light and dark")
+        print("frame over art: every text role reaches the target on every dark glass pane over every built-in picture, selected or not")
     }
 }

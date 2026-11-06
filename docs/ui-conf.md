@@ -45,7 +45,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
 | `background.opacity` | `1` | 0 to 1. Background strength on New Session and empty views. |
 | `background.session-opacity` | `1` | 0 to 1. Background strength inside a session. |
-| `glass` | `on` | `on` shows translucent panes over the background in light and dark appearance; `off` uses solid surfaces. Reduce Transparency always uses solid surfaces. |
+| `glass` | `on` | `on` shows translucent panes over the background in dark appearance; light appearance, `off` and Reduce Transparency use solid surfaces. |
 | `glass.blur` | `30` | 0 to 64. Blur radius in points behind panes. |
 | `glass.tint` | `ground` | Tint of panes: `ground`, `accent` or `#rrggbb`. |
 | `glass.opacity` | `0.3` | 0 to 1. Tint of every pane: the sidebar, the content, the title bar and the inspector, so they read as one window. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
@@ -106,7 +106,7 @@ The dashboard reads the `web` device's settings and follows every change as it i
 - `background`, `background.light`, `background.fit`, `background.position`, `background.dim`, `background.opacity`, `background.session-opacity`, `texture`, `texture.strength` and `texture.spacing` draw the background, loaded from the daemon. `background.session-opacity` applies on the Conversations view.
 - `desktop` shows the plain window colour, since a browser cannot show the desktop.
 - While a background is drawn, every piece of text sits on a pane: the top bar, page headings, cards, the Conversations list, the conversation, the Operations tabs, and the composer, menus, dialogs and notices. The background shows only in the `glass.gutter` around and between panes.
-- `glass` makes the panes translucent in light and dark appearance: the top bar, the Conversations list, headings and cards take `glass.opacity`, and the tabs, composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. `glass = off` and the browser's reduced transparency preference draw solid panes, with a soft shadow under floating ones.
+- In dark appearance, `glass` makes the panes translucent: the top bar, the Conversations list, headings and cards take `glass.opacity`, and the tabs, composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. Light appearance, `glass = off` and the browser's reduced transparency preference draw solid panes, with a soft shadow under floating ones.
 - `glass.tint` works as in the apps. A tint that would leave text below `contrast.target` is moved toward the ground colour until text reads on it, and each kind of pane's tint rises above its opacity as far as the background it can cover needs: a pane that stays put is measured against the art behind it, and one that scrolls against its whole column. `glass.readability = off` uses the opacities exactly.
 - Text keeps `contrast.target`. Text colours that would miss it on the dashboard's own surfaces are lifted toward white in dark, or black in light, until they reach it. With the browser's increased contrast preference, the target is 7.
 

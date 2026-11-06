@@ -1,5 +1,5 @@
 extension UIConfig {
-    func solidSurfaces(reduceTransparency: Bool) -> Bool {
-        !glass || reduceTransparency
+    func solidSurfaces(dark: Bool, reduceTransparency: Bool) -> Bool {
+        !glass || reduceTransparency || !dark
     }
 }

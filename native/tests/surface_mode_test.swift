@@ -13,14 +13,16 @@ struct SurfaceModeTest {
         }
 
         let on = UIConfig()
-        check(!on.solidSurfaces(reduceTransparency: false), "glass on keeps glass in light and dark")
-        check(on.solidSurfaces(reduceTransparency: true), "Reduce Transparency is solid")
+        check(!on.solidSurfaces(dark: true, reduceTransparency: false), "dark with glass on keeps glass")
+        check(on.solidSurfaces(dark: false, reduceTransparency: false), "light is solid")
+        check(on.solidSurfaces(dark: true, reduceTransparency: true), "Reduce Transparency is solid in dark")
 
         var off = UIConfig()
         off.values["glass"] = .text("off")
-        check(off.solidSurfaces(reduceTransparency: false), "glass off is solid")
+        check(off.solidSurfaces(dark: true, reduceTransparency: false), "glass off is solid in dark")
+        check(off.solidSurfaces(dark: false, reduceTransparency: false), "glass off is solid in light")
 
         if failures > 0 { exit(1) }
-        print("surface mode: glass off and Reduce Transparency draw solid surfaces")
+        print("surface mode: light, glass off and Reduce Transparency draw solid surfaces")
     }
 }

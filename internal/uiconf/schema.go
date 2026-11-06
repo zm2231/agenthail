@@ -70,7 +70,7 @@ var Keys = []Key{
 	number("background.opacity", "1", "Background strength over the ground colour on New Session and empty views.", 0, 1),
 	number("background.session-opacity", "1", "Background strength inside a session.", 0, 1),
 
-	choice("glass", "on", "Translucent panes over the background, in light and dark; off uses solid surfaces.", "on", "off"),
+	choice("glass", "on", "Translucent panes over the background in dark mode; light mode and off use solid surfaces.", "on", "off"),
 	number("glass.blur", "30", "Blur radius in points of the background behind panes.", 0, 64),
 	color("glass.tint", "ground", "Tint of panes.", "ground", "accent"),
 	number("glass.opacity", "0.3", "Tint opacity of every pane: sidebar, content, title bar and inspector. A minimum: raised where text needs it.", 0, 1),

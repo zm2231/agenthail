@@ -56,7 +56,7 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     }
 
     var body: some View {
-        let solid = appearance.config.solidSurfaces(reduceTransparency: reduceTransparency)
+        let solid = appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency)
         FloatingGlassLayers(content: content, shape: shape, interactive: interactive, solid: solid, opacity: solid ? 1 : appearance.floatingOpacity(key))
     }
 }

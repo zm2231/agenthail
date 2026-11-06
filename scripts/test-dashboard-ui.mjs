@@ -727,7 +727,7 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   const values = { background: "none", glass: "on", "glass.tint": "ground", "glass.opacity": 0.25, "glass.composer.opacity": 0.1, "glass.blur": 30, "glass.border": 0.08, "glass.gutter": 8 };
   const look = backdropLook(values, "dark", base).glass;
   assert.equal(look.on, true);
-  assert.equal(backdropLook(values, "light", base).glass.on, true, "light keeps glass, as on the Mac");
+  assert.equal(backdropLook(values, "light", base).glass.on, false, "light draws solid panes, as on the Mac");
   assert.equal(backdropLook(values, "light", base).gutter, 8, "with the same gutter around them");
   assert.deepEqual(look.tint, colours["var(--paper)"], "the ground tint is the page's own ground");
   assert.deepEqual(look.panes, { content: 0.25, sidebar: 0.25, chrome: 0.25, float: 0.2 }, "every pane takes the one glass tint; floating glass keeps at least 0.2 while readability is on");

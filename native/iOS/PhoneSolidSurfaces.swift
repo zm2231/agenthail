@@ -21,10 +21,11 @@ private struct SolidTabBar: ViewModifier {
 private struct SolidTabBarBody<Content: View>: View {
     let content: Content
     @ObservedObject var appearance: PhoneAppearance
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let solid = appearance.config.solidSurfaces(reduceTransparency: reduceTransparency)
+        let solid = appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency)
         content
             .toolbarBackground(PhonePalette.ground, for: .tabBar)
             .toolbarBackgroundVisibility(solid ? .visible : .automatic, for: .tabBar)

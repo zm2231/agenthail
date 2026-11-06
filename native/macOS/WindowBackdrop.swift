@@ -74,7 +74,7 @@ final class WindowBackdrop: ObservableObject {
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
         let workspace = NSWorkspace.shared
-        let solid = config.solidSurfaces(reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency)
+        let solid = config.solidSurfaces(dark: dark, reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency)
         if self.solid != solid { self.solid = solid }
         let floating = solid ? 1 : DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast)
         if composerOpacity != floating { composerOpacity = floating }
