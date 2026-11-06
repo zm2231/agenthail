@@ -351,6 +351,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runKeepAlive(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
+	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.background.start(d.runJournalSweeps)

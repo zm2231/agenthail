@@ -89,6 +89,14 @@ func (r *Registry) SessionPRs() (map[string][]SessionPR, error) {
 	return out, nil
 }
 
+// SessionHasPRIn counts unlinked pull requests too, so a branch whose pull
+// request the person unlinked is not searched again.
+func (r *Registry) SessionHasPRIn(sessionID, repo string) (bool, error) {
+	var count int
+	err := r.read.QueryRow(`SELECT COUNT(*) FROM session_prs WHERE session_id=? AND repo=?`, sessionID, repo).Scan(&count)
+	return count > 0, err
+}
+
 func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
 	rows, err := r.read.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
 	if err != nil {
