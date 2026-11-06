@@ -27,6 +27,10 @@ class Locks {
   request(_name, options, callback) {
     return new Promise((resolve, reject) => {
       const entry = { callback, resolve, reject };
+      if (options.ifAvailable && this.holder) {
+        Promise.resolve(callback(null)).then(resolve);
+        return;
+      }
       if (options.steal) {
         if (this.holder) this.holder.reject(Object.assign(new Error("stolen"), { name: "AbortError" }));
         this.grant(entry);
@@ -44,7 +48,7 @@ class Locks {
   }
   grant(entry) {
     this.holder = entry;
-    Promise.resolve(entry.callback()).then((value) => {
+    Promise.resolve(entry.callback({ mode: "exclusive" })).then((value) => {
       if (this.holder === entry) {
         this.holder = null;
         const next = this.queue.shift();
@@ -155,6 +159,27 @@ await settle();
 assert(watcher.got.includes("gap"), "a retained-cursor gap reaches the leader's stream config");
 await advance(1_000);
 assert.equal(live("/api/v1/catalog-events").length, 1, "the stream reopens after a gap");
+
+const named = new Map();
+const lockNamed = { request: (name, options, callback) => {
+  if (!named.has(name)) named.set(name, new Locks());
+  return named.get(name).request(name, options, callback);
+} };
+const chat = {};
+await dashboardModules(["chat-slots"], chat);
+const lost = [];
+const claims = [];
+for (let i = 0; i < 3; i++) claims.push(await chat.claimChatSlot(() => lost.push(i), { locks: lockNamed, focused: () => false }));
+assert(claims.every(Boolean), "three windows each get a conversation stream slot");
+assert.equal(await chat.claimChatSlot(() => {}, { locks: lockNamed, focused: () => false }), null, "a fourth unfocused window gets none, leaving a connection free");
+const focused = await chat.claimChatSlot(() => {}, { locks: lockNamed, focused: () => true, random: () => 0.5 });
+await settle();
+assert(focused, "the focused window takes a slot");
+assert.deepEqual(lost, [1], "from exactly one unfocused window, which stops its stream");
+claims[0].release();
+await settle();
+assert(await chat.claimChatSlot(() => {}, { locks: lockNamed, focused: () => false }), "a released slot is free again");
+assert.equal(await chat.claimChatSlot(() => {}, { locks: null }), null, "without Web Locks no conversation streams");
 
 const parse = { AbortController, TextDecoder, TextEncoder, setTimeout, clearTimeout };
 await dashboardModules(["sse-reader"], parse);

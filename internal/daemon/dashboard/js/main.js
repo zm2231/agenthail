@@ -55,6 +55,7 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+window.addEventListener("focus", () => startLiveStream());
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {

@@ -61,7 +61,7 @@ export function startSharedStreams({ locks = navigator.locks, channel = new Broa
       if (signal.aborted) return;
       if (result?.status === 409) config.gap?.();
       post({ stream: name, kind: "reset", status: result?.status ?? 0 });
-      await sleep(Math.min(30_000, 500 * 2 ** Math.max(0, attempt)), signal);
+      await sleep(Math.min(20_000, 1_000 * 2 ** Math.max(0, attempt)), signal);
     }
   }
 
