@@ -49,6 +49,7 @@ type dashboardSession struct {
 	KeepAlive         *dashboardKeepAlive        `json:"keepAlive,omitempty"`
 	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
 	InboxSection      string                     `json:"inboxSection,omitempty"`
+	EndTurn           *dashboardEndTurn          `json:"endTurn,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`

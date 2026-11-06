@@ -42,18 +42,21 @@ Tables beside the catalog, keyed by session id, one migration per slice. Each ta
 
 **`turn_ends`**, primary key `(session_id, started_at)`
 
-A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex with its hooks installed), or when `agenthail_end_turn` is called with no open row. The observer binds `completed_turn_id` when it sees the turn complete. A call is a repeat when the latest row has ended and no newer turn has started or completed.
+A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex with its hooks installed), which also drops any older row that never ended, so a session that never calls the tool holds one row at most. `agenthail_end_turn` fills the open row, or adds one when there is none. The observer binds `completed_turn_id` to the newest row when it sees a turn complete. A call is a repeat, and refused, when the latest row has ended, has not completed, and the runtime names no other active turn than the one recorded with it. An end stands, for the row and its attention, until a newer turn opens or a later turn completes.
 
 | Column | Meaning |
 |---|---|
+| `ended_at_ms` | when `agenthail_end_turn` was called; 0 while the turn runs |
+| `turn_id` | the runtime's active turn at the call, when the observer had seen it |
 | `completed_turn_id` | the runtime's turn id, bound at completion |
 | `needs` | `you` or `nothing` |
 | `headline` | one line, at most 80 characters |
 | `asks_json` | `[{question, options:[{label, does}], suggested, links:[{title, url}]}]` |
 | `next_json` | follow-ups, at most 3 |
-| `source` | `tool`, `nudged` (tool after the Stop hook), `text` (parsed from the reply), `none` |
-| `answered_at`, `answer_message_id` | set when the person's one reply is queued |
-| `created_at` | |
+| `source` | `tool`; slice 3 adds `nudged`, `text` and `none` |
+| `routed_to` | the session told of a needs-you instead of the person |
+
+Slice 4 adds `answered_at` and `answer_message_id`, set when the person's one reply is queued.
 
 **`work_records`**, primary key `session_id`
 
@@ -100,11 +103,11 @@ next      at most 3 strings, with needs "nothing"
 
 Refused, with a message the agent can act on: `needs: "you"` with no ask; asks with `needs: "nothing"`; `suggested` out of range; a second call in one turn. Description, about 600 bytes: write your reply first, then call this as the last thing in every turn; it decides whether the person is pinged.
 
-**A session that reports to an agent** (spawned task, worker under @lead) ends its turn the same way, but `needs: "you"` goes to its spawner or lead as a message, the same routing as permission prompts. The person sees it when the lead escalates it, or when the session has no lead.
+**A session that reports to an agent** (origin `agent` or `coordinator`: a spawned task, or a worker a lead started with `agenthail thread create` or `agenthail_create`, which records the lead as its creator) ends its turn the same way, but `needs: "you"` goes as an `[agenthail]` message to the session a permission prompt would reach, its project's lead first, then its spawner; the row records it in `routed_to` and `askedSession`. The person gets no ask attention and keeps today's "finished" push for that turn. They see the ask when the lead escalates it. A session the person or voice started, or one with nobody to tell (a lead itself), asks the person. If the message cannot be queued, the ask falls back to the person.
 
 **Skipped call.** Claude host: a Stop hook in `claude-host/host.mjs` blocks once (`stop_hook_active` guards the second stop; not while background tasks run) with the nudge. Codex: the per-thread hook config gains a Stop hook, `agenthail hook stop --surface codex`, that asks the daemon whether the turn has a `turn_ends` row; the Codex 0.163 binary carries `stop_hook_active`, and a spike with its own `CODEX_HOME` and app-server confirms the block semantics before that code lands. If the turn still ends without the call, the observer parses a closing "What I need from you" list or "Nothing needed from you" line from the reply (`source: text`); otherwise `source: none` and today's "finished" push stands.
 
-**Effects.** `rowAttention` (`internal/daemon/session_attention.go:5-25`) gains kind `ask`, after `request`, for an unanswered `needs: "you"` with no newer person message. The turn-completed push (`observer.go:223-230`) says "needs you: headline" or "done: headline". The open ask is listed by `/api/v1/requests` as a request of kind `ask`, so the phone's notification buttons (`surface/request_actions.go:35-61`) and the existing question pager work for it unchanged.
+**Effects.** Session rows, in the session view and the snapshot, carry `endTurn {headline, needs, asks, next, endedAt, askedSession}` while the end stands. `rowAttention` (`internal/daemon/session_attention.go`) gains kind `ask`, after `request`, for a standing `needs: "you"` that asks the person, which puts the row in Needs you. The turn-completed push says "needs you: headline" or "done: headline". Hosted Claude sessions name the tool in `CLAUDE_CODE_TERMINAL_MCP_TOOLS`, so a successful call ends the turn with no reply after it; a refused call is an error result and does not. In slice 4 the open ask is listed by `/api/v1/requests` as a request of kind `ask`, so the phone's notification buttons (`surface/request_actions.go:35-61`) and the existing question pager work for it unchanged.
 
 **One reply.** New action `turn-answer {sessionId, turnId, picks:[{ask, option | text}], note}`. The daemon composes one numbered message, "1. Deploy the fix? Deploy it" per ask plus the note, queues it through the normal send path, and marks the row answered. Composing in the daemon keeps Mac, iOS, web and the notification buttons identical.
 

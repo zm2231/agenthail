@@ -49,7 +49,8 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 		d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
 	}
 	if completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && !session.Delegated() {
-		d.notifyTurnCompleted(fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface)), session.ID, previous.HeldCompletionTurnID)
+		desktop, mobile := d.endTurnNotifications(session, previous.HeldCompletionTurnID, fmt.Sprintf("%s finished", d.resolveDisplay(session.ID)), fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface)))
+		d.notifyTurnCompleted(desktop, mobile, session.ID, previous.HeldCompletionTurnID)
 	}
 }
 
