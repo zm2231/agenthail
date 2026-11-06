@@ -11,8 +11,8 @@ struct UIConfigProblems: View {
                         Text("ui.conf line \(problem.line): \(problem.message)")
                             .textSelection(.enabled)
                     } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(DesktopPalette.attention)
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(DesktopPalette.text2)
                     }
                 }
             } header: {
