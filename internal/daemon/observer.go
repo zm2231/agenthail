@@ -76,10 +76,11 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		// An exited Claude session stays a delivery target whatever its stored
-		// status, since a send resumes it; it is observed only to drain its queue.
-		exited := claudeProcessExited(session)
-		if !isTask && ((exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session))) {
+		// An exited or offline Claude session stays a delivery target, since a
+		// send resumes it; it is observed only to drain its queue. An offline
+		// one may have no PID left to tell whether its process exited.
+		resumable := claudeProcessExited(session) || (session.Surface == surface.KindClaude && relayTargetInactive(session))
+		if !isTask && ((resumable && queueCounts[session.ID] == 0) || (!resumable && relayTargetInactive(session))) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}
