@@ -128,6 +128,10 @@ func TestSnoozeAndWakeHandBackThePreviousSnoozeForUndo(t *testing.T) {
 
 func TestASnoozeThatCannotHoldIsRefused(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := requestedSnooze(&surface.Session{}, now.Add(400*time.Microsecond), "", now); err == nil {
+		t.Fatal("a deadline inside the current millisecond was accepted")
+	}
 	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	for name, body := range map[string]string{

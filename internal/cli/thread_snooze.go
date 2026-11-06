@@ -14,8 +14,11 @@ func (a *App) cmdThreadSnooze(args []string) error {
 	}
 	payload := map[string]any{"action": "session-" + positional[0]}
 	done := "woke " + positional[1]
+	until, finished := flagVal(args, "--until"), hasFlag(args, "--until-finished")
+	if positional[0] == "wake" && (until != "" || finished) {
+		return fmt.Errorf("%s", threadSnoozeUsage)
+	}
 	if positional[0] == "snooze" {
-		until, finished := flagVal(args, "--until"), hasFlag(args, "--until-finished")
 		switch {
 		case finished && until == "":
 			payload["wake"] = "finished"

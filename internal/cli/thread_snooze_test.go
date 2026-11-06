@@ -17,6 +17,15 @@ func TestThreadSnoozeAndWakeSendTheirActions(t *testing.T) {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
+	for _, args := range [][]string{
+		{"thread", "wake", "vps::@builder", "--until", "2h"},
+		{"thread", "wake", "vps::@builder", "--until-finished"},
+		{"thread", "snooze", "vps::@builder"},
+	} {
+		if _, err := captureStdout(t, func() error { return app.Run(args) }); err == nil {
+			t.Fatalf("%v was accepted", args)
+		}
+	}
 	actions, _ := api.recorded()
 	if len(actions) != 3 {
 		t.Fatalf("actions=%v", actions)

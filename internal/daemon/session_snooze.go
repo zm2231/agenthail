@@ -35,10 +35,11 @@ func requestedSnooze(session *surface.Session, until time.Time, wake string, now
 		}
 		return registry.Snooze{At: now, Wake: wake}, nil
 	case (wake == "" || wake == registry.SnoozeWakeTime) && !until.IsZero():
+		until = until.UTC().Truncate(time.Millisecond)
 		if !until.After(now) {
 			return registry.Snooze{}, actionFailed(http.StatusBadRequest, "bad_request", "until must be in the future")
 		}
-		return registry.Snooze{At: now, Until: until.UTC().Truncate(time.Millisecond), Wake: registry.SnoozeWakeTime}, nil
+		return registry.Snooze{At: now, Until: until, Wake: registry.SnoozeWakeTime}, nil
 	}
 	return registry.Snooze{}, actionFailed(http.StatusBadRequest, "bad_request", `give either until or wake "finished"`)
 }
