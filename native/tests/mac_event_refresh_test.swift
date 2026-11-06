@@ -67,7 +67,7 @@ struct MacEventRefreshTest {
         }
         check(model.lastEventID == 14, "every event still moves the cursor: \(model.lastEventID)")
 
-        for type in ["state.changed", "settings.updated", "signin.changed", "host.state", "device.revoked", "stream.reset"] {
+        for type in ["state.changed", "settings.updated", "signin.changed", "host.state", "host.removed", "stream.reset"] {
             let (read, served) = (base(), history())
             model.receive(event(20, type))
             check(!model.pendingRefresh.isEmpty, "\(type) schedules a reread")
@@ -78,7 +78,8 @@ struct MacEventRefreshTest {
         let (read, served) = (base(), history())
         let devices = EventsDaemon.count("/api/v1/devices")
         model.receive(event(30, "device.paired"))
-        model.receive(event(31, "ledger.gate"))
+        check(!model.pendingRefresh.snapshot && model.pendingRefresh.operations, "a device event waits to reload Operations only")
+        model.receive(event(31, "state.changed"))
         check(await settle { base() == read + 1 && history() > served && EventsDaemon.count("/api/v1/devices") == devices + 1 }, "a later event inside the wait keeps what an earlier one asked for")
         print("ok   mac_event_refresh_test")
     }

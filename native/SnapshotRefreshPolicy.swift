@@ -1,7 +1,7 @@
 import Foundation
 
 enum SnapshotRefreshPolicy {
-    static func refreshes(for eventType: String) -> Bool {
-        ["stream.reset", "state.changed", "settings.updated", "signin.changed"].contains(eventType) || eventType.hasPrefix("device.") || eventType.hasPrefix("host.")
-    }
+    private static let rereads: Set<String> = ["stream.reset", "state.changed", "settings.updated", "signin.changed", "host.paired", "host.removed", "host.state"]
+
+    static func refreshes(for eventType: String) -> Bool { rereads.contains(eventType) }
 }
