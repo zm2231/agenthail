@@ -1,4 +1,4 @@
--- schemaVersion 70
+-- schemaVersion 71
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -1145,7 +1145,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_session_prs_update
-CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,linked_at_ms ON session_prs WHEN NEW.unlinked=0 OR OLD.unlinked=0
+CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms ON session_prs WHEN NEW.session_id IS NOT OLD.session_id OR NEW.repo IS NOT OLD.repo OR NEW.number IS NOT OLD.number OR NEW.url IS NOT OLD.url OR NEW.source IS NOT OLD.source OR NEW.unlinked IS NOT OLD.unlinked OR NEW.watch IS NOT OLD.watch OR NEW.title IS NOT OLD.title OR NEW.state IS NOT OLD.state OR NEW.head_sha IS NOT OLD.head_sha OR NEW.mergeable IS NOT OLD.mergeable OR NEW.review IS NOT OLD.review OR NEW.checks IS NOT OLD.checks OR (NEW.read_failures>=3) IS NOT (OLD.read_failures>=3) OR NEW.linked_at_ms IS NOT OLD.linked_at_ms
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

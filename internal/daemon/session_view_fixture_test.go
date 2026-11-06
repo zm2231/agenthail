@@ -321,16 +321,31 @@ func newViewFixture(t *testing.T) *viewFixture {
 				}
 			}
 		}},
-		{"a pull request linked, unlinked or watched", func(rng *rand.Rand) {
+		{"a pull request linked, unlinked, watched or read", func(rng *rand.Rand) {
 			id, number := session(rng), 1+rng.Intn(2)
 			var err error
-			switch rng.Intn(3) {
+			switch rng.Intn(5) {
 			case 0:
 				_, err = reg.LinkPR(registry.SessionPR{SessionID: id, Repo: "github.com/acme/app", Number: number, URL: fmt.Sprint("https://github.com/acme/app/pull/", number), Source: registry.PRSourceAgent, Title: fmt.Sprint("change ", rng.Intn(3))}, rng.Intn(2) == 0, f.clock)
 			case 1:
 				_, err = reg.UnlinkPR(id, "github.com/acme/app", number)
-			default:
+			case 2:
 				_, err = reg.SetPRWatch(id, "github.com/acme/app", number, rng.Intn(2) == 0)
+			case 3:
+				pr, found, readErr := reg.SessionPR(id, "github.com/acme/app", number)
+				if readErr != nil || !found {
+					err = readErr
+					break
+				}
+				pr.State, pr.Checks = []string{"open", "merged"}[rng.Intn(2)], []string{"", "passing", "failing"}[rng.Intn(3)]
+				_, err = reg.RecordPRRead(pr, pr.Wakes, f.clock)
+			default:
+				pr, found, readErr := reg.SessionPR(id, "github.com/acme/app", number)
+				if readErr != nil || !found {
+					err = readErr
+					break
+				}
+				_, err = reg.RecordPRReadFailure(id, "github.com/acme/app", number, pr.Wakes)
 			}
 			if err != nil {
 				t.Fatal(err)

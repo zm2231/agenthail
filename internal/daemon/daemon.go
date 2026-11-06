@@ -126,6 +126,7 @@ type Daemon struct {
 	workClean                sync.Mutex
 	workWake                 chan struct{}
 	github                   github.Client
+	prWatch                  prWatchState
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex

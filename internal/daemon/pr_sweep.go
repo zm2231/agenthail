@@ -32,10 +32,13 @@ func (d *Daemon) runPRSweeps(ctx context.Context) {
 		}
 		failure := ""
 		if err := d.linkBranchPRs(ctx); err != nil {
-			failure = err.Error()
+			failure = "linking worktree branches: " + err.Error()
+		}
+		if err := d.watchPRs(ctx, time.Now()); err != nil {
+			failure = strings.TrimPrefix(failure+"; watching: "+err.Error(), "; ")
 		}
 		if failure != lastFailure && failure != "" {
-			d.log.Printf("pull requests on worktree branches: %s", failure)
+			d.log.Printf("pull requests: %s", failure)
 		}
 		lastFailure = failure
 	}
