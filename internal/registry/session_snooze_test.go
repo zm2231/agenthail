@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -77,5 +78,59 @@ func TestPinAndSnoozeComeBackFromOneReadAndAWakeReturnsTheSnooze(t *testing.T) {
 	}
 	if _, err := r.WakeSession("missing"); err == nil {
 		t.Fatal("waking an unknown session succeeded")
+	}
+}
+
+func TestARegistryFromBeforeSnoozeKeepsItsPinsAndGainsSnooze(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"pinned", "plain"} {
+		if err := old.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := old.PinSession("pinned", at); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE sessions DROP COLUMN snoozed_at_ms`,
+		`ALTER TABLE sessions DROP COLUMN snoozed_until_ms`,
+		`ALTER TABLE sessions DROP COLUMN snooze_wake`,
+		`PRAGMA user_version=59`,
+	} {
+		if _, err := old.db.Exec(statement); err != nil {
+			old.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	var version int
+	if err := upgraded.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("upgraded to version %d (%v), want %d", version, err, schemaVersion)
+	}
+	marks, err := upgraded.SessionMarks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := marks["pinned"]; !m.PinnedAt.Equal(at) || m.Snooze.Set() || len(marks) != 1 {
+		t.Fatalf("marks after upgrade %+v", marks)
+	}
+	later := Snooze{At: at, Until: at.Add(time.Hour), Wake: SnoozeWakeTime}
+	if _, err := upgraded.SnoozeSession("plain", later); err != nil {
+		t.Fatal(err)
+	}
+	if marks, _ := upgraded.SessionMarks(); marks["plain"].Snooze != later {
+		t.Fatalf("snooze after upgrade %+v", marks["plain"])
 	}
 }
