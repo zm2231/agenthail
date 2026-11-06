@@ -357,6 +357,8 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksUntrusted:
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
+		case surfaces.CodexHooksNoNudge:
+			fmt.Printf("codex hooks: %s; update Codex, then run: agenthail hooks install codex\n", surfaces.CodexHooksNoNudge)
 		}
 		if build != nil {
 			fmt.Printf("[daemon] build: %s\n", build.Detail)

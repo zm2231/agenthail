@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 // codexStdioClient runs its own `codex app-server` over stdio for one task,
@@ -24,6 +26,7 @@ type codexStdioClient struct {
 	next    int
 	waiting map[int]chan map[string]any
 	done    chan struct{}
+	version string
 }
 
 func startCodexStdio(ctx context.Context, binary string, env []string) (*codexStdioClient, error) {
@@ -45,10 +48,12 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 	}
 	c := &codexStdioClient{ctx: ctx, cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, done: make(chan struct{})}
 	go c.read(stdout)
-	if _, err := c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, 30*time.Second); err != nil {
+	initialized, err := c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, 30*time.Second)
+	if err != nil {
 		c.Close()
 		return nil, err
 	}
+	c.version = codexUserAgentVersion(gjson.Get(codexJSON(initialized), "result.userAgent").String())
 	if err := c.write(map[string]any{"jsonrpc": "2.0", "method": "initialized"}); err != nil {
 		c.Close()
 		return nil, err

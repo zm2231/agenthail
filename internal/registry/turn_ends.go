@@ -41,6 +41,11 @@ type TurnEnd struct {
 
 var ErrTurnAlreadyEnded = errors.New("this turn has already ended")
 
+const (
+	TurnSourceTool   = "tool"
+	TurnSourceNudged = "nudged"
+)
+
 // Only the newest turn without an end is kept, so a session that never ends its turns holds one row.
 func (r *Registry) OpenTurn(sessionID string, at time.Time) error {
 	tx, err := r.db.Begin()
@@ -87,8 +92,11 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 	case ended > 0:
 		return TurnEnd{}, ErrTurnAlreadyEnded
 	}
-	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,needs=?,headline=?,asks_json=?,next_json=?,source=?,routed_to=? WHERE session_id=? AND started_at_ms=?`,
-		at.UnixMilli(), activeTurnID, end.Needs, end.Headline, string(asks), string(next), end.Source, end.RoutedTo, end.SessionID, started); err != nil {
+	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,needs=?,headline=?,asks_json=?,next_json=?,source=CASE WHEN source=? THEN source ELSE ? END,routed_to=? WHERE session_id=? AND started_at_ms=?`,
+		at.UnixMilli(), activeTurnID, end.Needs, end.Headline, string(asks), string(next), TurnSourceNudged, end.Source, end.RoutedTo, end.SessionID, started); err != nil {
+		return TurnEnd{}, err
+	}
+	if err := tx.QueryRow(`SELECT source FROM turn_ends WHERE session_id=? AND started_at_ms=?`, end.SessionID, started).Scan(&end.Source); err != nil {
 		return TurnEnd{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -96,6 +104,39 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 	}
 	end.StartedAt, end.EndedAt, end.TurnID = time.UnixMilli(started).UTC(), time.UnixMilli(at.UnixMilli()).UTC(), activeTurnID
 	return end, nil
+}
+
+func (r *Registry) TurnEnded(sessionID, turnID string) (bool, error) {
+	var ended int64
+	var rowTurn, completed string
+	err := r.read.QueryRow(`SELECT ended_at_ms,turn_id,completed_turn_id FROM turn_ends WHERE session_id=? ORDER BY started_at_ms DESC LIMIT 1`, sessionID).Scan(&ended, &rowTurn, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ended > 0 && completed == "" && (turnID == "" || rowTurn == "" || rowTurn == turnID), nil
+}
+
+func (r *Registry) MarkTurnNudged(sessionID string, at time.Time) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`UPDATE turn_ends SET source=? WHERE session_id=? AND ended_at_ms=0 AND completed_turn_id='' AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)`, TurnSourceNudged, sessionID, sessionID)
+	if err != nil {
+		return err
+	}
+	if marked, err := result.RowsAffected(); err != nil {
+		return err
+	} else if marked == 0 {
+		if _, err := tx.Exec(`INSERT INTO turn_ends(session_id,started_at_ms,source) VALUES(?,MAX(?,COALESCE((SELECT MAX(started_at_ms)+1 FROM turn_ends WHERE session_id=?),0)),?)`, sessionID, at.UnixMilli(), sessionID, TurnSourceNudged); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *Registry) RouteTurnEnd(sessionID string, startedAt time.Time, to string) error {

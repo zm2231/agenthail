@@ -30,7 +30,7 @@ func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTu
 		return nil, refusal
 	}
 	session := caller.session
-	end := registry.TurnEnd{SessionID: session.ID, Needs: input.Needs, Headline: strings.TrimSpace(input.Headline), Asks: input.Asks, Next: input.Next, Source: "tool"}
+	end := registry.TurnEnd{SessionID: session.ID, Needs: input.Needs, Headline: strings.TrimSpace(input.Headline), Asks: input.Asks, Next: input.Next, Source: registry.TurnSourceTool}
 	hearer, routed := noticeRecipient{}, false
 	if end.Needs == endTurnNeedsYou {
 		hearer, routed = d.endTurnHearer(session)

@@ -890,7 +890,23 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withMessageUUID(s, input)));
     });
-  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
+  // A turn that ends without agenthail_end_turn is asked once to call it.
+  const stop = (input, _toolUseID, { signal }) => {
+    if (!s.mcpToken || input.stop_hook_active || input.agent_id || s.tasks.some((task) => !task.ambient)) return Promise.resolve({});
+    return new Promise((resolve) => {
+      const child = execFile(args.agenthail, ['hook', 'stop', '--surface', 'claude'], { signal, timeout: 8_000, maxBuffer: 1 << 16 }, (error, stdout) => {
+        let output;
+        try {
+          output = JSON.parse(stdout);
+        } catch {}
+        if (error || output?.decision !== 'block' || typeof output.reason !== 'string') return resolve({});
+        resolve({ decision: 'block', reason: output.reason });
+      });
+      child.stdin.on('error', () => {});
+      child.stdin.end(JSON.stringify(input));
+    });
+  };
+  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }], Stop: [{ hooks: [stop] }] };
 }
 
 // Claude names a prompt by its own id, so the host says which message it took.

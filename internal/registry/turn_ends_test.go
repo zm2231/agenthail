@@ -95,3 +95,35 @@ func TestWithoutAStartHookANewTurnIsToldByItsCompletionOrItsRuntimeTurn(t *testi
 		t.Fatalf("a later completion left %q standing", got)
 	}
 }
+
+func TestAnEndGivenAfterTheNudgeIsRecordedAsNudged(t *testing.T) {
+	r := coordinatorRegistry(t, "worker")
+	now := time.Now()
+	for _, opened := range []bool{true, false} {
+		if opened {
+			if err := r.OpenTurn("worker", now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ended, err := r.TurnEnded("worker", ""); err != nil || ended {
+			t.Fatalf("opened=%v: a turn without an end reads ended=%v err=%v", opened, ended, err)
+		}
+		if err := r.MarkTurnNudged("worker", now.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		end, err := r.EndTurn(TurnEnd{SessionID: "worker", Needs: "nothing", Headline: "Done", Source: TurnSourceTool}, "turn-1", now.Add(2*time.Second))
+		if err != nil || end.Source != TurnSourceNudged {
+			t.Fatalf("opened=%v: end %+v err=%v", opened, end, err)
+		}
+		if ended, err := r.TurnEnded("worker", "turn-1"); err != nil || !ended {
+			t.Fatalf("opened=%v: the ended turn reads ended=%v err=%v", opened, ended, err)
+		}
+		if ended, _ := r.TurnEnded("worker", "turn-2"); ended {
+			t.Fatalf("opened=%v: another turn reads as ended", opened)
+		}
+		if err := r.BindTurnCompletion("worker", "reply-1"); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(time.Minute)
+	}
+}

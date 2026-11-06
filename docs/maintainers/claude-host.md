@@ -402,6 +402,11 @@ with no hook installed ([agent card](agent-card.md#telling-a-claude-session-its-
 The callback returns only the command's `additionalContext`, and nothing on any
 failure or after 8s. The claim is keyed by the Claude pid, the same key the
 installed hook uses as Claude's child, so a session that has both is told once.
+A session opened with its MCP credential also gets a `Stop` callback that runs
+`agenthail hook stop --surface claude` and passes on only its block, so a turn
+that ends without `agenthail_end_turn` is asked once to call it; it skips the
+command for the stop after a block, a subagent's stop, and while a background
+task that is not ambient runs ([work record](work-record.md)).
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume
