@@ -201,6 +201,15 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	for _, column := range []struct{ name, decl string }{
+		{"answered_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"answer_status", `TEXT NOT NULL DEFAULT ''`},
+		{"answer_message_id", `TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := ensureColumn(tx, "turn_ends", column.name, column.decl); err != nil {
+			return err
+		}
+	}
 	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
 	}

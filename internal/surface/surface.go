@@ -36,6 +36,8 @@ const (
 	// WaitingDialog is a dialog open in the session's own interface, such as
 	// a settings panel, which only that interface can settle.
 	WaitingDialog WaitingKind = "dialog"
+	// WaitingAsk is an ended turn's questions, answered by the person's next message.
+	WaitingAsk WaitingKind = "ask"
 )
 
 // Waiting marks a busy turn that cannot continue until its user answers. ID

@@ -233,7 +233,9 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   const peer = randomUUID();
   await c.call('send', { sessionId: id, uuid: peer, text: 'hello', origin: { kind: 'peer', from: randomUUID() } });
   await c.event(turnResult(id, peer));
-  const recorded = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const all = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.ok(all.filter((r) => r.event === 'Stop').every((r) => JSON.stringify(r.output) === '{}'), 'a session without the agenthail tools is never asked to end its turn');
+  const recorded = all.filter((r) => r.event !== 'Stop');
   assert.deepEqual(
     recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
     [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', 'card for UserPromptSubmit']],
@@ -252,6 +254,42 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
     [...sent, undefined],
     'each person message names the uuid Claude took; a peer message names none',
   );
+  c.close();
+});
+
+test('a session with the agenthail tools is asked once to end a turn that has no end, unless background work still runs', async () => {
+  const f = fixture();
+  const calls = path.join(f.root, 'agenthail-calls.jsonl');
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+const fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args: process.argv.slice(2), input }) + '\\n');
+process.stdout.write(process.argv[3] === 'stop' ? JSON.stringify({ decision: 'block', reason: 'end it' }) : '{}');
+`,
+    { mode: 0o755 },
+  );
+  await startHost(f, { agenthail });
+  const c = new Client(f.socket);
+  await c.call('subscribe', { after: 0 });
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd, mcp: { url: 'http://127.0.0.1:7412/mcp', token: 'ahs_first' } });
+  for (const text of ['hello', 'AMBIENT 60000', 'BACKGROUND 60000']) {
+    const uuid = randomUUID();
+    await c.call('send', { sessionId: id, uuid, text, origin: { kind: 'human' } });
+    await c.event(turnResult(id, uuid));
+  }
+  const stops = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.event === 'Stop');
+  assert.deepEqual(
+    stops.map((r) => [r.input.stop_hook_active, r.output]),
+    [[false, { decision: 'block', reason: 'end it' }], [true, {}], [false, { decision: 'block', reason: 'end it' }], [true, {}], [false, {}]],
+  );
+  const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.args[1] === 'stop');
+  assert.equal(ran.length, 2, 'the stop hook asks agenthail only for a turn that may still need its end');
+  assert.deepEqual(ran[0].args, ['hook', 'stop', '--surface', 'claude']);
+  assert.equal(ran[0].input.session_id, id);
   c.close();
 });
 

@@ -77,8 +77,24 @@ func (a *App) cmdHook(args []string) error {
 		}
 		return nil
 	}
+	if len(args) > 0 && args[0] == "stop" {
+		if len(args) != 3 || args[1] != "--surface" || (args[2] != string(surface.KindClaude) && args[2] != string(surface.KindCodex)) {
+			return errors.New("usage: agenthail hook stop --surface claude|codex")
+		}
+		done := make(chan map[string]any, 1)
+		input := os.Stdin
+		go func() { done <- a.turnStop(input, time.Now()) }()
+		select {
+		case output := <-done:
+			if output != nil {
+				_ = emit(output)
+			}
+		case <-claudeSessionContextExpired():
+		}
+		return nil
+	}
 	if len(args) != 1 || args[0] != "permission-request" {
-		return errors.New("usage: agenthail hook permission-request|session-context")
+		return errors.New("usage: agenthail hook permission-request|session-context|stop")
 	}
 	if os.Getenv("CLAUDE_CODE_ENTRYPOINT") != "cli" {
 		return nil

@@ -30,7 +30,7 @@ func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTu
 		return nil, refusal
 	}
 	session := caller.session
-	end := registry.TurnEnd{SessionID: session.ID, Needs: input.Needs, Headline: strings.TrimSpace(input.Headline), Asks: input.Asks, Next: input.Next, Source: "tool"}
+	end := registry.TurnEnd{SessionID: session.ID, Needs: input.Needs, Headline: strings.TrimSpace(input.Headline), Asks: input.Asks, Next: input.Next, Source: registry.TurnSourceTool}
 	hearer, routed := noticeRecipient{}, false
 	if end.Needs == endTurnNeedsYou {
 		hearer, routed = d.endTurnHearer(session)
@@ -143,11 +143,16 @@ func validEndTurn(input mcpEndTurnInput) *mcpRefusal {
 			return refusal
 		}
 	}
+	asked := map[string]bool{}
 	for i, ask := range input.Asks {
 		which := fmt.Sprintf("ask %d", i+1)
 		if strings.TrimSpace(ask.Question) == "" {
 			return refuse("invalid", which+" has no question.")
 		}
+		if asked[strings.TrimSpace(ask.Question)] {
+			return refuse("invalid", which+" repeats an earlier question; ask each question once.")
+		}
+		asked[strings.TrimSpace(ask.Question)] = true
 		if refusal := tooLong(which+" question", ask.Question, 160); refusal != nil {
 			return refusal
 		}

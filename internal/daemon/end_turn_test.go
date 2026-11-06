@@ -198,6 +198,7 @@ func TestAnEndOfTurnTheAgentCanFixIsRefused(t *testing.T) {
 		"an ask without options":     {"headline": "h", "needs": "you", "asks": []any{ask("q?")}},
 		"suggested out of range":     {"headline": "h", "needs": "you", "asks": []any{map[string]any{"question": "q?", "options": []any{deploy}, "suggested": 1}}},
 		"a link that is not a url":   {"headline": "h", "needs": "you", "asks": []any{map[string]any{"question": "q?", "options": []any{deploy}, "links": []any{map[string]any{"title": "PR", "url": "not a url"}}}}},
+		"one question asked twice":   {"headline": "h", "needs": "you", "asks": []any{ask("q?", deploy), ask("q?", deploy)}},
 		"five asks":                  {"headline": "h", "needs": "you", "asks": []any{ask("1", deploy), ask("2", deploy), ask("3", deploy), ask("4", deploy), ask("5", deploy)}},
 		"four next items":            {"headline": "h", "needs": "nothing", "next": []any{"a", "b", "c", "d"}},
 		"an option label over limit": {"headline": "h", "needs": "you", "asks": []any{ask("q?", map[string]any{"label": strings.Repeat("x", 41)})}},

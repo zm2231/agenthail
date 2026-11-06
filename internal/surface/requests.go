@@ -37,6 +37,13 @@ type Question struct {
 	Header      string           `json:"header"`
 	MultiSelect bool             `json:"multiSelect"`
 	Options     []QuestionOption `json:"options"`
+	Suggested   *int             `json:"suggested,omitempty"`
+	Links       []QuestionLink   `json:"links,omitempty"`
+}
+
+type QuestionLink struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
 }
 
 type QuestionOption struct {

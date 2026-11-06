@@ -249,8 +249,9 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
-	if desktopNotificationMessage != "" && observation.Reply.Error == "" {
-		desktopNotificationMessage, mobileNotificationMessage = d.endTurnNotifications(session, observation.CompletedTurnID, desktopNotificationMessage, mobileNotificationMessage)
+	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage}
+	if notice.desktop != "" && observation.Reply.Error == "" {
+		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.desktop, notice.mobile)
 	}
 	if observation.ActiveTurnID != "" && observation.ActiveTurnID != previous.ActiveTurnID || completionChanged {
 		if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
@@ -269,8 +270,8 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
-	if desktopNotificationMessage != "" {
-		d.notifyTurnCompleted(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
+	if notice.desktop != "" {
+		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)
 	}
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)
