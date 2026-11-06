@@ -20,14 +20,14 @@ struct TranscriptScrimMask: Equatable {
 
     var layers: [CGRect]
 
-    init(rows: [CGRect], shape: Shape = .band, end: CGFloat? = nil) {
-        self.init(turns: rows.map { Row(rect: $0) }, shape: shape, end: end)
+    init(rows: [CGRect], shape: Shape = .band, end: CGFloat? = nil, column: ClosedRange<CGFloat>? = nil) {
+        self.init(turns: rows.map { Row(rect: $0) }, shape: shape, end: end, column: column)
     }
 
-    init(turns rows: [Row], shape: Shape = .band, end: CGFloat? = nil) {
+    init(turns rows: [Row], shape: Shape = .band, end: CGFloat? = nil, column: ClosedRange<CGFloat>? = nil) {
         switch shape {
         case .band: self.init(band: rows.map(\.rect))
-        case .panels: self.init(panels: rows, end: end)
+        case .panels: self.init(panels: rows, end: end, column: column)
         }
     }
 
@@ -35,9 +35,9 @@ struct TranscriptScrimMask: Equatable {
         row.width > 0 && row.height > 0 ? row.insetBy(dx: -reach, dy: -reach) : nil
     }
 
-    private init(panels rows: [Row], end: CGFloat?) {
+    private init(panels rows: [Row], end: CGFloat?, column: ClosedRange<CGFloat>?) {
         let rows = rows.filter { $0.rect.width > 0 && $0.rect.height > 0 }.sorted { $0.rect.minY < $1.rect.minY }
-        guard let first = rows.first, let left = rows.map(\.rect.minX).min(), let right = rows.map(\.rect.maxX).max() else {
+        guard let first = rows.first, let left = column?.lowerBound ?? rows.map(\.rect.minX).min(), let right = column?.upperBound ?? rows.map(\.rect.maxX).max() else {
             layers = []
             return
         }
@@ -58,6 +58,10 @@ struct TranscriptScrimMask: Equatable {
         }
         if let end, end > panel.maxY { panel = panel.union(span(panel.maxY, end)) }
         cores.append(panel)
+        // Rails beside the transcript keep the gap between turns inside its edges.
+        let height = Self.far + panel.maxY
+        cores.append(CGRect(x: left - Self.reach, y: -Self.far, width: Self.reach, height: height))
+        cores.append(CGRect(x: right, y: -Self.far, width: Self.reach, height: height))
         layers = cores.map { $0.insetBy(dx: -Self.reach, dy: -Self.reach) }
     }
 
