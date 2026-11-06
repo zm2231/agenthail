@@ -82,7 +82,7 @@ jobs:
       - name: iOS simulator tests
         run: |
           rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
-          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
+          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"

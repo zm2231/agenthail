@@ -144,6 +144,10 @@ struct ConversationFlow: View {
     @State private var path: [String] = []
     @State private var wideSelection: String?
 
+    static func splits(_ sizeClass: UserInterfaceSizeClass?, _ typeSize: DynamicTypeSize) -> Bool {
+        sizeClass == .regular && !typeSize.isAccessibilitySize
+    }
+
     init(model: AgenthailIOSModel, initialSessionID: String? = nil) {
         self.model = model
         _wideSelection = State(initialValue: initialSessionID)
@@ -152,7 +156,7 @@ struct ConversationFlow: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
+            if Self.splits(sizeClass, dynamicTypeSize) {
                 NavigationSplitView {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
@@ -492,6 +496,8 @@ struct ConversationListView: View {
 struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     let session: SessionState
     private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     @State private var showingInfo = false
@@ -654,7 +660,7 @@ struct SessionScreen: View {
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) {
                 olderPlace.release()
-                position.scrollTo(y: $0)
+                position.scrollTo(y: $0.wrappedValue)
             }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
@@ -755,7 +761,7 @@ struct SessionScreen: View {
                 }
             }
         }
-        .toolbar(.hidden, for: .tabBar)
+        .toolbar(ConversationFlow.splits(sizeClass, typeSize) ? .automatic : .hidden, for: .tabBar)
         .navigationTitle(displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

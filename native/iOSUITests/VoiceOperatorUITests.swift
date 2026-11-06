@@ -18,6 +18,10 @@ final class VoiceOperatorUITests: XCTestCase {
     }
 
     func testJumpToLatestReachesTheBottomWithoutMovingTheControls() {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
+        }
         let app = XCUIApplication()
         app.launchArguments = ["--preview-voice"]
         app.launch()
