@@ -32,7 +32,7 @@ struct QueueTailRows: View {
             bubble(row)
                 .rebuilt(row.id, generation: generation)
                 .id(row.id)
-                .accessibilityIdentifier(row.id)
+                .accessibilityIdentifier("queue-\(row.item.listID)")
                 .confirmationDialog("Send this message again?", isPresented: Binding(get: { retrying?.id == row.id }, set: { if !$0 { retrying = nil } }), titleVisibility: .visible) {
                     Button("Send again") { run(row, leaves: false) { try await model.updateQueue(row.item, retry: true) } }
                     Button("Cancel", role: .cancel) { retrying = nil }

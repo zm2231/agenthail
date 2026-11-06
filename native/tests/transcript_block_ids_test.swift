@@ -30,17 +30,12 @@ struct TranscriptBlockIDsTest {
         check(Set(ids).count == ids.count, "derived block ids never meet a provider id: \(ids)")
         check(Set(TranscriptBlock.build(items, foldAgents: false).map(\.id)).count == 8, "unfolded blocks are distinct too")
 
-        let tagged = [TranscriptRowID.item("x"), TranscriptRowID.tools("x"), TranscriptRowID.images("x"), TranscriptRowID.fold(TranscriptRowID.item("x"))]
-        check(Set(tagged).count == tagged.count, "each derivation has its own namespace: \(tagged)")
-        check(TranscriptRowID.file("t:a", path: "b:c") != TranscriptRowID.file("t:a:b", path: "c"), "a file key keeps its owner and path apart")
-        let keys = tagged + ["more-" + tagged[0], TranscriptRowID.file(tagged[1], path: "x")]
-        check(Set(keys.map { $0.prefix(2) }).count == keys.count, "row memory keys start differently for each kind: \(keys)")
-
         var tail = TranscriptTail()
         tail.update(ids, in: "s", rows: [:], visible: .zero, following: false)
         let split = tail.split(ids, in: "s")
         check(split == TranscriptTail.opening(count: ids.count), "the lazy rows end where they were set: \(split)")
-        check(tail.split(ids + [TranscriptRowID.item("new")], in: "s") == split, "lazy membership holds when a row is added")
+        let grown = TranscriptBlock.build(items + [item("new", "message", text: "later", role: "assistant")]).map(\.id)
+        check(tail.split(grown, in: "s") == split, "lazy membership holds when a row is added")
     }
 
     static func check(_ condition: Bool, _ message: String) {

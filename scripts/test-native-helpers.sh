@@ -87,6 +87,7 @@ SOURCES=(
   TranscriptScrimRowLayers.swift
   TranscriptScrimRows.swift
   TranscriptTail.swift
+  TranscriptRowID.swift
   AgentMessage.swift
   ClampedText.swift
   TurnClock.swift
@@ -156,7 +157,6 @@ SOURCES=(
   macOS/StatusStripFit.swift
   macOS/TranscriptBlock.swift
   macOS/TranscriptAgentBlocks.swift
-  macOS/TranscriptRowID.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptFeed.swift
   macOS/RevealedRow.swift

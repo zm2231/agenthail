@@ -6,7 +6,7 @@ struct QueueTail: Equatable {
         var leavingSince: Date? = nil
         var awaitsTurnEnd = false
 
-        var id: String { "queue-\(item.listID)" }
+        var id: String { TranscriptRowID.queue("\(item.listID)") }
         var isDead: Bool { item.status == "dead" }
         var isOwn: Bool { (item.author ?? "person") == "person" && PeerEnvelope(item.message).sender == nil }
     }

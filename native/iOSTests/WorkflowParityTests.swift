@@ -145,6 +145,18 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(TimelineGroup.make(separated).count, 3, "Pairing must not move a result across an assistant message")
     }
 
+    func testGroupIDsNeverMeetAProviderID() {
+        func item(_ id: String, role: String = "assistant", agent: AgentMessage? = nil) -> TimelineItem {
+            var value = TimelineItem(id: id, kind: "message", role: role, title: role, text: id, timestamp: nil, callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+            value.agent = agent
+            return value
+        }
+        let peer = AgentMessage(direction: "in", kind: "peer", peer: "builder", summary: "Branch is ready")
+        let groups = TimelineGroup.make([item("p", role: "peer", agent: peer), item("q", role: "peer", agent: peer), item("agents:p")])
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(Set(groups.map(\.id)).count, groups.count, "a fold and a reply named like it keep their own ids: \(groups.map(\.id))")
+    }
+
     @MainActor
     func testCreationNavigatesKnownSessionAndPreservesUnknownReceipt() async throws {
         ParityProtocol.state.reset(unknown: true)
