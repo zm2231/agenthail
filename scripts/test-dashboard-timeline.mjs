@@ -337,6 +337,11 @@ assert.equal(context.presenceTone(backgroundSession), "background", "background 
 assert.equal(context.presenceLabel({ ...backgroundSession, status: "busy" }), "Working", "a turn in progress still reads as working");
 assert.equal(context.presenceLabel({ ...backgroundSession, waitingOn: { kind: "approval", id: "r1", answerable: true } }), "Waiting on you", "a question outranks background work");
 assert.notEqual(context.presenceLabel({ ...backgroundSession, backgroundTasks: { running: false, source: "host", tasks: [{ id: "m1", kind: "monitor", ambient: true }] } }), "Waiting on background work", "ambient tasks alone do not hold the session");
+const stoppedSession = { id: "session-stopped", surface: "claude", status: "idle", turnStop: { turnId: "u1", reason: "Claude API error: Overloaded" } };
+assert.equal(context.presenceLabel(stoppedSession), "Stopped: Claude API error: Overloaded", "a turn an API error ended names the error");
+assert.equal(context.presenceTone(stoppedSession), "stopped", "a stopped session has its own tone");
+assert.equal(context.presenceLabel({ ...stoppedSession, turnStop: { ...stoppedSession.turnStop, refused: true } }), "Stopped: safeguards refused this conversation; start a new one", "a refused conversation says to start a new one");
+assert.equal(context.presenceLabel({ ...stoppedSession, status: "busy" }), "Working", "a new turn outranks the stop");
 context.renderBackgroundTasks(backgroundSession);
 const backgroundPanel = elements["#background-panel"].innerHTML;
 assert(!elements["#background-panel"].hidden, "background work shows its panel");

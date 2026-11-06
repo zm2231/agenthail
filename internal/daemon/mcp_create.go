@@ -23,6 +23,9 @@ type mcpCreateInput struct {
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"Claude: plan, default, acceptEdits, auto or bypassPermissions. Codex: untrusted, on-request or never. It cannot exceed your own ceiling; omitted, the session gets your ceiling's level."`
 	Alias          string `json:"alias,omitempty" jsonschema:"A name to reach the session by, without @."`
 	Task           bool   `json:"task,omitempty" jsonschema:"Claude and Codex: record this as a task with a result you read with agenthail_result. The reply has its taskId. It settles when the child reports with agenthail_report, or at its last turn or goal, and it holds one of your running-session slots until then."`
+	Isolation      string `json:"isolation,omitempty" jsonschema:"worktree: run in a new git worktree and branch of cwd's repository, removed once reported or archived if nothing would be lost."`
+	Branch         string `json:"branch,omitempty" jsonschema:"Worktree branch; default ah/<alias>."`
+	Base           string `json:"base,omitempty" jsonschema:"Worktree base ref; default cwd's HEAD."`
 }
 
 func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
@@ -44,6 +47,13 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	}
 	if kind != surface.KindClaude && kind != surface.KindCodex {
 		return nil, refuse("invalid", "surface is claude, codex or notion.")
+	}
+	isolation := strings.TrimSpace(input.Isolation)
+	if isolation != "" && isolation != isolationWorktree {
+		return nil, refuse("invalid", "isolation is worktree or omitted.")
+	}
+	if isolation == "" && (strings.TrimSpace(input.Branch) != "" || strings.TrimSpace(input.Base) != "") {
+		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
 	if !filepath.IsAbs(strings.TrimSpace(input.Cwd)) {
 		return nil, refuse("invalid", "cwd must be an absolute folder.")
@@ -80,5 +90,6 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		Action: "session-create", Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 		PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias),
 		SourceSessionID: caller.session.ID, Ceiling: start.ceiling.encode(), Task: input.Task,
+		Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
 	})
 }

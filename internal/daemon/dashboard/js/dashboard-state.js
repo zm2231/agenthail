@@ -17,6 +17,8 @@ import { mobileConversationView } from "./navigation.js";
 import { scopedSessions } from "./session-scope.js";
 import { listedRows, loadSessionOrder, orderIsMissing } from "./session-order.js";
 import { findSessions, readHistory } from "./session-pages.js";
+import { catalogRead } from "./catalog-live.js";
+import { rereadSoon } from "./order-refresh.js";
 import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 
@@ -43,7 +45,10 @@ export function ensureSessionOrder() {
 }
 
 export async function load(fresh = false, selectDefault = true) {
-  if (app.loading) return;
+  if (app.loading) {
+    app.loadAgain = { fresh: fresh || Boolean(app.loadAgain?.fresh), selectDefault: selectDefault && (app.loadAgain?.selectDefault ?? true) };
+    return;
+  }
   app.loading = true;
   let loaded = false;
   const slowTimer = setTimeout(() => {
@@ -56,13 +61,13 @@ export async function load(fresh = false, selectDefault = true) {
     }
   }, 2000);
   try {
-    const [, { base: state, refreshAt }, history] = await Promise.all([
+    const [, { base: state, refreshAt, catalogSeq }, history] = await Promise.all([
       loadTools(),
       loadSessionOrder(fresh),
       readHistory(),
     ]);
     clearTimeout(app.orderRefresh);
-    if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => load(false, false), Math.max(0, refreshAt - Date.now()));
+    if (Number.isFinite(refreshAt)) app.orderRefresh = setTimeout(() => rereadSoon(0), Math.max(0, refreshAt - Date.now()));
     const rows = listedRows();
     const kept = [app.selected?.id, ...unconfirmedSendsOutside((id) => rows.has(id)).map((item) => item.sessionId), ...(state.deliveryProblems || []).map((item) => item.sessionId)];
     const missing = [...new Set(kept)].filter((id) => id && !rows.has(id) && !state.rekeyed?.[id]);
@@ -80,6 +85,7 @@ export async function load(fresh = false, selectDefault = true) {
       deliveryProblems: state.deliveryProblems || [],
       leadReplacements: state.leadReplacements || [],
     };
+    catalogRead(catalogSeq);
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"
       : "daemon-presence offline";
@@ -122,6 +128,9 @@ export async function load(fresh = false, selectDefault = true) {
   } finally {
     clearTimeout(slowTimer);
     app.loading = false;
-    if (loaded) ensureSessionOrder();
+    const again = app.loadAgain;
+    app.loadAgain = null;
+    if (again) load(again.fresh, again.selectDefault);
+    else if (loaded) ensureSessionOrder();
   }
 }

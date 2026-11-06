@@ -3,15 +3,17 @@ import { escape } from "./format.js";
 const draftLimit = 16;
 const drafts = new Map();
 
-export function createPager(questions) {
-  return { questions, step: 0, picks: questions.map(() => []), typed: questions.map(() => "") };
+// An agent's ask is answered by one message after its turn has ended, so it
+// is never sent on one tap, can carry a note, and has nothing to decline.
+export function createPager(questions, ask = false) {
+  return { questions, ask, note: "", step: 0, picks: questions.map(() => []), typed: questions.map(() => "") };
 }
 
 export function pagerFor(request) {
   const questions = request.questions || [];
   const saved = drafts.get(request.id);
   if (saved && JSON.stringify(saved.questions) === JSON.stringify(questions)) return saved;
-  const pager = createPager(questions);
+  const pager = createPager(questions, request.kind === "ask");
   savePager(request.id, pager);
   return pager;
 }
@@ -22,7 +24,7 @@ export function savePager(requestId, pager) {
   while (drafts.size > draftLimit) drafts.delete(drafts.keys().next().value);
 }
 
-export const isOneTap = (pager) => pager.questions.length === 1 && !pager.questions[0].multiSelect;
+export const isOneTap = (pager) => !pager.ask && pager.questions.length === 1 && !pager.questions[0].multiSelect;
 export const isSingle = (pager) => pager.questions.length === 1;
 export const reviewStep = (pager) => pager.questions.length;
 export const onReview = (pager) => !isSingle(pager) && pager.step === reviewStep(pager);
@@ -44,6 +46,15 @@ export function answers(pager) {
   return Object.fromEntries(pager.questions.map((question, index) => [question.question, answerAt(pager, index)]));
 }
 
+export function decision(pager, answered) {
+  const note = pager.note.trim();
+  return pager.ask && note ? { behavior: "allow", answers: answered, message: note } : { behavior: "allow", answers: answered };
+}
+
+const noteField = (pager) => (pager.ask ? `<label><span>Note</span><textarea data-pager-note rows="2" placeholder="Anything else, optional">${escape(pager.note)}</textarea></label>` : "");
+
+const links = (question) => (question.links?.length ? `<p class="pager-links">${question.links.map((link) => `<a href="${escape(link.url)}" target="_blank" rel="noopener noreferrer">${escape(link.title)}</a>`).join(" · ")}</p>` : "");
+
 export function choose(pager, option) {
   const question = pager.questions[pager.step];
   const chosen = question?.options?.[option];
@@ -56,7 +67,7 @@ export function choose(pager, option) {
   }
   pager.picks[pager.step] = [option];
   pager.typed[pager.step] = "";
-  pager.step += 1;
+  if (!isSingle(pager)) pager.step += 1;
   return null;
 }
 
@@ -94,20 +105,21 @@ export function renderPage(pager) {
       const answer = answerAt(pager, index);
       return `<button type="button" class="pager-review-row${answer === null ? " unanswered" : ""}" data-pager-step="${index}"><small>${escape(question.header || question.question)}</small><span>${answer === null ? "Not answered" : escape(answer)}</span></button>`;
     }).join("");
-    return `<p class="pager-question">Review your answers</p>${rows}${canSubmit(pager) ? "" : "<p>Answer every question to submit.</p>"}`;
+    return `<p class="pager-question">Review your answers</p>${rows}${canSubmit(pager) ? "" : "<p>Answer every question to submit.</p>"}${noteField(pager)}`;
   }
   const question = pager.questions[pager.step];
   if (!question) return "";
   const header = isSingle(pager) && question.header ? `<small>${escape(question.header)}</small>` : "";
   const options = (question.options || []).map((option, index) => {
     const picked = pager.picks[pager.step].includes(index);
-    return `<button type="button" class="pager-option" data-pager-pick="${index}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><kbd aria-hidden="true">${index < 9 ? index + 1 : ""}</kbd><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span></button>`;
+    const suggested = question.suggested === index ? ' <small class="pager-suggested">Suggested</small>' : "";
+    return `<button type="button" class="pager-option" data-pager-pick="${index}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><kbd aria-hidden="true">${index < 9 ? index + 1 : ""}</kbd><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}${suggested}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span></button>`;
   }).join("");
-  return `${header}<p class="pager-question">${escape(question.question)}</p>${options}<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>`;
+  return `${header}<p class="pager-question">${escape(question.question)}</p>${links(question)}${options}<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>${isSingle(pager) ? noteField(pager) : ""}`;
 }
 
 export function renderActions(pager, requestId) {
-  const decline = `<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(requestId)}">Decline</button>`;
+  const decline = pager.ask ? "" : `<button class="soft-button" type="button" data-request-respond="deny" data-request-id="${escape(requestId)}">Decline</button>`;
   let primary = "";
   if (onReview(pager) || (isSingle(pager) && !isOneTap(pager))) {
     primary = `<button class="primary-button" type="submit"${canSubmit(pager) ? "" : " disabled"}>${isSingle(pager) ? "Submit" : "Submit answers"}</button>`;
@@ -119,7 +131,7 @@ export function renderActions(pager, requestId) {
   return primary + decline;
 }
 
-export function renderQuestionCard(request, created) {
+export function renderQuestionCard(request, created, heading = "Claude asks") {
   const pager = pagerFor(request);
-  return `<form class="request-card question-pager" tabindex="-1" data-request-question="${escape(request.id)}"><h3>Claude asks${created}</h3><div class="pager-chips" aria-label="Questions">${renderChips(pager)}</div><div class="pager-page">${renderPage(pager)}</div><div class="request-actions">${renderActions(pager, request.id)}</div></form>`;
+  return `<form class="request-card question-pager" tabindex="-1" data-request-question="${escape(request.id)}"><h3>${escape(heading)}${created}</h3><div class="pager-chips" aria-label="Questions">${renderChips(pager)}</div><div class="pager-page">${renderPage(pager)}</div><div class="request-actions">${renderActions(pager, request.id)}</div></form>`;
 }

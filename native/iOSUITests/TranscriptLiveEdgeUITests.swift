@@ -34,6 +34,23 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         return all
     }
 
+    private func attachReplyProbe(_ app: XCUIApplication, reply: Int, viewport: CGRect, tree: [XCUIElementSnapshot]) {
+        let needle = "of reply \(reply)."
+        let anywhere = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", needle))
+        var lines = [
+            "reply \(reply) in timeline tree: \(tree.contains { $0.label.contains(needle) })",
+            "reply \(reply) anywhere in app: \(anywhere.count) at \(anywhere.allElementsBoundByIndex.map { "\($0.frame)" })",
+            "timeline frame: \(viewport)",
+            "keyboard frame: \(app.keyboards.firstMatch.exists ? "\(app.keyboards.firstMatch.frame)" : "none")",
+            "timeline tree (\(tree.count) elements):",
+        ]
+        lines += tree.map { "\($0.elementType.rawValue) id=\($0.identifier) frame=\($0.frame) label=\($0.label.prefix(80))" }
+        let probe = XCTAttachment(string: lines.joined(separator: "\n"))
+        probe.name = "reply-probe"
+        probe.lifetime = .keepAlways
+        add(probe)
+    }
+
     private func newestReply(_ app: XCUIApplication) -> Int {
         elements(app).compactMap { element in
             element.label.components(separatedBy: "of reply ").dropFirst().first.flatMap { Int($0.prefix { $0.isNumber }) }
@@ -48,11 +65,11 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         sleep(3)
         let left = newestReply(app)
         XCTAssertGreaterThan(left, 0, "the session showed no reply before switching away")
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         app.buttons["session-computer::codex-demo"].tapWhenReady()
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
         sleep(25)
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         session.tapWhenReady()
         XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 5))
         var seen: [(reply: Int, at: Date)] = []
@@ -96,7 +113,9 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Jump to latest"].waitForNonExistence(timeout: 3), "Jump to latest did not reach the latest row")
         record(app, "after-jump")
         let viewport = timeline.frame
-        XCTAssertTrue(elements(app).contains { $0.label.contains("of reply \(latest).") && viewport.intersects($0.frame) }, "the latest reply \(latest) is not on screen after Jump to latest")
+        let tree = elements(app)
+        attachReplyProbe(app, reply: latest, viewport: viewport, tree: tree)
+        XCTAssertTrue(tree.contains { $0.label.contains("of reply \(latest).") && viewport.intersects($0.frame) }, "the latest reply \(latest) is not on screen after Jump to latest")
         XCTAssertTrue((composer.value as? String ?? "").contains("draft kept"), "the draft was lost on Jump to latest")
         XCTAssertEqual(app.keyboards.firstMatch.exists, focused, "Jump to latest changed the composer's focus")
         let row = timeline.buttons[toolID]
@@ -173,7 +192,7 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
             XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
             sleep(5)
             assertStill(app, "after opening the session, round \(round)")
-            app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+            app.backToSessions()
         }
     }
 }

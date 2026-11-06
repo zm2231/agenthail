@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/worktree"
 )
 
 func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashboardActionRequest) (actionResult, error) {
@@ -25,12 +26,19 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		}
 	}
 	startOptions := func(cwd string) surface.SessionStartOptions {
-		return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
+		return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Agent: request.Agent, PermissionMode: request.PermissionMode, ConfigRoot: strings.TrimSpace(request.ConfigRoot)}
 	}
 	if request.Task && creator == "" {
 		return actionResult{}, invalidRequest("a task needs the session that started it")
 	}
+	isolated, isolationErr := wantsWorktree(request)
+	if isolationErr != nil {
+		return actionResult{}, isolationErr
+	}
 	if request.Launcher != "" {
+		if isolated {
+			return actionResult{}, invalidRequest("a session in its own worktree starts in the background, not in a terminal")
+		}
 		if request.Task {
 			return actionResult{}, invalidRequest("a session started in a terminal cannot be a task")
 		}
@@ -56,6 +64,18 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	defer func() { _ = d.Registry.ReleaseAliasReservation(reservation) }()
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
+	var work *worktree.Plan
+	if isolated {
+		plan, err := d.beginWork(ctx, request, cwd, alias)
+		if err != nil {
+			return actionResult{}, err
+		}
+		if request.Ceiling, err = worktreeCeiling(request.Ceiling, plan); err != nil {
+			d.abandonWork(plan)
+			return actionResult{}, invalidRequest(err.Error())
+		}
+		work, cwd = &plan, plan.Cwd
+	}
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
 	ctx = surface.WithSourceSessionID(ctx, surface.SendOptions{SourceSessionID: creator, Author: surface.AuthorPerson}.Sender())
@@ -66,17 +86,42 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	var extra map[string]any
 	pick, placeErr := d.resolveClaudeStart(surface.SurfaceKind(request.Surface), creator, &options)
 	if placeErr != nil {
+		if work != nil {
+			d.abandonWork(*work)
+		}
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", placeErr.Error())
 	}
 	if pick != nil {
 		extra = map[string]any{"account": pick}
 	}
+	if work != nil {
+		if extra == nil {
+			extra = map[string]any{}
+		}
+		extra["worktree"] = workResult(*work)
+	}
+	var readyErr error
+	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
+		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		return readyErr
+	})
 	session, sent, startErr := starter.StartSession(ctx, options)
 	if session == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
 		}
+		if work != nil {
+			d.abandonWork(*work)
+		}
 		return actionResult{}, d.unstartedSession(request.Message, startErr)
+	}
+	if work != nil {
+		if activated, err := d.changeWork(func(r *registry.Registry) (bool, error) { return r.ActivateWork(work.WorktreePath, session.ID) }); err != nil || !activated {
+			d.log.Printf("record worktree %s for %s: activated=%t %v", work.WorktreePath, session.ID, activated, err)
+		}
+	}
+	if readyErr != nil {
+		return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), nil)
 	}
 	session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 	if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -178,7 +223,15 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		}
 		launchRequest.MCP = mcp
 	}
+	var readyErr error
+	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
+		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		return readyErr
+	})
 	launchResult, launchErr := launcher.Launch(ctx, launchRequest)
+	if readyErr != nil && launchResult.Session != nil {
+		return actionResult{}, createStorageFailure(launchResult.Session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), map[string]any{"launcher": request.Launcher})
+	}
 	startErr := launchErr
 	if launchErr != nil && launchResult.Session == nil {
 		var acceptedErr surface.LaunchAcceptedError

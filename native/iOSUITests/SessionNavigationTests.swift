@@ -15,30 +15,31 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["session-computer::crowded-4"].exists, "a sixth idle session waits behind Show more")
         let more = app.buttons["more-computer::project-fieldnotes"]
         XCTAssertEqual(more.label, "Show 3 more")
-        app.swipeUp()
+        let list: XCUIElement = app.isPad ? app.buttons["session-computer::crowded-3"] : app
+        list.swipeUp()
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "show more"
         shot.lifetime = .keepAlways
         add(shot)
         more.tapWhenReady()
         XCTAssertTrue(app.buttons["session-computer::crowded-4"].waitForExistence(timeout: 5), "Show more expands the project in place")
-        for _ in 0..<3 where !more.isHittable { app.swipeUp() }
+        for _ in 0..<3 where !more.isHittable { list.swipeUp() }
         XCTAssertEqual(more.label, "Show less")
         more.tapWhenReady()
         XCTAssertTrue(app.buttons["session-computer::crowded-3"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["session-computer::crowded-4"].exists, "Show less folds the project back to five")
-        for _ in 0..<3 where !app.buttons["voice-entry"].isHittable { app.swipeDown() }
+        for _ in 0..<3 where !app.buttons["voice-entry"].isHittable { list.swipeDown() }
         app.buttons["voice-entry"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Sample conversation"].exists, "the preview voice entry must not dial a paired host")
         app.buttons["Done"].tapWhenReady()
         for tab in ["Sessions", "Inbox", "Settings"] {
-            XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")
+            XCTAssertTrue(app.tab(tab).isHittable, "\(tab) tab is covered by the Voice entry")
         }
-        app.tabBars.buttons["Inbox"].tapWhenReady()
-        XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected)
-        app.tabBars.buttons["Settings"].tapWhenReady()
-        XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected)
+        app.tab("Inbox").tapWhenReady()
+        XCTAssertTrue(app.tab("Inbox").isSelected)
+        app.tab("Settings").tapWhenReady()
+        XCTAssertTrue(app.tab("Settings").isSelected)
         XCTAssertFalse(app.buttons["voice-entry"].exists)
     }
 
@@ -60,23 +61,23 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertLessThan(allEvents.frame.maxY, call.frame.minY)
         app.buttons["Chat"].tapWhenReady()
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.tabBars.buttons["Inbox"].isHittable)
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        XCTAssertEqual(app.tab("Inbox").isHittable, app.isPad, app.isPad ? "the tabs went away while a session is open beside the list" : "the tabs stay over a session")
+        app.backToSessions()
         XCTAssertTrue(session.waitForExistence(timeout: 5))
         app.buttons["new-menu"].tapWhenReady()
         XCTAssertTrue(app.navigationBars["New session"].waitForExistence(timeout: 5))
         app.navigationBars["New session"].buttons["Cancel"].tapWhenReady()
         XCTAssertTrue(session.waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["Inbox"].tapWhenReady()
+        app.tab("Inbox").tapWhenReady()
         let inboxSession = app.buttons["inbox-session-2"]
         XCTAssertTrue(inboxSession.waitForExistence(timeout: 10))
         inboxSession.tapWhenReady()
         let menu = app.buttons["Session menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.tabBars.buttons["Sessions"].isSelected)
+        XCTAssertTrue(app.tab("Sessions").isSelected)
         session.tapWhenReady()
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
@@ -99,7 +100,7 @@ final class SessionNavigationTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
         app.launch()
-        app.tabBars.buttons["Inbox"].tapWhenReady()
+        app.tab("Inbox").tapWhenReady()
         XCTAssertTrue(app.buttons["inbox-session-1"].waitForExistence(timeout: 10), "Current lists what can still be acted on")
         app.buttons["History"].tapWhenReady()
         XCTAssertTrue(app.buttons["inbox-message-13"].waitForExistence(timeout: 5))

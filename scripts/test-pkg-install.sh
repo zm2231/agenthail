@@ -70,6 +70,7 @@ test -x "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test -x "/Library/Application Support/Agenthail/runtime/node/bin/node"
 test -f "/Library/Application Support/Agenthail/claude-host/host.mjs"
 test -f "/Library/Application Support/Agenthail/claude-host/checker.mjs"
+test -f "/Library/Application Support/Agenthail/browser-host/host.mjs"
 test -x /Applications/Agenthail.app/Contents/MacOS/Agenthail
 for _ in {1..5}; do
 	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
@@ -210,6 +211,9 @@ jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$plist")" = "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_SIDECAR raw -o - "$plist")" = "/Library/Application Support/Agenthail/sidecar.py"
 launchctl bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
+# A registry at version 10 had none of the presentation triggers, and SQLite
+# will not drop a column a trigger names, so remove them before faking it.
+sqlite3 "$HOME/.agenthail/registry.db" "SELECT 'DROP TRIGGER \"' || name || '\";' FROM sqlite_schema WHERE type='trigger' AND name LIKE 'catalog_presentation_version_%'" | sqlite3 "$HOME/.agenthail/registry.db"
 sqlite3 "$HOME/.agenthail/registry.db" <<'SQL'
 ALTER TABLE routes DROP COLUMN active;
 ALTER TABLE routes DROP COLUMN once_only;

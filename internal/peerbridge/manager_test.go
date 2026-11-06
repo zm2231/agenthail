@@ -31,20 +31,20 @@ var binary string
 // takes longer than those deadlines allow.
 func TestMain(m *testing.M) {
 	testkit.ClearAgentEnv()
-	buildDir, err := os.MkdirTemp("", "ah-bin-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	binary = filepath.Join(buildDir, "agenthail")
-	if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail").CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "build: %v\n%s", err, output)
-		_ = os.RemoveAll(buildDir)
-		os.Exit(1)
-	}
-	code := m.Run()
-	_ = os.RemoveAll(buildDir)
-	os.Exit(code)
+	os.Exit(testkit.RunInOwnHome(func() int {
+		buildDir, err := os.MkdirTemp("", "ah-bin-")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer os.RemoveAll(buildDir)
+		binary = filepath.Join(buildDir, "agenthail")
+		if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail").CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "build: %v\n%s", err, output)
+			return 1
+		}
+		return m.Run()
+	}))
 }
 
 type peerFixture struct {

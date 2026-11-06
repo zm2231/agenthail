@@ -98,6 +98,15 @@ func (r *Registry) AdoptProjectLinks(links []ProjectLink) (bool, error) {
 		if !link.Shared() || link.OriginHost == "" {
 			continue
 		}
+		if link.Joined, err = movedProjectID(tx, link.Joined); err != nil {
+			return false, err
+		}
+		if link.Survivor, err = movedProjectID(tx, link.Survivor); err != nil {
+			return false, err
+		}
+		if link.Joined == link.Survivor {
+			continue
+		}
 		current, found, err := projectLinkTx(tx, link.Joined)
 		if err != nil {
 			return false, err

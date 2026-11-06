@@ -34,6 +34,7 @@ func TestAnUpgradedRegistryHoldsACompletionAndWatchesItsSessionUntilReleased(t *
 	if err := old.SaveRuntimeState("codex", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {
 		t.Fatal(err)
 	}
+	asBeforePresentationTriggers(t, old)
 	for _, statement := range []string{`ALTER TABLE session_runtime DROP COLUMN held_completion_turn_id`, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)} {
 		if _, err := old.db.Exec(statement); err != nil {
 			old.Close()

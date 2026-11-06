@@ -117,6 +117,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		return dashboardState{}, fmt.Errorf("read the person's name: %w", err)
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Signin: make([]signin.Status, 0, len(signin.Consumers)), Rekeyed: rekeyed, Person: person}
+	if browser := d.browserStatus(); browser != nil {
+		state.Daemon["browser"] = browser
+	}
 	if catalogMirror(ctx) && page == nil {
 		state.RetiredClock, state.RetiredIDs = &mirrorRetired.Clock, mirrorRetired.IDs
 	}
@@ -129,6 +132,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	if state.ProjectLinks, err = d.sharedProjectLinks(); err != nil {
 		return dashboardState{}, fmt.Errorf("read project links: %w", err)
+	}
+	if state.ProjectMoves, err = d.sharedProjectMoves(); err != nil {
+		return dashboardState{}, fmt.Errorf("read project moves: %w", err)
 	}
 	if page != nil {
 		state.catalogPageApplied = true
@@ -201,6 +207,14 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read project leads: %w", err)
 	}
+	works, err := d.Registry.SessionWork()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session worktrees: %w", err)
+	}
+	sessionPRs, err := d.Registry.SessionPRs()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session pull requests: %w", err)
+	}
 	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
@@ -230,6 +244,12 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			observedAt = now.UTC()
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
+		if work, found := works[session.ID]; found {
+			entry.Worktree = newWorkView(work)
+		}
+		if prs := sessionPRs[session.ID]; len(prs) > 0 {
+			entry.PRs = d.prViews(prs)
+		}
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt
 		}

@@ -52,7 +52,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 			t.Fatalf("launcher %s sessionOptions=%v, want %v", launcher.ID, launcher.SessionOptions, want)
 		}
 	}
-	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "--literal instruction", "cwd": home, "model": "sonnet", "name": "phone-task", "worktree": "phone-work", "agent": "reviewer", "effort": "high", "permissionMode": "plan", "launcher": launcher})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "--literal instruction", "cwd": home, "model": "sonnet", "name": "phone-task", "agent": "reviewer", "effort": "high", "permissionMode": "plan", "launcher": launcher})
 	request = httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
@@ -76,7 +76,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 		t.Fatalf("spawns=%+v", spawns)
 	}
 	argv := strings.Join(spawns[0].Argv, " ")
-	for _, want := range []string{"sonnet", "phone-task", "phone-work", "reviewer", "high", "plan"} {
+	for _, want := range []string{"sonnet", "phone-task", "reviewer", "high", "plan"} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("missing %q in %s", want, argv)
 		}

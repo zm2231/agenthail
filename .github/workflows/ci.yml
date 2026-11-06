@@ -53,11 +53,19 @@ jobs:
           cache-dependency-path: |
             push-relay/package-lock.json
             claude-host/package-lock.json
+            browser-host/package-lock.json
             sidecar/package-lock.json
-      - name: Claude host tests
+      - uses: actions/cache@v5
+        if: runner.environment != 'self-hosted'
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Node host tests
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" npm test --prefix browser-host
       - name: Cookie bridge dependencies
         working-directory: sidecar
         run: npm ci --ignore-scripts
@@ -99,6 +107,8 @@ jobs:
           node scripts/test-dashboard-projects.mjs
           node scripts/test-dashboard-project-view.mjs
           node scripts/test-dashboard-session-order.mjs
+          node scripts/test-dashboard-shared-stream.mjs
+          node scripts/test-dashboard-live-order.mjs
           node scripts/test-dashboard-project-now.mjs
           node scripts/test-dashboard-holders.mjs
           node scripts/test-dashboard-model.mjs
@@ -181,13 +191,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: claude-host/package-lock.json
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
       - name: Vet
         run: go vet ./...
-      - name: Claude host tests
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Node host tests
         run: |
           npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
           npm test --prefix claude-host
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" npm test --prefix browser-host
       - uses: actions/cache@v5
         with:
           path: ~/.cache/agenthail-build/node-v*.tar.gz
@@ -215,7 +233,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: claude-host/package-lock.json
+          cache-dependency-path: |
+            claude-host/package-lock.json
+            browser-host/package-lock.json
       - uses: actions/cache@v5
         with:
           path: ~/.cache/agenthail-build/node-v*.tar.gz
@@ -228,9 +248,19 @@ jobs:
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
           mkdir -p "$RUNNER_TEMP/inspect"
           tar -xzf dist/agenthail-v0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP/inspect"
+          tar -xzf dist/agenthail-v0.0.0-ci-linux-arm64.tar.gz -C "$RUNNER_TEMP/inspect"
           root="$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-amd64"
           test "$("$root/runtime/node/bin/node" --version)" = v22.23.1
-          (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
+          "$root/runtime/node/bin/node" scripts/test-staged-hosts.mjs "$root"
+          node scripts/test-staged-hosts.mjs "$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-arm64" --files-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-linux-archives
+          path: |
+            dist/agenthail-v0.0.0-ci-linux-*.tar.gz
+            dist/agenthail-v0.0.0-ci-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 3
 
   installer:
     needs: gate
@@ -287,6 +317,12 @@ jobs:
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
         run: scripts/test-pkg-artifact.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-pkg
+          path: dist/Agenthail-v0.0.0-ci-arm64.pkg
+          if-no-files-found: error
+          retention-days: 3
       - name: Verify main window layout at narrow widths
         run: |
           pkgutil --expand-full dist/Agenthail-v0.0.0-ci-arm64.pkg "$RUNNER_TEMP/layout-pkg"

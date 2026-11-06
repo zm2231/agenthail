@@ -6,7 +6,7 @@ final class InboxSteerUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-steer-rows", "--preview-theme", theme]
         app.launch()
-        app.tabBars.buttons["Inbox"].tapWhenReady(timeout: 15)
+        app.tab("Inbox").tapWhenReady(timeout: 15)
         return app
     }
 

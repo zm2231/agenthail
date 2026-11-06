@@ -15,12 +15,12 @@ func TestThreadCreateClaudeForwardsAdvancedOptions(t *testing.T) {
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "claude-new", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd}}
 	app := threadFixture(t, starter)
 	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--worktree", "branch", "--permission-mode", "plan", "--json"})
+		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--permission-mode", "plan", "--json"})
 	})
 	if err != nil || !strings.Contains(output, `"id":"claude-new"`) || len(starter.options) != 1 {
 		t.Fatal(output, err, starter.options)
 	}
-	if got := starter.options[0]; got.Effort != "high" || got.Worktree != "branch" || got.Message != "hello" {
+	if got := starter.options[0]; got.Effort != "high" || got.PermissionMode != "plan" || got.Message != "hello" {
 		t.Fatalf("options=%+v", got)
 	}
 }

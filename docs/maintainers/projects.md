@@ -90,7 +90,22 @@ refused, and so is a name that is both a stored channel and a project. A
 channel cannot be created or renamed to a project's name. See
 [hosts](hosts.md#relays-and-channels-across-hosts).
 
-A changed remote moves a project to its new key on the next catalog pass.
+A changed remote moves a project to its new key on the next catalog pass,
+with everything kept under the old key: its ledger, its lead and lead
+history, its links and its archive state. Each host remembers the key it
+last saw for each repository folder (`repository_keys`), and the move is one
+registry transaction. The host records the move (`project_moves`), so a
+checkout that still names the old remote resolves to the new key, and naming
+the old remote again moves the project back. Moves between repository keys
+reach paired hosts like links do, in the snapshot's `projectMoves` and the
+`project.moved` catalog event. A replica of a shared ledger that saw the move
+first hands it to the ledger's owner (`/api/v1/ledger/sync/moves`) before it
+confirms the new key there.
+
+A move is refused when both keys already keep a ledger, or both have a lead,
+because two histories cannot be merged. Nothing moves; `agenthail doctor`
+and the ledger board of either key name the history that stayed behind, and
+the refusal clears when the folder names its old remote again.
 
 ## Linked projects
 
@@ -145,7 +160,7 @@ Each row carries `current`, which the session's surface computes, and
 | Scope | A session is in it when |
 |---|---|
 | `running` | it is working |
-| `current`, `recent` | its row is `current` |
+| `current`, `recent` | its row is `current`, or it is pinned |
 | `all` | it is not archived |
 | `archived` | it or its project is archived |
 
@@ -176,6 +191,42 @@ that needs the user stays hidden.
 
 Archive state is per checkout, in the owning host's registry. A project entry
 is archived only when every checkout is.
+
+## Snooze and inbox sections
+
+Each row in the session view carries `inboxSection`, the one section of the
+inbox it belongs to. The first that applies wins:
+
+| Section | A session is in it when |
+|---|---|
+| `archived` | it or its project is archived |
+| `needsYou` | it has `attention` |
+| `snoozed` | its snooze still holds |
+| `running` | it is working, finishing background work, or has queued messages |
+
+Any other row has no `inboxSection`. A `done` section needs a session's
+end-of-turn record, which rows do not carry yet.
+
+A request for the person outranks a snooze, so snoozing never hides one.
+
+`session-snooze` takes `sessionId` and either `until` (an RFC 3339 time in the
+future) or `wake: "finished"`. A `until` snooze holds until that time. A
+`finished` snooze holds while the turn that was running when it was set keeps
+running; it needs a working session. A session that is archived, or whose
+project is, cannot be snoozed but can be woken. Times are kept to the
+millisecond.
+`session-wake` takes `sessionId` and clears the snooze. Both answer the new
+`snooze` and the `previous` one, so a client undoes either by sending the
+previous snooze back, or `session-wake` when there was none. From the CLI:
+`agenthail thread snooze <target> --until 2h|<time>`,
+`agenthail thread snooze <target> --until-finished` and
+`agenthail thread wake <target>`.
+
+Rows carry `snooze: {snoozedAt, until, wake}` for the last snooze set, even
+after it stopped holding; `inboxSection` says whether it still does. The view's
+`refreshAt` includes the next `until`, so a client rereads when a snooze ends.
+State lives in `sessions.snoozed_at_ms`, `snoozed_until_ms` and `snooze_wake`,
+read with the pin in one query per catalog pass.
 
 - A project id with a key applies to every checkout of this host with that key
   and is forwarded to every paired host whose mirrored sessions have it. A host

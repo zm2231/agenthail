@@ -58,6 +58,12 @@ export function limitLabel(session) {
   return session.limitResume ? limitResumeLabel(session) : session.usageLimit ? usageLimitLabel(session) : "";
 }
 
+export function stopLabel(session) {
+  const stop = session.status === "busy" ? null : session.turnStop;
+  if (!stop) return "";
+  return stop.refused ? "Stopped: safeguards refused this conversation; start a new one" : `Stopped: ${stop.reason}`;
+}
+
 export const quietAfterMs = 10 * 60 * 1000;
 
 export function quietNote(activity, now = Date.now()) {
@@ -108,6 +114,7 @@ export function presenceLabel(session, now = Date.now()) {
   if (unavailable(session)) return "Unavailable";
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
   if (limitLabel(session)) return limitLabel(session);
+  if (stopLabel(session)) return stopLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
   if (session.status === "busy") return workingLabel(session, now);
   return (
@@ -124,6 +131,7 @@ export function presenceLabel(session, now = Date.now()) {
 export function presenceTone(session) {
   if (unavailable(session)) return "unavailable";
   if (session.waitingOn) return "waiting";
+  if (stopLabel(session)) return "stopped";
   if (backgroundWaiting(session)) return "background";
   if (session.status === "busy" || session.currentReason === "working") return "active";
   if (["queued", "blocked"].includes(session.currentReason)) return "queued";

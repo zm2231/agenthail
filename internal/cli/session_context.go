@@ -58,6 +58,9 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 			return nil
 		}
 	}
+	if hook.Event == claudehooks.PromptSubmit.Event {
+		_ = store.OpenTurn(session.ID, now)
+	}
 	card, err := a.cardSources().For(ctx, *session)
 	if err != nil {
 		return nil

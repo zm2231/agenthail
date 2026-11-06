@@ -41,7 +41,7 @@ func (r Request) Actions() []RequestAction {
 		}
 		return []RequestAction{decline}
 	}
-	if r.Kind != WaitingQuestion {
+	if !r.asksQuestions() {
 		actions := []RequestAction{{ID: "allow", Title: "Allow"}}
 		if r.AlwaysAllow {
 			actions = append(actions, RequestAction{ID: "always", Title: "Always allow"})
@@ -82,7 +82,7 @@ func (r Request) Choose(choice, text string) (Decision, error) {
 			if text == "" {
 				return Decision{}, fmt.Errorf("a reply to request %s needs text", r.ID)
 			}
-			if r.Kind != WaitingQuestion {
+			if !r.asksQuestions() {
 				return Decision{Behavior: "deny", Message: text}, nil
 			}
 			return Decision{Behavior: "allow", Answers: map[string]string{question.Question: text}}, nil
@@ -95,7 +95,10 @@ func (r Request) Choose(choice, text string) (Decision, error) {
 
 // Prompt is what the request asks, in one line for a notification.
 func (r Request) Prompt() string {
-	if r.Kind == WaitingQuestion && len(r.Questions) > 0 {
+	if r.Kind == WaitingAsk && strings.TrimSpace(r.Title) != "" {
+		return r.Title
+	}
+	if r.asksQuestions() && len(r.Questions) > 0 {
 		return r.Questions[0].Question
 	}
 	if r.Kind == WaitingInput && r.Elicitation != nil {
@@ -110,6 +113,10 @@ func (r Request) Prompt() string {
 		}
 	}
 	return "Claude needs your approval"
+}
+
+func (r Request) asksQuestions() bool {
+	return r.Kind == WaitingQuestion || r.Kind == WaitingAsk
 }
 
 func (r Request) singleChoice() (Question, bool) {

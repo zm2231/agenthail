@@ -32,7 +32,7 @@ func (p *sessionViewPlan) countRetired(counts []registry.CatalogRetiredCount, fi
 		if filters.ProjectID != "" && retired.ProjectID != filters.ProjectID {
 			continue
 		}
-		row := dashboardSession{Status: surface.StatusOffline}
+		row := dashboardSession{Status: retired.Status}
 		if retired.Unavailable {
 			row.Status = surface.StatusUnknown
 		}

@@ -25,6 +25,8 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const AGENTHAIL_MCP = 'agenthail';
+// A successful call of this tool ends Claude's turn without a reply after it.
+const END_TURN_TOOL = `mcp__${AGENTHAIL_MCP}__agenthail_end_turn`;
 const AGENTHAIL_MCP_TIMEOUT_MS = 3_700_000;
 const TAKE_TIMEOUT_MS = 10_000;
 const HUMAN_KEPT = 64;
@@ -423,16 +425,15 @@ async function open(params) {
     throw new HostError('invalid', `unknown permission mode: ${params.permissionMode}`);
   }
   if (params.effort && !EFFORTS.has(params.effort)) throw new HostError('invalid', `unknown effort: ${params.effort}`);
-  for (const name of ['model', 'agent', 'name', 'worktree']) {
+  for (const name of ['model', 'agent', 'name']) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
-  if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
   if (params.checker !== undefined) {
     for (const name of ['run', 'token', 'prompt']) {
       if (typeof params.checker?.[name] !== 'string' || !params.checker[name].trim()) throw new HostError('invalid', `a checker names its run, token and prompt; ${name} is missing`);
     }
-    if (params.resume || params.permissionMode || params.agent || params.worktree) {
-      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode, agent or worktree');
+    if (params.resume || params.permissionMode || params.agent) {
+      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode or agent');
     }
   }
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
@@ -444,7 +445,6 @@ async function open(params) {
   }
   const extraArgs = {
     ...(params.name ? { name: params.name } : {}),
-    ...(params.worktree ? { worktree: params.worktree } : {}),
   };
   const existing = sessions.get(id);
   if (existing) {
@@ -503,7 +503,7 @@ async function open(params) {
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
-        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }, params.configDir),
+        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.mcp ? { CLAUDE_CODE_TERMINAL_MCP_TOOLS: END_TURN_TOOL } : {}) }, params.configDir),
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),
@@ -888,7 +888,23 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withMessageUUID(s, input)));
     });
-  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }] };
+  // A turn that ends without agenthail_end_turn is asked once to call it.
+  const stop = (input, _toolUseID, { signal }) => {
+    if (!s.mcpToken || input.stop_hook_active || input.agent_id || s.tasks.some((task) => !task.ambient)) return Promise.resolve({});
+    return new Promise((resolve) => {
+      const child = execFile(args.agenthail, ['hook', 'stop', '--surface', 'claude'], { signal, timeout: 8_000, maxBuffer: 1 << 16 }, (error, stdout) => {
+        let output;
+        try {
+          output = JSON.parse(stdout);
+        } catch {}
+        if (error || output?.decision !== 'block' || typeof output.reason !== 'string') return resolve({});
+        resolve({ decision: 'block', reason: output.reason });
+      });
+      child.stdin.on('error', () => {});
+      child.stdin.end(JSON.stringify(input));
+    });
+  };
+  return { SessionStart: [{ hooks: [run] }], UserPromptSubmit: [{ hooks: [run] }], Stop: [{ hooks: [stop] }] };
 }
 
 // Claude names a prompt by its own id, so the host says which message it took.

@@ -83,7 +83,7 @@ func TestTheDebugSocketServesEachRuntimeProfileToItsOwnerOnly(t *testing.T) {
 	if err != nil || response.StatusCode != http.StatusOK || stats.HeapSys == 0 || stats.Sys < stats.HeapSys || stats.HeapIdle < stats.HeapReleased {
 		t.Fatalf("memstats: status=%d err=%v %+v", response.StatusCode, err, stats)
 	}
-	if response, err := client.Get("http://daemon/profiles/cpu"); err != nil || response.StatusCode != http.StatusNotFound {
+	if response, err := client.Get("http://daemon/profiles/threadcreate"); err != nil || response.StatusCode != http.StatusNotFound {
 		t.Fatalf("an unlisted profile was served: %v %v", response, err)
 	}
 	stop()
@@ -176,5 +176,91 @@ func TestADebugClientThatStopsReadingCannotHoldTheServer(t *testing.T) {
 	stuck.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.ReadAll(stuck); err != nil {
 		t.Fatalf("the stuck connection was left open after shutdown: %v", err)
+	}
+}
+
+func TestTheDebugSocketSamplesTheDaemonsCPUOneProfileAtATime(t *testing.T) {
+	home := debugSocketHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{log: log.New(io.Discard, "", 0)}
+	stop, err := d.startDebugSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := debugClient()
+	for _, bad := range []string{"0", "301", "soon"} {
+		if response, err := client.Get("http://daemon/profiles/cpu?seconds=" + bad); err != nil || response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("seconds=%s: %v %v", bad, response, err)
+		}
+	}
+	first := make(chan *http.Response, 1)
+	go func() {
+		response, err := client.Get("http://daemon/profiles/cpu?seconds=2")
+		if err != nil {
+			t.Error(err)
+		}
+		first <- response
+	}()
+	time.Sleep(500 * time.Millisecond)
+	if response, err := client.Get("http://daemon/profiles/cpu?seconds=1"); err != nil || response.StatusCode != http.StatusConflict {
+		t.Fatalf("a second profile while one ran: %v %v", response, err)
+	}
+	response := <-first
+	if response == nil {
+		t.FailNow()
+	}
+	parsed, err := profile.Parse(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || parsed.DurationNanos < int64(time.Second) {
+		t.Fatalf("cpu profile: status=%d err=%v", response.StatusCode, err)
+	}
+	found := false
+	for _, kind := range parsed.SampleType {
+		found = found || kind.Type == "cpu"
+	}
+	if !found {
+		t.Fatalf("cpu profile has no cpu samples: %v", parsed.SampleType)
+	}
+}
+
+func TestACPUProfileWhoseClientLeftFreesTheProfiler(t *testing.T) {
+	home := debugSocketHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{log: log.New(io.Discard, "", 0)}
+	stop, err := d.startDebugSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	client := debugClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/profiles/cpu?seconds=300", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response, err := client.Do(request); err == nil {
+		response.Body.Close()
+		t.Fatalf("a 300s profile answered in 300ms: %d", response.StatusCode)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		response, err := client.Get("http://daemon/profiles/cpu?seconds=1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode == http.StatusOK {
+			return
+		}
+		if response.StatusCode != http.StatusConflict || time.Now().After(deadline) {
+			t.Fatalf("the abandoned profile still held the profiler: %d", response.StatusCode)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

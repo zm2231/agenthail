@@ -28,6 +28,9 @@ var placementInputMutations = []placementMutation{
 	{"UsageLimit", func(r *dashboardSession, now time.Time) {
 		r.UsageLimit = &surface.UsageLimit{ResetsAt: now.Add(time.Hour)}
 	}},
+	{"TurnStop", func(r *dashboardSession, _ time.Time) {
+		r.TurnStop = &surface.TurnStop{TurnID: "u1", Reason: "Claude API error: overloaded"}
+	}},
 	{"LimitResume", func(r *dashboardSession, now time.Time) {
 		r.LimitResume = &dashboardLimitResume{State: registry.LimitResumeWaiting, RefusedAt: now}
 	}},
@@ -36,6 +39,9 @@ var placementInputMutations = []placementMutation{
 	{"Current", func(r *dashboardSession, _ time.Time) { r.Current = !r.Current }},
 	{"CurrentReason", func(r *dashboardSession, _ time.Time) { r.Current, r.CurrentReason = true, "queued" }},
 	{"Archived", func(r *dashboardSession, _ time.Time) { r.Archived = true }},
+	{"KeepAlive", func(r *dashboardSession, now time.Time) {
+		r.KeepAlive = &dashboardKeepAlive{FailedAt: now, Error: "refused"}
+	}},
 	{"Project", func(r *dashboardSession, _ time.Time) {
 		r.Project = &CatalogProject{ID: "p-delta", DisplayName: "delta"}
 	}},
@@ -55,13 +61,17 @@ var placementInputMutations = []placementMutation{
 	{"ObservedSubagents", func(r *dashboardSession, _ time.Time) {
 		r.ObservedSubagents = &surface.SubagentRollup{Count: 1, Working: 1}
 	}},
+	{"PinnedAt", func(r *dashboardSession, now time.Time) { r.PinnedAt = now }},
+	{"Snooze", func(r *dashboardSession, now time.Time) {
+		r.Snooze = &dashboardSnooze{SnoozedAt: now, Until: now.Add(time.Hour), Wake: registry.SnoozeWakeTime}
+	}},
 	{"Host", func(r *dashboardSession, _ time.Time) {
 		r.Host = &dashboardHost{ID: "h1", Name: "vps", State: hostStateUnreachable}
 	}},
 }
 
 // Attention and ReplacedLead reach clients as delivery.* and coordinator.* events; RegisteredAt never changes after insert.
-var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "ReplacedLead": true, "Display": true, "ID": true, "Placement": true}
+var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "ReplacedLead": true, "Display": true, "InboxSection": true, "ID": true, "Placement": true}
 
 var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"RuntimeKind":     func(r *dashboardSession, _ time.Time) { r.RuntimeKind = surface.RuntimeClaudeCLI },
@@ -75,6 +85,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	},
 	"Plan":              func(r *dashboardSession, _ time.Time) { r.Plan = &surface.Plan{Done: 1, Total: 3} },
 	"Open":              func(r *dashboardSession, _ time.Time) { r.Open = !r.Open },
+	"Ended":             func(r *dashboardSession, _ time.Time) { r.Ended = !r.Ended },
 	"Capabilities":      func(r *dashboardSession, _ time.Time) { r.Capabilities.Send = !r.Capabilities.Send },
 	"ReadOnly":          func(r *dashboardSession, _ time.Time) { r.ReadOnly = !r.ReadOnly },
 	"ReadOnlyReason":    func(r *dashboardSession, _ time.Time) { r.ReadOnlyReason = "elsewhere" },
@@ -82,6 +93,12 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"ForkedFrom":        func(r *dashboardSession, _ time.Time) { r.ForkedFrom = "s05" },
 	"ObservedAt":        func(r *dashboardSession, now time.Time) { r.ObservedAt = now },
 	"UnavailableReason": func(r *dashboardSession, _ time.Time) { r.UnavailableReason = "gone" },
+	"Worktree": func(r *dashboardSession, _ time.Time) {
+		r.Worktree = &workView{Path: "/w/.worktrees/ah-x", State: "active"}
+	},
+	"PRs": func(r *dashboardSession, _ time.Time) {
+		r.PRs = []prView{{Repo: "github.com/acme/app", Number: 1}}
+	},
 	"Runtime": func(r *dashboardSession, _ time.Time) {
 		r.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: true}
 	},
@@ -95,6 +112,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 		r.LiveHiddenSubagents = &surface.SubagentRollup{Count: 2, Working: 1}
 	},
 	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
+	"EndTurn": func(r *dashboardSession, now time.Time) {
+		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", Needs: endTurnNeedsNothing, EndedAt: now}
+	},
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {

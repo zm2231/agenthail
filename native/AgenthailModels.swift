@@ -569,6 +569,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var turnStop: TurnStopState? = nil
     var limitResume: LimitResumeState? = nil
     var activity: SessionActivity? = nil
     var plan: SessionPlan? = nil
@@ -750,6 +751,17 @@ struct UsageLimitState: Codable, Hashable {
         guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return "Usage limit reached" }
         return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
     }
+}
+
+/// A session whose last turn a refusal or an API error ended. A refused
+/// conversation refuses every later turn.
+struct TurnStopState: Codable, Hashable {
+    var turnId: String
+    var at: String? = nil
+    var reason: String
+    var refused: Bool? = nil
+
+    var detail: String { refused == true ? "Safeguards refused this conversation; start a new one" : reason }
 }
 
 /// A session a usage limit stopped, as its computer resumes it: waiting for
@@ -1514,12 +1526,12 @@ struct SessionDetail: Decodable {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume, activity: session.activity)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, turnStop: session.turnStop, limitResume: limitResume, activity: session.activity)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
-            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume, newValue.activity)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit, session.turnStop, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.turnStop, newValue.limitResume, newValue.activity)
         }
     }
 }
@@ -1541,22 +1553,23 @@ struct SessionLiveState: Equatable {
     var waitingOn: WaitingState?
     var backgroundTasks: BackgroundTasks?
     var usageLimit: UsageLimitState?
+    var turnStop: TurnStopState?
     var limitResume: LimitResumeState?
     var activity: SessionActivity?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
          capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
-         limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
+         turnStop: TurnStopState? = nil, limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
-        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, limitResume, activity)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.turnStop, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, turnStop, limitResume, activity)
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume, activity: live.activity)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, turnStop: live.turnStop, limitResume: live.limitResume, activity: live.activity)
     }
 }
 
@@ -1574,6 +1587,7 @@ struct RawSession: Decodable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var turnStop: TurnStopState? = nil
     var activity: SessionActivity? = nil
     var runtimeKind: String? = nil
 
@@ -1919,13 +1933,13 @@ struct AttachedFile: Decodable, Equatable, Hashable {
 
 struct SessionStreamItem: Decodable {
     let itemId: String
-    let version: UInt64
+    var version: UInt64
     let op: String
     let kind: String
     let turnId: String?
     let callId: String?
-    let ts: String
-    let body: String?
+    var ts: String
+    var body: String?
     let context: ContextState?
     let goal: GoalState?
     let role: String?
@@ -1933,7 +1947,7 @@ struct SessionStreamItem: Decodable {
     let title: String?
     let status: String?
     var resetsAt: String? = nil
-    let truncated: Bool
+    var truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
     let reason: String?
@@ -1984,6 +1998,77 @@ struct SessionStreamEvent: Decodable {
     var item: TimelineItem? = nil
 }
 
+struct SessionStreamWire: Decodable {
+    var stream: String? = nil
+    var sessionId: String? = nil
+    let seq: UInt64
+    var type: String? = nil
+    var data: SessionStreamItem? = nil
+    var item: TimelineItem? = nil
+    var itemId: String? = nil
+    var from: Int? = nil
+    var text: String? = nil
+    var version: UInt64? = nil
+    var ts: String? = nil
+}
+
+/// A connection's copy of each streamed row. A stream sends a row whole the
+/// first time its connection sees it and only the bytes it gained after that;
+/// `from` counts the UTF-8 bytes the connection holds for the row.
+struct SessionStreamRebuild {
+    enum Outcome {
+        case row(SessionStreamEvent)
+        case resync
+        case skip
+    }
+
+    /// The rows one connection remembers. A row let go that is appended to
+    /// again asks for a resync, which sends it whole.
+    static let rowLimit = 512
+
+    private var rows: [String: (event: SessionStreamEvent, bytes: Int, touched: UInt64)] = [:]
+    private var clock: UInt64 = 0
+
+    var count: Int { rows.count }
+
+    private mutating func keep(_ id: String, _ event: SessionStreamEvent, bytes: Int) {
+        clock += 1
+        rows[id] = (event, bytes, clock)
+        guard rows.count > Self.rowLimit, let oldest = rows.min(by: { $0.value.touched < $1.value.touched })?.key else { return }
+        rows[oldest] = nil
+    }
+
+    mutating func apply(_ wire: SessionStreamWire) -> Outcome {
+        if wire.type == "append" {
+            guard let id = wire.itemId, let from = wire.from, let text = wire.text, let held = rows[id], held.bytes == from else { return .resync }
+            var data = held.event.data
+            let body = (data.body ?? "") + text
+            data.body = body
+            data.version = wire.version ?? data.version
+            data.ts = wire.ts ?? data.ts
+            data.truncated = false
+            var item = held.event.item
+            if var current = item {
+                current.text = body
+                if let ts = wire.ts { current.timestamp = ts }
+                current.truncated = false
+                item = current
+            }
+            let event = SessionStreamEvent(stream: held.event.stream, sessionId: held.event.sessionId, seq: wire.seq, type: "item", data: data, item: item)
+            keep(id, event, bytes: from + text.utf8.count)
+            return .row(event)
+        }
+        guard let data = wire.data else { return .skip }
+        let event = SessionStreamEvent(stream: wire.stream ?? "", sessionId: wire.sessionId ?? "", seq: wire.seq, type: wire.type ?? "item", data: data, item: wire.item)
+        if data.op == "remove" {
+            rows[data.itemId] = nil
+        } else if !data.itemId.isEmpty {
+            keep(data.itemId, event, bytes: (data.body ?? "").utf8.count)
+        }
+        return .row(event)
+    }
+}
+
 struct CatalogStreamEvent: Decodable {
     let stream: String
     let seq: UInt64
@@ -2014,11 +2099,11 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let kind: String
     let role: String?
     let title: String
-    let text: String
-    let timestamp: String?
+    var text: String
+    var timestamp: String?
     let callId: String?
     let status: String?
-    let truncated: Bool
+    var truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
     var attachment: SessionAttachment? = nil

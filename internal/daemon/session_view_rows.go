@@ -19,6 +19,7 @@ type presentationMergedFields struct {
 	WaitingOn       json.RawMessage `json:"waitingOn"`
 	BackgroundTasks json.RawMessage `json:"backgroundTasks"`
 	UsageLimit      json.RawMessage `json:"usageLimit"`
+	TurnStop        json.RawMessage `json:"turnStop"`
 }
 
 // Every projection write takes a new generation, so an unchanged generation means an unchanged projection.
@@ -76,7 +77,7 @@ func (c *presentationFingerprints) adopt(read registry.CatalogPresentation) erro
 	return nil
 }
 
-func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint) (dashboardSession, error) {
+func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint, prViews func([]registry.SessionPR) []prView) (dashboardSession, error) {
 	row := source.row
 	row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot, row.ConfiguredModel, row.PendingModel = nil, nil, nil, nil, "", ""
 	row.Name, row.Surface, row.Status, row.Cwd = record.Name, surface.SurfaceKind(record.Surface), surface.SessionStatus(record.Status), record.Cwd
@@ -92,8 +93,8 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		subagent.ParentID, subagent.RootID, subagent.Depth, subagent.Nickname, subagent.Role = record.Subagent.ParentID, record.Subagent.RootID, record.Subagent.Depth, record.Subagent.Nickname, record.Subagent.Role
 		row.Subagent = &subagent
 	}
-	row.WaitingOn, row.BackgroundTasks, row.UsageLimit = nil, nil, nil
-	if len(record.WaitingOn)+len(record.BackgroundTasks)+len(record.UsageLimit) > 0 {
+	row.WaitingOn, row.BackgroundTasks, row.UsageLimit, row.TurnStop = nil, nil, nil, nil
+	if len(record.WaitingOn)+len(record.BackgroundTasks)+len(record.UsageLimit)+len(record.TurnStop) > 0 {
 		var projected presentationMergedFields
 		if err := json.Unmarshal(source.raw, &projected); err != nil {
 			return row, err
@@ -108,6 +109,9 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		if row.UsageLimit, err = mergedPresentationField[surface.UsageLimit](projected.UsageLimit, record.UsageLimit); err != nil {
 			return row, err
 		}
+		if row.TurnStop, err = mergedPresentationField[surface.TurnStop](projected.TurnStop, record.TurnStop); err != nil {
+			return row, err
+		}
 	}
 	switch {
 	case record.Alias.Valid:
@@ -117,6 +121,14 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 	}
 	if record.HostID == "" {
 		row.Archived = record.Archived
+		row.PinnedAt, row.KeepAlive = record.PinnedAt, keepAliveRow(record.KeepAlive)
+		row.Snooze = snoozeRow(record.Snooze)
+		row.EndTurn = endTurnRow(record.TurnEnd)
+		row.Worktree = workRow(record.Work)
+		row.PRs = nil
+		if len(record.PRs) > 0 {
+			row.PRs = prViews(record.PRs)
+		}
 	}
 	return row, nil
 }

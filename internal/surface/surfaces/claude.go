@@ -35,6 +35,8 @@ type Claude struct {
 	request      ClaudeRequest
 	webAccounts  claudeWebAccounts
 	localOnly    bool
+	goneMu       sync.Mutex
+	goneBridges  map[string]bool
 	mcpAttachment
 }
 

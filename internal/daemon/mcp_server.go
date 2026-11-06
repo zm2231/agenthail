@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/agenttools"
 )
 
 const mcpOutputLimit = 16 << 10
@@ -35,32 +36,63 @@ func (d *Daemon) mcpHandler() http.Handler {
 }
 
 func (d *Daemon) registerMCPTools(server *mcp.Server) {
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_whoami", Description: "Your session, alias, project, host, coordinator role, capabilities, ceiling and credential expiry."}, d.mcpWhoami)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_sessions", Description: "Sessions you may read: your own, the ones you spawned, and your project's. Paged; pass nextCursor back as cursor. A session that appears while you page shows up when you list again from the start."}, d.mcpSessions)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_capabilities", Description: "What you may do: capabilities, ceiling, which sessions you can read, which surfaces you may start, and the output limits."}, d.mcpCapabilities)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_requests", Description: "The sessions you can read that are waiting on a prompt or question, or one session's open requests, in one call (prompts clipped to fit; pass requestId for one request's longer prompt). If truncated is true, total says how many there are."}, d.mcpRequests)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_ledger_read", Description: "Your project's intent ledger: the board, or one list (goals, asks, decisions, questions, work, ready), paged."}, d.mcpLedgerRead)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_read", Description: "A session's latest items, older pages through before, newer items through since, or a clipped item's full text through bodyRef. Results are capped at 16 KiB."}, d.mcpRead)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_projects", Description: "The projects on this host and its paired hosts, with their coordinators. A project marked conflict has coordinators on two hosts and cannot be reached until one is chosen."}, d.mcpProjects)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_channel_send", Description: "Post a message to a channel or project, delivered to its members as from you."}, d.mcpChannelSend)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_coordinator", Description: "Set or clear a project's coordinator. For the person's voice operator only."}, d.mcpCoordinator)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_archive", Description: "Archive, or restore, a session you spawned or, as coordinator, lead."}, d.mcpArchive)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."}, d.mcpHistory)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."}, d.mcpLedgerWrite)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_create", Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."}, d.mcpCreate)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."}, d.mcpReport)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_result", Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."}, d.mcpResult)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_wait", Description: "Wait until a task settles, its child asks for something, or its goal stops, and say which. Default 600 seconds, at most 3600; a Claude session Agenthail doesn't host waits at most 45, so call again with the cursor. If it times out, the tasks you started are still running, and you get one notice when each settles, so you can end your turn instead of waiting again."}, d.mcpWait)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_send", Description: "Send a message to a session (target) or to a project's coordinator (project). Queued by default; sessions you spawned or lead can also take mode now. A queued message may go up to your spawner or your project's coordinator, attributed to you."}, d.mcpSend)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_steer", Description: "Steer the running turn of a session you spawned or, as coordinator, lead."}, d.mcpSteer)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_interrupt", Description: "Interrupt the running turn of a session you spawned or, as coordinator, lead."}, d.mcpInterrupt)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_goal", Description: "Set, edit, clear, pause or resume the goal of a Codex session you spawned or, as coordinator, lead, or change its token budget."}, d.mcpGoal)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_answer", Description: "Allow or deny an open request (a permission prompt, question or MCP input) of a session you spawned or, as coordinator, lead. Recorded as answered by you. You never answer your own requests or those of a session above you."}, d.mcpAnswer)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_session_settings", Description: "Change the model, permission mode or effort of a session you spawned or, as coordinator, lead, or compact its context. A permission mode cannot exceed the session's ceiling."}, d.mcpSessionSettings)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_alias", Description: "Name a session you spawned or, as coordinator, lead, so it can be reached as @name."}, d.mcpAlias)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_queue", Description: "Retry or cancel a queued instruction, or clear a session's pending ones. For the person's voice operator only."}, d.mcpQueue)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_relay", Description: "Add, remove or list relays that pass one session's replies to another. For the person's voice operator only."}, d.mcpRelay)
-	addMCPTool(d, server, &mcp.Tool{Name: "agenthail_channel", Description: "Create, delete, rename or list channels, and add or remove their members. For the person's voice operator only."}, d.mcpChannel)
+	handlers := d.mcpHandlers()
+	for _, tool := range agenttools.Tools {
+		register, ok := handlers[tool.Name]
+		if !ok {
+			panic("agenthail MCP tool " + tool.Name + " has no handler")
+		}
+		register(server, mcpTool(tool))
+	}
+}
+
+const mcpAlwaysLoadMeta = "anthropic/alwaysLoad"
+
+func mcpTool(tool agenttools.Tool) *mcp.Tool {
+	out := &mcp.Tool{Name: tool.Name, Description: tool.Description}
+	if tool.AlwaysLoad {
+		out.Meta = mcp.Meta{mcpAlwaysLoadMeta: true}
+	}
+	return out
+}
+
+type mcpRegistrar func(*mcp.Server, *mcp.Tool)
+
+func bindMCP[In any](d *Daemon, run func(context.Context, *mcpCaller, In) (any, error)) mcpRegistrar {
+	return func(server *mcp.Server, tool *mcp.Tool) { addMCPTool(d, server, tool, run) }
+}
+
+func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
+	return map[string]mcpRegistrar{
+		"agenthail_whoami":           bindMCP(d, d.mcpWhoami),
+		"agenthail_sessions":         bindMCP(d, d.mcpSessions),
+		"agenthail_capabilities":     bindMCP(d, d.mcpCapabilities),
+		"agenthail_requests":         bindMCP(d, d.mcpRequests),
+		"agenthail_ledger_read":      bindMCP(d, d.mcpLedgerRead),
+		"agenthail_read":             bindMCP(d, d.mcpRead),
+		"agenthail_projects":         bindMCP(d, d.mcpProjects),
+		"agenthail_channel_send":     bindMCP(d, d.mcpChannelSend),
+		"agenthail_coordinator":      bindMCP(d, d.mcpCoordinator),
+		"agenthail_archive":          bindMCP(d, d.mcpArchive),
+		"agenthail_history":          bindMCP(d, d.mcpHistory),
+		"agenthail_ledger_write":     bindMCP(d, d.mcpLedgerWrite),
+		"agenthail_create":           bindMCP(d, d.mcpCreate),
+		agenttools.EndTurn:           bindMCP(d, d.mcpEndTurn),
+		"agenthail_report":           bindMCP(d, d.mcpReport),
+		"agenthail_result":           bindMCP(d, d.mcpResult),
+		"agenthail_wait":             bindMCP(d, d.mcpWait),
+		"agenthail_send":             bindMCP(d, d.mcpSend),
+		"agenthail_steer":            bindMCP(d, d.mcpSteer),
+		"agenthail_interrupt":        bindMCP(d, d.mcpInterrupt),
+		"agenthail_goal":             bindMCP(d, d.mcpGoal),
+		"agenthail_answer":           bindMCP(d, d.mcpAnswer),
+		"agenthail_session_settings": bindMCP(d, d.mcpSessionSettings),
+		"agenthail_alias":            bindMCP(d, d.mcpAlias),
+		"agenthail_pr":               bindMCP(d, d.mcpPR),
+		"agenthail_queue":            bindMCP(d, d.mcpQueue),
+		"agenthail_relay":            bindMCP(d, d.mcpRelay),
+		"agenthail_channel":          bindMCP(d, d.mcpChannel),
+	}
 }
 
 func addMCPTool[In any](d *Daemon, server *mcp.Server, tool *mcp.Tool, run func(context.Context, *mcpCaller, In) (any, error)) {

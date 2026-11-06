@@ -127,14 +127,26 @@ function control(request) {
 // hooks.jsonl.
 let hooks = {};
 async function runHooks(event, input) {
+  const outputs = [];
   for (const matcher of hooks[event] ?? []) {
     for (const callback of matcher.hookCallbackIds) {
       const id = `fake-${++requests}`;
       write({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: { session_id: sessionId, transcript_path: transcript, cwd: process.cwd(), hook_event_name: event, ...input } } });
       const output = await new Promise((resolve) => pending.set(id, resolve));
-      fs.appendFileSync(path.join(dir, 'hooks.jsonl'), JSON.stringify({ sessionId, pid: process.pid, event, output }) + '\n');
+      fs.appendFileSync(path.join(dir, 'hooks.jsonl'), JSON.stringify({ sessionId, pid: process.pid, event, input, output }) + '\n');
+      outputs.push(output);
     }
   }
+  return outputs;
+}
+
+// stop runs the Stop hooks as a turn ends. Like Claude, a hook that blocks
+// gets one more reply from the model, then the hooks run again knowing so.
+async function stop() {
+  const outputs = await runHooks('Stop', { stop_hook_active: false });
+  if (!outputs.some((output) => output?.decision === 'block')) return;
+  write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: 'ended' }] } });
+  await runHooks('Stop', { stop_hook_active: true });
 }
 
 async function turn(message) {
@@ -257,6 +269,7 @@ async function turn(message) {
   fs.appendFileSync(transcript, JSON.stringify({ uuid, text, reply, origin: message.origin ?? null, priority: message.priority ?? null, pid: process.pid, inputClosed }) + '\n');
   claudeTranscript(uuid, text, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
+  await stop();
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, user_message_uuids: [uuid], duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   if (process.env.FAKE_CLAUDE_IDLE_AFTER_MS) await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_CLAUDE_IDLE_AFTER_MS)));
   state('idle');

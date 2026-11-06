@@ -19,10 +19,11 @@ const (
 type SessionStatus string
 
 const (
-	StatusIdle    SessionStatus = "idle"
-	StatusBusy    SessionStatus = "busy"
-	StatusOffline SessionStatus = "offline"
-	StatusUnknown SessionStatus = "unknown"
+	StatusIdle      SessionStatus = "idle"
+	StatusBusy      SessionStatus = "busy"
+	StatusOffline   SessionStatus = "offline"
+	StatusUnknown   SessionStatus = "unknown"
+	StatusNotLoaded SessionStatus = "notLoaded"
 )
 
 // WaitingKind names what an open turn is waiting for from its user.
@@ -35,6 +36,8 @@ const (
 	// WaitingDialog is a dialog open in the session's own interface, such as
 	// a settings panel, which only that interface can settle.
 	WaitingDialog WaitingKind = "dialog"
+	// WaitingAsk is an ended turn's questions, answered by the person's next message.
+	WaitingAsk WaitingKind = "ask"
 )
 
 // Waiting marks a busy turn that cannot continue until its user answers. ID
@@ -93,6 +96,17 @@ func BackgroundRunning(tasks *BackgroundTasks) bool {
 // when the limit lifts, when Claude said.
 type UsageLimit struct {
 	ResetsAt time.Time `json:"resetsAt,omitzero"`
+}
+
+// TurnStop is a session whose last turn ended on a provider error other than
+// a usage limit, so it does not continue until something sends it a message.
+// Refused marks a turn the provider's safeguards refused; such a conversation
+// refuses every later turn too.
+type TurnStop struct {
+	TurnID  string    `json:"turnId"`
+	At      time.Time `json:"at,omitzero"`
+	Reason  string    `json:"reason"`
+	Refused bool      `json:"refused,omitempty"`
 }
 
 // Lifted reports a limit whose reset time has passed.
@@ -163,6 +177,14 @@ func SameUsageLimit(left, right *UsageLimit) bool {
 	return left.ResetsAt.Equal(right.ResetsAt)
 }
 
+// SameTurnStop reports whether two readings name the same stopped turn.
+func SameTurnStop(left, right *TurnStop) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
 // SameBackground reports whether two readings list the same background work.
 func SameBackground(left, right *BackgroundTasks) bool {
 	if left == nil || right == nil {
@@ -195,15 +217,18 @@ func SameWaiting(left, right *Waiting) bool {
 // conversation and can come and go. ForkedFrom is the conversation this one was
 // branched from.
 type Session struct {
-	ID                    string            `json:"id"`
-	Surface               SurfaceKind       `json:"surface"`
-	Name                  string            `json:"name"`
-	Cwd                   string            `json:"cwd"`
-	PID                   int               `json:"pid"`
-	Status                SessionStatus     `json:"status"`
+	ID      string        `json:"id"`
+	Surface SurfaceKind   `json:"surface"`
+	Name    string        `json:"name"`
+	Cwd     string        `json:"cwd"`
+	PID     int           `json:"pid"`
+	Status  SessionStatus `json:"status"`
+	// Ended means the runtime no longer holds the session. A send resumes it.
+	Ended                 bool              `json:"ended,omitempty"`
 	WaitingOn             *Waiting          `json:"waitingOn,omitempty"`
 	BackgroundTasks       *BackgroundTasks  `json:"backgroundTasks,omitempty"`
 	UsageLimit            *UsageLimit       `json:"usageLimit,omitempty"`
+	TurnStop              *TurnStop         `json:"turnStop,omitempty"`
 	Activity              *Activity         `json:"activity,omitempty"`
 	Plan                  *Plan             `json:"plan,omitempty"`
 	Transcript            string            `json:"transcript"`
@@ -491,6 +516,11 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrRouteChanged is a send that found its route gone before delivering
+// anything. The session it was given now names the route to take, which the
+// caller publishes before sending again.
+var ErrRouteChanged = errors.New("the session's route changed before delivery")
+
 // ErrNothingToSteer is a steer that found the session idle: its turn ended
 // before the steer reached it.
 var ErrNothingToSteer = errors.New("session idle; nothing to steer")
@@ -648,6 +678,16 @@ type HumanTurnSender interface {
 	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
 }
 
+// RouteRefresher re-reads what a session's live process offers now, so a send
+// routes on that rather than on a row read earlier.
+type RouteRefresher interface {
+	RefreshRoute(ctx context.Context, sess *Session)
+}
+
+func SameRoute(a, b Session) bool {
+	return a.Bridge == b.Bridge && a.Transport == b.Transport && a.PID == b.PID
+}
+
 type AgenthailTurnSender interface {
 	SendAgenthailTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
@@ -740,7 +780,6 @@ func PersonName(ctx context.Context) string {
 type SessionStartOptions struct {
 	TurnOptions
 	Name           string `json:"name,omitempty"`
-	Worktree       string `json:"worktree,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	ConfigRoot     string `json:"configRoot,omitempty"`
@@ -880,6 +919,7 @@ type TurnObservation struct {
 	WaitingOn       *Waiting         `json:"waitingOn,omitempty"`
 	BackgroundTasks *BackgroundTasks `json:"backgroundTasks,omitempty"`
 	UsageLimit      *UsageLimit      `json:"usageLimit,omitempty"`
+	TurnStop        *TurnStop        `json:"turnStop,omitempty"`
 	Activity        *Activity        `json:"activity,omitempty"`
 	Plan            *Plan            `json:"plan,omitempty"`
 	// LimitStop is a last turn a usage limit refused, kept after the limit

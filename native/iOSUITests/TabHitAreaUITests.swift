@@ -23,7 +23,7 @@ final class TabHitAreaUITests: XCTestCase {
         app.launch()
         let voice = app.buttons["voice-entry"]
         XCTAssertTrue(voice.waitForExistence(timeout: 10))
-        let tabs = ["Sessions", "Inbox", "Settings"].map { app.tabBars.buttons[$0] }
+        let tabs = ["Sessions", "Inbox", "Settings"].map { app.tab($0) }
         for tab in tabs { XCTAssertTrue(tab.waitForExistence(timeout: 5), tab.label) }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "hit areas \(textSize ?? "default")"
@@ -41,12 +41,19 @@ final class TabHitAreaUITests: XCTestCase {
             XCTAssertTrue(voice.waitForExistence(timeout: 5))
         }
         for tab in tabs.reversed() {
-            for (dx, dy) in [(-22.0, 0.0), (22.0, 0.0), (0.0, -21.0), (0.0, 21.0)] {
+            let other = tab == tabs[0] ? tabs[1] : tabs[0]
+            func answers(_ dx: Double, _ dy: Double) -> Bool {
+                other.tapWhenReady()
                 tap(window, at: tab.frame, dx: dx, dy: dy)
-                XCTAssertTrue(tab.isSelected, "\(tab.label) misses a tap at \(dx), \(dy)")
-                if tab.label != "Sessions" {
-                    tabs[0].tapWhenReady()
-                }
+                return tab.isSelected
+            }
+            for dx in [-22.0, 22.0] { XCTAssertTrue(answers(dx, 0), "\(tab.label) misses a tap at \(dx), 0") }
+            if app.isPad {
+                // The top tab bar sits under the status bar, so its 44 pt band can start below the frame's centre line.
+                let band = stride(from: -27.0, through: 27.0, by: 3.0).filter { answers(0, $0) }
+                XCTAssertGreaterThanOrEqual((band.last ?? 0) - (band.first ?? 0), 42, "\(tab.label) answers taps across only \(band.first ?? 0)...\(band.last ?? 0) pt")
+            } else {
+                for dy in [-21.0, 21.0] { XCTAssertTrue(answers(0, dy), "\(tab.label) misses a tap at 0, \(dy)") }
             }
         }
     }

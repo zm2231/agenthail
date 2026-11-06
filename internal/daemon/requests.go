@@ -14,8 +14,8 @@ import (
 )
 
 // requestsHandler reads a session's open requests and permission mode from
-// its provider now, none when nothing is open. Answers go through the respond
-// action.
+// its provider now, and the ask of an ended turn waiting on the person, none
+// when nothing is open. Answers go through the respond action.
 func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
@@ -39,20 +39,27 @@ func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) ([]
 	if err != nil {
 		return nil, "", actionFailed(http.StatusConflict, "conflict", "surface is not configured")
 	}
-	responder, ok := sessionResponder(adapter, session)
-	if !ok {
+	_, ask, asking, err := d.openTurnEndRequest(session.ID)
+	if err != nil {
+		return nil, "", actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+	}
+	var state surface.RequestState
+	if responder, ok := sessionResponder(adapter, session); ok {
+		ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		defer cancel()
+		if state, err = responder.Requests(ctx, session); err != nil {
+			return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
+		}
+	} else if !asking {
 		return nil, "", actionFailed(http.StatusBadRequest, "invalid_request", "this session's requests are not answered through Agenthail")
 	}
-	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-	defer cancel()
-	state, err := responder.Requests(ctx, session)
-	if err != nil {
-		return nil, "", actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
-	}
 	replacedBy, _ := d.coordinator().ReplacedBy(session.ID)
-	requests := make([]openRequestView, 0, len(state.Requests))
+	requests := make([]openRequestView, 0, len(state.Requests)+1)
 	for _, request := range state.Requests {
 		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
+	}
+	if asking {
+		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Actions: ask.Actions()})
 	}
 	return requests, state.PermissionMode, nil
 }

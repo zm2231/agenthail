@@ -47,7 +47,7 @@ func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
 	}
 	if request.Filters.Status != "" {
 		valid := false
-		for _, kind := range []string{"unavailable", "waiting", "working", "limited", "finishing", "queued", "offline", "idle"} {
+		for _, kind := range []string{"unavailable", "waiting", "working", "limited", "stopped", "finishing", "queued", "offline", "idle"} {
 			valid = valid || request.Filters.Status == kind
 		}
 		if !valid {

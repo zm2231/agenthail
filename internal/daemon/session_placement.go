@@ -21,6 +21,10 @@ type placementInputs struct {
 	LimitResume   string
 	UsageLimit    bool
 	UsageResetsAt time.Time
+	KeptDown      bool
+	Pinned        bool
+	Snooze        *dashboardSnooze
+	TurnStop      string
 	Current       bool
 	CurrentReason string
 	ProjectID     string
@@ -50,6 +54,9 @@ func placementOf(row dashboardSession) placementInputs {
 		Waiting:       row.WaitingOn != nil,
 		HostDown:      mirroredHostDown(row),
 		UsageLimit:    row.UsageLimit != nil,
+		KeptDown:      row.KeepAlive != nil,
+		Pinned:        !row.PinnedAt.IsZero(),
+		Snooze:        row.Snooze,
 		Current:       row.Current,
 		CurrentReason: row.CurrentReason,
 		Subagent:      row.Subagent,
@@ -69,6 +76,9 @@ func placementOf(row dashboardSession) placementInputs {
 	}
 	if row.UsageLimit != nil {
 		inputs.UsageResetsAt = row.UsageLimit.ResetsAt.UTC()
+	}
+	if row.TurnStop != nil {
+		inputs.TurnStop = row.TurnStop.TurnID
 	}
 	if row.Project != nil {
 		inputs.ProjectID, inputs.ProjectName = row.Project.ID, row.Project.DisplayName

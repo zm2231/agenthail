@@ -96,7 +96,8 @@ type catalogIdentityCache struct {
 	slots        chan struct{}
 	inflight     sync.WaitGroup
 	// changed runs after a background refresh changed a path's identity.
-	changed func()
+	changed     func()
+	observeRoot func(root, key string)
 }
 
 type catalogRootEntry struct {
@@ -218,7 +219,11 @@ func (c *catalogIdentityCache) resolve(ctx context.Context, path string, now tim
 	c.mu.Lock()
 	projects, links, generation := c.projects, c.links, c.generation
 	c.mu.Unlock()
-	identity, gitDirs, transient := resolveCatalogIdentity(ctx, path, projects, links, c.repositories)
+	identity, gitDirs, transient := resolveUnlinkedCatalogIdentity(ctx, path, projects, c.repositories)
+	if project := identity.Project; !transient && project != nil && !project.Added && project.Key != "" && c.observeRoot != nil {
+		c.observeRoot(project.RootPath, project.Key)
+	}
+	identity.Project = links.apply(identity.Project)
 	if transient {
 		c.mu.Lock()
 		known, found := c.known[path]
