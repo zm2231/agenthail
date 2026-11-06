@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -44,9 +43,16 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		return
 	}
 	payload, bodyKey := s.normalizeLocked(event)
+	previous := s.appendBodies[bodyKey]
 	s.mu.Unlock()
-	accumulated := payload.Body
-	_, changed, err := s.persist(payload)
+	var written *streamedBody
+	var changed bool
+	var err error
+	if bodyKey != "" {
+		written, changed, err = s.persistBody(payload, previous, payload.text)
+	} else {
+		_, changed, err = s.persist(payload)
+	}
 	if err != nil {
 		s.mu.Lock()
 		s.appendFailed = true
@@ -56,7 +62,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	}
 	s.mu.Lock()
 	if bodyKey != "" {
-		s.appendBodies[bodyKey] = accumulated
+		s.appendBodies[bodyKey] = written
 	}
 	if event.Cursor > 0 && providerKey != "" && event.Cursor > s.appendCursors[providerKey] {
 		if s.appendCursors == nil {
@@ -82,19 +88,21 @@ func (s *sessionSource) persist(payload sessionJournalPayload) (registry.Session
 }
 
 func sessionJournalEntry(sessionID string, payload sessionJournalPayload) (registry.SessionJournalEntry, error) {
+	return sessionJournalEntryWithRef(sessionID, payload, "")
+}
+
+func sessionJournalEntryWithRef(sessionID string, payload sessionJournalPayload, ref string) (registry.SessionJournalEntry, error) {
 	fullBody := []byte(payload.Body)
 	if len(fullBody) <= sessionStreamBodyBytes {
 		encoded, err := json.Marshal(payload)
 		return registry.SessionJournalEntry{SessionID: sessionID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, err
 	}
-	prefix := fullBody[:sessionStreamBodyBytes]
-	for !utf8.Valid(prefix) {
-		prefix = prefix[:len(prefix)-1]
-	}
-	payload.Body = string(prefix)
+	payload.Body = journalBodyPrefix(fullBody)
 	payload.Truncated = true
-	if ref, refErr := newSessionBodyRef(); refErr == nil {
+	if ref != "" {
 		payload.BodyRef = ref
+	} else if minted, refErr := newSessionBodyRef(); refErr == nil {
+		payload.BodyRef = minted
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

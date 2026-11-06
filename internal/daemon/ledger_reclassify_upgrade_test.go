@@ -33,7 +33,7 @@ func TestASessionWithNoHookCaptureSkipsTheRederive(t *testing.T) {
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{s.ID: s}, observations: map[string]*surface.TurnObservation{}, accepted: true, kind: surface.KindClaude}
 	adapter := &rederiveSurface{daemonSurface: fake, items: []surface.TimelineItem{{ID: "100-aaaaaa-0", Kind: "message", Role: "user", Text: "hello"}}}
-	source := &sessionSource{manager: d.sources, session: s, adapter: adapter, epoch: "quiet", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: d.sources, session: s, adapter: adapter, epoch: "quiet", ctx: context.Background(), appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 	if err := source.loadSeed(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestRederivesWaitForASlot(t *testing.T) {
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, kind: surface.KindClaude}
 	adapter := &rederiveSurface{daemonSurface: fake}
-	source := &sessionSource{manager: manager, session: s, adapter: adapter, epoch: "waiting", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: manager, session: s, adapter: adapter, epoch: "waiting", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := source.rederiveJournal(ctx); !errors.Is(err, context.DeadlineExceeded) || adapter.calls != 0 {
@@ -111,7 +111,7 @@ func TestRederivingAnOlderJournalReclassifiesAnEarlierHookCapture(t *testing.T) 
 		{ID: "500-eeeeee-0", Kind: "event", Title: "Claude Code instructions", PromptID: "wake-old", Timestamp: "2026-11-02T12:57:34Z"},
 	}}
 	for range 2 {
-		source := &sessionSource{manager: d.sources, session: s, adapter: adapter, epoch: "upgrade", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+		source := &sessionSource{manager: d.sources, session: s, adapter: adapter, epoch: "upgrade", ctx: context.Background(), appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 		if err := source.loadSeed(); err != nil {
 			t.Fatal(err)
 		}

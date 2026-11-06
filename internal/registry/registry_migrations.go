@@ -126,6 +126,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal", "payload_codec", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_bodies", "written_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -193,7 +196,7 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
-	if err := ensureJournalPromptIndexes(tx); err != nil {
+	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
