@@ -28,5 +28,8 @@ export function startLiveOrder() {
     if (message.kind === "event") catalogEvent(message.event, { render, reread: rereadSoon });
     else if (app.hasState) rereadSoon(0);
   });
+  subscribe("events", (message) => {
+    if (message.kind === "event" && !message.event.type.startsWith("ui.") && app.hasState) rereadSoon();
+  });
   startSharedStreams();
 }

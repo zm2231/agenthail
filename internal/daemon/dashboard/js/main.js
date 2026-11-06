@@ -83,5 +83,3 @@ if ("serviceWorker" in navigator) {
   });
   navigator.serviceWorker.startMessages();
 }
-
-setInterval(() => rereadSoon(0), 30000);
