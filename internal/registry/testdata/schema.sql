@@ -1,4 +1,4 @@
--- schemaVersion 63
+-- schemaVersion 64
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -819,6 +819,9 @@ CREATE TABLE turn_ends (
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
 	routed_to TEXT NOT NULL DEFAULT '',
+	answered_at_ms INTEGER NOT NULL DEFAULT 0,
+	answer_status TEXT NOT NULL DEFAULT '',
+	answer_message_id TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
 );
 

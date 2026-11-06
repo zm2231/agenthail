@@ -3027,6 +3027,12 @@ select {
 .pager-review-row.unanswered span {
   color: var(--accent);
 }
+.pager-option .pager-suggested {
+  color: var(--accent);
+}
+.pager-links a {
+  color: var(--accent);
+}
 .request-actions {
   display: flex;
   flex-wrap: wrap;

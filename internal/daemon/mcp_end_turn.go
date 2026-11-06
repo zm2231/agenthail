@@ -143,11 +143,16 @@ func validEndTurn(input mcpEndTurnInput) *mcpRefusal {
 			return refusal
 		}
 	}
+	asked := map[string]bool{}
 	for i, ask := range input.Asks {
 		which := fmt.Sprintf("ask %d", i+1)
 		if strings.TrimSpace(ask.Question) == "" {
 			return refuse("invalid", which+" has no question.")
 		}
+		if asked[strings.TrimSpace(ask.Question)] {
+			return refuse("invalid", which+" repeats an earlier question; ask each question once.")
+		}
+		asked[strings.TrimSpace(ask.Question)] = true
 		if refusal := tooLong(which+" question", ask.Question, 160); refusal != nil {
 			return refusal
 		}
