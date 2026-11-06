@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -170,21 +171,28 @@ func TestAPullRequestLinkedOutsideTheDaemonShowsInTheNextSessionView(t *testing.
 	}
 }
 
-func TestAPullRequestLinkedWatchedOrUnlinkedRepublishesItsSessionsRow(t *testing.T) {
+func TestAPullRequestActionRepublishesItsSessionsRowOnlyWhenItChangesIt(t *testing.T) {
 	f := newMCPWriteFixture(t)
 	f.d.github = &fakeGitHub{prs: map[github.Ref]github.PullRequest{{Repo: acmeApp, Number: 42}: acmePR(42, "Fix the login")}}
-	for _, action := range []string{"link", "unwatch", "unlink"} {
+	for i, step := range []struct {
+		action      string
+		republishes bool
+	}{{"link", true}, {"link", false}, {"unwatch", true}, {"unwatch", false}, {"watch", true}, {"watch", false}, {"unlink", true}} {
 		select {
 		case <-f.d.catalogNudge:
 		default:
 		}
-		if out, refused := callMCP(t, f.child, "agenthail_pr", map[string]any{"action": action, "pr": "https://github.com/acme/app/pull/42", "clientRequestId": action}); refused {
-			t.Fatalf("%s: %v", action, out)
+		if out, refused := callMCP(t, f.child, "agenthail_pr", map[string]any{"action": step.action, "pr": "https://github.com/acme/app/pull/42", "clientRequestId": fmt.Sprint(step.action, i)}); refused {
+			t.Fatalf("%s: %v", step.action, out)
 		}
+		republished := false
 		select {
 		case <-f.d.catalogNudge:
+			republished = true
 		default:
-			t.Fatalf("%s did not republish the session's row", action)
+		}
+		if republished != step.republishes {
+			t.Fatalf("step %d, %s: republished=%v, want %v", i, step.action, republished, step.republishes)
 		}
 	}
 }

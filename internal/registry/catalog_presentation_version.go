@@ -12,6 +12,7 @@ type presentationInput struct {
 	columns string
 	when    string
 	changed bool
+	shown   map[string]string
 }
 
 var presentationInputs = []presentationInput{
@@ -27,7 +28,7 @@ var presentationInputs = []presentationInput{
 	{table: "coordinator_replaced"},
 	{table: "turn_ends"},
 	{table: "work_records", columns: presentationWorkColumns, when: `%[1]s.session_id<>''`},
-	{table: "session_prs", columns: presentationPRColumns, when: `%[1]s.unlinked=0`, changed: true},
+	{table: "session_prs", columns: presentationPRColumns, when: `%[1]s.unlinked=0`, changed: true, shown: map[string]string{"read_failures": fmt.Sprintf("(%%[1]s.read_failures>=%d)", PRReadFailureLimit)}},
 	{table: "catalog_retired_version"},
 	{table: "session_runtime", columns: "session_id,completed_turn_id", changed: true},
 	{table: "session_keep_alive", columns: "session_id,failed_at_ms,error"},
@@ -44,7 +45,11 @@ func (input presentationInput) triggerWhen(event string) string {
 	if event == "update" && input.changed {
 		var changed []string
 		for column := range strings.SplitSeq(input.columns, ",") {
-			changed = append(changed, fmt.Sprintf("NEW.%[1]s IS NOT OLD.%[1]s", column))
+			value := "%[1]s." + column
+			if expression, ok := input.shown[column]; ok {
+				value = expression
+			}
+			changed = append(changed, fmt.Sprintf(value, "NEW")+" IS NOT "+fmt.Sprintf(value, "OLD"))
 		}
 		return " WHEN " + strings.Join(changed, " OR ")
 	}

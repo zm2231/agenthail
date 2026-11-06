@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	prRateFloor        = 100
-	prBackoffFirst     = 4 * time.Minute
-	prBackoffLongest   = 30 * time.Minute
-	prReadFailureLimit = 3
+	prRateFloor      = 100
+	prBackoffFirst   = 4 * time.Minute
+	prBackoffLongest = 30 * time.Minute
 )
 
 type prHostState struct {
@@ -110,7 +109,7 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			if !found {
 				if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
 					recorded, err := r.RecordPRReadFailure(row.SessionID, row.Repo, row.Number, row.Wakes)
-					return recorded && row.ReadFailures+1 == prReadFailureLimit, err
+					return recorded && row.ReadFailures+1 == registry.PRReadFailureLimit, err
 				}); err != nil {
 					return err
 				}
@@ -121,7 +120,7 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
 				var err error
 				recorded, err = r.RecordPRRead(verdict.row, row.Wakes, now)
-				return recorded && (prShownChange(row, verdict.row) || row.ReadFailures >= prReadFailureLimit), err
+				return recorded && (prShownChange(row, verdict.row) || row.ReadFailures >= registry.PRReadFailureLimit), err
 			}); err != nil {
 				return err
 			}

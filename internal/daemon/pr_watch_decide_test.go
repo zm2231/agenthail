@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/github"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type watchRig struct {
@@ -134,7 +135,7 @@ func TestAReadThatMissesAPullRequestDuringARewatchCountsNothing(t *testing.T) {
 		w.personSets("watch")
 	}
 	w.fake.duringRead = rewatch
-	for range prReadFailureLimit {
+	for range registry.PRReadFailureLimit {
 		w.tick()
 	}
 	pr, _, _ := w.d.Registry.SessionPR("to", acmeApp.String(), 42)
@@ -154,7 +155,7 @@ func TestAPullRequestGitHubStopsReturningShowsItsProblem(t *testing.T) {
 		}
 	}
 	drain()
-	for i := 1; i < prReadFailureLimit; i++ {
+	for i := 1; i < registry.PRReadFailureLimit; i++ {
 		w.tick()
 		if drain() {
 			t.Fatalf("read failure %d republished the catalog with nothing new to show", i)

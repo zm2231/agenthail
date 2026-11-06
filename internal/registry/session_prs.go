@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// PRReadFailureLimit is how many reads running GitHub may leave a watched pull
+// request out of before its row shows the problem.
+const PRReadFailureLimit = 3
+
 const (
 	PRSourceAgent   = "agent"
 	PRSourceCreated = "created"
@@ -160,7 +164,7 @@ func (r *Registry) SessionHasPRIn(sessionID, repo string) (bool, error) {
 const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms"
 
 func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,read_failures FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`)
+	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,CASE WHEN read_failures>=? THEN read_failures ELSE 0 END FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`, PRReadFailureLimit)
 	if err != nil {
 		return nil, err
 	}

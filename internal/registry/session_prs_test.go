@@ -70,3 +70,36 @@ func TestAWatchReadMovesTheSessionViewKeyOnlyWhenWhatItShowsChanges(t *testing.T
 		t.Fatal("a read that changed nothing shown moved the view key")
 	}
 }
+
+func TestReadFailuresMoveTheSessionViewKeyOnlyWhenTheyReachTheLimit(t *testing.T) {
+	r := openTestRegistry(t)
+	at := time.UnixMilli(1_800_000_000_000)
+	if _, err := r.LinkPR(SessionPR{SessionID: "s1", Repo: "github.com/acme/app", Number: 42, URL: "https://github.com/acme/app/pull/42", Source: PRSourceAgent}, true, at); err != nil {
+		t.Fatal(err)
+	}
+	moved := func(write func(SessionPR) (bool, error)) bool {
+		t.Helper()
+		pr, _, err := r.SessionPR("s1", "github.com/acme/app", 42)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, _ := r.ReadCatalogPresentationKey(context.Background())
+		if recorded, err := write(pr); err != nil || !recorded {
+			t.Fatalf("write = %v, %v", recorded, err)
+		}
+		after, _ := r.ReadCatalogPresentationKey(context.Background())
+		return after != before
+	}
+	fail := func(pr SessionPR) (bool, error) { return r.RecordPRReadFailure("s1", pr.Repo, pr.Number, pr.Wakes) }
+	for i := 1; i < PRReadFailureLimit; i++ {
+		if moved(fail) {
+			t.Fatalf("read failure %d moved the key with nothing new to show", i)
+		}
+	}
+	if !moved(fail) {
+		t.Fatal("the failure that reached the limit kept the key")
+	}
+	if !moved(func(pr SessionPR) (bool, error) { return r.RecordPRRead(pr, pr.Wakes, at) }) {
+		t.Fatal("the read that cleared the failures kept the key")
+	}
+}

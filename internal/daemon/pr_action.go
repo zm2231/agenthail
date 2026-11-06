@@ -56,7 +56,7 @@ func (d *Daemon) prProblem(pr registry.SessionPR) string {
 			return problem
 		}
 	}
-	if pr.ReadFailures >= prReadFailureLimit {
+	if pr.ReadFailures >= registry.PRReadFailureLimit {
 		return "GitHub has not returned this pull request on the last few reads"
 	}
 	return ""
@@ -87,8 +87,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 			return actionResult{}, githubFailure(ref, err)
 		}
 		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
-			_, err := r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true, time.Now())
-			return err == nil, err
+			return r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true, time.Now())
 		}); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
@@ -101,13 +100,19 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", fmt.Sprintf("%s is not linked to this session", ref.URL()))
 		}
 	default:
-		changed, err := d.changePRs(func(r *registry.Registry) (bool, error) {
-			return r.SetPRWatch(session.ID, repo, ref.Number, request.Op == "watch")
+		watch, found := request.Op == "watch", false
+		_, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+			before, linked, err := r.SessionPR(session.ID, repo, ref.Number)
+			if err != nil || !linked {
+				return false, err
+			}
+			found, err = r.SetPRWatch(session.ID, repo, ref.Number, watch)
+			return found && before.Watch != watch, err
 		})
 		if err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
-		if !changed {
+		if !found {
 			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", fmt.Sprintf("%s is not linked to this session; link it first", ref.URL()))
 		}
 	}
