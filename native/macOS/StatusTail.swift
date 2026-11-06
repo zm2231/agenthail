@@ -14,65 +14,22 @@ struct StatusTail: View {
             }
             Spacer(minLength: density == .none ? 0 : DesktopSpace.l)
             if density != .none {
-                ForEach(items.filter { $0 != "usage" }, id: \.self) { item($0) }
+                StatusItems(state: itemsState, model: model, pane: pane)
+                    .equatable()
             }
         }
         .lineLimit(1)
     }
 
-    private var short: Bool { density == .icons }
-
-    @ViewBuilder
-    private func item(_ name: String) -> some View {
-        switch name {
-        case "working":
-            let working = model.knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
-            StatusLabel(title: short ? "\(working)" : "\(working) working", spoken: "\(working) working") {
-                Circle().fill(DesktopPalette.working).frame(width: 7, height: 7)
-            }
-        case "needs-you":
-            let needsYou = model.sessionTree.needsYou
-            let spoken = "\(needsYou.count) need\(needsYou.count == 1 ? "s" : "") you"
-            Button { if let first = needsYou.first { pane.select(first.id) } } label: {
-                StatusLabel(title: short ? "\(needsYou.count)" : spoken, spoken: spoken) {
-                    Circle().fill(DesktopPalette.attention).frame(width: 7, height: 7)
-                }
-            }
-            .buttonStyle(ReadableButtonStyle())
-            .disabled(needsYou.isEmpty)
-        case "hosts":
-            StatusLabel(title: short ? nil : hosts, spoken: hosts) { Image(systemName: "desktopcomputer") }
-        case "terminal":
-            let session = pane.displayedSession
-            Button { if let session { model.focusInTerminal(session) } } label: {
-                StatusLabel(title: short ? nil : "Terminal", spoken: "Terminal") { Image(systemName: "terminal") }
-            }
-            .buttonStyle(ReadableButtonStyle())
-            .disabled(session?.runtime?.focusable != true)
-            .help("Show this session's terminal")
-        default:
-            EmptyView()
-        }
-    }
-
-    private var hosts: String {
-        let remote = (model.snapshot?.daemon.hosts ?? []).filter { $0.state == "connected" }.map(\.name)
-        return (["this Mac"] + remote).joined(separator: " · ")
-    }
-}
-
-private struct StatusLabel<Icon: View>: View {
-    let title: String?
-    let spoken: String
-    @ViewBuilder let icon: Icon
-
-    var body: some View {
-        HStack(spacing: 5) {
-            icon
-            if let title { Text(title) }
-        }
-        .help(title == spoken ? "" : spoken)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spoken)
+    private var itemsState: StatusItemsState {
+        let shown = items.filter { $0 != "usage" }
+        return StatusItemsState(
+            items: shown,
+            short: density == .icons,
+            working: shown.contains("working") ? model.knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count : 0,
+            needsYou: shown.contains("needs-you") ? model.sessionTree.needsYou.count : 0,
+            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.snapshot?.daemon.hosts ?? []) : "",
+            terminalFocusable: shown.contains("terminal") && pane.displayedSession?.runtime?.focusable == true
+        )
     }
 }

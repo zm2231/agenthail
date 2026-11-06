@@ -416,37 +416,11 @@ extension SessionSidebar {
     }
 
     private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, attention: SessionAttention?, showsReason: Bool = false) -> some View {
-        let selected = pane.selectedSessionID == session.id
-        let needsYou = attention != nil
-        return Button {
-            pane.select(session.id, keep: NSEvent.modifierFlags.contains(.command))
-        } label: {
-            SessionRowView(session: session, title: title, family: family, needsYou: needsYou, reason: showsReason ? attention?.reason : nil, finishedUnseen: model.finishedUnseen.contains(session.id))
-                .padding(.vertical, DesktopSpace.xs)
-                .padding(.horizontal, DesktopSpace.s)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DesktopPalette.attentionBackground.when(needsYou && !selected), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
-                .selectionMark(selected, bar: true)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { pane.keepTab(session.id) })
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .contextMenu {
-            Button("Open in New Window") { openWindow(id: "session", value: session.id) }
-            Button("Rename…") { pane.renamingSession = session }
-            if session.canAdopt {
-                Button("Open in Agenthail") { pane.adoptingSession = session }
-            }
-            Divider()
-            Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
-            if ProjectMenu.canAddFolder(session), let cwd = session.cwd {
-                Button("Add Folder as Project") { pane.changeProject { _ in await model.addProject(path: cwd, host: ProjectMenu.host(of: session)) } }
-            }
-            if ProjectMenu.canMakeLead(session, projects: model.projects) {
-                Button("Make Project Lead") { pane.changeProject { await model.makeLead(session.id, replace: $0) } }
-            }
-        }
+        SidebarSessionRow(
+            state: SidebarRowState(session: session, title: title, family: family, attention: attention, showsReason: showsReason, finishedUnseen: model.finishedUnseen.contains(session.id), selected: pane.selectedSessionID == session.id, canMakeLead: ProjectMenu.canMakeLead(session, projects: model.projects)),
+            actions: SidebarRowActions(shown: session, model: model, pane: pane)
+        )
+        .equatable()
     }
 }
 
