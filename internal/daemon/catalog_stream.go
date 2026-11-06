@@ -672,11 +672,18 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if err != nil {
 		return false
 	}
+	prs, err := d.Registry.PRsForSession(session.ID)
+	if err != nil {
+		return false
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
 		row.RegisteredAt = registered
 		if hasWork {
 			row.Worktree = newWorkView(work)
+		}
+		if len(prs) > 0 {
+			row.PRs = newPRViews(prs)
 		}
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)

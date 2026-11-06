@@ -88,6 +88,7 @@ func (d *Daemon) mcpHandlers() map[string]mcpRegistrar {
 		"agenthail_answer":           bindMCP(d, d.mcpAnswer),
 		"agenthail_session_settings": bindMCP(d, d.mcpSessionSettings),
 		"agenthail_alias":            bindMCP(d, d.mcpAlias),
+		"agenthail_pr":               bindMCP(d, d.mcpPR),
 		"agenthail_queue":            bindMCP(d, d.mcpQueue),
 		"agenthail_relay":            bindMCP(d, d.mcpRelay),
 		"agenthail_channel":          bindMCP(d, d.mcpChannel),

@@ -60,6 +60,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doWorkClean(ctx, p, session.ID, worktree.Options{ForceIgnored: request.ForceIgnored})
 	case "alias":
 		return d.doSessionAlias(session, request.Alias)
+	case "pr":
+		return d.doPR(ctx, p, session, request)
 	}
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {

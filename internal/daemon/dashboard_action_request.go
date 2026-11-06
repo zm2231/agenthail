@@ -14,6 +14,9 @@ type dashboardActionRequest struct {
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`
 	ForceIgnored    bool                       `json:"forceIgnored"`
+	Op              string                     `json:"op"`
+	PR              string                     `json:"pr"`
+	Repo            string                     `json:"repo"`
 	Agent           string                     `json:"agent"`
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`

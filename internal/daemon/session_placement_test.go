@@ -96,6 +96,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"Worktree": func(r *dashboardSession, _ time.Time) {
 		r.Worktree = &workView{Path: "/w/.worktrees/ah-x", State: "active"}
 	},
+	"PRs": func(r *dashboardSession, _ time.Time) {
+		r.PRs = []prView{{Repo: "github.com/acme/app", Number: 1}}
+	},
 	"Runtime": func(r *dashboardSession, _ time.Time) {
 		r.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: true}
 	},

@@ -1043,6 +1043,30 @@
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
+  "api/action pr unknown op": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"op must be link, unlink, watch or unwatch\"}}\n"
+  },
+  "api/action pr unlink not linked": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"https://github.com/acme/app/pull/1 is not linked to this session\"}}\n"
+  },
   "api/action project action unknown": {
     "status": 400,
     "header": {
@@ -3562,6 +3586,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
+  },
+  "api/v1/actions pr unknown op": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"op must be link, unlink, watch or unwatch\"}}\n"
+  },
+  "api/v1/actions pr unlink not linked": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"https://github.com/acme/app/pull/1 is not linked to this session\"}}\n"
   },
   "api/v1/actions project action unknown": {
     "status": 400,
