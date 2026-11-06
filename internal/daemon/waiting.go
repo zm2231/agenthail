@@ -45,11 +45,33 @@ func (d *Daemon) observeTurn(ctx context.Context, adapter surface.Surface, sessi
 	return observation, err
 }
 
-// publishWaiting writes a session's catalog row with what it waits on now,
-// through the entry the last discovery pass left for status refreshes. A
-// session without one, or whose row did not commit, waits for a discovery
-// pass instead.
 func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *surface.Waiting) {
+	d.publishLive(ctx, sessionID, func(session *surface.Session) {
+		session.WaitingOn = waiting
+		if waiting != nil {
+			// A turn waiting on the person is not quiet; the next status pass
+			// reads its activity again once the wait ends.
+			session.Status = surface.StatusBusy
+			session.Activity = nil
+		}
+	})
+}
+
+// publishRoute writes a session's catalog row with the route a send read
+// from its process, so its notice describes the route the send takes.
+func (d *Daemon) publishRoute(reached surface.Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.publishLive(ctx, reached.ID, func(session *surface.Session) {
+		session.Bridge, session.Transport, session.PID = reached.Bridge, reached.Transport, reached.PID
+	})
+}
+
+// publishLive writes a session's catalog row with change applied, through
+// the entry the last discovery pass left for status refreshes. A session
+// without one, or whose row did not commit, waits for a discovery pass
+// instead.
+func (d *Daemon) publishLive(ctx context.Context, sessionID string, change func(*surface.Session)) {
 	d.catalogLiveMu.Lock()
 	live := d.catalogLive[sessionID]
 	var session surface.Session
@@ -61,13 +83,7 @@ func (d *Daemon) publishWaiting(ctx context.Context, sessionID string, waiting *
 		d.requestCatalogDiscovery()
 		return
 	}
-	session.WaitingOn = waiting
-	if waiting != nil {
-		// A turn waiting on the person is not quiet; the next status pass
-		// reads its activity again once the wait ends.
-		session.Status = surface.StatusBusy
-		session.Activity = nil
-	}
+	change(&session)
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)

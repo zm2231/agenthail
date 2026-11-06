@@ -43,6 +43,14 @@ type HistoryEntry struct {
 	Error           string                   `json:"error,omitempty"`
 	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
 	Operation       QueueOperation           `json:"operation,omitempty"`
+	SendTrace
+}
+
+// SendTrace is the route a send ended on and the Remote Control id its session
+// held when that route was chosen.
+type SendTrace struct {
+	SendRoute string `json:"sendRoute,omitempty"`
+	Bridge    string `json:"bridge,omitempty"`
 }
 
 func boundHistoryText(value string) string {
@@ -56,9 +64,9 @@ func (r *Registry) RecordHistory(entry HistoryEntry) error {
 	if entry.Kind == "" {
 		return fmt.Errorf("history kind is required")
 	}
-	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error,operation) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,COALESCE(NULLIF(?10,''),(SELECT operation FROM message_queue WHERE id=?5 AND ?5>0),''))`,
+	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error,operation,send_route,bridge) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,COALESCE(NULLIF(?10,''),(SELECT operation FROM message_queue WHERE id=?5 AND ?5>0),''),?11,?12)`,
 		entry.Kind, entry.SessionID, entry.SourceSessionID, entry.RouteID, entry.QueueID, entry.CompletionID,
-		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error), entry.Operation)
+		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error), entry.Operation, entry.SendRoute, entry.Bridge)
 	if err != nil {
 		return err
 	}
@@ -75,7 +83,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	if limit > 200 {
 		limit = 200
 	}
-	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation FROM delivery_history h`
+	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation,h.send_route,h.bridge FROM delivery_history h`
 	args := []any{}
 	if sessionID != "" {
 		query += ` WHERE h.session_id=? OR h.source_session_id=?`
@@ -92,7 +100,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 
 func scanHistoryEntry(row rowScanner) (HistoryEntry, error) {
 	var entry HistoryEntry
-	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation)
+	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error, &entry.Operation, &entry.SendRoute, &entry.Bridge)
 	entry.Evidence = historyEvidence(entry)
 	return entry, err
 }
@@ -104,7 +112,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	if limit > 100 {
 		limit = 100
 	}
-	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation FROM delivery_history h`
+	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error,h.operation,h.send_route,h.bridge FROM delivery_history h`
 	args := []any{}
 	conditions := []string{}
 	if beforeID > 0 {

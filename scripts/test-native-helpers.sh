@@ -111,6 +111,7 @@ SOURCES=(
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
+  macOS/MainWindowShow.swift
   macOS/Overview.swift
   macOS/QueueFacts.swift
   ScrimField.swift
