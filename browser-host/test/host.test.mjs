@@ -13,11 +13,21 @@ const HOST = new URL('../host.mjs', import.meta.url).pathname;
 function startHost(t, browsers) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bh-'));
   const socket = path.join(dir, 'host.sock');
-  const child = spawn(process.execPath, [HOST, '--socket', socket, '--browsers', browsers ?? path.join(dir, 'browsers'), '--version', 'test'], { stdio: ['pipe', 'inherit', 'inherit'] });
+  const child = spawn(process.execPath, [HOST, '--socket', socket, '--browsers', browsers ?? path.join(dir, 'browsers'), '--version', 'test'], {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    env: { ...process.env, TMPDIR: dir },
+  });
   const exited = new Promise(resolve => child.on('exit', resolve));
   t.after(async () => {
     child.stdin.end();
     await exited;
+    for (const pid of processesUnder(dir)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+      }
+    }
     fs.rmSync(dir, { recursive: true, force: true });
   });
   return { child, socket, exited, dir };
@@ -60,6 +70,14 @@ function listeningPids() {
     if (error.status === 1) return [];
     throw error;
   }
+}
+
+function processesUnder(dir) {
+  const out = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+  return out.split('\n')
+    .filter(line => line.includes(dir + path.sep))
+    .map(line => Number(line.trim().split(/\s+/, 1)[0]))
+    .filter(pid => pid !== process.pid);
 }
 
 function descendsFrom(pid, ancestor) {
@@ -112,8 +130,24 @@ test('launch downloads the pinned Chromium on first use and runs it without a de
   assert.equal(launched.error, undefined, launched.error?.message);
   assert.equal(launched.result.state, 'ready');
   assert.equal(launched.result.running, true);
+  const chromium = processesUnder(host.dir).filter(pid => pid !== host.child.pid);
+  assert.notDeepEqual(chromium, []);
+  assert.ok(chromium.every(pid => descendsFrom(pid, host.child.pid)));
   const ports = listeningPids().filter(pid => descendsFrom(pid, host.child.pid));
   assert.deepEqual(ports, []);
   const closed = await call(host.socket, 'close');
   assert.equal(closed.result.running, false);
+});
+
+test('Chromium exits when its host is killed', { timeout: 600_000 }, async t => {
+  const host = startHost(t, process.env.AGENTHAIL_BROWSER_TEST_BROWSERS);
+  const launched = await call(host.socket, 'launch');
+  assert.equal(launched.error, undefined, launched.error?.message);
+  assert.notDeepEqual(processesUnder(host.dir).filter(pid => pid !== host.child.pid), []);
+  host.child.kill('SIGKILL');
+  await host.exited;
+  for (let attempt = 0; processesUnder(host.dir).length > 0; attempt++) {
+    assert.ok(attempt < 100, `Chromium outlived its host: ${processesUnder(host.dir)}`);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
 });
