@@ -7,49 +7,54 @@ import (
 	"strings"
 )
 
-var presentationInputs = []struct {
+type presentationInput struct {
 	table   string
 	columns string
 	when    string
-}{
-	{"aliases", "", ""},
-	{"attention_items", "", ""},
-	{"limit_resumes", "", ""},
-	{"delivery_intents", "", outgoingIntentRow},
-	{"message_queue", "", ""},
-	{"session_archive", "", ""},
-	{"projects", "", ""},
-	{"coordinators", "", ""},
-	{"coordinator_history", "", ""},
-	{"coordinator_replaced", "", ""},
-	{"turn_ends", "", ""},
-	{"session_runtime", "session_id,completed_turn_id", ""},
-	{"session_keep_alive", "session_id,failed_at_ms,error", ""},
-	{"sessions", "id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake", ""},
-	{"catalog_sessions", "session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project", ""},
+	changed bool
+}
+
+var presentationInputs = []presentationInput{
+	{table: "aliases"},
+	{table: "attention_items"},
+	{table: "limit_resumes"},
+	{table: "delivery_intents", when: outgoingIntentRow},
+	{table: "message_queue"},
+	{table: "session_archive"},
+	{table: "projects"},
+	{table: "coordinators"},
+	{table: "coordinator_history"},
+	{table: "coordinator_replaced"},
+	{table: "turn_ends"},
+	{table: "catalog_retired_version"},
+	{table: "session_runtime", columns: "session_id,completed_turn_id", changed: true},
+	{table: "session_keep_alive", columns: "session_id,failed_at_ms,error"},
+	{table: "sessions", columns: "id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake"},
+	{table: "catalog_sessions", columns: "session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project"},
 }
 
 // Must cover every row catalogPresentationOutgoing and settledDeliveryFailure read.
 const outgoingIntentRow = `(%[1]s.status IN ('failed','held') OR (%[1]s.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
 	WHERE f.sender_session_id=%[1]s.sender_session_id AND f.target_session_id=%[1]s.target_session_id AND f.status='failed' AND f.id<%[1]s.id)))`
 
-func presentationTriggerWhen(columns, when, event string) string {
-	if event == "update" && columns != "" {
+// A WHEN clause stops a column from being dropped, so changed may name only columns every supported schema has.
+func (input presentationInput) triggerWhen(event string) string {
+	if event == "update" && input.changed {
 		var changed []string
-		for column := range strings.SplitSeq(columns, ",") {
+		for column := range strings.SplitSeq(input.columns, ",") {
 			changed = append(changed, fmt.Sprintf("NEW.%[1]s IS NOT OLD.%[1]s", column))
 		}
 		return " WHEN " + strings.Join(changed, " OR ")
 	}
 	switch {
-	case when == "":
+	case input.when == "":
 		return ""
 	case event == "insert":
-		return " WHEN " + fmt.Sprintf(when, "NEW")
+		return " WHEN " + fmt.Sprintf(input.when, "NEW")
 	case event == "delete":
-		return " WHEN " + fmt.Sprintf(when, "OLD")
+		return " WHEN " + fmt.Sprintf(input.when, "OLD")
 	}
-	return " WHEN " + fmt.Sprintf(when, "NEW") + " OR " + fmt.Sprintf(when, "OLD")
+	return " WHEN " + fmt.Sprintf(input.when, "NEW") + " OR " + fmt.Sprintf(input.when, "OLD")
 }
 
 func catalogPresentationVersionSchema() string {
@@ -62,7 +67,7 @@ func catalogPresentationVersionSchema() string {
 			if event == "update" && input.columns != "" {
 				on += " OF " + input.columns
 			}
-			fmt.Fprintf(&ddl, "DROP TRIGGER IF EXISTS %s;\nCREATE TRIGGER %s AFTER %s ON %s%s\nBEGIN\n\tUPDATE catalog_presentation_version SET version=version+1;\nEND;\n", name, name, on, input.table, presentationTriggerWhen(input.columns, input.when, event))
+			fmt.Fprintf(&ddl, "DROP TRIGGER IF EXISTS %s;\nCREATE TRIGGER %s AFTER %s ON %s%s\nBEGIN\n\tUPDATE catalog_presentation_version SET version=version+1;\nEND;\n", name, name, on, input.table, input.triggerWhen(event))
 		}
 	}
 	return ddl.String()

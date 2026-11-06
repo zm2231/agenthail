@@ -867,6 +867,24 @@ BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
 
+-- trigger catalog_presentation_version_catalog_retired_version_delete
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_delete AFTER DELETE ON catalog_retired_version
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_retired_version_insert
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_insert AFTER INSERT ON catalog_retired_version
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_retired_version_update
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_update AFTER UPDATE ON catalog_retired_version
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
 -- trigger catalog_presentation_version_catalog_sessions_delete
 CREATE TRIGGER catalog_presentation_version_catalog_sessions_delete AFTER DELETE ON catalog_sessions
 BEGIN
@@ -880,7 +898,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_catalog_sessions_update
-CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions WHEN NEW.session_id IS NOT OLD.session_id OR NEW.unavailable_reason IS NOT OLD.unavailable_reason OR NEW.waiting_on IS NOT OLD.waiting_on OR NEW.background_tasks IS NOT OLD.background_tasks OR NEW.usage_limit IS NOT OLD.usage_limit OR NEW.turn_stop IS NOT OLD.turn_stop OR NEW.host_queue_count IS NOT OLD.host_queue_count OR NEW.observed_at IS NOT OLD.observed_at OR NEW.projection_generation IS NOT OLD.projection_generation OR NEW.projection_fingerprint IS NOT OLD.projection_fingerprint OR NEW.misses IS NOT OLD.misses OR NEW.discovery_failures IS NOT OLD.discovery_failures OR NEW.retired IS NOT OLD.retired OR NEW.current IS NOT OLD.current OR NEW.host_project IS NOT OLD.host_project
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1046,7 +1064,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_session_keep_alive_update
-CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1082,7 +1100,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_sessions_update
-CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions WHEN NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.surface IS NOT OLD.surface OR NEW.status IS NOT OLD.status OR NEW.cwd IS NOT OLD.cwd OR NEW.last_active_ms IS NOT OLD.last_active_ms OR NEW.runtime_kind IS NOT OLD.runtime_kind OR NEW.source IS NOT OLD.source OR NEW.transport IS NOT OLD.transport OR NEW.host_id IS NOT OLD.host_id OR NEW.parent_session_id IS NOT OLD.parent_session_id OR NEW.root_session_id IS NOT OLD.root_session_id OR NEW.subagent_depth IS NOT OLD.subagent_depth OR NEW.agent_nickname IS NOT OLD.agent_nickname OR NEW.agent_role IS NOT OLD.agent_role OR NEW.registered_at IS NOT OLD.registered_at OR NEW.pinned_at_ms IS NOT OLD.pinned_at_ms OR NEW.snoozed_at_ms IS NOT OLD.snoozed_at_ms OR NEW.snoozed_until_ms IS NOT OLD.snoozed_until_ms OR NEW.snooze_wake IS NOT OLD.snooze_wake
+CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
