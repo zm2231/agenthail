@@ -2005,7 +2005,21 @@ struct SessionStreamRebuild {
         case skip
     }
 
-    private var rows: [String: (event: SessionStreamEvent, bytes: Int)] = [:]
+    /// The rows one connection remembers. A row let go that is appended to
+    /// again asks for a resync, which sends it whole.
+    static let rowLimit = 512
+
+    private var rows: [String: (event: SessionStreamEvent, bytes: Int, touched: UInt64)] = [:]
+    private var clock: UInt64 = 0
+
+    var count: Int { rows.count }
+
+    private mutating func keep(_ id: String, _ event: SessionStreamEvent, bytes: Int) {
+        clock += 1
+        rows[id] = (event, bytes, clock)
+        guard rows.count > Self.rowLimit, let oldest = rows.min(by: { $0.value.touched < $1.value.touched })?.key else { return }
+        rows[oldest] = nil
+    }
 
     mutating func apply(_ wire: SessionStreamWire) -> Outcome {
         if wire.type == "append" {
@@ -2024,7 +2038,7 @@ struct SessionStreamRebuild {
                 item = current
             }
             let event = SessionStreamEvent(stream: held.event.stream, sessionId: held.event.sessionId, seq: wire.seq, type: "item", data: data, item: item)
-            rows[id] = (event, from + text.utf8.count)
+            keep(id, event, bytes: from + text.utf8.count)
             return .row(event)
         }
         guard let data = wire.data else { return .skip }
@@ -2032,7 +2046,7 @@ struct SessionStreamRebuild {
         if data.op == "remove" {
             rows[data.itemId] = nil
         } else if !data.itemId.isEmpty {
-            rows[data.itemId] = (event, (data.body ?? "").utf8.count)
+            keep(data.itemId, event, bytes: (data.body ?? "").utf8.count)
         }
         return .row(event)
     }

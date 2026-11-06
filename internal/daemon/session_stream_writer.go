@@ -29,6 +29,11 @@ type sessionStreamAppend struct {
 
 type bodyViewer func(ref string, head, from int) (registry.SessionJournalBodyView, bool, error)
 
+// heldReplyLimit bounds the replies one connection remembers. A reply still
+// streaming is touched on every delta, so it is never the one let go; a reply
+// let go that grows again is sent whole.
+const heldReplyLimit = 64
+
 // sessionStreamWriter belongs to one connection: it remembers each reply's
 // bytes that connection was sent, so a reply that grows is sent as the bytes
 // it gained. Any other change, and a row this connection has not seen, is
@@ -39,6 +44,7 @@ type sessionStreamWriter struct {
 	toItem    func(sessionJournalPayload) surface.TimelineItem
 	view      bodyViewer
 	held      map[string]*heldReply
+	clock     uint64
 }
 
 type heldReply struct {
@@ -48,6 +54,7 @@ type heldReply struct {
 	stamp   uint64
 	checked bool
 	digest  hash.Hash
+	touched uint64
 }
 
 func newSessionStreamWriter(w io.Writer, sessionID string, toItem func(sessionJournalPayload) surface.TimelineItem, view bodyViewer) *sessionStreamWriter {
@@ -80,7 +87,7 @@ func (s *sessionStreamWriter) write(entry registry.SessionJournalEntry) error {
 			held.digest.Write(gained)
 			held.bytes += len(gained)
 			held.ref, held.stamp, held.checked = row.BodyRef, stamp, row.BodyRef != ""
-			s.held[row.ItemID] = held
+			s.keep(row.ItemID, held)
 			return nil
 		}
 	}
@@ -89,8 +96,24 @@ func (s *sessionStreamWriter) write(entry registry.SessionJournalEntry) error {
 	}
 	digest := sha256.New()
 	digest.Write([]byte(row.Body))
-	s.held[row.ItemID] = &heldReply{shape: replyShape(row), bytes: len(row.Body), digest: digest}
+	s.keep(row.ItemID, &heldReply{shape: replyShape(row), bytes: len(row.Body), digest: digest})
 	return nil
+}
+
+func (s *sessionStreamWriter) keep(itemID string, held *heldReply) {
+	s.clock++
+	held.touched = s.clock
+	s.held[itemID] = held
+	if len(s.held) <= heldReplyLimit {
+		return
+	}
+	oldest, at := "", s.clock
+	for id, candidate := range s.held {
+		if candidate.touched < at {
+			oldest, at = id, candidate.touched
+		}
+	}
+	delete(s.held, oldest)
 }
 
 // gained returns the bytes the body has past what the connection holds, when

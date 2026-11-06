@@ -20,8 +20,15 @@ function utf8Length(text) {
 
 // An append's from counts the UTF-8 bytes this connection was sent for the
 // row, so a null result means the copy diverged and the stream must reopen.
+export const streamRebuildRowLimit = 512;
+
 export function streamRebuild() {
   const rows = new Map();
+  const keep = (id, row) => {
+    rows.delete(id);
+    rows.set(id, row);
+    if (rows.size > streamRebuildRowLimit) rows.delete(rows.keys().next().value);
+  };
   return (envelope) => {
     if (envelope.type === "append") {
       const held = rows.get(envelope.itemId);
@@ -29,12 +36,12 @@ export function streamRebuild() {
       const body = (held.data.body || "") + envelope.text;
       const data = { ...held.data, body, version: envelope.version, ts: envelope.ts, final: Boolean(envelope.final), truncated: false };
       const item = held.item && { ...held.item, text: body, timestamp: envelope.ts, truncated: false };
-      rows.set(envelope.itemId, { data, item, bytes: held.bytes + utf8Length(envelope.text) });
+      keep(envelope.itemId, { data, item, bytes: held.bytes + utf8Length(envelope.text) });
       return { stream: envelope.stream, sessionId: envelope.sessionId, seq: envelope.seq, type: "item", data, item };
     }
     const row = envelope.data || {};
     if (row.itemId && row.op === "remove") rows.delete(row.itemId);
-    else if (row.itemId) rows.set(row.itemId, { data: row, item: envelope.item, bytes: utf8Length(row.body || "") });
+    else if (row.itemId) keep(row.itemId, { data: row, item: envelope.item, bytes: utf8Length(row.body || "") });
     return envelope;
   };
 }

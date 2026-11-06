@@ -14,11 +14,36 @@ var ErrResync = errors.New("session stream append does not continue the row it n
 // stream sends a row whole the first time the connection sees it, and only
 // the bytes it gained after that.
 type Rebuild struct {
-	rows map[string]Event
+	rows  map[string]rebuildRow
+	clock uint64
 }
 
+type rebuildRow struct {
+	event   Event
+	touched uint64
+}
+
+// RebuildRowLimit bounds the rows one connection remembers. A row let go that
+// is appended to again asks for a resync, which sends it whole.
+const RebuildRowLimit = 512
+
 func NewRebuild() *Rebuild {
-	return &Rebuild{rows: map[string]Event{}}
+	return &Rebuild{rows: map[string]rebuildRow{}}
+}
+
+func (b *Rebuild) keep(event Event) {
+	b.clock++
+	b.rows[event.ItemID] = rebuildRow{event: event, touched: b.clock}
+	if len(b.rows) <= RebuildRowLimit {
+		return
+	}
+	oldest, at := "", b.clock
+	for id, row := range b.rows {
+		if row.touched < at {
+			oldest, at = id, row.touched
+		}
+	}
+	delete(b.rows, oldest)
 }
 
 func (b *Rebuild) Apply(seq uint64, envelope []byte) (Event, error) {
@@ -39,13 +64,14 @@ func (b *Rebuild) Apply(seq uint64, envelope []byte) (Event, error) {
 		seq = message.Seq
 	}
 	if message.Type == "append" {
-		row, found := b.rows[message.ItemID]
-		if !found || len(row.Body) != message.From {
+		held, found := b.rows[message.ItemID]
+		if !found || len(held.event.Body) != message.From {
 			return Event{}, ErrResync
 		}
+		row := held.event
 		row.Seq, row.Version, row.Final, row.Truncated = seq, message.Version, message.Final, false
 		row.Body += message.Text
-		b.rows[message.ItemID] = row
+		b.keep(row)
 		return row, nil
 	}
 	event, err := DecodePayload(seq, message.Data)
@@ -56,7 +82,7 @@ func (b *Rebuild) Apply(seq uint64, envelope []byte) (Event, error) {
 		if event.Operation == "remove" {
 			delete(b.rows, event.ItemID)
 		} else {
-			b.rows[event.ItemID] = event
+			b.keep(event)
 		}
 	}
 	return event, nil

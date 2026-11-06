@@ -257,4 +257,17 @@ assert.equal(grouped[2].user, undefined);
 assert.equal(vm.runInContext('exchangePrompt(groupItems[0])', groupingContext).label, 'Conversation input');
 assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "peer", sender: "collab"})', groupingContext).label, 'From collab');
 assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "task-notification"})', groupingContext).label, 'Task notification');
+const boundedRebuild = vm.runInContext('streamRebuild()', groupingContext);
+const rowLimit = vm.runInContext('streamRebuildRowLimit', groupingContext);
+const wholeRow = (seq, itemId) => boundedRebuild({seq, type: 'item', data: {itemId, kind: 'text', role: 'assistant', body: 'a'}});
+wholeRow(1, 'old');
+wholeRow(2, 'live');
+let liveBytes = 1;
+for (let index = 0; index < 2 * rowLimit; index++) {
+  wholeRow(3 + 2 * index, `row-${index}`);
+  const grown = boundedRebuild({seq: 4 + 2 * index, type: 'append', itemId: 'live', from: liveBytes, text: 'b'});
+  assert.ok(grown, `a live row keeps growing after ${index} other rows`);
+  liveBytes++;
+}
+assert.equal(boundedRebuild({seq: 1e6, type: 'append', itemId: 'old', from: 1, text: 'b'}), null, 'an append to a row the rebuild let go asks for a reopen');
 console.log('Session journal browser behavior: stream identity, paging cursor, upserts, roles, context, and switching pass.');

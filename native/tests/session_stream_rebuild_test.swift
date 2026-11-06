@@ -38,12 +38,12 @@ struct SessionStreamRebuildTest {
         try! JSONDecoder().decode(SessionStreamWire.self, from: Data(json.utf8))
     }
 
-    static func whole(_ seq: Int, _ body: String) -> String {
-        #"{"stream":"session","sessionId":"S","seq":\#(seq),"type":"item","data":{"itemId":"reply","version":1,"op":"upsert","kind":"text","role":"assistant","ts":"2026-11-06T00:00:00Z","body":"\#(body)","truncated":true,"bodyRef":"ref"},"item":{"id":"reply","kind":"text","role":"assistant","title":"text","text":"\#(body)","timestamp":"2026-11-06T00:00:00Z","truncated":true,"bodyRef":"ref"}}"#
+    static func whole(_ seq: Int, _ body: String, id: String = "reply") -> String {
+        #"{"stream":"session","sessionId":"S","seq":\#(seq),"type":"item","data":{"itemId":"\#(id)","version":1,"op":"upsert","kind":"text","role":"assistant","ts":"2026-11-06T00:00:00Z","body":"\#(body)","truncated":true,"bodyRef":"ref"},"item":{"id":"\#(id)","kind":"text","role":"assistant","title":"text","text":"\#(body)","timestamp":"2026-11-06T00:00:00Z","truncated":true,"bodyRef":"ref"}}"#
     }
 
-    static func append(_ seq: Int, from: Int, _ text: String) -> String {
-        #"{"stream":"session","sessionId":"S","seq":\#(seq),"type":"append","itemId":"reply","from":\#(from),"text":"\#(text)","version":\#(seq),"ts":"2026-11-06T00:00:0\#(seq % 10)Z"}"#
+    static func append(_ seq: Int, from: Int, _ text: String, id: String = "reply") -> String {
+        #"{"stream":"session","sessionId":"S","seq":\#(seq),"type":"append","itemId":"\#(id)","from":\#(from),"text":"\#(text)","version":\#(seq),"ts":"2026-11-06T00:00:0\#(seq % 10)Z"}"#
     }
 
     static func event(_ json: String) -> String { "event: item\ndata: \(json)\n\n" }
@@ -60,6 +60,16 @@ struct SessionStreamRebuildTest {
         check(!again.data.truncated && again.item?.truncated == false, "a row holding every byte is not marked cut")
         check(again.item?.timestamp == "2026-11-06T00:00:04Z" && again.data.version == 4, "an append carries the row's time and version")
         guard case .resync = rebuild.apply(wire(append(5, from: 7, "wrong"))) else { return fail("an append from the wrong offset asks to resync") }
+
+        var bounded = SessionStreamRebuild()
+        _ = bounded.apply(wire(whole(1, "a", id: "old")))
+        _ = bounded.apply(wire(whole(2, "a", id: "live")))
+        for index in 0..<(2 * SessionStreamRebuild.rowLimit) {
+            _ = bounded.apply(wire(whole(3 + 2 * index, "a", id: "row-\(index)")))
+            guard case .row = bounded.apply(wire(append(4 + 2 * index, from: 1 + index, "b", id: "live"))) else { return fail("a live row keeps growing after \(index) other rows") }
+            check(bounded.count <= SessionStreamRebuild.rowLimit, "the rebuild holds \(bounded.count) rows, past its limit")
+        }
+        guard case .resync = bounded.apply(wire(append(100_000, from: 1, "b", id: "old"))) else { return fail("an append to a row the rebuild let go asks to resync") }
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SessionStreamProtocol.self]
