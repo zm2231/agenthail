@@ -404,6 +404,11 @@ Every place that treats `host_id = ''` as "this daemon's session":
   outcome naming that host, recorded only under the addressed session.
 - `dashboardState` and `publishCatalogPresence` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.
+  Triggers on `message_queue` and `sessions` mark a mirrored session in
+  `host_queue_dirty` in the writer's own transaction, whichever process
+  writes. The refresh, run after each presence pass and host delivery, reads
+  only marked sessions, rewrites rows whose count differs, and clears the
+  marks; with no marks it returns without taking the write lock.
 - `registerRecentClaudePeers` advertises a mirrored session only while its
   host is connected, under its host-prefixed peer name.
 - The CLI `list` renders rows with a host id from their projection.

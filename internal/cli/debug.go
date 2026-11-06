@@ -9,15 +9,31 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
+const debugUsage = "usage: agenthail debug heap <dir> | agenthail debug cpu <dir> [seconds]"
+
 func (a *App) cmdDebug(args []string) error {
-	if len(args) != 2 || args[0] != "heap" || strings.HasPrefix(args[1], "-") {
-		return errors.New("usage: agenthail debug heap <dir>")
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+		return errors.New(debugUsage)
+	}
+	seconds := daemon.DefaultCPUProfileSeconds
+	switch {
+	case args[0] == "heap" && len(args) == 2:
+	case args[0] == "cpu" && len(args) == 2:
+	case args[0] == "cpu" && len(args) == 3:
+		parsed, err := strconv.Atoi(args[2])
+		if err != nil || parsed < 1 || parsed > daemon.MaxCPUProfileSeconds {
+			return fmt.Errorf("seconds must be between 1 and %d", daemon.MaxCPUProfileSeconds)
+		}
+		seconds = parsed
+	default:
+		return errors.New(debugUsage)
 	}
 	if !a.daemonIsRunning() {
 		return errors.New("the daemon is not running; start it with: agenthail daemon start")
@@ -32,16 +48,25 @@ func (a *App) cmdDebug(args []string) error {
 		return dialer.DialContext(ctx, "unix", socket)
 	}}}
 	stamp := time.Now().UTC().Format("20060102T150405Z")
+	if args[0] == "cpu" {
+		path := filepath.Join(dir, "cpu-"+stamp+".pb.gz")
+		fmt.Fprintf(os.Stderr, "sampling the daemon's CPU for %ds\n", seconds)
+		if err := fetchDebugFile(client, fmt.Sprintf("profiles/cpu?seconds=%d", seconds), path, time.Duration(seconds)*time.Second+time.Minute); err != nil {
+			return fmt.Errorf("cpu profile: %w", err)
+		}
+		fmt.Println(path)
+		return nil
+	}
 	// Memory statistics come first: the heap profile collects garbage before
 	// it is written.
 	path := filepath.Join(dir, "memstats-"+stamp+".json")
-	if err := fetchDebugFile(client, "memstats", path); err != nil {
+	if err := fetchDebugFile(client, "memstats", path, 2*time.Minute); err != nil {
 		return fmt.Errorf("memory statistics: %w", err)
 	}
 	fmt.Println(path)
 	for _, name := range daemon.DebugProfiles {
 		path := filepath.Join(dir, fmt.Sprintf("%s-%s.pb.gz", name, stamp))
-		if err := fetchDebugFile(client, "profiles/"+name, path); err != nil {
+		if err := fetchDebugFile(client, "profiles/"+name, path, 2*time.Minute); err != nil {
 			return fmt.Errorf("%s profile: %w", name, err)
 		}
 		fmt.Println(path)
@@ -53,8 +78,8 @@ var createProfileFile = func(path string) (io.WriteCloser, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 }
 
-func fetchDebugFile(client *http.Client, endpoint, path string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+func fetchDebugFile(client *http.Client, endpoint, path string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://daemon/"+endpoint, nil)
 	if err != nil {

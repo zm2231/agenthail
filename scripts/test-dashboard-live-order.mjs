@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import { dashboardModules } from "./dashboard-modules.mjs";
+
+const row = (id, placement, extra = {}) => ({ id, placement, name: id, ...extra });
+const listing = (...rows) => ({ rows: new Map(rows.map((each) => [each.id, each])), families: rows.map((each) => ({ id: each.id, members: [{ id: each.id }] })) });
+const context = { app: { state: { sessions: [] }, sessionOrder: {} } };
+await dashboardModules(["catalog-live"], context);
+const { app } = context;
+const install = () => {
+  app.sessionOrder = { current: listing(row("a", "p1"), row("b", "p1")), all: listing(row("b", "p1"), row("c", "p1")) };
+  app.state.sessions = [...new Map([...app.sessionOrder.current.rows, ...app.sessionOrder.all.rows]).values()];
+};
+install();
+const calls = { render: 0, reread: 0 };
+const hooks = { render: () => calls.render++, reread: () => calls.reread++ };
+const send = (seq, type, data) => context.catalogEvent({ data: JSON.stringify({ stream: "catalog", seq, type, data }) }, hooks);
+const order = (key) => app.sessionOrder[key].families.map((family) => family.id).join(",");
+
+send(5, "session.upserted", { session: row("b", "p1", { status: "busy" }) });
+assert.equal(calls.reread, 0, "nothing is applied before the first read gives a cursor");
+context.catalogRead(4);
+assert.equal(app.sessionOrder.current.rows.get("b").status, "busy", "an event newer than the read is replayed onto it");
+assert.equal(calls.reread, 0, "replay after a read does not ask for another read");
+
+send(5, "session.upserted", { session: row("b", "p1", { status: "idle" }) });
+assert.equal(app.sessionOrder.current.rows.get("b").status, "busy", "an event at or below the cursor is ignored");
+
+send(6, "session.upserted", { session: row("b", "p1", { status: "idle", lastActive: "now" }) });
+assert.equal(app.sessionOrder.current.rows.get("b").status, "idle");
+assert.equal(app.sessionOrder.all.rows.get("b").status, "idle", "a row is patched in every listing that holds it");
+assert.equal(app.state.sessions.find((each) => each.id === "b").status, "idle");
+assert.equal(order("current"), "a,b", "a patch keeps the order");
+assert.deepEqual(calls, { render: 1, reread: 0 }, "activity without a placement change is not news");
+
+app.selected = app.state.sessions.find((each) => each.id === "a");
+send(7, "session.upserted", { session: row("a", "p2") });
+assert.equal(calls.reread, 1, "a placement change is news");
+assert.equal(app.selected.placement, "p2", "the open conversation sees its row change");
+assert.equal(order("current"), "a,b", "news waits for the reread to move anything");
+
+send(8, "session.upserted", { session: row("z", "p1") });
+assert.equal(calls.reread, 2, "an unknown session is news");
+send(9, "session.removed", { sessionId: "nobody" });
+assert.equal(calls.reread, 2, "removing a session nobody holds is not news");
+send(10, "session.removed", { sessionId: "c" });
+assert.equal(calls.reread, 3, "removing a held session is news");
+send(11, "session.queue", { sessionId: "a", queueCount: 2 });
+assert.equal(app.sessionOrder.current.rows.get("a").queueCount, 2);
+assert.equal(calls.reread, 4, "queue changes are news");
+send(12, "delivery.problem", { deliveryId: 1 });
+send(13, "coordinator.replaced", {});
+send(14, "surface.health", {});
+assert.equal(calls.reread, 6, "delivery and coordinator events are news; others are not");
+context.catalogEvent({ data: JSON.stringify({ stream: "other", seq: 99, type: "session.queue", data: {} }) }, hooks);
+assert.equal(calls.reread, 6);
+
+const stream = context.catalogStream();
+assert.equal(stream.ready(), true);
+assert.equal(stream.path(), "/api/v1/catalog-events?after=14", "the stream resumes after the last event this tab applied");
+stream.seen({ id: "20" });
+assert.equal(stream.path(), "/api/v1/catalog-events?after=20");
+stream.gap();
+assert.equal(stream.ready(), false, "after a gap the stream waits for a fresh read");
+install();
+context.catalogRead(30);
+assert.equal(stream.ready(), true);
+assert.equal(stream.path(), "/api/v1/catalog-events?after=30", "and resumes from that read");
+
+const holdContext = {};
+await dashboardModules(["order-hold"], holdContext);
+const handlers = new Map();
+const target = () => ({ addEventListener: (type, fn) => handlers.set(type, fn) });
+const list = target();
+const root = { addEventListener: (type, fn) => handlers.set(`root:${type}`, fn) };
+let pending = null;
+let released = 0;
+const holding = holdContext.bindOrderHold(list, { root, settle: 3000, onRelease: () => released++, setTimeout: (fn) => { pending = fn; return 1; }, clearTimeout: () => { pending = null; } });
+assert.equal(holding(), false);
+handlers.get("pointermove")();
+assert.equal(holding(), true, "moving over the list holds the order");
+pending();
+assert.equal(holding(), false, "a pointer parked past the settle time lets news through");
+assert.equal(released, 1);
+handlers.get("pointerdown")();
+pending();
+assert.equal(holding(), true, "a button down keeps holding past the settle time");
+handlers.get("root:pointerup")();
+assert.equal(holding(), false, "releasing the button lets go");
+handlers.get("scroll")();
+assert.equal(holding(), true, "scrolling the list holds the order");
+handlers.get("pointerleave")();
+assert.equal(holding(), false, "leaving the list lets go at once");
+assert.equal(released, 3);
+
+const loads = [];
+const refresh = { app: { loading: false }, document: { hidden: false }, load: async (...args) => { loads.push(args); }, setTimeout: (fn) => { refresh.next = fn; return 1; } };
+await dashboardModules(["order-refresh"], refresh);
+let held = true;
+refresh.holdOrderWith(() => held);
+refresh.rereadSoon();
+refresh.rereadSoon();
+await refresh.next();
+assert.equal(loads.length, 0, "a reread waits while the order is held");
+held = false;
+refresh.orderReleased();
+await refresh.next();
+assert.deepEqual(loads, [[false, false]], "releasing the hold runs the waiting reread once");
+refresh.orderReleased();
+assert.equal(loads.length, 1);
+refresh.app.loading = true;
+refresh.rereadSoon(0);
+await refresh.next();
+assert.equal(loads.length, 1, "a reread does not race a load in flight");
+refresh.app.loading = false;
+await refresh.next();
+assert.equal(loads.length, 2, "it runs once that load ends");
+console.log("dashboard live order tests passed");

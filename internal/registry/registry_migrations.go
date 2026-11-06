@@ -90,6 +90,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
+	if err := dropPresentationTriggers(tx); err != nil {
+		return err
+	}
 	if err := setAsideReleasedProjectsTable(tx); err != nil {
 		return err
 	}
@@ -126,8 +129,16 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal", "payload_codec", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_bodies", "written_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
+	}
+	for _, column := range []string{"send_route", "bridge"} {
+		if err := ensureColumn(tx, "delivery_history", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
 	}
 	for _, column := range []struct{ name, decl string }{
 		{"reason", `TEXT NOT NULL DEFAULT ''`},
@@ -188,12 +199,27 @@ func migrateTx(tx *sql.Tx) error {
 		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
+		{"pinned_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_until_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snooze_wake", `TEXT NOT NULL DEFAULT ''`},
+		{"ended", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err
 		}
 	}
-	if err := ensureJournalPromptIndexes(tx); err != nil {
+	for _, column := range []struct{ name, decl string }{
+		{"answered_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"answer_status", `TEXT NOT NULL DEFAULT ''`},
+		{"answer_message_id", `TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := ensureColumn(tx, "turn_ends", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
@@ -315,6 +341,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"host_queue_count", `INTEGER NOT NULL DEFAULT 0`},
 		{"background_tasks", `BLOB NOT NULL DEFAULT ''`},
 		{"usage_limit", `BLOB NOT NULL DEFAULT ''`},
+		{"turn_stop", `BLOB NOT NULL DEFAULT ''`},
 		{"current", `INTEGER NOT NULL DEFAULT 0`},
 		{"current_reason", `TEXT NOT NULL DEFAULT ''`},
 	} {
@@ -333,6 +360,14 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if _, err := tx.Exec(catalogRetiredSchema); err != nil {
 		return err
+	}
+	if _, err := tx.Exec(hostQueueDirtySchema); err != nil {
+		return err
+	}
+	if version < 67 {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE host_id<>''`); err != nil {
+			return err
+		}
 	}
 	if version < 29 {
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET ` + catalogCurrentAssignment("catalog_sessions")); err != nil {
@@ -414,6 +449,19 @@ func migrateTx(tx *sql.Tx) error {
 		if err := moveLedgerCaptureIntoTheLog(tx); err != nil {
 			return err
 		}
+	}
+	if version >= 1 && version < 59 {
+		if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=CAST(strftime('%s','now') AS INTEGER)*1000 WHERE pinned_at_ms=0 AND id IN (` + localLeadSessions + `)`); err != nil {
+			return err
+		}
+	}
+	if version < 68 {
+		if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE status='offline'`); err != nil {
+			return err
+		}
+	}
+	if err := createPresentationTriggers(tx); err != nil {
+		return err
 	}
 	if version == schemaVersion {
 		return nil

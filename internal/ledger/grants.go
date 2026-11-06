@@ -15,13 +15,23 @@ func (s *Store) GrantSession(projectKey, sessionID string) error {
 	if projectKey == "" || sessionID == "" {
 		return fmt.Errorf("project key and session are required")
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO ledger_grants(project_key,session_id,since_ms) VALUES(?,?,?)`, projectKey, sessionID, time.Now().UnixMilli())
-	return err
+	return s.grantWrite(projectKey, `INSERT OR IGNORE INTO ledger_grants(project_key,session_id,since_ms) VALUES(?,?,?)`, projectKey, sessionID, time.Now().UnixMilli())
 }
 
 func (s *Store) RevokeSession(projectKey, sessionID string) error {
-	_, err := s.db.Exec(`DELETE FROM ledger_grants WHERE project_key=? AND session_id=?`, projectKey, sessionID)
-	return err
+	return s.grantWrite(projectKey, `DELETE FROM ledger_grants WHERE project_key=? AND session_id=?`, projectKey, sessionID)
+}
+
+func (s *Store) grantWrite(projectKey, statement string, args ...any) error {
+	tx, err := s.begin(projectKey)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(statement, args...); err != nil {
+		return err
+	}
+	return tx.Tx.Commit()
 }
 
 func (s *Store) SessionGrants(sessionID string) ([]Grant, error) {

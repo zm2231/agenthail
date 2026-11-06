@@ -17,6 +17,8 @@ Session commands:
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread adopt <target>        Open a terminal Claude session in Agenthail
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
+  pr <link|unlink|watch|unwatch> <url|number> [--repo <owner/name>] [--session <target>] [--json]
+                                 Link a pull request to your session, or to --session; gh pr create links its own
   list [--all|--archived|--recent|--running] [--project <name|id>|--cwd <path>] [--wide]
                                  List daemon catalog conversations; --recent adds the last 24h;
                                  --cwd lists the project that holds that folder
@@ -135,6 +137,7 @@ Background service:
   daemon install                Keep Agenthail running after login and restarts
   daemon uninstall              Stop Agenthail from starting automatically
   debug heap <dir>              Write the daemon's memory statistics and heap, allocation and goroutine profiles to <dir>
+  debug cpu <dir> [seconds]     Sample the daemon's CPU for [seconds] (default 30, at most 300) and write the profile to <dir>
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root

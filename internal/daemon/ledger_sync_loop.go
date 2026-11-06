@@ -115,6 +115,9 @@ func (d *Daemon) syncLedgerProject(ctx context.Context, host *pairedHost, key st
 	host.ledgerMu.Lock()
 	defer host.ledgerMu.Unlock()
 	if !host.ledgerConfirmed[key] {
+		if err := d.handOffProjectMoves(ctx, host, key); err != nil {
+			return 0, err
+		}
 		if err := d.confirmLedgerOwnerLocked(ctx, host, key); err != nil {
 			return 0, err
 		}

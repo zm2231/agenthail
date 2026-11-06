@@ -11,8 +11,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// ledgerManaged is whether G2 may queue into a session: one Agenthail started, never the person's own terminal or a delegated subagent.
-func (d *Daemon) ledgerManaged(session surface.Session) bool {
+// agenthailStarted is a session Agenthail started, never the person's own terminal or a delegated subagent.
+func (d *Daemon) agenthailStarted(session surface.Session) bool {
 	if session.Delegated() {
 		return false
 	}
@@ -30,7 +30,7 @@ func (d *Daemon) ledgerManaged(session surface.Session) bool {
 }
 
 func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
-	if turnID == "" || !d.ledgerManaged(session) {
+	if turnID == "" || !d.agenthailStarted(session) {
 		return
 	}
 	store := d.ledgerStore()

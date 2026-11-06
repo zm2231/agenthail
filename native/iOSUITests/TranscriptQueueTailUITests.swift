@@ -94,7 +94,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
         sleep(2)
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         session.tapWhenReady()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 5), "the cached transcript shows while it reloads")
@@ -108,7 +108,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
     }
 
     private func open(_ session: XCUIElement, in app: XCUIApplication) {
-        if !session.isHittable { app.navigationBars.buttons.element(boundBy: 0).tapWhenReady() }
+        if !session.isHittable { app.backToSessions() }
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
         sleep(3)

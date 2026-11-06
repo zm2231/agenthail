@@ -68,7 +68,7 @@ func assertPresentationMatchesMergePatch(t *testing.T, store *registry.Registry)
 		t.Fatalf("rows=%d want=%d", len(read.Rows), len(want))
 	}
 	for _, record := range read.Rows {
-		row, err := presentationRow(record, cache.rows[record.ID])
+		row, err := presentationRow(record, cache.rows[record.ID], (&Daemon{}).prViews)
 		if err != nil {
 			t.Fatal(err)
 		}

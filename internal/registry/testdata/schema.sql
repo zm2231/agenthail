@@ -1,4 +1,4 @@
--- schemaVersion 55
+-- schemaVersion 73
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -73,6 +73,9 @@ CREATE UNIQUE INDEX session_credentials_live ON session_credentials(session_id) 
 -- index session_journal_bodies_session
 CREATE INDEX session_journal_bodies_session ON session_journal_bodies(session_id);
 
+-- index session_journal_body_tail_session
+CREATE INDEX session_journal_body_tail_session ON session_journal_body_tail(session_id);
+
 -- index session_journal_position
 CREATE UNIQUE INDEX session_journal_position ON session_journal(session_id, position);
 
@@ -93,14 +96,26 @@ CREATE UNIQUE INDEX session_journal_provider_key
 -- index session_moves_conversation
 CREATE INDEX session_moves_conversation ON session_moves(conversation, role, state);
 
+-- index session_prs_watched
+CREATE INDEX session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked=0;
+
+-- index sessions_parent
+CREATE INDEX sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
+
 -- index sessions_recent
 CREATE INDEX sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id);
+
+-- index sessions_root
+CREATE INDEX sessions_root ON sessions(root_session_id) WHERE root_session_id<>'';
 
 -- index tasks_parent
 CREATE INDEX tasks_parent ON tasks(parent_session_id);
 
 -- index tasks_running
 CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
+-- index work_records_session
+CREATE UNIQUE INDEX work_records_session ON work_records(session_id) WHERE session_id<>'';
 
 -- table action_receipts
 CREATE TABLE action_receipts (
@@ -156,6 +171,12 @@ CREATE TABLE catalog_events (
 	created_at TEXT NOT NULL
 );
 
+-- table catalog_presentation_version
+CREATE TABLE catalog_presentation_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
+);
+
 -- table catalog_retired_version
 CREATE TABLE catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
@@ -177,6 +198,7 @@ CREATE TABLE catalog_sessions (
 	host_queue_count INTEGER NOT NULL DEFAULT 0,
 	background_tasks BLOB NOT NULL DEFAULT '',
 	usage_limit BLOB NOT NULL DEFAULT '',
+	turn_stop BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
 	current_reason TEXT NOT NULL DEFAULT '',
 	retired INTEGER NOT NULL DEFAULT 0
@@ -274,7 +296,9 @@ CREATE TABLE delivery_history (
 	message TEXT NOT NULL DEFAULT '',
 	result TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
-	operation TEXT NOT NULL DEFAULT ''
+	operation TEXT NOT NULL DEFAULT '',
+	send_route TEXT NOT NULL DEFAULT '',
+	bridge TEXT NOT NULL DEFAULT ''
 );
 
 -- table delivery_intents
@@ -348,6 +372,11 @@ CREATE TABLE host_identity (
 	host_id TEXT NOT NULL,
 	name TEXT NOT NULL
 );
+
+-- table host_queue_dirty
+CREATE TABLE host_queue_dirty (
+	session_id TEXT PRIMARY KEY
+) WITHOUT ROWID;
 
 -- table hosts
 CREATE TABLE hosts (
@@ -477,6 +506,22 @@ CREATE TABLE project_links (
 	origin_host TEXT NOT NULL
 );
 
+-- table project_move_refusals
+CREATE TABLE project_move_refusals (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	at_ms INTEGER NOT NULL
+);
+
+-- table project_moves
+CREATE TABLE project_moves (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
+
 -- table projects
 CREATE TABLE projects (
 	id TEXT PRIMARY KEY,
@@ -552,6 +597,12 @@ CREATE TABLE removed_project_ledgers (
 	removed_at_ms INTEGER NOT NULL
 );
 
+-- table repository_keys
+CREATE TABLE repository_keys (
+	workspace_root TEXT PRIMARY KEY,
+	project_key TEXT NOT NULL
+);
+
 -- table routes
 CREATE TABLE routes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -616,7 +667,8 @@ CREATE TABLE session_journal (
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
-	payload_codec INTEGER NOT NULL DEFAULT 0, payload_role TEXT GENERATED ALWAYS AS (json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.role')) VIRTUAL, payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
+	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '', payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
 	PRIMARY KEY (session_id, seq)
 );
 
@@ -625,7 +677,17 @@ CREATE TABLE session_journal_bodies (
 	ref TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	body BLOB NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	written_seq INTEGER NOT NULL DEFAULT 0
+);
+
+-- table session_journal_body_tail
+CREATE TABLE session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
 );
 
 -- table session_journal_state
@@ -643,6 +705,18 @@ CREATE TABLE session_journal_state (
 	derived_version INTEGER NOT NULL DEFAULT 0,
 	transcript_checkpoint TEXT NOT NULL DEFAULT '',
 	swept_seq INTEGER NOT NULL DEFAULT 0
+);
+
+-- table session_keep_alive
+CREATE TABLE session_keep_alive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
+	failed_at_ms INTEGER NOT NULL DEFAULT 0,
+	announced INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT ''
 );
 
 -- table session_moves
@@ -664,6 +738,34 @@ CREATE TABLE session_origins (
 	via TEXT NOT NULL,
 	creator_session_id TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table session_prs
+CREATE TABLE session_prs (
+	session_id TEXT NOT NULL,
+	repo TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	url TEXT NOT NULL,
+	source TEXT NOT NULL,
+	unlinked INTEGER NOT NULL DEFAULT 0,
+	watch INTEGER NOT NULL DEFAULT 1,
+	title TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT '',
+	head_sha TEXT NOT NULL DEFAULT '',
+	mergeable TEXT NOT NULL DEFAULT '',
+	review TEXT NOT NULL DEFAULT '',
+	checks TEXT NOT NULL DEFAULT '',
+	failed_checks TEXT NOT NULL DEFAULT '',
+	passed_head TEXT NOT NULL DEFAULT '',
+	conflict_head TEXT NOT NULL DEFAULT '',
+	remarks_through_ms INTEGER NOT NULL DEFAULT 0,
+	remark_ids TEXT NOT NULL DEFAULT '',
+	wakes INTEGER NOT NULL DEFAULT 0,
+	comment_wakes INTEGER NOT NULL DEFAULT 0,
+	read_failures INTEGER NOT NULL DEFAULT 0,
+	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
+	linked_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (session_id, repo, number)
 );
 
 -- table session_rekeys
@@ -709,7 +811,10 @@ CREATE TABLE sessions (
 	parent_session_id TEXT NOT NULL DEFAULT '', root_session_id TEXT NOT NULL DEFAULT '',
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
-	host_id TEXT NOT NULL DEFAULT ''
+	host_id TEXT NOT NULL DEFAULT '',
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
+	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
+	ended INTEGER NOT NULL DEFAULT 0
 );
 
 -- table signin_bindings
@@ -755,6 +860,370 @@ CREATE TABLE tasks (
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
+-- table turn_ends
+CREATE TABLE turn_ends (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_at_ms INTEGER NOT NULL,
+	ended_at_ms INTEGER NOT NULL DEFAULT 0,
+	turn_id TEXT NOT NULL DEFAULT '',
+	completed_turn_id TEXT NOT NULL DEFAULT '',
+	needs TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	asks_json TEXT NOT NULL DEFAULT 'null',
+	next_json TEXT NOT NULL DEFAULT 'null',
+	source TEXT NOT NULL DEFAULT '',
+	routed_to TEXT NOT NULL DEFAULT '',
+	answered_at_ms INTEGER NOT NULL DEFAULT 0,
+	answer_status TEXT NOT NULL DEFAULT '',
+	answer_message_id TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, started_at_ms)
+);
+
+-- table work_records
+CREATE TABLE work_records (
+	worktree_path TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL,
+	branch TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	base_commit TEXT NOT NULL,
+	state TEXT NOT NULL,
+	settled_reason TEXT NOT NULL DEFAULT '',
+	cleanup TEXT NOT NULL DEFAULT '',
+	cleanup_reason TEXT NOT NULL DEFAULT '',
+	kept_paths TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- trigger catalog_presentation_version_aliases_delete
+CREATE TRIGGER catalog_presentation_version_aliases_delete AFTER DELETE ON aliases
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_aliases_insert
+CREATE TRIGGER catalog_presentation_version_aliases_insert AFTER INSERT ON aliases
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_aliases_update
+CREATE TRIGGER catalog_presentation_version_aliases_update AFTER UPDATE OF created_at,name,session_id ON aliases WHEN (NEW.created_at IS NOT OLD.created_at OR NEW.name IS NOT OLD.name OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_delete
+CREATE TRIGGER catalog_presentation_version_attention_items_delete AFTER DELETE ON attention_items
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_insert
+CREATE TRIGGER catalog_presentation_version_attention_items_insert AFTER INSERT ON attention_items
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_attention_items_update
+CREATE TRIGGER catalog_presentation_version_attention_items_update AFTER UPDATE OF created_at,id,queue_id,reason,requested_action,resolution,resolved_at,session_id ON attention_items WHEN (NEW.created_at IS NOT OLD.created_at OR NEW.id IS NOT OLD.id OR NEW.queue_id IS NOT OLD.queue_id OR NEW.reason IS NOT OLD.reason OR NEW.requested_action IS NOT OLD.requested_action OR NEW.resolution IS NOT OLD.resolution OR NEW.resolved_at IS NOT OLD.resolved_at OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_retired_version_delete
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_delete AFTER DELETE ON catalog_retired_version
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_retired_version_insert
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_insert AFTER INSERT ON catalog_retired_version
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_retired_version_update
+CREATE TRIGGER catalog_presentation_version_catalog_retired_version_update AFTER UPDATE OF id,version ON catalog_retired_version WHEN (NEW.id IS NOT OLD.id OR NEW.version IS NOT OLD.version)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_delete
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_delete AFTER DELETE ON catalog_sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_insert
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_insert AFTER INSERT ON catalog_sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_catalog_sessions_update
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.unavailable_reason IS NOT OLD.unavailable_reason OR NEW.waiting_on IS NOT OLD.waiting_on OR NEW.background_tasks IS NOT OLD.background_tasks OR NEW.usage_limit IS NOT OLD.usage_limit OR NEW.turn_stop IS NOT OLD.turn_stop OR NEW.host_queue_count IS NOT OLD.host_queue_count OR NEW.projection_generation IS NOT OLD.projection_generation OR NEW.projection_fingerprint IS NOT OLD.projection_fingerprint OR NEW.misses IS NOT OLD.misses OR NEW.discovery_failures IS NOT OLD.discovery_failures OR NEW.retired IS NOT OLD.retired OR NEW.current IS NOT OLD.current OR NEW.host_project IS NOT OLD.host_project)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_delete
+CREATE TRIGGER catalog_presentation_version_coordinator_history_delete AFTER DELETE ON coordinator_history
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_insert
+CREATE TRIGGER catalog_presentation_version_coordinator_history_insert AFTER INSERT ON coordinator_history
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_history_update
+CREATE TRIGGER catalog_presentation_version_coordinator_history_update AFTER UPDATE OF acknowledged_at_ms,action,announced_at_ms,at_ms,changed_by,id,name,notify_sender,person_notified_at_ms,previous_name,previous_session_id,project_id,reason,session_id ON coordinator_history WHEN (NEW.acknowledged_at_ms IS NOT OLD.acknowledged_at_ms OR NEW.action IS NOT OLD.action OR NEW.announced_at_ms IS NOT OLD.announced_at_ms OR NEW.at_ms IS NOT OLD.at_ms OR NEW.changed_by IS NOT OLD.changed_by OR NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.notify_sender IS NOT OLD.notify_sender OR NEW.person_notified_at_ms IS NOT OLD.person_notified_at_ms OR NEW.previous_name IS NOT OLD.previous_name OR NEW.previous_session_id IS NOT OLD.previous_session_id OR NEW.project_id IS NOT OLD.project_id OR NEW.reason IS NOT OLD.reason OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_delete
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_delete AFTER DELETE ON coordinator_replaced
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_insert
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_insert AFTER INSERT ON coordinator_replaced
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinator_replaced_update
+CREATE TRIGGER catalog_presentation_version_coordinator_replaced_update AFTER UPDATE OF project_id,session_id ON coordinator_replaced WHEN (NEW.project_id IS NOT OLD.project_id OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_delete
+CREATE TRIGGER catalog_presentation_version_coordinators_delete AFTER DELETE ON coordinators
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_insert
+CREATE TRIGGER catalog_presentation_version_coordinators_insert AFTER INSERT ON coordinators
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_coordinators_update
+CREATE TRIGGER catalog_presentation_version_coordinators_update AFTER UPDATE OF changed_at_ms,changed_by,cwd,host_id,instructions,model,name,permission_mode,project_id,project_root,session_id,surface ON coordinators WHEN (NEW.changed_at_ms IS NOT OLD.changed_at_ms OR NEW.changed_by IS NOT OLD.changed_by OR NEW.cwd IS NOT OLD.cwd OR NEW.host_id IS NOT OLD.host_id OR NEW.instructions IS NOT OLD.instructions OR NEW.model IS NOT OLD.model OR NEW.name IS NOT OLD.name OR NEW.permission_mode IS NOT OLD.permission_mode OR NEW.project_id IS NOT OLD.project_id OR NEW.project_root IS NOT OLD.project_root OR NEW.session_id IS NOT OLD.session_id OR NEW.surface IS NOT OLD.surface)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_delete
+CREATE TRIGGER catalog_presentation_version_delivery_intents_delete AFTER DELETE ON delivery_intents WHEN (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_insert
+CREATE TRIGGER catalog_presentation_version_delivery_intents_insert AFTER INSERT ON delivery_intents WHEN (NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id)))
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_delivery_intents_update
+CREATE TRIGGER catalog_presentation_version_delivery_intents_update AFTER UPDATE OF created_at,dismissed_at,evidence,failure,id,message,notification_queue_id,provider_key,queue_id,relayed,retries,sender_session_id,status,target_session_id,updated_at,uuid ON delivery_intents WHEN ((NEW.status IN ('failed','held') OR (NEW.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=NEW.sender_session_id AND f.target_session_id=NEW.target_session_id AND f.status='failed' AND f.id<NEW.id))) OR (OLD.status IN ('failed','held') OR (OLD.status IN ('sent','delivered') AND EXISTS (SELECT 1 FROM delivery_intents f
+	WHERE f.sender_session_id=OLD.sender_session_id AND f.target_session_id=OLD.target_session_id AND f.status='failed' AND f.id<OLD.id)))) AND (NEW.created_at IS NOT OLD.created_at OR NEW.dismissed_at IS NOT OLD.dismissed_at OR NEW.evidence IS NOT OLD.evidence OR NEW.failure IS NOT OLD.failure OR NEW.id IS NOT OLD.id OR NEW.message IS NOT OLD.message OR NEW.notification_queue_id IS NOT OLD.notification_queue_id OR NEW.provider_key IS NOT OLD.provider_key OR NEW.queue_id IS NOT OLD.queue_id OR NEW.relayed IS NOT OLD.relayed OR NEW.retries IS NOT OLD.retries OR NEW.sender_session_id IS NOT OLD.sender_session_id OR NEW.status IS NOT OLD.status OR NEW.target_session_id IS NOT OLD.target_session_id OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uuid IS NOT OLD.uuid)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_delete
+CREATE TRIGGER catalog_presentation_version_limit_resumes_delete AFTER DELETE ON limit_resumes
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_insert
+CREATE TRIGGER catalog_presentation_version_limit_resumes_insert AFTER INSERT ON limit_resumes
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_limit_resumes_update
+CREATE TRIGGER catalog_presentation_version_limit_resumes_update AFTER UPDATE OF account_key,attempts,refused_at_ms,resets_at_ms,session_id,state,turn_id,updated_at_ms ON limit_resumes WHEN (NEW.account_key IS NOT OLD.account_key OR NEW.attempts IS NOT OLD.attempts OR NEW.refused_at_ms IS NOT OLD.refused_at_ms OR NEW.resets_at_ms IS NOT OLD.resets_at_ms OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.turn_id IS NOT OLD.turn_id OR NEW.updated_at_ms IS NOT OLD.updated_at_ms)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_delete
+CREATE TRIGGER catalog_presentation_version_message_queue_delete AFTER DELETE ON message_queue
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_insert
+CREATE TRIGGER catalog_presentation_version_message_queue_insert AFTER INSERT ON message_queue
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_message_queue_update
+CREATE TRIGGER catalog_presentation_version_message_queue_update AFTER UPDATE OF attempts,author,available_at_ms,busy_delivery,dead_at_ms,deferrals,delivered,delivery_key,evidence,host_request,id,inflight_at_ms,last_error,message,model,operation,person_name,queued_at,refusal,refusal_announced,refused,relay_hops,session_id,source_session_id,status,turn_options,updated_at,uploads ON message_queue WHEN (NEW.attempts IS NOT OLD.attempts OR NEW.author IS NOT OLD.author OR NEW.available_at_ms IS NOT OLD.available_at_ms OR NEW.busy_delivery IS NOT OLD.busy_delivery OR NEW.dead_at_ms IS NOT OLD.dead_at_ms OR NEW.deferrals IS NOT OLD.deferrals OR NEW.delivered IS NOT OLD.delivered OR NEW.delivery_key IS NOT OLD.delivery_key OR NEW.evidence IS NOT OLD.evidence OR NEW.host_request IS NOT OLD.host_request OR NEW.id IS NOT OLD.id OR NEW.inflight_at_ms IS NOT OLD.inflight_at_ms OR NEW.last_error IS NOT OLD.last_error OR NEW.message IS NOT OLD.message OR NEW.model IS NOT OLD.model OR NEW.operation IS NOT OLD.operation OR NEW.person_name IS NOT OLD.person_name OR NEW.queued_at IS NOT OLD.queued_at OR NEW.refusal IS NOT OLD.refusal OR NEW.refusal_announced IS NOT OLD.refusal_announced OR NEW.refused IS NOT OLD.refused OR NEW.relay_hops IS NOT OLD.relay_hops OR NEW.session_id IS NOT OLD.session_id OR NEW.source_session_id IS NOT OLD.source_session_id OR NEW.status IS NOT OLD.status OR NEW.turn_options IS NOT OLD.turn_options OR NEW.updated_at IS NOT OLD.updated_at OR NEW.uploads IS NOT OLD.uploads)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_delete
+CREATE TRIGGER catalog_presentation_version_projects_delete AFTER DELETE ON projects
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_insert
+CREATE TRIGGER catalog_presentation_version_projects_insert AFTER INSERT ON projects
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_projects_update
+CREATE TRIGGER catalog_presentation_version_projects_update AFTER UPDATE OF added,archived_at_ms,created_at_ms,id,project_key,repository,title,workspace_root ON projects WHEN (NEW.added IS NOT OLD.added OR NEW.archived_at_ms IS NOT OLD.archived_at_ms OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.id IS NOT OLD.id OR NEW.project_key IS NOT OLD.project_key OR NEW.repository IS NOT OLD.repository OR NEW.title IS NOT OLD.title OR NEW.workspace_root IS NOT OLD.workspace_root)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_delete
+CREATE TRIGGER catalog_presentation_version_session_archive_delete AFTER DELETE ON session_archive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_insert
+CREATE TRIGGER catalog_presentation_version_session_archive_insert AFTER INSERT ON session_archive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_archive_update
+CREATE TRIGGER catalog_presentation_version_session_archive_update AFTER UPDATE OF archived_at_ms,session_id ON session_archive WHEN (NEW.archived_at_ms IS NOT OLD.archived_at_ms OR NEW.session_id IS NOT OLD.session_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_delete
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_delete AFTER DELETE ON session_keep_alive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_insert
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_insert AFTER INSERT ON session_keep_alive
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_keep_alive_update
+CREATE TRIGGER catalog_presentation_version_session_keep_alive_update AFTER UPDATE OF session_id,failed_at_ms,error ON session_keep_alive WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.failed_at_ms IS NOT OLD.failed_at_ms OR NEW.error IS NOT OLD.error)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_prs_delete
+CREATE TRIGGER catalog_presentation_version_session_prs_delete AFTER DELETE ON session_prs WHEN OLD.unlinked=0
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_prs_insert
+CREATE TRIGGER catalog_presentation_version_session_prs_insert AFTER INSERT ON session_prs WHEN NEW.unlinked=0
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_prs_update
+CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms ON session_prs WHEN (NEW.unlinked=0 OR OLD.unlinked=0) AND (NEW.session_id IS NOT OLD.session_id OR NEW.repo IS NOT OLD.repo OR NEW.number IS NOT OLD.number OR NEW.url IS NOT OLD.url OR NEW.source IS NOT OLD.source OR NEW.unlinked IS NOT OLD.unlinked OR NEW.watch IS NOT OLD.watch OR NEW.title IS NOT OLD.title OR NEW.state IS NOT OLD.state OR NEW.head_sha IS NOT OLD.head_sha OR NEW.mergeable IS NOT OLD.mergeable OR NEW.review IS NOT OLD.review OR NEW.checks IS NOT OLD.checks OR (NEW.read_failures>=3) IS NOT (OLD.read_failures>=3) OR NEW.linked_at_ms IS NOT OLD.linked_at_ms)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_delete
+CREATE TRIGGER catalog_presentation_version_session_runtime_delete AFTER DELETE ON session_runtime
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_insert
+CREATE TRIGGER catalog_presentation_version_session_runtime_insert AFTER INSERT ON session_runtime
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_runtime_update
+CREATE TRIGGER catalog_presentation_version_session_runtime_update AFTER UPDATE OF session_id,completed_turn_id ON session_runtime WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.completed_turn_id IS NOT OLD.completed_turn_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_delete
+CREATE TRIGGER catalog_presentation_version_sessions_delete AFTER DELETE ON sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_insert
+CREATE TRIGGER catalog_presentation_version_sessions_insert AFTER INSERT ON sessions
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_sessions_update
+CREATE TRIGGER catalog_presentation_version_sessions_update AFTER UPDATE OF id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake ON sessions WHEN (NEW.id IS NOT OLD.id OR NEW.name IS NOT OLD.name OR NEW.surface IS NOT OLD.surface OR NEW.status IS NOT OLD.status OR NEW.cwd IS NOT OLD.cwd OR NEW.last_active_ms IS NOT OLD.last_active_ms OR NEW.runtime_kind IS NOT OLD.runtime_kind OR NEW.source IS NOT OLD.source OR NEW.transport IS NOT OLD.transport OR NEW.host_id IS NOT OLD.host_id OR NEW.parent_session_id IS NOT OLD.parent_session_id OR NEW.root_session_id IS NOT OLD.root_session_id OR NEW.subagent_depth IS NOT OLD.subagent_depth OR NEW.agent_nickname IS NOT OLD.agent_nickname OR NEW.agent_role IS NOT OLD.agent_role OR NEW.registered_at IS NOT OLD.registered_at OR NEW.pinned_at_ms IS NOT OLD.pinned_at_ms OR NEW.snoozed_at_ms IS NOT OLD.snoozed_at_ms OR NEW.snoozed_until_ms IS NOT OLD.snoozed_until_ms OR NEW.snooze_wake IS NOT OLD.snooze_wake)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_delete
+CREATE TRIGGER catalog_presentation_version_turn_ends_delete AFTER DELETE ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_insert
+CREATE TRIGGER catalog_presentation_version_turn_ends_insert AFTER INSERT ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_turn_ends_update
+CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF answer_message_id,answer_status,answered_at_ms,asks_json,completed_turn_id,ended_at_ms,headline,needs,next_json,routed_to,session_id,source,started_at_ms,turn_id ON turn_ends WHEN (NEW.answer_message_id IS NOT OLD.answer_message_id OR NEW.answer_status IS NOT OLD.answer_status OR NEW.answered_at_ms IS NOT OLD.answered_at_ms OR NEW.asks_json IS NOT OLD.asks_json OR NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.needs IS NOT OLD.needs OR NEW.next_json IS NOT OLD.next_json OR NEW.routed_to IS NOT OLD.routed_to OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_delete
+CREATE TRIGGER catalog_presentation_version_work_records_delete AFTER DELETE ON work_records WHEN OLD.session_id<>''
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_insert
+CREATE TRIGGER catalog_presentation_version_work_records_insert AFTER INSERT ON work_records WHEN NEW.session_id<>''
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_update
+CREATE TRIGGER catalog_presentation_version_work_records_update AFTER UPDATE OF session_id,worktree_path,branch,base_ref,state,settled_reason,cleanup,cleanup_reason,kept_paths ON work_records WHEN (NEW.session_id<>'' OR OLD.session_id<>'') AND (NEW.session_id IS NOT OLD.session_id OR NEW.worktree_path IS NOT OLD.worktree_path OR NEW.branch IS NOT OLD.branch OR NEW.base_ref IS NOT OLD.base_ref OR NEW.state IS NOT OLD.state OR NEW.settled_reason IS NOT OLD.settled_reason OR NEW.cleanup IS NOT OLD.cleanup OR NEW.cleanup_reason IS NOT OLD.cleanup_reason OR NEW.kept_paths IS NOT OLD.kept_paths)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
 -- trigger catalog_retired_version_archived
 CREATE TRIGGER catalog_retired_version_archived AFTER INSERT ON session_archive
 BEGIN
@@ -763,6 +1232,7 @@ END;
 
 -- trigger catalog_retired_version_project
 CREATE TRIGGER catalog_retired_version_project AFTER UPDATE OF archived_at_ms ON projects
+WHEN NEW.archived_at_ms IS NOT OLD.archived_at_ms
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
@@ -789,7 +1259,7 @@ END;
 
 -- trigger catalog_retired_version_row
 CREATE TRIGGER catalog_retired_version_row AFTER UPDATE OF retired,host_project,unavailable_reason ON catalog_sessions
-WHEN OLD.retired=1 OR NEW.retired=1
+WHEN (OLD.retired=1 OR NEW.retired=1) AND (NEW.retired IS NOT OLD.retired OR NEW.host_project IS NOT OLD.host_project OR NEW.unavailable_reason IS NOT OLD.unavailable_reason)
 BEGIN
 	UPDATE catalog_retired_version SET version=version+1;
 END;
@@ -819,6 +1289,22 @@ CREATE TRIGGER catalog_sessions_retired_current AFTER UPDATE OF current ON catal
 WHEN NEW.current=1 AND NEW.retired=1
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.session_id;
+END;
+
+-- trigger catalog_sessions_unretire_family
+CREATE TRIGGER catalog_sessions_unretire_family AFTER UPDATE OF retired ON catalog_sessions
+WHEN OLD.retired=1 AND NEW.retired=0
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
+END;
+
+-- trigger catalog_sessions_unretire_family_insert
+CREATE TRIGGER catalog_sessions_unretire_family_insert AFTER INSERT ON catalog_sessions
+WHEN NEW.retired=0
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
 END;
 
 -- trigger message_queue_catalog_delete
@@ -856,9 +1342,41 @@ BEGIN
 	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
 END;
 
+-- trigger message_queue_host_count_delete
+CREATE TRIGGER message_queue_host_count_delete AFTER DELETE ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id=OLD.session_id AND host_id<>'';
+END;
+
+-- trigger message_queue_host_count_insert
+CREATE TRIGGER message_queue_host_count_insert AFTER INSERT ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id=NEW.session_id AND host_id<>'';
+END;
+
+-- trigger message_queue_host_count_update
+CREATE TRIGGER message_queue_host_count_update AFTER UPDATE OF status,session_id ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id IN (OLD.session_id,NEW.session_id) AND host_id<>'';
+END;
+
+-- trigger sessions_host_count_insert
+CREATE TRIGGER sessions_host_count_insert AFTER INSERT ON sessions
+WHEN NEW.host_id<>''
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) VALUES(NEW.id);
+END;
+
+-- trigger sessions_host_count_mirrored
+CREATE TRIGGER sessions_host_count_mirrored AFTER UPDATE OF host_id ON sessions
+WHEN NEW.host_id<>''
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) VALUES(NEW.id);
+END;
+
 -- trigger sessions_unretire
-CREATE TRIGGER sessions_unretire AFTER UPDATE OF status,parent_session_id ON sessions
-WHEN NEW.status<>'offline' OR NEW.parent_session_id<>''
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
+WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;

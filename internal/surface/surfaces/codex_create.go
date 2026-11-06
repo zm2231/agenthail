@@ -79,8 +79,8 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
 	}
-	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.Name != "" || options.ConfigRoot != "" {
-		return nil, nil, fmt.Errorf("name, worktree, agent, permission-mode and config root creation options require Claude")
+	if options.Agent != "" || options.PermissionMode != "" || options.Name != "" || options.ConfigRoot != "" {
+		return nil, nil, fmt.Errorf("name, agent, permission-mode and config root creation options require Claude")
 	}
 	message := strings.TrimSpace(options.Message)
 	if message == "" {
@@ -122,6 +122,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	setCodexTransport(session, transport)
 	if session.Cwd == "" {
 		session.Cwd = options.Cwd
+	}
+	if err := surface.SessionReady(ctx, *session); err != nil {
+		return session, nil, fmt.Errorf("record the new thread before its first turn: %w", err)
 	}
 	turnParams := map[string]any{
 		"threadId": threadID,

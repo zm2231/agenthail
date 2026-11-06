@@ -69,6 +69,7 @@ func (d *Daemon) registerLedgerSyncRoutes(mux *http.ServeMux, dashboard *dashboa
 	mux.HandleFunc("/api/v1/ledger/sync/claim", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncClaimHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/confirm", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncConfirmHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/abort", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncAbortHandler)))
+	mux.HandleFunc("/api/v1/ledger/sync/moves", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncMovesHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/replay", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiLedgerSyncReplayHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/events", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiLedgerSyncEventsHandler)))
 	mux.HandleFunc("/api/v1/ledger/sync/digest", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiLedgerSyncDigestHandler)))

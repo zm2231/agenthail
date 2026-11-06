@@ -88,6 +88,27 @@ assert.match(card, /data-request-question="q4"/);
 assert.match(card, /<kbd aria-hidden="true">1<\/kbd><span aria-hidden="true">☐<\/span><span><span>Mac/, "the key hint sits before its option");
 assert.match(card, /data-pager-pick="2"/, "options are picked by position");
 
+const deploy = { question: "Deploy it now?", header: "", multiSelect: false, options: [{ label: "Deploy", description: "" }, { label: "Wait", description: "until Monday" }], suggested: 0, links: [{ title: "Runbook", url: "https://example.com/run?a=1&b=2" }] };
+const askRequest = { id: "turn-end-1", kind: "ask", title: "Ready to ship", questions: [deploy] };
+const asking = pagers.pagerFor(askRequest);
+assert.ok(asking.ask && !pagers.isOneTap(asking), "an ask is never answered on one tap");
+assert.equal(pagers.choose(asking, 1), null, "picking an ask's option waits for submit");
+assert.doesNotMatch(pagers.renderActions(asking, askRequest.id), /data-request-respond="deny"/, "an ask has nothing to decline");
+assert.match(pagers.renderActions(asking, askRequest.id), />Submit</);
+const askPage = pagers.renderPage(asking);
+assert.match(askPage, /Deploy <small class="pager-suggested">Suggested<\/small>/, "the suggested option is marked");
+assert.match(askPage, /href="https:\/\/example.com\/run\?a=1&#38;b=2" target="_blank" rel="noopener noreferrer">Runbook</, "links open apart from the dashboard");
+assert.match(askPage, /data-pager-note/, "an ask takes a note");
+same(pagers.decision(asking, pagers.next(asking)), { behavior: "allow", answers: { "Deploy it now?": "Wait" } }, "an empty note is left out");
+asking.note = "  After lunch.  ";
+same(pagers.decision(asking, pagers.answers(asking)), { behavior: "allow", answers: { "Deploy it now?": "Wait" }, message: "After lunch." });
+same(pagers.decision(pagers.createPager([scope]), { "Which scope?": "Yes" }), { behavior: "allow", answers: { "Which scope?": "Yes" } }, "a question never carries a note");
+assert.doesNotMatch(pagers.renderPage(pagers.createPager([scope])), /data-pager-note/);
+assert.match(pagers.renderQuestionCard(askRequest, "", "@builder asks: <Ready>"), /<h3>@builder asks: &#60;Ready&#62;<\/h3>/, "the heading names the agent and is escaped");
+const twoAskPager = pagers.createPager([deploy, scope], true);
+pagers.goTo(twoAskPager, 2);
+assert.match(pagers.renderPage(twoAskPager), /data-pager-note/, "several asks take the note on the review");
+
 const hostile = pagers.renderQuestionCard({ id: "q3", kind: "question", questions: [{ question: "<b>x</b>", header: "<i>", multiSelect: false, options: [{ label: "<img>", description: "" }] }, scope] }, "");
 assert.doesNotMatch(hostile, /<b>|<i>|<img>/);
 
@@ -162,4 +183,17 @@ assert.equal(sent.length, 2, "once the first answer settles a retry can send");
 release();
 await fire("click", { target: element({ pagerStep: "0" }) });
 assert.equal(live().step, 0, "a chip goes back");
+
+context.app.requests = { requests: [{ id: "dom-ask", kind: "ask", title: "Ready", questions: [deploy] }] };
+form.dataset.requestQuestion = "dom-ask";
+await fire("click", { target: pick(0) });
+assert.equal(sent.length, 2, "a click on an ask's option does not send");
+const note = element({});
+note.matches = (selector) => selector === "[data-pager-note]" || selector === "input, textarea, select";
+note.value = "Watch the error rate.";
+await fire("input", { target: note });
+const submitted = fire("submit", { target: form });
+same(sent[2], { requestId: "dom-ask", decision: { behavior: "allow", answers: { "Deploy it now?": "Deploy" }, message: "Watch the error rate." } }, "the ask's answer carries the typed note");
+release();
+await submitted;
 console.log("dashboard question pager ok");

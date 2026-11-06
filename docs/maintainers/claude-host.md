@@ -382,7 +382,7 @@ outbox for queued messages (`surface.WithMessageUUID`).
 ## Creation and resume
 
 `Claude.StartSession` opens a new conversation in the host under a uuid it
-chooses, with the model, permission mode, effort, agent, name and worktree
+chooses, with the model, permission mode, effort, agent and name
 asked for, then sends the message as the conversation's first turn: a person's
 turn under the delivery intent's uuid. It is the `claude-sdk` launcher, the
 default for the CLI, the dashboard and the apps. An open whose answer is lost
@@ -402,6 +402,11 @@ with no hook installed ([agent card](agent-card.md#telling-a-claude-session-its-
 The callback returns only the command's `additionalContext`, and nothing on any
 failure or after 8s. The claim is keyed by the Claude pid, the same key the
 installed hook uses as Claude's child, so a session that has both is told once.
+A session opened with its MCP credential also gets a `Stop` callback that runs
+`agenthail hook stop --surface claude` and passes on only its block, so a turn
+that ends without `agenthail_end_turn` is asked once to call it; it skips the
+command for the stop after a block, a subagent's stop, and while a background
+task that is not ambient runs ([work record](work-record.md)).
 Where Claude records a conversation's system prompt (the SDK's `snapshot`,
 which the SDK notes is still rolling out and does not apply to every
 provider), it resends the prompt it recorded on every later request and resume
@@ -421,8 +426,7 @@ build, with the environment that host started with.
 Claude restores a resumed conversation's title from its transcript (the last
 `custom-title` record) but names the resumed process anew, with
 `nameSource: "derived"`, so the open carries that title as `name` and the
-session keeps the name it was started or renamed with. The host refuses only
-a `worktree` on a resume. The host's `held` answer holds the delivery. `refused` means Claude refused the
+session keeps the name it was started or renamed with. The host's `held` answer holds the delivery. `refused` means Claude refused the
 conversation: a queued message waits as `refused` with Claude's output as its
 last error, and a direct send fails with it. `open_failed` is a Claude that
 never got to decide, and the delivery is retried like any other unavailable
@@ -441,7 +445,7 @@ for them. The model and permission mode change through the host instead.
 
 ## Packaging
 
-`scripts/stage-claude-host.sh` stages `host.mjs` with its locked dependencies
+`scripts/stage-node-host.sh claude-host` stages `host.mjs` with its locked dependencies
 beside the `agenthail` binary as `claude-host/`. The SDK's bundled Claude
 binaries are optional dependencies and are omitted; the remaining dependencies
 are plain JavaScript, so one tree serves every platform, and the script fails

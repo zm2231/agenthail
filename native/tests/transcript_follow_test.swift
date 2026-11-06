@@ -112,7 +112,7 @@ struct RevealOnCollapse: View {
     var body: some View {
         Color.clear.onReceive(NotificationCenter.default.publisher(for: .collapseRow)) { note in
             guard note.object as? String == id else { return }
-            revealRow(rowTops[id] ?? 0)
+            revealRow(Binding(get: { rowTops[id] ?? 0 }, set: { _ in }))
         }
     }
 }

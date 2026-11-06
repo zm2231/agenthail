@@ -67,6 +67,7 @@ func (d *Daemon) recordReport(child string, taskID int64, state, result string) 
 		writeActionResult(recorder, actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error()))
 		return recorder.reply()
 	}
+	d.settleWork(child, registry.WorkSettledTaskReported)
 	writeActionResult(recorder, actionOK(map[string]any{"taskId": taskID, "settled": settled}), nil)
 	return recorder.reply()
 }

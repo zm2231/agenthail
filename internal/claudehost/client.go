@@ -75,7 +75,6 @@ type OpenRequest struct {
 	Effort         string       `json:"effort,omitempty"`
 	Agent          string       `json:"agent,omitempty"`
 	Name           string       `json:"name,omitempty"`
-	Worktree       string       `json:"worktree,omitempty"`
 	ConfigDir      string       `json:"configDir,omitempty"`
 	Checker        *CheckerOpen `json:"checker,omitempty"`
 	MCP            *MCPServer   `json:"mcp,omitempty"`

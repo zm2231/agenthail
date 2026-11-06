@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type ledgerCall struct {
@@ -93,9 +94,18 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
+	notCarried, err := a.registry().ProjectMoveRefusalsOf(key)
+	if err != nil {
+		return err
+	}
+	if !hasFlag(args, "--json") {
+		for _, refusal := range notCarried {
+			fmt.Println(notCarriedLine(refusal))
+		}
+	}
 	if scope.State == ledger.LedgerDisabled {
 		if hasFlag(args, "--json") {
-			return emit(map[string]any{"projectKey": key, "capture": "disabled"})
+			return emit(map[string]any{"projectKey": key, "capture": "disabled", "notCarried": notCarried})
 		}
 		fmt.Printf("ledger is disabled for this project (%s)\n", key)
 		fmt.Println("enable with: agenthail ledger enable")
@@ -137,6 +147,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"checks":             board.GoalChecks(),
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
+			"notCarried":         notCarried,
 		}
 		if scope.State == ledger.LedgerEnabled {
 			out["captureSince"], out["attach"] = scope.Since, scope.Attach
@@ -356,4 +367,8 @@ func (a *App) ledgerShow(store *ledger.Store, args []string, id string) error {
 		}
 	}
 	return fmt.Errorf("%q is not a work item or an ask in this project; agenthail ledger list shows the items", id)
+}
+
+func notCarriedLine(refusal registry.ProjectMoveRefusal) string {
+	return fmt.Sprintf("history under %s was not carried to %s when the project's remote changed: %s", refusal.From, refusal.To, refusal.Reason)
 }

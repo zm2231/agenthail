@@ -11,6 +11,7 @@ func TestARegistryAtSchema30GainsAnswerableWaitsAndUsageLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	asBeforePresentationTriggers(t, r)
 	for _, statement := range []string{
 		`ALTER TABLE session_runtime DROP COLUMN waiting_answerable`,
 		`ALTER TABLE catalog_sessions DROP COLUMN usage_limit`,

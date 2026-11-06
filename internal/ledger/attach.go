@@ -45,7 +45,10 @@ type AttachResult struct {
 	Readback   string   `json:"readback"`
 }
 
-type Refusal struct{ Reason string }
+type Refusal struct {
+	Reason  string
+	MovedTo string
+}
 
 func (r *Refusal) Error() string { return r.Reason }
 

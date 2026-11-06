@@ -203,9 +203,12 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 		observation.UsageLimit = &surface.UsageLimit{ResetsAt: last.UsageResetsAt}
 	}
 	observation.UsageAccount = claudeTranscriptRoot(path)
-	if last.Done && last.UsageLimited {
+	switch {
+	case last.Done && last.UsageLimited:
 		observation.LimitStop = &surface.LimitStop{TurnID: last.UserID, RefusedAt: last.TerminalAt, ResetsAt: last.UsageResetsAt}
-	} else if last.Done && !last.Interrupted && last.APIError == "" {
+	case last.Done && last.APIError != "":
+		observation.TurnStop = &surface.TurnStop{TurnID: last.UserID, At: last.TerminalAt, Reason: claudeTurnError(last), Refused: last.Refused}
+	case last.Done && !last.Interrupted:
 		observation.SettledAt = last.TerminalAt
 	}
 	return observation, nil

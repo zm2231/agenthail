@@ -11,11 +11,12 @@ import (
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/worktree"
 )
 
 func daemonSessionAction(action string) bool {
 	switch action {
-	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive":
+	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive", "work-clean":
 		return true
 	}
 	return false
@@ -49,8 +50,18 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionFocus(ctx, session)
 	case "session-archive", "session-unarchive":
 		return d.doSessionArchive(request.Action, session.ID)
+	case "session-pin", "session-unpin":
+		return d.doSessionPin(request.Action == "session-pin", session.ID)
+	case "session-snooze":
+		return d.doSessionSnooze(session, request.Until, request.Wake)
+	case "session-wake":
+		return d.doSessionWake(session.ID)
+	case "work-clean":
+		return d.doWorkClean(ctx, p, session.ID, worktree.Options{ForceIgnored: request.ForceIgnored})
 	case "alias":
 		return d.doSessionAlias(session, request.Alias)
+	case "pr":
+		return d.doPR(ctx, p, session, request)
 	}
 	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
@@ -165,7 +176,18 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			d.recordSetting(session, "permission-mode", mode, p.actor())
 		}
 	case "respond":
-		return d.respond(ctx, adapter, session, strings.TrimSpace(request.RequestID), request.Decision, p.actor())
+		requestID := strings.TrimSpace(request.RequestID)
+		if isTurnEndRequest(requestID) {
+			if p.Kind == principalSession {
+				return actionResult{}, actionFailed(http.StatusForbidden, "forbidden", "an ended turn's questions are answered by the person")
+			}
+			personName := request.PersonName
+			if personName == "" {
+				personName, _ = d.Registry.PersonName()
+			}
+			return d.answerTurnEnd(ctx, adapter, session, requestID, request.Decision, personName, p.actor())
+		}
+		return d.respond(ctx, adapter, session, requestID, request.Decision, p.actor())
 	case "request-withdraw":
 		return d.withdrawReplacedRequest(ctx, adapter, session, strings.TrimSpace(request.RequestID), p.actor())
 	case "context", "usage", "status", "effort", "rename":

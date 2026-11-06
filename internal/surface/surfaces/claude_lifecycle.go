@@ -159,7 +159,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	id := uuid.NewString()
 	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
-		Effort: options.Effort, Agent: options.Agent, Name: options.Name, Worktree: options.Worktree,
+		Effort: options.Effort, Agent: options.Agent, Name: options.Name,
 		ConfigDir: root,
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
@@ -169,6 +169,9 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 			return session, nil, failure
 		}
 		return nil, nil, failure
+	}
+	if err := surface.SessionReady(ctx, *session); err != nil {
+		return session, nil, fmt.Errorf("record the new conversation before its first turn: %w", err)
 	}
 	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID)
 	return session, sent, err
@@ -190,7 +193,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 		return nil, nil, err
 	}
 	args := []string{"--bg"}
-	for _, pair := range [][2]string{{"--model", options.Model}, {"--name", options.Name}, {"--worktree", options.Worktree}, {"--agent", options.Agent}, {"--permission-mode", options.PermissionMode}, {"--effort", options.Effort}} {
+	for _, pair := range [][2]string{{"--model", options.Model}, {"--name", options.Name}, {"--agent", options.Agent}, {"--permission-mode", options.PermissionMode}, {"--effort", options.Effort}} {
 		if pair[1] != "" {
 			args = append(args, pair[0], pair[1])
 		}

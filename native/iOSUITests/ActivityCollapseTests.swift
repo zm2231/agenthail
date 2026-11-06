@@ -32,6 +32,11 @@ final class ActivityCollapseTests: XCTestCase {
     }
 
     func testCollapsingAToolFromItsEndKeepsTheToolOnScreen() {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // A portrait iPad shows the whole expanded tool, so its line never scrolls away.
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { @MainActor in XCUIDevice.shared.orientation = .portrait }
+        }
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-long-activity"]
         app.launch()
@@ -49,11 +54,12 @@ final class ActivityCollapseTests: XCTestCase {
         for _ in 0..<6 where !collapse.isHittable { timeline.swipeUp() }
         if collapse.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
         XCTAssertTrue(collapse.isHittable)
-        XCTAssertFalse(tool.isHittable, "the tool's line should have scrolled above the screen before collapsing")
+        let top = app.navigationBars.firstMatch.frame.maxY
+        XCTAssertLessThanOrEqual(tool.frame.maxY, top, "the tool's line should have scrolled under the top bar before collapsing, at \(tool.frame)")
         XCTAssertGreaterThanOrEqual(collapse.frame.height, 44, "the control should be a full-size tap target, at \(collapse.frame)")
         collapse.tapWhenStill()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapse)], timeout: 5), .completed)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
-        XCTAssertTrue(tool.isHittable && tool.frame.maxY < timeline.frame.maxY - 140, "the collapsed tool's line should be on screen above the composer, at \(tool.frame) in \(timeline.frame)")
+        XCTAssertTrue(tool.frame.minY >= top && tool.frame.maxY < timeline.frame.maxY - 140, "the collapsed tool's line should be on screen between the top bar and the composer, at \(tool.frame) under \(top) in \(timeline.frame)")
     }
 }

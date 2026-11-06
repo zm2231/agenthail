@@ -238,12 +238,16 @@ if [ -d "$REPO_DIR/sidecar/node_modules" ]; then
 fi
 
 cp sidecar/package.json sidecar/package-lock.json "$STAGE_DIR/"
-if [ -f "$REPO_DIR/claude-host/host.mjs" ] && [ -f "$REPO_DIR/scripts/stage-claude-host.sh" ]; then
-	"$REPO_DIR/scripts/stage-claude-host.sh" "$STAGE_DIR/claude-host"
-elif [ -d "$REPO_DIR/claude-host" ]; then
-	cp -R "$REPO_DIR/claude-host" "$STAGE_DIR/claude-host"
-fi
+for host in claude-host browser-host; do
+	if [ -f "$REPO_DIR/$host/host.mjs" ] && [ -f "$REPO_DIR/scripts/stage-node-host.sh" ]; then
+		"$REPO_DIR/scripts/stage-node-host.sh" "$host" "$STAGE_DIR/$host"
+	elif [ -d "$REPO_DIR/$host" ]; then
+		cp -R "$REPO_DIR/$host" "$STAGE_DIR/$host"
+	fi
+	test -f "$STAGE_DIR/$host/host.mjs"
+done
 test -f "$STAGE_DIR/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+test -f "$STAGE_DIR/browser-host/node_modules/playwright-core/package.json"
 if [ -f "$REPO_DIR/scripts/fetch-node.sh" ]; then
 	"$REPO_DIR/scripts/fetch-node.sh" "$(uname -s | tr "[:upper:]" "[:lower:]")" "$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")" "$STAGE_DIR"
 elif [ -d "$REPO_DIR/runtime" ]; then

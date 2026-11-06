@@ -18,6 +18,7 @@ type codexTurn struct {
 	AssistantItems []codexAssistantItem
 	Done           bool
 	Error          string
+	Stop           *surface.TurnStop
 }
 
 type codexAssistantItem struct {
@@ -103,7 +104,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Stop: codexTurnStop(entry)}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -175,7 +176,7 @@ func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID 
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError}
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Stop: codexTurnStop(entry)}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -354,6 +355,14 @@ func codexObservation(thread *codexThread) *surface.TurnObservation {
 		observation.CompletedTurnID = turn.ID
 		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true, Error: turn.Error}
 		break
+	}
+	if observation.Status != surface.StatusBusy {
+		for i := len(thread.Turns) - 1; i >= 0; i-- {
+			if turn := thread.Turns[i]; turn.ID == observation.TerminalTurnID {
+				observation.TurnStop = turn.Stop
+				break
+			}
+		}
 	}
 	return observation
 }

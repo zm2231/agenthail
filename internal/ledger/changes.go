@@ -1,6 +1,9 @@
 package ledger
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
 type changeTx struct {
 	*sql.Tx
@@ -24,7 +27,23 @@ func (s *Store) begin(projectKey string) (*changeTx, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := notMoved(tx, projectKey); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
 	return &changeTx{Tx: tx, store: s, projectKey: projectKey}, nil
+}
+
+func notMoved(q querier, projectKey string) error {
+	var to string
+	err := q.QueryRow(`SELECT to_key FROM project_moves WHERE from_key=? AND to_key!=''`, projectKey).Scan(&to)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return &Refusal{Reason: "the project " + projectKey + " is now " + to + " because its remote changed; nothing was recorded under the old key", MovedTo: to}
 }
 
 func (tx *changeTx) Commit() error {

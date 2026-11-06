@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/permissions"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -234,8 +235,13 @@ func (a *App) cmdDoctor(args []string) error {
 	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	projectNotes, heldLinks, projectsErr := a.doctorProjectNotes(callCtx)
 	cancel()
+	var notCarried []registry.ProjectMoveRefusal
+	var notCarriedErr error
+	if r := a.registry(); r != nil {
+		notCarried, notCarriedErr = r.ProjectMoveRefusals()
+	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(hostProblems) == 0, "projectLinks": projectNotes, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
 			report["ledgerPromptHooksError"] = hookErr.Error()
 		}
@@ -251,6 +257,9 @@ func (a *App) cmdDoctor(args []string) error {
 		report["connection"] = connection
 		if projectsErr != nil {
 			report["projectLinksError"] = projectsErr.Error()
+		}
+		if notCarriedErr != nil {
+			report["projectHistoryNotCarriedError"] = notCarriedErr.Error()
 		}
 		if settingsErr != nil {
 			report["settingsError"] = settingsErr.Error()
@@ -335,6 +344,12 @@ func (a *App) cmdDoctor(args []string) error {
 		for _, note := range projectNotes {
 			fmt.Printf("project %s\n", note)
 		}
+		for _, refusal := range notCarried {
+			fmt.Printf("project %s\n", notCarriedLine(refusal))
+		}
+		if notCarriedErr != nil {
+			fmt.Printf("project history: unknown (%s)\n", notCarriedErr)
+		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:
 			fmt.Printf("codex hooks: missing; Codex sessions, including the ones Agenthail starts, aren't told who they are until you run: agenthail hooks install codex\n")
@@ -342,6 +357,8 @@ func (a *App) cmdDoctor(args []string) error {
 			fmt.Printf("codex hooks: outdated; Codex sessions may not be told who they are until you run: agenthail hooks install codex\n")
 		case surfaces.CodexHooksUntrusted:
 			fmt.Printf("codex hooks: Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex\n")
+		case surfaces.CodexHooksNoNudge:
+			fmt.Printf("codex hooks: %s; update Codex, then run: agenthail hooks install codex\n", surfaces.CodexHooksNoNudge)
 		}
 		if build != nil {
 			fmt.Printf("[daemon] build: %s\n", build.Detail)
@@ -423,6 +440,9 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	if heldLinks > 0 {
 		return fmt.Errorf("doctor found %d project link(s) this host holds without applying", heldLinks)
+	}
+	if len(notCarried) > 0 || notCarriedErr != nil {
+		return fmt.Errorf("doctor found %d project(s) whose history stayed under an old remote, or could not check them", max(1, len(notCarried)))
 	}
 	if len(hostProblems) > 0 {
 		return fmt.Errorf("doctor found %d paired host(s) that don't know this host as a paired host", len(hostProblems))

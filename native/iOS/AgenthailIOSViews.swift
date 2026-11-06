@@ -144,6 +144,10 @@ struct ConversationFlow: View {
     @State private var path: [String] = []
     @State private var wideSelection: String?
 
+    static func splits(_ sizeClass: UserInterfaceSizeClass?, _ typeSize: DynamicTypeSize) -> Bool {
+        sizeClass == .regular && !typeSize.isAccessibilitySize
+    }
+
     init(model: AgenthailIOSModel, initialSessionID: String? = nil) {
         self.model = model
         _wideSelection = State(initialValue: initialSessionID)
@@ -152,7 +156,7 @@ struct ConversationFlow: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
+            if Self.splits(sizeClass, dynamicTypeSize) {
                 NavigationSplitView {
                     ConversationListView(model: model, selectedID: wideSelection) { wideSelection = $0; path = [$0] }
                 } detail: {
@@ -492,6 +496,8 @@ struct ConversationListView: View {
 struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     let session: SessionState
     private var liveSession: SessionState { model.snapshot?.sessions.first { $0.id == session.id } ?? session }
     @State private var showingInfo = false
@@ -502,6 +508,8 @@ struct SessionScreen: View {
     @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
     @State private var landed = false
+    @State private var opening = OpeningRebuild()
+    @State private var rowsGeneration = 0
     @State private var overflows = false
     @State private var jumps = 0
     @State private var userScrolling = false
@@ -543,6 +551,16 @@ struct SessionScreen: View {
         } else {
             position.scrollTo(edge: .bottom)
         }
+    }
+
+    private func rebuildOpeningRows() {
+        guard followingLatest, !userScrolling else { return }
+        rowsGeneration += 1
+    }
+
+    private func openingRowAppeared(_ id: String) {
+        opening.rowAppeared(id)
+        opening.fire(latest: latestRowID, rebuildOpeningRows)
     }
 
     private func settleAtLatest() async {
@@ -611,12 +629,14 @@ struct SessionScreen: View {
                 }
                 if activityOnly {
                     let leading = items.first?.id
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).id($0.id) }
+                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt($0.id, generation: rowsGeneration).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).probesScrollJump($0.id).onAppear { [id = $0.id] in if id == items.last?.id { openingRowAppeared(id) } }.id($0.id) }
                 } else {
                     let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
-                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).id(group.id)
+                            .rebuilt(group.id, generation: rowsGeneration)
+                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
+                            .onAppear { if group.id == groups.last?.id { openingRowAppeared(group.id) } }.id(group.id)
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -648,17 +668,18 @@ struct SessionScreen: View {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
                     transcriptRows
-                    if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly) }
+                    if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly, generation: rowsGeneration) }
                 }.transcriptScrimRow()
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) {
                 olderPlace.release()
-                position.scrollTo(y: $0)
+                position.scrollTo(y: $0.wrappedValue)
             }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
+            .environment(\.cachedAttachment) { [model, id = session.id] in model.cachedAttachment(for: $0, sessionID: id) }
             .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
@@ -668,6 +689,7 @@ struct SessionScreen: View {
             .id(jumps)
         }
         .scrollPosition($position)
+        .scrollJumpProbe()
         .accessibilityIdentifier("session-timeline")
         .phoneBackdrop(.transcript)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -717,8 +739,10 @@ struct SessionScreen: View {
             if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
         }
 #if DEBUG
-        .overlay(alignment: .topLeading) { ScrollCountLabel() }
-#endif
+        .overlay(alignment: .topLeading) {
+            ScrollCountLabel()
+            if ScrollJumpProbe.enabled { ScrollJumpLabel() }
+        }#endif
         .edgeBar(.top, spacing: 0) {
             if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
@@ -755,7 +779,7 @@ struct SessionScreen: View {
                 }
             }
         }
-        .toolbar(.hidden, for: .tabBar)
+        .toolbar(ConversationFlow.splits(sizeClass, typeSize) ? .automatic : .hidden, for: .tabBar)
         .navigationTitle(displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -800,6 +824,7 @@ struct SessionScreen: View {
             olderPlace.release()
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
+            let open = opening.open(following: followingLatest)
             edge.atLatest = !startsAtOldest
             landed = false
             await model.loadSession(session.id)
@@ -809,6 +834,8 @@ struct SessionScreen: View {
                 scrollToLatest()
             }
             landed = true
+            opening.land(open)
+            opening.fire(latest: latestRowID, rebuildOpeningRows)
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
@@ -1339,12 +1366,14 @@ struct CopyCallID: View {
 struct AttachmentRow: View {
     let item: TimelineItem
     let loader: (() async -> Data?)?
-    @State private var data: Data?
+    @State private var loaded: Data?
     @State private var attempted = false
     @State private var retryCount = 0
     @Environment(\.transcriptRows) private var rows
+    @Environment(\.cachedAttachment) private var cached
 
     private var failedKey: String { "attachment-failed-" + item.id }
+    private var data: Data? { loaded ?? cached(item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1361,7 +1390,7 @@ struct AttachmentRow: View {
         .task(id: "\(item.id)-\(retryCount)") {
             guard let loader, data == nil, retryCount > 0 || rows.isOpen(failedKey) != true else { return }
             attempted = true
-            data = await loader()
+            loaded = await loader()
             if !Task.isCancelled { rows.set(failedKey, open: data == nil) }
         }
     }
@@ -1709,6 +1738,15 @@ struct IOSSessionRow: View {
             }
             .font(.caption)
             .foregroundStyle(PhonePalette.muted)
+            .lineLimit(1)
+            .fixedSize()
+        } else if kind == .stopped {
+            HStack(spacing: 4) {
+                Image(systemName: kind.symbol)
+                Text(kind.label)
+            }
+            .font(.caption)
+            .foregroundStyle(PhonePalette.failed)
             .lineLimit(1)
             .fixedSize()
         } else if kind == .working {

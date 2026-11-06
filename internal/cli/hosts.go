@@ -412,7 +412,10 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	if err != nil {
 		return err
 	}
-	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.options.Worktree, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode, "configRoot": request.options.ConfigRoot, "sourceSessionId": creator}
+	fields := map[string]string{"action": "session-create", "host": hostText, "surface": string(request.surface), "message": request.message, "cwd": request.cwd, "alias": request.alias, "model": request.model, "approvalPolicy": request.approval, "name": request.options.Name, "worktree": request.branch, "base": request.base, "agent": request.options.Agent, "permissionMode": request.options.PermissionMode, "configRoot": request.options.ConfigRoot, "sourceSessionId": creator}
+	if request.worktree {
+		fields["isolation"] = "worktree"
+	}
 	for key, value := range fields {
 		if value != "" {
 			payload[key] = value
@@ -429,6 +432,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 		Session    *surface.Session    `json:"session"`
 		Result     *surface.SendResult `json:"result"`
 		Account    *claudepick.Pick    `json:"account"`
+		Worktree   *threadWorktree     `json:"worktree"`
 		Error      string              `json:"error"`
 	}
 	if err != nil {
@@ -440,7 +444,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	} else if decodeErr := json.Unmarshal(data, &response); decodeErr != nil {
 		return fmt.Errorf("decode create response (HTTP %d): %w", status, decodeErr)
 	}
-	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Error: response.Error}
+	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: response.Error}
 	output.Unknown = output.Status == string(registry.DeliveryIntentSubmitted)
 	if !output.OK {
 		if output.Error == "" {
@@ -467,6 +471,7 @@ func (a *App) createRemoteThread(hostText string, request threadCreateRequest, c
 	default:
 		fmt.Printf("created %s in %s\n", label, output.Session.Cwd)
 	}
+	printThreadWorktree(output.Worktree)
 	printPickedAccount(output.Account)
 	return nil
 }

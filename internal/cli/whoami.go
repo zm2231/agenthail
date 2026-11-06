@@ -146,6 +146,10 @@ func (a *App) cardSources() agentcard.Sources {
 			hearer, _, _ := a.coordinator().PromptHearer(session.ID, projectID, where)
 			return hearer
 		},
+		MCP: func(session surface.Session) bool {
+			_, live, err := a.registry().LiveCredentialHash(session.ID, time.Now())
+			return err == nil && live
+		},
 	}
 }
 

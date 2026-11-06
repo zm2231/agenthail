@@ -41,6 +41,7 @@ type sessionJournalPayload struct {
 	Attachment       *surface.Attachment      `json:"attachment,omitempty"`
 	Files            []surface.AttachedFile   `json:"files,omitempty"`
 	Turn             *surface.TurnMetadata    `json:"turn,omitempty"`
+	text             []byte
 }
 
 func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJournalPayload, string) {
@@ -79,16 +80,26 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	if providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") && op == "upsert" && body != "" {
 		bodyKey = providerKey
 	}
+	var text []byte
 	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
-		body = s.appendBodies[providerKey] + body
+		if previous := s.appendBodies[providerKey]; previous != nil {
+			text = previous.text
+		}
+		text = append(text, body...)
+		body = ""
+		if len(text) <= sessionStreamBodyBytes {
+			body = string(text)
+		}
 		bodyKey = providerKey
 		op = "upsert"
+	} else if bodyKey != "" {
+		text = []byte(body)
 	}
 	at := event.Timestamp
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn}, bodyKey
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: event.Turn, text: text}, bodyKey
 }
 
 func commandsOf(commands *surface.RuntimeCommands) []surface.RuntimeCommand {

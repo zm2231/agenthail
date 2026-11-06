@@ -164,7 +164,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		if _, err := tx.Exec(`INSERT INTO sessions(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(selected, ",")+` FROM sessions WHERE id=?`, newID, oldID); err != nil {
 			return err
 		}
-	} else if _, err := tx.Exec(`UPDATE sessions SET transcript=CASE WHEN transcript='' THEN (SELECT transcript FROM sessions WHERE id=?1) ELSE transcript END,cwd=CASE WHEN cwd='' THEN (SELECT cwd FROM sessions WHERE id=?1) ELSE cwd END,has_local=MAX(has_local,(SELECT has_local FROM sessions WHERE id=?1)) WHERE id=?2`, oldID, newID); err != nil {
+	} else if _, err := tx.Exec(`UPDATE sessions SET transcript=CASE WHEN transcript='' THEN (SELECT transcript FROM sessions WHERE id=?1) ELSE transcript END,cwd=CASE WHEN cwd='' THEN (SELECT cwd FROM sessions WHERE id=?1) ELSE cwd END,has_local=MAX(has_local,(SELECT has_local FROM sessions WHERE id=?1)),pinned_at_ms=CASE WHEN pinned_at_ms=0 THEN (SELECT pinned_at_ms FROM sessions WHERE id=?1) ELSE pinned_at_ms END,stopped_at_ms=MAX(stopped_at_ms,(SELECT stopped_at_ms FROM sessions WHERE id=?1)) WHERE id=?2`, oldID, newID); err != nil {
 		return err
 	}
 	var hasAlias, hasRuntime, hasJournal, hasCatalog bool
@@ -199,6 +199,8 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"delivery_intents", `UPDATE delivery_intents SET sender_session_id=?2 WHERE sender_session_id=?1`, false},
 		{"delivery_intents", `UPDATE OR IGNORE delivery_intents SET target_session_id=?2 WHERE target_session_id=?1`, false},
 		{"session_archive", `UPDATE OR IGNORE session_archive SET session_id=?2 WHERE session_id=?1`, false},
+		{"session_keep_alive", `UPDATE OR IGNORE session_keep_alive SET session_id=?2 WHERE session_id=?1`, false},
+		{"turn_ends", `UPDATE OR IGNORE turn_ends SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_credentials", `UPDATE OR IGNORE session_credentials SET claimed_session_id=?2 WHERE claimed_session_id=?1`, false},
 		{"session_runtime", `UPDATE session_runtime SET session_id=?2 WHERE session_id=?1`, hasRuntime},
@@ -206,13 +208,18 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"session_origins", `UPDATE session_origins SET creator_session_id=?2 WHERE creator_session_id=?1`, false},
 		{"tasks", `UPDATE OR IGNORE tasks SET child_session_id=?2 WHERE child_session_id=?1`, false},
 		{"tasks", `UPDATE tasks SET parent_session_id=?2 WHERE parent_session_id=?1`, false},
+		{"work_records", `UPDATE OR IGNORE work_records SET session_id=?2 WHERE session_id=?1`, false},
+		{"session_prs", `UPDATE OR IGNORE session_prs SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_ceilings", `INSERT OR IGNORE INTO session_ceilings(session_id,ceiling) SELECT ?2,ceiling FROM session_ceilings WHERE session_id=?1`, false},
 		{"limit_resumes", `UPDATE OR IGNORE limit_resumes SET session_id=?2 WHERE session_id=?1`, false},
 		{"session_context", `INSERT OR IGNORE INTO session_context(session_id,fingerprint,start_key,delivered_at_ms) SELECT ?2,fingerprint,start_key,delivered_at_ms FROM session_context WHERE session_id=?1`, false},
 		{"session_journal_state", `UPDATE session_journal_state SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"session_journal", `UPDATE session_journal SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"session_journal_bodies", `UPDATE session_journal_bodies SET session_id=?2 WHERE session_id=?1`, hasJournal},
+		{"session_journal_body_tail", `UPDATE session_journal_body_tail SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"catalog_sessions", `UPDATE catalog_sessions SET session_id=?2,projection_fingerprint='' WHERE session_id=?1`, hasCatalog},
+		{"host_queue_dirty", `INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT ?2 FROM host_queue_dirty WHERE session_id=?1`, false},
+		{"host_queue_dirty", `DELETE FROM host_queue_dirty WHERE session_id=?1`, false},
 		{"sessions", `UPDATE sessions SET parent_session_id=?2 WHERE parent_session_id=?1`, false},
 		{"sessions", `UPDATE sessions SET root_session_id=?2 WHERE root_session_id=?1`, false},
 		{"sessions", `UPDATE sessions SET forked_from=?2 WHERE forked_from=?1`, false},

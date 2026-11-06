@@ -334,36 +334,45 @@ func projectAction(ctx context.Context, client *daemonAPIClient, payload map[str
 	return json.Unmarshal(data, answer)
 }
 
+var threadMarks = map[string]string{"archive": "archived", "unarchive": "unarchived", "pin": "pinned", "unpin": "unpinned"}
+
 func (a *App) cmdThreadArchive(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 2 {
-		return fmt.Errorf("usage: agenthail thread <archive|unarchive> <target> [--json]")
+		return fmt.Errorf("usage: agenthail thread <archive|unarchive|pin|unpin> <target> [--json]")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
-	defer cancel()
-	session, _, remote, err := a.resolveAnyTarget(ctx, positional[1])
+	answer, err := a.threadSessionAction(positional[1], map[string]any{"action": "session-" + positional[0]})
 	if err != nil {
-		return err
-	}
-	id := ""
-	if remote != nil {
-		id = remote.ID
-	} else {
-		id = session.ID
-	}
-	client, err := a.daemonAPI()
-	if err != nil {
-		return err
-	}
-	var answer map[string]any
-	if err := projectAction(ctx, client, map[string]any{"action": "session-" + positional[0], "sessionId": id}, &answer); err != nil {
 		return err
 	}
 	if hasFlag(args, "--json") {
 		return emit(answer)
 	}
-	fmt.Printf("%sd %s\n", positional[0], positional[1])
+	fmt.Printf("%s %s\n", threadMarks[positional[0]], positional[1])
 	return nil
+}
+
+func (a *App) threadSessionAction(target string, payload map[string]any) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
+	defer cancel()
+	session, _, remote, err := a.resolveAnyTarget(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	if remote != nil {
+		payload["sessionId"] = remote.ID
+	} else {
+		payload["sessionId"] = session.ID
+	}
+	client, err := a.daemonAPI()
+	if err != nil {
+		return nil, err
+	}
+	var answer map[string]any
+	if err := projectAction(ctx, client, payload, &answer); err != nil {
+		return nil, err
+	}
+	return answer, nil
 }
 
 // resolveAddedCheckout picks the one added checkout a selector names: the

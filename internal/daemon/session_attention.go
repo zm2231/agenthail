@@ -12,14 +12,23 @@ func rowAttention(row dashboardSession, outgoing int, incoming string) *SessionA
 		}
 		return &SessionAttention{Kind: "request", Reason: row.Display.Detail}
 	}
+	if row.EndTurn.asksPerson() {
+		return &SessionAttention{Kind: AttentionAsk, Reason: row.EndTurn.Headline}
+	}
 	if incoming != "" {
 		return &SessionAttention{Kind: "incoming", Reason: incoming}
 	}
 	if outgoing > 0 {
 		return &SessionAttention{Kind: "outgoing", Reason: CountText(outgoing, "message") + " not delivered"}
 	}
-	if row.Display.Kind == "limited" {
+	switch row.Display.Kind {
+	case "limited":
 		return &SessionAttention{Kind: "usageLimit", Reason: row.Display.Detail}
+	case "stopped":
+		return &SessionAttention{Kind: "stopped", Reason: row.Display.Detail}
+	}
+	if row.KeepAlive != nil {
+		return &SessionAttention{Kind: AttentionKeepAliveFailed, Reason: keepAliveFailedText("This session")}
 	}
 	return nil
 }

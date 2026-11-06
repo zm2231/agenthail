@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 	parent_session_id TEXT NOT NULL DEFAULT '', root_session_id TEXT NOT NULL DEFAULT '',
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
-	host_id TEXT NOT NULL DEFAULT ''
+	host_id TEXT NOT NULL DEFAULT '',
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
+	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
+	ended INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS coordinators (
 	project_id TEXT NOT NULL,
@@ -219,7 +222,9 @@ CREATE TABLE IF NOT EXISTS delivery_history (
 	message TEXT NOT NULL DEFAULT '',
 	result TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
-	operation TEXT NOT NULL DEFAULT ''
+	operation TEXT NOT NULL DEFAULT '',
+	send_route TEXT NOT NULL DEFAULT '',
+	bridge TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS attention_items (
@@ -331,6 +336,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
 	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -354,9 +360,18 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	body BLOB NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	written_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
+CREATE TABLE IF NOT EXISTS session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
+);
+CREATE INDEX IF NOT EXISTS session_journal_body_tail_session ON session_journal_body_tail(session_id);
 CREATE TABLE IF NOT EXISTS session_credentials (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
@@ -487,10 +502,60 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_running ON tasks(child_session_id) WHERE state='running';
 CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_session_id);
+CREATE TABLE IF NOT EXISTS work_records (
+	worktree_path TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL,
+	branch TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	base_commit TEXT NOT NULL,
+	state TEXT NOT NULL,
+	settled_reason TEXT NOT NULL DEFAULT '',
+	cleanup TEXT NOT NULL DEFAULT '',
+	cleanup_reason TEXT NOT NULL DEFAULT '',
+	kept_paths TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS work_records_session ON work_records(session_id) WHERE session_id<>'';
+CREATE TABLE IF NOT EXISTS session_prs (
+	session_id TEXT NOT NULL,
+	repo TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	url TEXT NOT NULL,
+	source TEXT NOT NULL,
+	unlinked INTEGER NOT NULL DEFAULT 0,
+	watch INTEGER NOT NULL DEFAULT 1,
+	title TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT '',
+	head_sha TEXT NOT NULL DEFAULT '',
+	mergeable TEXT NOT NULL DEFAULT '',
+	review TEXT NOT NULL DEFAULT '',
+	checks TEXT NOT NULL DEFAULT '',
+	failed_checks TEXT NOT NULL DEFAULT '',
+	passed_head TEXT NOT NULL DEFAULT '',
+	conflict_head TEXT NOT NULL DEFAULT '',
+	remarks_through_ms INTEGER NOT NULL DEFAULT 0,
+	remark_ids TEXT NOT NULL DEFAULT '',
+	wakes INTEGER NOT NULL DEFAULT 0,
+	comment_wakes INTEGER NOT NULL DEFAULT 0,
+	read_failures INTEGER NOT NULL DEFAULT 0,
+	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
+	linked_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (session_id, repo, number)
+);
+CREATE INDEX IF NOT EXISTS session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked=0;
 CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS catalog_presentation_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS host_queue_dirty (
+	session_id TEXT PRIMARY KEY
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS catalog_sessions (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	host_project BLOB NOT NULL,
@@ -505,6 +570,7 @@ CREATE TABLE IF NOT EXISTS catalog_sessions (
 	host_queue_count INTEGER NOT NULL DEFAULT 0,
 	background_tasks BLOB NOT NULL DEFAULT '',
 	usage_limit BLOB NOT NULL DEFAULT '',
+	turn_stop BLOB NOT NULL DEFAULT '',
 	current INTEGER NOT NULL DEFAULT 0,
 	current_reason TEXT NOT NULL DEFAULT '',
 	retired INTEGER NOT NULL DEFAULT 0
@@ -535,6 +601,33 @@ CREATE TABLE IF NOT EXISTS project_links (
 CREATE TABLE IF NOT EXISTS session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_keep_alive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
+	failed_at_ms INTEGER NOT NULL DEFAULT 0,
+	announced INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS turn_ends (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_at_ms INTEGER NOT NULL,
+	ended_at_ms INTEGER NOT NULL DEFAULT 0,
+	turn_id TEXT NOT NULL DEFAULT '',
+	completed_turn_id TEXT NOT NULL DEFAULT '',
+	needs TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	asks_json TEXT NOT NULL DEFAULT 'null',
+	next_json TEXT NOT NULL DEFAULT 'null',
+	source TEXT NOT NULL DEFAULT '',
+	routed_to TEXT NOT NULL DEFAULT '',
+	answered_at_ms INTEGER NOT NULL DEFAULT 0,
+	answer_status TEXT NOT NULL DEFAULT '',
+	answer_message_id TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, started_at_ms)
 );
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
@@ -594,6 +687,22 @@ CREATE TABLE IF NOT EXISTS removed_project_ledgers (
 	workspace_root TEXT PRIMARY KEY,
 	project_id TEXT NOT NULL,
 	removed_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_moves (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_move_refusals (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS repository_keys (
+	workspace_root TEXT PRIMARY KEY,
+	project_key TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,

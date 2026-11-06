@@ -74,6 +74,8 @@ A lead or operator change, made by the daemon, by another process writing the re
 
 `tools/list` returns every tool. A call the caller's capabilities do not cover is refused with `capability_missing`, so a session that gains or loses a role needs no new tool list.
 
+Each tool's name and description come from `agenttools.Tools`, which `registerMCPTools` walks in order, binding each to its handler; a tool without a handler stops the daemon at start. The tools most sessions call, `agenthail_send`, `agenthail_create`, `agenthail_wait`, `agenthail_result` and `agenthail_end_turn`, carry `_meta["anthropic/alwaysLoad"]: true`, so Claude lists them in every turn instead of behind tool search; every other tool stays deferred. `internal/agenttools/budget.json` pins the bytes of the whole tool list, of the always-loaded tools, and of the CLI and tool forms of the session card. `TestTheToolListAgentsSeeStaysAtItsPinnedSize` and `TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI` fail on any change in size, so a change that grows what agents read raises the numbers in the same diff.
+
 ## Read scope
 
 A session reads:
@@ -109,6 +111,7 @@ Archived sessions and sessions owned by other hosts are outside every scope. A s
 | `agenthail_alias` | Name a session | control scope, down only |
 | `agenthail_archive` | Archive or restore a session | control scope, down only |
 | `agenthail_create` | Start a Claude or Codex session with a first message, within the caller's ceiling, or a Notion thread | `spawn`; Notion needs `control.all` |
+| `agenthail_end_turn` | The last call of a turn: a headline, `needs: you` with up to 4 asks or `needs: nothing` with up to 3 next items. Refused, without ending the turn, when invalid or when the turn has already ended. See [work-record.md](work-record.md) | any session, about its own turn |
 | `agenthail_report` | A task's child reports `done` or `failed` with its result; the first report settles the task and later ones update `latest` | the child of a task |
 | `agenthail_result` | A task's state, result and `latest`, by `taskId` or child `target`, clipped to the output limit | the parent, or a reader of the child |
 | `agenthail_wait` | Wait until a task settles, its child asks for something, or its goal stops | the parent, or a reader of the child |

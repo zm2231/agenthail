@@ -19,6 +19,19 @@ const (
 	RouteAgenthailTurn
 )
 
+func (r Route) String() string {
+	switch r {
+	case RoutePeer:
+		return "peer"
+	case RouteHumanTurn:
+		return "human-turn"
+	case RouteAgenthailTurn:
+		return "agenthail-turn"
+	default:
+		return "send"
+	}
+}
+
 // Router is implemented by an adapter whose sessions take more than one
 // route. Every other adapter's messages take RouteSend.
 type Router interface {

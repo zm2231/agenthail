@@ -2,7 +2,7 @@ import Foundation
 
 // Mirrors the daemon's sessionDisplayState; scripts/fixtures/session-display-vectors.json holds both to it.
 enum SessionDisplayKind: String, CaseIterable, Identifiable {
-    case unavailable, waiting, working, limited, finishing, queued, offline, idle
+    case unavailable, waiting, working, limited, stopped, finishing, queued, offline, idle
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         case .waiting: "Waiting on you"
         case .working: "Working"
         case .limited: "Usage limit"
+        case .stopped: "Stopped"
         case .finishing: "Finishing"
         case .queued: "Queued"
         case .offline: "Offline"
@@ -27,6 +28,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         case .waiting: "questionmark.bubble"
         case .working: "waveform"
         case .limited: "gauge.with.dots.needle.100percent"
+        case .stopped: "exclamationmark.octagon"
         case .finishing: "hourglass"
         case .queued: "tray.and.arrow.down"
         case .offline, .idle: "circle"
@@ -39,6 +41,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         case .waiting: (waitingPlace ?? session.waitingPlace)?.label ?? "Waiting on you"
         case .working: session.workingLabel(now: now)
         case .limited: limit ?? session.limitLabel ?? "Usage limit"
+        case .stopped: "Stopped"
         case .finishing: "Waiting on background work"
         case .queued: "Queued"
         case .offline: "Offline"
@@ -54,6 +57,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         if session.status == "busy" { return .working }
         if let resume = session.limitResume, resume.state != "released" { return .limited }
         if let limit = session.usageLimit, !lifted(limit, now: now) { return .limited }
+        if session.turnStop != nil { return .stopped }
         if session.backgroundTasks?.running == true { return .finishing }
         if session.queueCount > 0 { return .queued }
         if session.status == "offline" { return .offline }

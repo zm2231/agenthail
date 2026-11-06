@@ -1,5 +1,5 @@
 import { app } from "./state.js";
-import { pagerFor, choose, type, next, goTo, move, renderChips, renderPage, renderActions } from "./question-pager.js";
+import { pagerFor, choose, type, next, goTo, move, decision, renderChips, renderPage, renderActions } from "./question-pager.js";
 
 function requestOf(form) {
   return (app.requests?.requests || []).find((request) => request.id === form.dataset.requestQuestion);
@@ -14,13 +14,13 @@ function refresh(form, pager, { page = true } = {}) {
 
 const sending = new Set();
 
-async function send(form, answers, respond) {
+async function send(form, pager, answers, respond) {
   const requestId = form.dataset.requestQuestion;
   if (sending.has(requestId)) return;
   sending.add(requestId);
   form.querySelectorAll("button").forEach((button) => { button.disabled = true; });
   try {
-    await respond(requestId, { behavior: "allow", answers });
+    await respond(requestId, decision(pager, answers));
   } finally {
     sending.delete(requestId);
   }
@@ -41,15 +41,20 @@ export function bindQuestionPager(respond) {
     const pick = event.target.closest("[data-pager-pick]");
     if (!pick) return;
     const answers = choose(pager, Number(pick.dataset.pagerPick));
-    if (answers) await send(form, answers, respond);
+    if (answers) await send(form, pager, answers, respond);
     else refresh(form, pager);
   });
   document.addEventListener("input", (event) => {
-    if (!event.target.matches("[data-pager-other]")) return;
+    const note = event.target.matches("[data-pager-note]");
+    if (!note && !event.target.matches("[data-pager-other]")) return;
     const form = event.target.closest("form[data-request-question]");
     const request = form && requestOf(form);
     if (!request) return;
     const pager = pagerFor(request);
+    if (note) {
+      pager.note = event.target.value;
+      return;
+    }
     type(pager, event.target.value);
     refresh(form, pager, { page: false });
   });
@@ -61,7 +66,7 @@ export function bindQuestionPager(respond) {
     if (!request) return;
     const pager = pagerFor(request);
     const answers = next(pager);
-    if (answers) await send(form, answers, respond);
+    if (answers) await send(form, pager, answers, respond);
     else refresh(form, pager);
   });
   document.addEventListener("keydown", (event) => {

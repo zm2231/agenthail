@@ -60,7 +60,8 @@ export async function loadSessionOrder(fresh = false) {
     if (!listings.every((listing) => !listing.mixed && listing.hostEpoch === base.hostEpoch)) continue;
     app.sessionOrder = Object.fromEntries(keys.map((key, index) => [key, listings[index]]));
     const refreshAt = listings.map((listing) => listing.view.refreshAt).filter(Boolean).map(Date.parse).reduce((first, at) => Math.min(first, at), Infinity);
-    return { base, refreshAt };
+    const catalogSeq = Math.min(base.catalogSeq ?? 0, ...listings.map((listing) => listing.catalogSeq));
+    return { base, refreshAt, catalogSeq };
   }
   throw new Error("The computer restarted while the dashboard was reading it. Trying again.");
 }

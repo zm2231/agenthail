@@ -29,6 +29,7 @@ struct SessionDisplayVectorsTest {
             case .working: header.hasPrefix("Working")
             case .waiting: header == (session.waitingPlace?.label ?? "Waiting on you")
             case .limited: header == (session.limitLabel ?? "Usage limit")
+            case .stopped: header == "Stopped"
             case .finishing: header == "Waiting on background work"
             case .idle: header == "Idle" || header == "Closed"
             }
