@@ -32,14 +32,14 @@ func (d *Daemon) observeRepositoryKey(root, key string) {
 	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 }
 
-func (d *Daemon) adoptProjectMoves(moves []registry.ProjectMove) error {
+func (d *Daemon) adoptProjectMoves(moves []registry.ProjectMove) ([]registry.ProjectMoveOutcome, error) {
 	outcomes, err := d.Registry.AdoptProjectMoves(moves)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	d.projectMovesApplied(outcomes)
 	d.publishProjectMoves()
-	return nil
+	return outcomes, nil
 }
 
 func (d *Daemon) projectMovesApplied(outcomes []registry.ProjectMoveOutcome) {

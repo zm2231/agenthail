@@ -24,7 +24,16 @@ func (d *Daemon) ledgerRead(key string, req ledger.ReadRequest) (map[string]any,
 	if last, ok := d.ledgerSync.last(key); ok {
 		req.Sync = &ledger.SyncHealth{OwnerHead: last.Head, Error: last.Error}
 	}
-	return d.ledgerStore().Read(key, req)
+	result, err := d.ledgerStore().Read(key, req)
+	if err != nil {
+		return nil, err
+	}
+	refusals, err := d.Registry.ProjectMoveRefusalsOf(key)
+	if err != nil || len(refusals) == 0 {
+		return result, err
+	}
+	result["notCarried"] = refusals
+	return result, nil
 }
 
 // ledgerETag hashes the exact bytes served, so two different answers never share one.

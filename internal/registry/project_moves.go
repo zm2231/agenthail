@@ -67,7 +67,15 @@ func (r *Registry) ProjectMoveTargets() (map[string]string, error) {
 }
 
 func (r *Registry) ProjectMoveRefusals() ([]ProjectMoveRefusal, error) {
-	rows, err := r.read.Query(`SELECT from_key,to_key,reason,at_ms FROM project_move_refusals ORDER BY from_key`)
+	return r.projectMoveRefusals(`SELECT from_key,to_key,reason,at_ms FROM project_move_refusals ORDER BY from_key`)
+}
+
+func (r *Registry) ProjectMoveRefusalsOf(key string) ([]ProjectMoveRefusal, error) {
+	return r.projectMoveRefusals(`SELECT from_key,to_key,reason,at_ms FROM project_move_refusals WHERE from_key=?1 OR to_key=?1 ORDER BY from_key`, key)
+}
+
+func (r *Registry) projectMoveRefusals(query string, args ...any) ([]ProjectMoveRefusal, error) {
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
