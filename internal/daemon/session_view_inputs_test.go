@@ -29,7 +29,6 @@ var notSessionViewInputs = map[string]string{
 	"alias_reservations": sessionOnly, "launcher_pending": sessionOnly, "pending_ceilings": sessionOnly, "session_ceilings": sessionOnly,
 	"session_context": sessionOnly, "session_moves": sessionOnly, "session_rekeys": sessionOnly, "tasks": sessionOnly,
 	"session_origins": voiceOperators,
-	"work_records":    "task worktrees, copied into a session's catalog projection when it is published; views read that copy",
 }
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {

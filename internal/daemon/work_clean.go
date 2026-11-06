@@ -41,8 +41,16 @@ func (d *Daemon) wakeWorkClean() {
 	}
 }
 
+func (d *Daemon) changeWork(write func(*registry.Registry) (bool, error)) (bool, error) {
+	changed, err := write(d.Registry)
+	if err == nil && changed {
+		d.requestCatalogDiscovery()
+	}
+	return changed, err
+}
+
 func (d *Daemon) settleWork(sessionID, reason string) {
-	settled, err := d.Registry.SettleWork(sessionID, reason, time.Now())
+	settled, err := d.changeWork(func(r *registry.Registry) (bool, error) { return r.SettleWork(sessionID, reason, time.Now()) })
 	if err != nil {
 		d.log.Printf("settle worktree of %s: %s", d.resolveDisplay(sessionID), err)
 		return
@@ -90,12 +98,12 @@ func (d *Daemon) reconcileCreatingWork(now time.Time) {
 			}
 		}
 		if owner != "" {
-			if _, err := d.Registry.ActivateWork(record.WorktreePath, owner); err != nil {
+			if _, err := d.changeWork(func(r *registry.Registry) (bool, error) { return r.ActivateWork(record.WorktreePath, owner) }); err != nil {
 				d.log.Printf("give worktree %s to %s: %s", record.WorktreePath, d.resolveDisplay(owner), err)
 			}
 			continue
 		}
-		if _, err := d.Registry.SettleOrphanWork(record.WorktreePath, now); err != nil {
+		if _, err := d.changeWork(func(r *registry.Registry) (bool, error) { return r.SettleOrphanWork(record.WorktreePath, now) }); err != nil {
 			d.log.Printf("settle unfinished worktree %s: %s", record.WorktreePath, err)
 		}
 	}
@@ -123,7 +131,8 @@ func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options wor
 		return d.setWorkCleanup(record, registry.WorkCleanupKept, outcome.KeptReason, outcome.IgnoredPaths)
 	}
 	if record.SessionID == "" {
-		return record, d.Registry.DropWork(record.WorktreePath)
+		_, err := d.changeWork(func(r *registry.Registry) (bool, error) { return true, r.DropWork(record.WorktreePath) })
+		return record, err
 	}
 	return d.setWorkCleanup(record, registry.WorkCleanupRemoved, "", nil)
 }
@@ -133,13 +142,10 @@ func (d *Daemon) setWorkCleanup(record registry.WorkRecord, cleanup, reason stri
 		return record, nil
 	}
 	record.Cleanup, record.CleanupReason, record.KeptPaths = cleanup, reason, keptPaths
-	if err := d.Registry.SetWorkCleanup(record.WorktreePath, cleanup, reason, keptPaths); err != nil {
-		return record, err
-	}
-	if record.SessionID != "" {
-		d.requestCatalogDiscovery()
-	}
-	return record, nil
+	_, err := d.changeWork(func(r *registry.Registry) (bool, error) {
+		return true, r.SetWorkCleanup(record.WorktreePath, cleanup, reason, keptPaths)
+	})
+	return record, err
 }
 
 func (d *Daemon) sessionWorking(sessionID string) bool {
@@ -167,11 +173,13 @@ func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string,
 		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "this session has no worktree of its own")
 	}
 	if record.State == registry.WorkActive {
-		if _, err := d.Registry.SettleWork(sessionID, registry.WorkSettledPerson, time.Now()); err != nil {
+		if _, err := d.changeWork(func(r *registry.Registry) (bool, error) {
+			return r.SettleWork(sessionID, registry.WorkSettledPerson, time.Now())
+		}); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	} else if record.Cleanup == registry.WorkCleanupKept {
-		if err := d.Registry.SetWorkCleanup(record.WorktreePath, registry.WorkCleanupPending, "", nil); err != nil {
+		if _, err := d.setWorkCleanup(record, registry.WorkCleanupPending, "", nil); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	}

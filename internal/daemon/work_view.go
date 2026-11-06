@@ -13,6 +13,13 @@ type workView struct {
 	KeptPaths     []string `json:"keptPaths,omitempty"`
 }
 
+func workRow(record *registry.WorkRecord) *workView {
+	if record == nil {
+		return nil
+	}
+	return newWorkView(*record)
+}
+
 func newWorkView(record registry.WorkRecord) *workView {
 	return &workView{Path: record.WorktreePath, Branch: record.Branch, Base: record.BaseRef, State: record.State, SettledReason: record.SettledReason, Cleanup: record.Cleanup, CleanupReason: record.CleanupReason, KeptPaths: record.KeptPaths}
 }

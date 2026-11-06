@@ -198,6 +198,42 @@ func TestCleaningAnotherHostsSessionsWorktreeRunsOnThatHost(t *testing.T) {
 	}
 }
 
+func TestAWorktreeTakenOrSettledRepublishesItsSessionsRow(t *testing.T) {
+	d, reg, _, _, _ := daemonFixture(t)
+	path := filepath.Join(t.TempDir(), "wt")
+	if err := reg.BeginWork(registry.WorkRecord{WorktreePath: path, RepoRoot: filepath.Dir(path), Branch: "ah/wt", BaseRef: "main", BaseCommit: "base"}, time.Now().Add(-2*workCreatingStale)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RegisterSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: path, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	republished := func(step string) {
+		t.Helper()
+		select {
+		case <-d.catalogNudge:
+		default:
+			t.Fatalf("%s did not republish the session's row", step)
+		}
+	}
+	drain := func() {
+		select {
+		case <-d.catalogNudge:
+		default:
+		}
+	}
+	drain()
+	d.sweepWork(context.Background(), time.Now())
+	if work := workOf(t, reg, "worker"); work.State != registry.WorkActive {
+		t.Fatalf("work %+v", work)
+	}
+	republished("handing the unfinished worktree to its session")
+	d.settleWork("worker", registry.WorkSettledTaskReported)
+	if work := workOf(t, reg, "worker"); work.State != registry.WorkSettled {
+		t.Fatalf("work %+v", work)
+	}
+	republished("settling the worktree")
+}
+
 func TestACreateThatCrashedIsReconciledFromItsRecord(t *testing.T) {
 	checkout := pushedCheckout(t)
 	d, reg, _, _, _ := daemonFixture(t)

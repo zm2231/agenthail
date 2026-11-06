@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -140,6 +142,39 @@ func (r *Registry) SessionWork() (map[string]WorkRecord, error) {
 	return out, nil
 }
 
+// presentationWorkColumns are the work_records columns a session row shows;
+// changing one moves the presentation version.
+const presentationWorkColumns = "session_id,worktree_path,branch,base_ref,state,settled_reason,cleanup,cleanup_reason,kept_paths"
+
+func presentationWork(ctx context.Context, tx *sql.Tx) (map[string]WorkRecord, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT `+presentationWorkColumns+` FROM work_records WHERE session_id<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]WorkRecord{}
+	for rows.Next() {
+		var record WorkRecord
+		var kept string
+		if err := rows.Scan(&record.SessionID, &record.WorktreePath, &record.Branch, &record.BaseRef, &record.State, &record.SettledReason, &record.Cleanup, &record.CleanupReason, &kept); err != nil {
+			return nil, err
+		}
+		if record.KeptPaths, err = decodeKeptPaths(kept); err != nil {
+			return nil, err
+		}
+		out[record.SessionID] = record
+	}
+	return out, rows.Err()
+}
+
+func decodeKeptPaths(kept string) ([]string, error) {
+	if kept == "" {
+		return nil, nil
+	}
+	var paths []string
+	return paths, json.Unmarshal([]byte(kept), &paths)
+}
+
 func (r *Registry) workRecords(where string, args ...any) ([]WorkRecord, error) {
 	rows, err := r.read.Query(`SELECT worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,settled_reason,cleanup,cleanup_reason,kept_paths,created_at_ms,settled_at_ms FROM work_records `+where+` ORDER BY created_at_ms`, args...)
 	if err != nil {
@@ -154,10 +189,8 @@ func (r *Registry) workRecords(where string, args ...any) ([]WorkRecord, error) 
 		if err := rows.Scan(&record.WorktreePath, &record.SessionID, &record.RepoRoot, &record.Branch, &record.BaseRef, &record.BaseCommit, &record.State, &record.SettledReason, &record.Cleanup, &record.CleanupReason, &kept, &created, &settled); err != nil {
 			return nil, err
 		}
-		if kept != "" {
-			if err := json.Unmarshal([]byte(kept), &record.KeptPaths); err != nil {
-				return nil, err
-			}
+		if record.KeptPaths, err = decodeKeptPaths(kept); err != nil {
+			return nil, err
 		}
 		record.CreatedAt = time.UnixMilli(created).UTC()
 		if settled > 0 {

@@ -116,7 +116,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		return actionResult{}, d.unstartedSession(request.Message, startErr)
 	}
 	if work != nil {
-		if activated, err := d.Registry.ActivateWork(work.WorktreePath, session.ID); err != nil || !activated {
+		if activated, err := d.changeWork(func(r *registry.Registry) (bool, error) { return r.ActivateWork(work.WorktreePath, session.ID) }); err != nil || !activated {
 			d.log.Printf("record worktree %s for %s: activated=%t %v", work.WorktreePath, session.ID, activated, err)
 		}
 	}
