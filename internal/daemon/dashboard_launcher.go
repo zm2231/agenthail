@@ -193,7 +193,7 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 	})
 	launchResult, launchErr := launcher.Launch(ctx, launchRequest)
 	if readyErr != nil && launchResult.Session != nil {
-		return d.acceptedLaunch(request.Launcher, launchResult.Location, fmt.Sprintf("record the session before its first turn, which was not sent: %s", readyErr), untracked(alias)), nil
+		return actionResult{}, createStorageFailure(launchResult.Session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), map[string]any{"launcher": request.Launcher})
 	}
 	startErr := launchErr
 	if launchErr != nil && launchResult.Session == nil {

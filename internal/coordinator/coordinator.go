@@ -372,13 +372,14 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		return readyErr
 	}
 	session, sent, startErr := starter.StartSession(surface.WithSessionReady(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), ready), options)
+	if session != nil && readyErr != nil {
+		settle("")
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded before its first turn, which was not sent: %w", session.ID, readyErr))
+	}
 	if session == nil {
 		settle("")
 	} else {
 		settle(session.ID)
-	}
-	if session != nil && readyErr != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded before its first turn, which was not sent: %w", session.ID, readyErr))
 	}
 	if session == nil {
 		if startErr == nil {

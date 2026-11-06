@@ -30,12 +30,23 @@ Whether Codex defers MCP tools is not yet verified; if it does not, the two new 
 
 ## Data model
 
-Three tables beside the catalog, keyed by session id, one per slice, starting at schema 56 (no open PR claims it).
+Tables beside the catalog, keyed by session id, one migration per slice. Each takes the next free schema number when it lands, after rechecking main and every open PR.
 
-**`turn_ends`**, primary key `(session_id, turn_id)`
+**`sessions.pinned_at`, `sessions.stopped_by_person_at`, `keep_alive`** (pinned sessions)
 
 | Column | Meaning |
 |---|---|
+| `sessions.pinned_at` | unix ms, null when unpinned; set by `session-pin`, cleared by `session-unpin` |
+| `sessions.stopped_by_person_at` | the person stopped it; cleared by their next send or resume |
+| `keep_alive(session_id, failures, next_at, failed_at)` | backoff state; `failed_at` set after the fifth failure in 30 minutes |
+
+**`turn_ends`**, primary key `(session_id, started_at)`
+
+A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex with its hooks installed), or when `agenthail_end_turn` is called with no open row. The observer binds `completed_turn_id` when it sees the turn complete. A call is a repeat when the latest row has ended and no newer turn has started or completed.
+
+| Column | Meaning |
+|---|---|
+| `completed_turn_id` | the runtime's turn id, bound at completion |
 | `needs` | `you` or `nothing` |
 | `headline` | one line, at most 80 characters |
 | `asks_json` | `[{question, options:[{label, does}], suggested, links:[{title, url}]}]` |
@@ -60,9 +71,18 @@ Three tables beside the catalog, keyed by session id, one per slice, starting at
 |---|---|
 | `url`, `source` | `agent`, `created` (from `gh pr create`), `branch` (found by the work record's branch), `person` |
 | `watch` | on by default |
-| `state`, `head_sha`, `mergeable` | last read |
+| `title`, `state`, `head_sha`, `mergeable`, `review` | last read; `review` is `approved`, `changes_requested` or `none` |
 | `failed_checks`, `passed_head`, `conflict_head`, `remarks_through`, `remark_ids` | what has already woken the agent, so a change wakes it once |
 | `wakes`, `read_failures`, `last_read_at`, `linked_at` | |
+
+**`work_files`**, primary key `(session_id, path)`, and **`work_commits`**, primary key `(session_id, sha)`
+
+Derived in the daemon from the session's tool events, with no model: Claude `Edit`, `Write`, `MultiEdit` and `NotebookEdit`, Codex file changes, and shell calls running `git commit`.
+
+| Column | Meaning |
+|---|---|
+| `work_files`: `added`, `removed`, `last_at` | lines changed, summed per path |
+| `work_commits`: `subject`, `at`, `pushed` | `pushed` once a remote branch contains it |
 
 A session with none of these rows looks exactly as it does today; adopted terminal sessions gain only what they opt into (an end-of-turn call, an explicit PR link).
 
@@ -120,13 +140,15 @@ Each slice is one PR, builds on a working product, and lands with the budget tes
 | # | Slice | Acceptance tests |
 |---|---|---|
 | 0 | Tool spec table and budget test | `tools/list` is generated from the spec; the test pins card, always-loaded and list bytes and fails on growth |
-| 1 | `agenthail_end_turn`, `turn_ends` (schema 56), `ask` attention, push text | MCP call stores the row; each refusal case; a needs-you turn puts the row in the Needs you band and the push says "needs you: headline"; a worker's needs-you reaches its spawner, not the person |
-| 2 | Nudge and fallback | claude-host test with a fake query: a turn without the call is blocked once, not twice, not while background tasks run; Codex Stop hook tested against a scratch app-server; parser table tests built from real reply endings |
-| 3 | One reply and the card | `turn-answer` queues exactly one numbered message, idempotent on retry, and clears the attention; notification buttons answer an ask; card in web, Mac and iOS |
-| 4 | Worktree isolation, `work_records` (schema 57), cleanup | temporary repository: create makes branch and worktree and starts there; settle removes a clean merged worktree; dirty or unpushed is kept with its reason; Claude passthrough removed |
-| 5 | PR link, `session_prs` (schema 58) | explicit link and unlink through CLI and MCP; `gh pr create` cases link, guarded cases do not; branch link |
-| 6 | PR watch and settle | fake GitHub reads: a failing check wakes once per head; a new head re-arms; conflict wakes once; merged settles the session and removes its worktree without a wake |
-| 7 | Work panel | panel shows branch, worktree, PRs and kept reason in web, Mac and iOS |
+| 1 | Pinned sessions stay up: `pinned_at`, `session-pin`/`session-unpin` (CLI `agenthail pin`/`unpin`), keeper | a pinned session that exits is resumed once, and after a daemon restart; the resume sends no input (no host turn, no `turn/start`); archived or person-stopped sessions are never resumed; a mirrored row from a paired host is skipped; a failing resume follows 30s, 1m, 2m, 4m, 8m, then `keepAliveFailed` attention exactly once; a project's first lead starts pinned, a replacement lead inherits the old one's pin, and unpin always works |
+| 2 | `agenthail_end_turn`, `turn_ends`, `ask` attention, push text | MCP call stores the row; each refusal case; a needs-you turn puts the row in the Needs you band and the push says "needs you: headline"; a worker's needs-you reaches its spawner or lead, not the person |
+| 3 | Nudge and fallback | claude-host test with a fake query: a turn without the call is blocked once, not twice, not while background tasks run; Codex Stop hook tested against a scratch app-server; parser table tests built from real reply endings |
+| 4 | One reply and the card | `turn-answer` queues exactly one numbered message, idempotent on retry, and clears the attention; notification buttons answer an ask; card in web, Mac and iOS |
+| 5 | Worktree isolation, `work_records`, cleanup | temporary repository: create makes branch and worktree and starts there; settle removes a clean merged worktree; dirty or unpushed is kept with its reason; Claude passthrough removed |
+| 6 | PR link, `session_prs` | explicit link and unlink through CLI and MCP; `gh pr create` cases link, guarded cases do not; branch link; without `gh` or a sign-in, link refuses with the reason |
+| 7 | PR watch and settle | fake GitHub reads: a failing check wakes once per head; a new head re-arms; conflict wakes once; merged settles the session and removes its worktree without a wake |
+| 8 | Files and commits | recorded transcripts of Claude and Codex edits and commits produce the expected `work_files` and `work_commits` rows; a commit is marked pushed once a remote branch has it |
+| 9 | Work panel | panel shows branch, worktree, PRs with checks, files, commits and kept reason in web, Mac and iOS |
 
 ## Decisions
 
