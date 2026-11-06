@@ -26,6 +26,7 @@ type catalogViewState struct {
 	archive   registry.ArchiveState
 	attention map[string]bool
 	marks     map[string]registry.SessionMark
+	turnEnds  map[string]registry.TurnEnd
 }
 
 func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
@@ -45,7 +46,11 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read pinned and snoozed sessions: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, marks: marks}, nil
+	turnEnds, err := d.Registry.CurrentTurnEnds()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read turn ends: %w", err)
+	}
+	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -99,6 +104,9 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	mark := view.marks[row.ID]
 	row.PinnedAt, row.KeepAlive = mark.PinnedAt, keepAliveRow(mark.KeepAlive)
 	row.Snooze = snoozeRow(mark.Snooze)
+	if end, ok := view.turnEnds[row.ID]; ok {
+		row.EndTurn = endTurnRow(&end)
+	}
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether

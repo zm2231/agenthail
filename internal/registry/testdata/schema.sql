@@ -1,4 +1,4 @@
--- schemaVersion 60
+-- schemaVersion 61
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -781,6 +781,22 @@ CREATE TABLE tasks (
 	wake INTEGER NOT NULL DEFAULT 0,
 	created_at_ms INTEGER NOT NULL,
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table turn_ends
+CREATE TABLE turn_ends (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_at_ms INTEGER NOT NULL,
+	ended_at_ms INTEGER NOT NULL DEFAULT 0,
+	turn_id TEXT NOT NULL DEFAULT '',
+	completed_turn_id TEXT NOT NULL DEFAULT '',
+	needs TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	asks_json TEXT NOT NULL DEFAULT 'null',
+	next_json TEXT NOT NULL DEFAULT 'null',
+	source TEXT NOT NULL DEFAULT '',
+	routed_to TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, started_at_ms)
 );
 
 -- trigger catalog_retired_version_archived

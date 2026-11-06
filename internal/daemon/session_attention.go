@@ -12,6 +12,9 @@ func rowAttention(row dashboardSession, outgoing int, incoming string) *SessionA
 		}
 		return &SessionAttention{Kind: "request", Reason: row.Display.Detail}
 	}
+	if row.EndTurn.asksPerson() {
+		return &SessionAttention{Kind: AttentionAsk, Reason: row.EndTurn.Headline}
+	}
 	if incoming != "" {
 		return &SessionAttention{Kind: "incoming", Reason: incoming}
 	}

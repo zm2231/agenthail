@@ -558,6 +558,20 @@ CREATE TABLE IF NOT EXISTS session_keep_alive (
 	announced INTEGER NOT NULL DEFAULT 0,
 	error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS turn_ends (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	started_at_ms INTEGER NOT NULL,
+	ended_at_ms INTEGER NOT NULL DEFAULT 0,
+	turn_id TEXT NOT NULL DEFAULT '',
+	completed_turn_id TEXT NOT NULL DEFAULT '',
+	needs TEXT NOT NULL DEFAULT '',
+	headline TEXT NOT NULL DEFAULT '',
+	asks_json TEXT NOT NULL DEFAULT 'null',
+	next_json TEXT NOT NULL DEFAULT 'null',
+	source TEXT NOT NULL DEFAULT '',
+	routed_to TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, started_at_ms)
+);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL,

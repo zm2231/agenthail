@@ -102,6 +102,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 		r.LiveHiddenSubagents = &surface.SubagentRollup{Count: 2, Working: 1}
 	},
 	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
+	"EndTurn": func(r *dashboardSession, now time.Time) {
+		r.EndTurn = &dashboardEndTurn{Headline: "Deployed", Needs: endTurnNeedsNothing, EndedAt: now}
+	},
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
