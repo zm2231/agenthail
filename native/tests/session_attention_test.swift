@@ -84,6 +84,16 @@ struct SessionAttentionTest {
         expect(places["hosted"]?.reason == "Waiting on a prompt Agenthail can't reach. Stop and resume to clear it", "a hosted prompt no one holds says how to clear it")
         expect(places["held"]?.reason == "Needs your approval", "a request Agenthail holds asks for the answer")
         expect(places["unknown-reset"]?.reason == "Usage limit reached", "a limit with no reset time says it was reached")
+
+        var asking = session("asking", status: "idle", lastActive: "2026-10-04T11:40:00Z")
+        asking.endTurn = SessionEndTurn(headline: "Ready to ship", needs: "you", requestId: "turn-end-1")
+        var answered = session("answered", status: "idle", lastActive: "2026-10-04T11:41:00Z")
+        answered.endTurn = SessionEndTurn(headline: "Ready to ship", needs: "you", requestId: "turn-end-2", answeredAt: "2026-10-04T11:42:00Z")
+        var told = session("told", status: "idle", lastActive: "2026-10-04T11:43:00Z")
+        told.endTurn = SessionEndTurn(headline: "Ready", needs: "you", askedSession: "lead")
+        let asks = SessionAttention.build(sessions: [asking, answered, told], attention: [], deliveryProblems: [])
+        expect(asks["asking"] == SessionAttention(kind: .request, reason: "Asks: Ready to ship"), "an ended turn's ask needs the person: \(String(describing: asks["asking"]))")
+        expect(asks["answered"] == nil && asks["told"] == nil, "an answered ask, or one told to an agent, does not")
         print("session attention tests passed")
     }
 
