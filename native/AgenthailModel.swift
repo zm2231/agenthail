@@ -892,6 +892,24 @@ final class AgenthailModel: ObservableObject {
         localSends[sessionID]?.removeAll { $0.id == send.id }
     }
 
+    func deleteSend(_ send: LocalSend, in sessionID: String) {
+        guard send.canDelete else { return }
+        let position = localSends[sessionID]?.firstIndex { $0.id == send.id }
+        discardSend(send, in: sessionID)
+        guard let deliveryID = send.deliveryID, let api else { return }
+        Task {
+            do {
+                try await api.action("delivery-delete", deliveryID: deliveryID)
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+                if let position, localSends[sessionID]?.contains(where: { $0.id == send.id }) != true {
+                    localSends[sessionID, default: []].insert(send, at: min(position, localSends[sessionID]?.count ?? 0))
+                }
+            }
+        }
+    }
+
     @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
     private var modelCatalogLoads: Set<String> = []
 
@@ -1178,12 +1196,20 @@ final class AgenthailModel: ObservableObject {
     }
 
     func dismissDeliveryProblem(_ problem: DeliveryProblem) {
+        settleDeliveryProblem(problem, action: "delivery-dismiss")
+    }
+
+    func deleteDeliveryProblem(_ problem: DeliveryProblem) {
+        settleDeliveryProblem(problem, action: "delivery-delete")
+    }
+
+    private func settleDeliveryProblem(_ problem: DeliveryProblem, action: String) {
         guard let api else { return }
         let position = snapshot?.deliveryProblems?.firstIndex { $0.deliveryId == problem.deliveryId }
         removeDeliveryProblem(problem.deliveryId)
         Task {
             do {
-                try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
+                try await api.action(action, deliveryID: problem.deliveryId)
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)

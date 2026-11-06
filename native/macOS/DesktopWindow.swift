@@ -946,7 +946,8 @@ struct TranscriptView: View {
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
                         if send.failure != nil { pane.model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
-                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { pane.model.retrySend(send, in: session.id) })
+                    } : nil, onRetry: send.failure == nil || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
+                    onDelete: send.canDelete ? { pane.model.deleteSend(send, in: session.id) } : nil)
                     .transcriptScrimRow(turn: send.id.description)
                     .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
@@ -1162,6 +1163,7 @@ struct UserBubble: View {
     var failure: String? = nil
     var onEdit: ((String) -> Void)? = nil
     var onRetry: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     /// The transcript row this message is, so "Show more" is remembered with the session's other rows.
     var row: String? = nil
     @State private var opened: RowChoice<Bool>?
@@ -1225,6 +1227,11 @@ struct UserBubble: View {
                     .lineLimit(2)
                 if let onRetry {
                     Button("Retry", action: onRetry)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                }
+                if let onDelete {
+                    Button("Delete", action: onDelete)
                         .buttonStyle(.plain)
                         .foregroundStyle(DesktopPalette.accentText)
                 }
@@ -1809,14 +1816,20 @@ struct DeliveryProblemBanner: View {
             Button("Edit and resend") { model.resendDeliveryProblem(problem) }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.accentText)
-            Button {
-                model.dismissDeliveryProblem(problem)
-            } label: {
-                Image(systemName: "xmark")
+            if problem.deletable == true {
+                Button("Delete") { model.deleteDeliveryProblem(problem) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.accentText)
+            } else {
+                Button {
+                    model.dismissDeliveryProblem(problem)
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .accessibilityLabel("Dismiss")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.text2)
-            .accessibilityLabel("Dismiss")
         }
         .font(.system(size: DesktopType.body))
         .padding(.horizontal, DesktopSpace.m)

@@ -1253,6 +1253,8 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
 
     var id: String { "\(hostID ?? "")/\(deliveryId)" }
 
+    var deletable: Bool? = nil
+
     var reasonText: String {
         let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = words.first else { return "The message was not delivered." }
