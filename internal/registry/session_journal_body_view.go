@@ -20,21 +20,18 @@ func (r *Registry) SessionJournalBodyView(sessionID, ref string, head, from int)
 	if head < 0 || from < 0 {
 		return SessionJournalBodyView{}, false, fmt.Errorf("invalid session journal body view")
 	}
-	tx, err := r.read.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	readTx, err := r.read.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return SessionJournalBodyView{}, false, err
 	}
-	defer tx.Rollback()
+	defer readTx.Rollback()
+	tx := journalTx{Tx: readTx, prepared: r.journalRead}
 	var view SessionJournalBodyView
 	var baseLength int
-	if err := tx.QueryRow(`SELECT written_seq,length(CAST(body AS BLOB)) FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, ref).Scan(&view.Stamp, &baseLength); err != nil {
+	if err := tx.QueryRow(journalBodyStampSQL, sessionID, ref).Scan(&view.Stamp, &baseLength, &view.Total); err != nil {
 		if err == sql.ErrNoRows {
 			return SessionJournalBodyView{}, false, nil
 		}
-		return SessionJournalBodyView{}, false, err
-	}
-	view.Total = baseLength
-	if err := tx.QueryRow(`SELECT COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=? ORDER BY start DESC LIMIT 1),?)`, ref, baseLength).Scan(&view.Total); err != nil {
 		return SessionJournalBodyView{}, false, err
 	}
 	if view.Head, err = bodyRange(tx, sessionID, ref, baseLength, 0, min(head, view.Total)); err != nil {
@@ -48,14 +45,14 @@ func (r *Registry) SessionJournalBodyView(sessionID, ref string, head, from int)
 	return view, true, nil
 }
 
-func bodyRange(tx *sql.Tx, sessionID, ref string, baseLength, lo, hi int) ([]byte, error) {
+func bodyRange(tx journalWriter, sessionID, ref string, baseLength, lo, hi int) ([]byte, error) {
 	out := make([]byte, 0, hi-lo)
 	if lo >= hi {
 		return out, nil
 	}
 	if lo < baseLength {
 		var part []byte
-		if err := tx.QueryRow(`SELECT substr(CAST(body AS BLOB),?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, lo+1, min(hi, baseLength)-lo, sessionID, ref).Scan(&part); err != nil {
+		if err := tx.QueryRow(journalBodyBaseRangeSQL, lo+1, min(hi, baseLength)-lo, sessionID, ref).Scan(&part); err != nil {
 			return nil, err
 		}
 		out = append(out, part...)
@@ -63,7 +60,7 @@ func bodyRange(tx *sql.Tx, sessionID, ref string, baseLength, lo, hi int) ([]byt
 	if hi <= baseLength {
 		return out, nil
 	}
-	rows, err := tx.Query(`SELECT start,chunk FROM session_journal_body_tail WHERE ref=?1 AND start>=COALESCE((SELECT MAX(start) FROM session_journal_body_tail WHERE ref=?1 AND start<=?2),0) AND start<?3 ORDER BY start`, ref, max(lo, baseLength), hi)
+	rows, err := tx.Query(journalBodyChunkRangeSQL, ref, max(lo, baseLength), hi)
 	if err != nil {
 		return nil, err
 	}

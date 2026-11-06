@@ -20,7 +20,16 @@ const (
 	journalBodyStoredLengthSQL  = `SELECT COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=?1 ORDER BY start DESC LIMIT 1),length(CAST(body AS BLOB))) FROM session_journal_bodies WHERE session_id=?2 AND ref=?1`
 	journalBodyAppendTailSQL    = `INSERT INTO session_journal_body_tail(ref,session_id,start,chunk) VALUES(?,?,?,?)`
 	journalUpdateAppendedRowSQL = `UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,payload_role=? WHERE session_id=? AND seq=?`
+	journalWindowBoundsSQL      = `SELECT (SELECT MIN(seq) FROM session_journal WHERE session_id=?1),(SELECT MAX(seq) FROM session_journal WHERE session_id=?1),COALESCE((SELECT pruned_seq FROM session_journal_state WHERE session_id=?1),0),COALESCE((SELECT next_seq FROM session_journal_state WHERE session_id=?1),0)`
+	journalWindowRowsSQL        = `SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`
+	journalBodyStampSQL         = `SELECT written_seq,length(CAST(body AS BLOB)),COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=?2 ORDER BY start DESC LIMIT 1),length(CAST(body AS BLOB))) FROM session_journal_bodies WHERE session_id=?1 AND ref=?2`
+	journalBodyBaseRangeSQL     = `SELECT substr(CAST(body AS BLOB),?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`
+	journalBodyChunkRangeSQL    = `SELECT start,chunk FROM session_journal_body_tail WHERE ref=?1 AND start>=COALESCE((SELECT MAX(start) FROM session_journal_body_tail WHERE ref=?1 AND start<=?2),0) AND start<?3 ORDER BY start`
 )
+
+var journalReadStatementSQL = []string{
+	journalWindowBoundsSQL, journalWindowRowsSQL, journalBodyStampSQL, journalBodyBaseRangeSQL, journalBodyChunkRangeSQL,
+}
 
 var journalStatementSQL = []string{
 	journalStateEnsureSQL, journalNextSeqSQL, journalByProviderKeySQL, journalUpdateRowSQL, journalInsertRowSQL,
@@ -33,9 +42,9 @@ var journalStatementSQL = []string{
 // wait for the connection that transaction holds.
 type journalStatements map[string]*sql.Stmt
 
-func prepareJournalStatements(db *sql.DB) (journalStatements, error) {
+func prepareJournalStatements(db *sql.DB, queries []string) (journalStatements, error) {
 	prepared := journalStatements{}
-	for _, query := range journalStatementSQL {
+	for _, query := range queries {
 		stmt, err := db.Prepare(query)
 		if err != nil {
 			return nil, errors.Join(err, prepared.close())
@@ -62,6 +71,29 @@ type journalWriter interface {
 type journalTx struct {
 	*sql.Tx
 	prepared journalStatements
+}
+
+type preparedReader struct {
+	db       *sql.DB
+	prepared journalStatements
+}
+
+func (r *Registry) preparedRead() preparedReader {
+	return preparedReader{db: r.read, prepared: r.journalRead}
+}
+
+func (p preparedReader) Query(query string, args ...any) (*sql.Rows, error) {
+	if stmt := p.prepared[query]; stmt != nil {
+		return stmt.Query(args...)
+	}
+	return p.db.Query(query, args...)
+}
+
+func (p preparedReader) QueryRow(query string, args ...any) *sql.Row {
+	if stmt := p.prepared[query]; stmt != nil {
+		return stmt.QueryRow(args...)
+	}
+	return p.db.QueryRow(query, args...)
 }
 
 func (r *Registry) beginJournal() (journalTx, error) {

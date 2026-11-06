@@ -26,6 +26,7 @@ type Registry struct {
 	retryBackoff  time.Duration
 	migration     *MigrationTiming
 	journal       journalStatements
+	journalRead   journalStatements
 }
 
 func (r *Registry) SetRetryBackoff(backoff time.Duration) {
@@ -127,12 +128,14 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 }
 
 func (r *Registry) prepare() error {
-	prepared, err := prepareJournalStatements(r.db)
+	var err error
+	if r.journal, err = prepareJournalStatements(r.db, journalStatementSQL); err == nil {
+		r.journalRead, err = prepareJournalStatements(r.read, journalReadStatementSQL)
+	}
 	if err != nil {
 		r.Close()
 		return fmt.Errorf("prepare registry statements: %w", err)
 	}
-	r.journal = prepared
 	return nil
 }
 
@@ -225,5 +228,5 @@ func (r *Registry) Close() error {
 	r.seen.mu.Unlock()
 	r.writeStamps(pending)
 	defer closeOpenLock(r.openLock)
-	return errors.Join(r.journal.close(), r.read.Close(), r.db.Close())
+	return errors.Join(r.journal.close(), r.journalRead.close(), r.read.Close(), r.db.Close())
 }
