@@ -75,7 +75,7 @@ jobs:
         run: scripts/fetch-node.sh
       - name: Race tests
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
       - name: Build
         run: go build ./...
       - name: Vet
@@ -219,7 +219,7 @@ jobs:
         run: scripts/test-fetch-node.sh
       - name: Race tests
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
 
   linux-archives:
     runs-on: ubuntu-latest

@@ -687,6 +687,7 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 		}
 		if err == nil {
 			d.settleWork(sessionID, registry.WorkSettledArchived)
+			go d.closeBrowserTabs(sessionID)
 		}
 	} else {
 		err = d.Registry.UnarchiveSession(sessionID)

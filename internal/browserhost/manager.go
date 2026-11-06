@@ -63,6 +63,12 @@ func (m *Manager) Status() Status {
 	return m.status
 }
 
+func (m *Manager) Refresh(ctx context.Context) {
+	if status, err := m.Client().Status(ctx); err == nil {
+		m.setStatus(status)
+	}
+}
+
 func (m *Manager) setStatus(status Status) {
 	m.mu.Lock()
 	changed := !reflect.DeepEqual(m.status, status)

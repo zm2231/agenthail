@@ -1,11 +1,13 @@
 // Protocol: docs/maintainers/browser-host.md. Exits when stdin (the daemon) closes.
 import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { Browser } from './browser.mjs';
+import { Tabs } from './tabs.mjs';
 
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 const MAX_LINE = 1 << 20;
 
 const { values: args } = parseArgs({
@@ -23,8 +25,12 @@ for (const name of ['socket', 'browsers', 'version']) {
 }
 
 const browser = new Browser({ browsers: args.browsers, node: process.execPath });
+const tabs = new Tabs({ browser, shots: path.join(path.dirname(args.socket), 'shots') });
+browser.disconnected = () => tabs.forget();
 
 const methods = {
+  ...Object.fromEntries(['open', 'navigate', 'snapshot', 'act', 'wait', 'dialog', 'resize', 'list', 'close', 'closeOwner']
+    .map(name => [`tabs.${name}`, params => tabs[name](params)])),
   hello: () => ({ protocol: PROTOCOL, hostVersion: args.version, pid: process.pid }),
   status: () => browser.status(),
   launch: async () => {
