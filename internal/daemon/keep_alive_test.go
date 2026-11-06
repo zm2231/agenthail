@@ -130,9 +130,22 @@ func TestAPinnedSessionThatCannotBeBroughtBackBacksOffThenNeedsThePersonOnce(t *
 	start := time.Now()
 	at := start
 	var waits []time.Duration
+	republished := false
 	for pass := 0; pass < 40; pass++ {
 		before := len(kept.woken)
+		select {
+		case <-d.catalogNudge:
+		default:
+		}
 		d.keepPinned(context.Background(), at)
+		if pinned, _ := r.PinnedSessions(); !republished && len(pinned) == 1 && !pinned[0].KeepAlive.FailedAt.IsZero() {
+			select {
+			case <-d.catalogNudge:
+				republished = true
+			default:
+				t.Fatal("giving up on the session did not republish its row for paired hosts")
+			}
+		}
 		if len(kept.woken) > before && len(kept.woken) > 1 {
 			waits = append(waits, at.Sub(start))
 			start = at
@@ -154,6 +167,22 @@ func TestAPinnedSessionThatCannotBeBroughtBackBacksOffThenNeedsThePersonOnce(t *
 	row := keptRow(t, d, "to")
 	if row.KeepAlive == nil || row.Attention == nil || row.Attention.Kind != AttentionKeepAliveFailed {
 		t.Fatalf("row keepAlive=%+v attention=%+v", row.KeepAlive, row.Attention)
+	}
+
+	kept.ended["to"] = false
+	d.keepPinned(context.Background(), at)
+	select {
+	case <-d.catalogNudge:
+	default:
+	}
+	d.keepPinned(context.Background(), at.Add(keepAliveHealthy))
+	if pinned, _ := r.PinnedSessions(); len(pinned) != 1 || !pinned[0].KeepAlive.FailedAt.IsZero() {
+		t.Fatalf("ten healthy minutes left the failure: %+v", pinned)
+	}
+	select {
+	case <-d.catalogNudge:
+	default:
+		t.Fatal("a session that came back did not republish its row for paired hosts")
 	}
 
 	kept.wakeErr = nil

@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -157,13 +158,13 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 		t.Fatal("a move aborted before it arrived was prepared")
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/home/user/.claude/projects/x/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-2", session, "builder", nil); !errors.As(err, &MoveConflictError{}) {
+	if _, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil); !errors.As(err, &MoveConflictError{}) {
 		t.Fatalf("a move that never received its files took the session: %v", err)
 	}
 	if err := r.SetMoveState("move-2", MoveReceived, "", MovePrepared); err != nil {
 		t.Fatal(err)
 	}
-	events, err := r.TakeMovedSession("move-2", session, "builder", nil)
+	events, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +188,50 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 	}
 }
 
+func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
+	r := openTestRegistry(t)
+	source := "h00000000000a"
+	if _, err := r.AddHost(PairedHost{ID: source, Name: "laptop", Endpoint: "https://laptop.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
+	sourcePin := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	for i, pinnedAt := range []time.Time{{}, sourcePin} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.PinSession(moveConversation, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SaveKeepAlive(moveConversation, KeepAlive{Attempts: 5, FailedAt: time.Now(), Error: "gave up"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RecordSessionStop(moveConversation, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		move := fmt.Sprint("move-", i)
+		if _, err := r.PrepareMoveIn(move, moveConversation, source, []byte(`{"a":1}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SetMoveState(move, MoveReceived, "", MovePrepared); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.TakeMovedSession(move, session, "", pinnedAt, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := r.SessionPinnedAt(moveConversation); err != nil || !got.Equal(pinnedAt) {
+			t.Fatalf("source pin %v: the moved session is pinned at %v (%v)", pinnedAt, got, err)
+		}
+		kept, err := r.PinnedSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pinnedAt.IsZero() && len(kept) != 0 || !pinnedAt.IsZero() && (len(kept) != 1 || kept[0].KeepAlive != (KeepAlive{})) {
+			t.Fatalf("source pin %v: kept %+v, want the source's pin with a fresh keeper count and no stop", pinnedAt, kept)
+		}
+	}
+}
+
 func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 	r := openTestRegistry(t)
 	source, third := "h00000000000a", "h00000000000b"
@@ -206,13 +251,13 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
-	if _, err := r.TakeMovedSession("move-1", session, "", nil); !errors.As(err, &SessionOwnedError{}) {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("a move took a session another host still serves: %v", err)
 	}
 	if _, _, err := r.RemoveHostCatalogRow(third, moveConversation, entity, "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.TakeMovedSession("move-1", session, "", nil); err != nil {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil); err != nil {
 		t.Fatalf("a move could not take a session its last host stopped serving: %v", err)
 	}
 	if owner, _ := r.SessionHost(moveConversation); owner != "" {
