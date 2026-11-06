@@ -447,6 +447,7 @@
 		AF46B959BB42711D6404DF7F /* NativeVoiceAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVoiceAudio.swift; sourceTree = "<group>"; };
 		AFAA5C70E0A307C25243752B /* VoiceOperatorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperatorModel.swift; sourceTree = "<group>"; };
 		AFBB43A50691914AFA2683A6 /* TurnNoticeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticeUITests.swift; sourceTree = "<group>"; };
+		B09490CD2A7A794299B74F26 /* Textual */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Textual; path = Packages/Textual; sourceTree = SOURCE_ROOT; };
 		B2B8853E9BE39E1DE3C99531 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		B53189F2F3F442A260900B88 /* TranscriptScrimMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrimMask.swift; sourceTree = "<group>"; };
 		B8516330BAD617EC489F9B21 /* TurnNoticePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticePreference.swift; sourceTree = "<group>"; };
@@ -627,6 +628,14 @@
 			path = iOS;
 			sourceTree = "<group>";
 		};
+		40DAE438998720FBDB7ABD84 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				B09490CD2A7A794299B74F26 /* Textual */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
 		427DD559812A649864FD1333 /* iOSUITests */ = {
 			isa = PBXGroup;
 			children = (
@@ -767,6 +776,7 @@
 				6FA4E53ED9FB111FBCBD675E /* iOSNotificationService */,
 				FE69312B1A3C67311E6940BB /* iOSTests */,
 				427DD559812A649864FD1333 /* iOSUITests */,
+				40DAE438998720FBDB7ABD84 /* Packages */,
 				9FEA4E00148A7830942890EF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -925,8 +935,8 @@
 			mainGroup = 7C8018B2DDC6BEB4F73F1F0B;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8BCA5E90E9C2D0B6915AFF84 /* XCRemoteSwiftPackageReference "textual" */,
 				93EC17CDABAE3E3545E9F279 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				7A4FE5F216D78DB3C180857C /* XCLocalSwiftPackageReference "Packages/Textual" */,
 			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -1558,15 +1568,14 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		8BCA5E90E9C2D0B6915AFF84 /* XCRemoteSwiftPackageReference "textual" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/gonzalezreal/textual";
-			requirement = {
-				kind = exactVersion;
-				version = 0.5.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		7A4FE5F216D78DB3C180857C /* XCLocalSwiftPackageReference "Packages/Textual" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Textual;
 		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
 		93EC17CDABAE3E3545E9F279 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stasel/WebRTC";
@@ -1585,7 +1594,6 @@
 		};
 		6B5A93EB2293BEFB3BF96AB5 /* Textual */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8BCA5E90E9C2D0B6915AFF84 /* XCRemoteSwiftPackageReference "textual" */;
 			productName = Textual;
 		};
 /* End XCSwiftPackageProductDependency section */
