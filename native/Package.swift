@@ -105,6 +105,7 @@ let package = Package(
                 "QuestionPagerDrafts.swift",
                 "QuestionPagerView.swift",
                 "QuestionPagerParts.swift",
+                "ChipFlow.swift",
                 "RequestCard.swift",
                 "AgenthailModel.swift",
                 "AgenthailModelPaging.swift",

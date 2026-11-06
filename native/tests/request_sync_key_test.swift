@@ -35,12 +35,23 @@ struct RequestSyncKeyTest {
         retired.retire("turn-end-1", in: "s1")
         expect(!retired.settles(waiting) && retired.retired(in: "s1") == "turn-end-1", "the entry holds while the row still names the ask")
         expect(retired.retired(in: "other") == nil, "an entry belongs to its session")
-        var caughtUp = retired
-        caughtUp.settle(answered)
-        expect(caughtUp.retired(in: "s1") == nil, "the entry goes once the row shows answeredAt")
+        expect(!retired.settles(answered), "the entry holds once answered, until the turn moves on")
         var moved = retired
         moved.settle(newer)
         expect(moved.retired(in: "s1") == nil && listed.offered(pendingAsk: "turn-end-1", retired: moved.retired(in: "s1")).count == 2, "a new ask drops the entry, so it cannot hide anything")
+        var resumed = retired
+        resumed.settle(session())
+        expect(resumed.retired(in: "s1") == nil, "a turn that resumes drops the entry")
+
+        let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [])
+        let asked = SessionRequest(id: "turn-end-1", kind: "ask", tool: "", questions: [question])
+        let receipt = AnswerReceipt(asked, RequestDecision(behavior: "allow", message: " After lunch. ", answers: ["Deploy it now?": "Wait"]))
+        expect(receipt.text == "You answered: Wait · After lunch.", "the receipt says what was sent: \(receipt.text)")
+        var answeredHere = RetiredAsks()
+        answeredHere.retire("turn-end-1", in: "s1", receipt: receipt)
+        expect(answeredHere.receipt(for: waiting) == receipt && answeredHere.receipt(for: answered) == receipt, "the receipt shows while the row names the ask, answered or not")
+        expect(answeredHere.receipt(for: newer) == nil && answeredHere.receipt(for: session()) == nil, "and goes when the turn moves on")
+        expect(retired.receipt(for: waiting) == nil, "a refused answer leaves no receipt")
         let sent = RequestAnswerFailure(AgenthailAPIError.request(502, "session is gone"))
         expect(RequestAnswerFailure.retires(ask, failure: nil) && !RequestAnswerFailure.retires(ask, failure: sent) && !RequestAnswerFailure.retires(approval, failure: nil), "only a sent or terminally failed ask retires")
         print("request sync key tests passed")

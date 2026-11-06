@@ -23,17 +23,40 @@ extension SessionRequests {
     }
 }
 
+struct AnswerReceipt: Hashable {
+    let text: String
+    let at: Date
+
+    init(_ request: SessionRequest, _ decision: RequestDecision, at: Date = Date()) {
+        let answers = (request.questions ?? []).compactMap { decision.answers?[$0.question] }
+        let note = (decision.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        text = "You answered: " + (answers + (note.isEmpty ? [] : [note])).joined(separator: " · ")
+        self.at = at
+    }
+}
+
+// One entry per session, kept while the row still names the ask, so it can neither grow nor hide a newer ask.
 struct RetiredAsks: Hashable {
-    private var bySession: [String: String] = [:]
+    private struct Entry: Hashable {
+        let requestID: String
+        let receipt: AnswerReceipt?
+    }
 
-    func retired(in sessionID: String) -> String? { bySession[sessionID] }
+    private var bySession: [String: Entry] = [:]
 
-    mutating func retire(_ requestID: String, in sessionID: String) {
-        bySession[sessionID] = requestID
+    func retired(in sessionID: String) -> String? { bySession[sessionID]?.requestID }
+
+    func receipt(for session: SessionState) -> AnswerReceipt? {
+        guard let entry = bySession[session.id], entry.requestID == session.endTurn?.requestId else { return nil }
+        return entry.receipt
+    }
+
+    mutating func retire(_ requestID: String, in sessionID: String, receipt: AnswerReceipt? = nil) {
+        bySession[sessionID] = Entry(requestID: requestID, receipt: receipt)
     }
 
     func settles(_ session: SessionState) -> Bool {
-        bySession[session.id].map { $0 != session.pendingAskID } ?? false
+        bySession[session.id].map { $0.requestID != session.endTurn?.requestId } ?? false
     }
 
     mutating func settle(_ session: SessionState) {

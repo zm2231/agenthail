@@ -762,10 +762,14 @@ struct SessionScreen: View {
                                 respond: { decision in Task { await model.respond(to: request, sessionID: session.id, decision: decision) } },
                                 leadNow: request.replacedBy.map { model.leadName($0, requestFrom: session.id) },
                                 withdraw: request.replacedBy == nil ? nil : { Task { await model.withdraw(request, sessionID: session.id) } },
-                                asker: liveSession.displayName)
+                                asker: liveSession.displayName, attention: AnyShapeStyle(PhonePalette.attention))
                     .id(request.id)
                     .padding(.horizontal)
                     .padding(.top, 6)
+                } else if let receipt = model.retiredAsks.receipt(for: liveSession) {
+                    AnswerReceiptRow(receipt: receipt)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                 }
                 if let detail {
                     if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {

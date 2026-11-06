@@ -9,6 +9,8 @@ struct RequestCard: View {
     var leadNow: String? = nil
     var withdraw: (() -> Void)? = nil
     var asker: String = "The agent"
+    var attention = AnyShapeStyle(RoleStyle(.needsYou))
+    var surface: AnyShapeStyle? = AnyShapeStyle(.regularMaterial)
     @State private var form = ElicitationForm()
 
     var heading: String { Self.heading(request, asker: asker) }
@@ -33,7 +35,7 @@ struct RequestCard: View {
             } else {
                 Label(heading, systemImage: request.usesPager ? "questionmark.bubble" : "hand.raised")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(request.isAsk ? attention : accent)
                 if request.usesPager {
                     QuestionPagerView(request: request, answering: answering, accent: accent, respond: respond)
                 } else {
@@ -65,7 +67,7 @@ struct RequestCard: View {
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background { if let surface { RoundedRectangle(cornerRadius: 12).fill(surface) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("request-\(request.id)")
     }

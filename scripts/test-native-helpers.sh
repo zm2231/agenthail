@@ -49,6 +49,7 @@ SOURCES=(
   QuestionPagerDrafts.swift
   QuestionPagerView.swift
   QuestionPagerParts.swift
+  ChipFlow.swift
   RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift

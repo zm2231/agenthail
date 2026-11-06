@@ -108,6 +108,7 @@ targets:
       - path: QuestionPagerDrafts.swift
       - path: QuestionPagerView.swift
       - path: QuestionPagerParts.swift
+      - path: ChipFlow.swift
       - path: RequestCard.swift
       - path: PairedCredential.swift
       - path: PushReceipts.swift

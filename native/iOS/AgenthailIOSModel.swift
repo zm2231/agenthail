@@ -1373,7 +1373,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             if failure?.dropsCard == true { sessionRequests = sessionRequests?.removing(request.id) }
             operationError = failure?.message
         }
-        if RequestAnswerFailure.retires(request, failure: failure) { retiredAsks.retire(request.id, in: sessionID) }
+        if RequestAnswerFailure.retires(request, failure: failure) {
+            retiredAsks.retire(request.id, in: sessionID, receipt: failure == nil ? AnswerReceipt(request, decision) : nil)
+        }
         await fetchRequests(sessionID, key: sessionRequestsKey)
         await refreshSession(sessionID)
     }

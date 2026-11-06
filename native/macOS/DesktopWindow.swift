@@ -706,12 +706,22 @@ struct ConversationPane: View {
                                             respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
                                             leadNow: request.replacedBy.map { model.sessionName($0) },
                                             withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } },
-                                            asker: session.displayName)
+                                            asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil)
                                 .id(request.id)
+                                .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
                                 .scrimSurface(radius: 12)
+                                .floatingEdge(RoundedRectangle(cornerRadius: 12))
                                 .frame(maxWidth: DesktopColumns.reading)
                                 .padding(.horizontal, DesktopColumns.gutter)
                                 .padding(.top, DesktopSpace.s)
+                            } else if let receipt = pane.retiredAsks.receipt(for: session) {
+                                AnswerReceiptRow(receipt: receipt)
+                                    .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
+                                    .scrimSurface(radius: 12)
+                                    .floatingEdge(RoundedRectangle(cornerRadius: 12))
+                                    .frame(maxWidth: DesktopColumns.reading)
+                                    .padding(.horizontal, DesktopColumns.gutter)
+                                    .padding(.top, DesktopSpace.s)
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, DesktopSpace.l).padding(.top, DesktopSpace.xs)

@@ -135,13 +135,15 @@ struct AskCardFlowTest {
             check(pane.requests?.offered(pendingAsk: stale.pendingAskID, retired: pane.retiredAsks.retired(in: "S")).isEmpty == true, "\(id) is not offered again while the row still names it")
             check(pane.requestError == message, "\(id) keeps its message: \(String(describing: pane.requestError))")
         }
-        await pane.syncRequests(for: row(requestID: "turn-end-6", answered: true))
-        check(pane.retiredAsks.retired(in: "S") == nil, "the local entry goes once the row shows the answer")
+        let answeredRow = row(requestID: "turn-end-6", answered: true)
+        await pane.syncRequests(for: answeredRow)
+        check(pane.retiredAsks.receipt(for: answeredRow)?.text == "You answered: Deploy", "the answer leaves a receipt while the row names the ask: \(String(describing: pane.retiredAsks.receipt(for: answeredRow)))")
         AskDaemon.staleReread = false
         AskDaemon.answered = false
         AskDaemon.listed = "turn-end-7"
         let next = row(requestID: "turn-end-7")
         await pane.syncRequests(for: next)
+        check(pane.retiredAsks.retired(in: "S") == nil && pane.retiredAsks.receipt(for: next) == nil, "a new ask drops the entry and its receipt")
         check(pane.requests?.offered(pendingAsk: next.pendingAskID, retired: pane.retiredAsks.retired(in: "S")).map(\.id) == ["turn-end-7"], "the next ask is offered")
         print("ask card flow ok")
     }

@@ -70,6 +70,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Event().wait()
         body = RESPONSES.get(self.path.split("?", 1)[0])
         if body is None:
+            if REQUESTS_LOG:
+                with open(REQUESTS_LOG, "a") as log:
+                    log.write("404 " + self.path + "\n")
             self.send_error(404)
             return
         data = json.dumps(body).encode()
@@ -150,6 +153,12 @@ if __name__ == "__main__":
         RESPONSES["/api/v1/history"] = {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []}
         RESPONSES["/api/v1/projects/activity"] = {"projects": []}
         RESPONSES["/api/v1/session-options"] = {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []}
+        RESPONSES["/api/v1/usage"] = {"sets": []}
+        RESPONSES["/api/v1/session-commands"] = {"commands": [], "unavailable": ""}
+        RESPONSES["/api/v1/session-metadata"] = {}
+        RESPONSES["/api/v1/prompts"] = {"prompts": [], "nextBefore": None}
+        RESPONSES["/api/v1/models"] = {"models": []}
+        HELD_STREAMS.update({"/api/v1/catalog-events", "/api/v1/session-stream"})
         RESPONSES["/api/v1/session"] = {
             "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
             "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",

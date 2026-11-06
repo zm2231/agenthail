@@ -847,7 +847,9 @@ final class SessionPane: ObservableObject, Identifiable {
             failure = RequestAnswerFailure(error)
             if failure?.dropsCard == true { requests = requests?.removing(request.id) }
         }
-        if RequestAnswerFailure.retires(request, failure: failure) { retiredAsks.retire(request.id, in: id) }
+        if RequestAnswerFailure.retires(request, failure: failure) {
+            retiredAsks.retire(request.id, in: id, receipt: failure == nil ? AnswerReceipt(request, decision) : nil)
+        }
         await fetchRequests(id, key: requestsKey)
         if let failure { requestError = failure.message }
         await loadSession(id)

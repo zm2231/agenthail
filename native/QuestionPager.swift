@@ -8,6 +8,7 @@ struct QuestionPager: Hashable {
     private(set) var step = 0
     private(set) var picks: [Int: Set<Int>] = [:]
     private(set) var typed: [Int: String] = [:]
+    private(set) var other: Set<Int> = []
 
     init(questions: [SessionRequest.Question], ask: Bool = false) {
         self.questions = questions
@@ -61,8 +62,17 @@ struct QuestionPager: Hashable {
         }
         picks[step] = [option]
         typed[step] = nil
+        other.remove(step)
         if !isSingle { step += 1 }
         return nil
+    }
+
+    func isOtherPicked(at index: Int) -> Bool { other.contains(index) }
+
+    mutating func chooseOther() {
+        guard questions.indices.contains(step) else { return }
+        picks[step] = []
+        other.insert(step)
     }
 
     mutating func pick(_ option: Int) -> RequestDecision? {
