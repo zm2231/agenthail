@@ -26,7 +26,9 @@ requests `{id, method, params}`, responses `{id, result}` or
 | `close` | closes Chromium, returns the status |
 
 The daemon accepts a host only when `hello` reports protocol 1, the daemon's
-own version and the pid it spawned, within 15 seconds.
+own version and the pid it spawned, within 15 seconds. Every call is bounded by
+its caller's context: when the context ends, the connection is cut, so a
+wedged host cannot hold up the daemon.
 
 ## Chromium on first use
 
@@ -58,7 +60,7 @@ The snapshot (`/api/v1/snapshot`) reports `daemon.browser`:
 | `absent` | the host is up and Chromium is not downloaded |
 | `ready` | Chromium is installed; `running` says whether it is open |
 | `missing_libraries` | Chromium is installed and cannot load; see `missing` and `install` |
-| `failed` | the last download or launch failed; see `error` |
+| `failed` | the last download or launch failed, or `ldd` did not finish within 10 seconds; see `error` |
 
 Each status change invalidates the snapshot's ETag.
 
