@@ -97,6 +97,9 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		}
 		return turnID, ended, false
 	}
+	if !ending && !done {
+		return turnID, ended, false
+	}
 	key := stableTimelineItemID(offset, line, itemCount)
 	if ending {
 		at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
@@ -268,13 +271,21 @@ var turnScanLimit int64 = 64 << 20
 // record that started that turn, at most turnScanLimit bytes back; a
 // turn that started further back is unknown and leaves the tracker empty.
 func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claudeTurnTracker, error) {
+	return claudeTurnStateFrom(ctx, file, offset, newClaudeTurnStartSearch())
+}
+
+func newClaudeTurnStartSearch() *turnStartSearch {
+	return newTurnStartSearch(claudeLineMayStartTurn, claudeRecordStartsTurn)
+}
+
+func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*claudeTurnTracker, error) {
 	tracker := newClaudeTurnTracker("", surface.ClaudeClosingTurn{})
-	from, found, err := turnReplayStart(ctx, file, offset, []byte(`"user"`), claudeRecordStartsTurn)
+	from, found, err := turnReplayStart(ctx, file, offset, starts)
 	if err != nil || !found {
 		return tracker, err
 	}
 	tracker.betweenKnown = from == 0
-	err = scanTranscriptRecords(ctx, file, from, offset, func(record map[string]any, recordOffset int64, line []byte) {
+	err = scanTranscriptRecords(ctx, file, from, offset, true, func(record map[string]any, recordOffset int64, line []byte) {
 		tracker.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
 	})
 	return tracker, err
@@ -285,15 +296,15 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 // the turn before the one in progress, which carries the compactions and the
 // context size that preceded the current turn. Without an earlier turn it is
 // the transcript's start when that is in reach, else the current turn's.
-func turnReplayStart(ctx context.Context, file *os.File, offset int64, needle []byte, starts func(map[string]any) bool) (int64, bool, error) {
-	current, found, err := transcriptRecordBefore(ctx, file, offset, needle, starts)
+func turnReplayStart(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (int64, bool, error) {
+	current, found, err := starts.before(ctx, file, offset)
 	if err != nil {
 		return 0, false, err
 	}
 	if !found {
 		return 0, offset <= turnScanLimit, nil
 	}
-	previous, found, err := transcriptRecordBefore(ctx, file, current, needle, starts)
+	previous, found, err := starts.before(ctx, file, current)
 	switch {
 	case err != nil:
 		return 0, false, err
@@ -305,45 +316,15 @@ func turnReplayStart(ctx context.Context, file *os.File, offset int64, needle []
 	return current, true, nil
 }
 
-// transcriptRecordBefore returns the offset of the last record before offset
-// that match accepts, looking only at lines containing needle.
-func transcriptRecordBefore(ctx context.Context, file *os.File, offset int64, needle []byte, match func(map[string]any) bool) (int64, bool, error) {
-	const chunk = 1 << 20
-	floor := max(0, offset-turnScanLimit)
-	end := offset
-	var carry []byte
-	for end > floor {
-		if err := ctx.Err(); err != nil {
-			return 0, false, err
-		}
-		start := max(floor, end-chunk)
-		buf := make([]byte, end-start, end-start+int64(len(carry)))
-		if _, err := file.ReadAt(buf, start); err != nil && err != io.EOF {
-			return 0, false, err
-		}
-		buf = append(buf, carry...)
-		next := len(buf)
-		for next > 0 {
-			previous := bytes.LastIndexByte(buf[:next-1], '\n')
-			if previous < 0 && start > 0 {
-				break
-			}
-			line := buf[previous+1 : next]
-			if bytes.Contains(line, needle) {
-				var record map[string]any
-				if json.Unmarshal(line, &record) == nil && match(record) {
-					return start + int64(previous+1), true, nil
-				}
-			}
-			next = previous + 1
-		}
-		carry = append([]byte(nil), buf[:next]...)
-		end = start
-	}
-	return 0, false, nil
+func transcriptRecordBefore(ctx context.Context, file *os.File, offset int64, candidate func([]byte) bool, match func(map[string]any) bool) (int64, bool, error) {
+	return newTurnStartSearch(candidate, match).before(ctx, file, offset)
 }
 
-func scanTranscriptRecords(ctx context.Context, file *os.File, from, to int64, visit func(record map[string]any, offset int64, line []byte)) error {
+func lineContains(needle []byte) func([]byte) bool {
+	return func(line []byte) bool { return bytes.Contains(line, needle) }
+}
+
+func scanTranscriptRecords(ctx context.Context, file *os.File, from, to int64, compact bool, visit func(record map[string]any, offset int64, line []byte)) error {
 	reader := bufio.NewReaderSize(io.NewSectionReader(file, from, to-from), 1<<20)
 	offset := from
 	for {
@@ -352,8 +333,12 @@ func scanTranscriptRecords(ctx context.Context, file *os.File, from, to int64, v
 		}
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 && line[len(line)-1] == '\n' {
+			decoded := line
+			if compact {
+				decoded = shrinkTranscriptLine(line)
+			}
 			var record map[string]any
-			if json.Unmarshal(line, &record) == nil {
+			if json.Unmarshal(decoded, &record) == nil {
 				visit(record, offset, line)
 			}
 		}
@@ -407,7 +392,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	}
 	var items []surface.TimelineItem
 	var itemErr error
-	err = scanTranscriptRecords(ctx, file, from, end, func(record map[string]any, offset int64, line []byte) {
+	err = scanTranscriptRecords(ctx, file, from, end, false, func(record map[string]any, offset int64, line []byte) {
 		if itemErr != nil {
 			return
 		}

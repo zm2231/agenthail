@@ -12,6 +12,7 @@
 		0265FA869065773F39600986 /* TestRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34BE7F9A701699F72A33B490 /* TestRoutes.swift */; };
 		070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */; };
 		0735E5BFD23705F4C87E60D6 /* InboxPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0E5F2D719CC6DDC08591BC /* InboxPreview.swift */; };
+		0740E2CF3E344953963E5796 /* TranscriptTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14EA08B4C3AAC865894FE6A1 /* TranscriptTail.swift */; };
 		07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F97182BB6B3E031BAE4D18C /* SessionControls.swift */; };
 		09008EACA9626B0CA9628068 /* SessionListChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74D671F0DB0275E3CDC13160 /* SessionListChromeTests.swift */; };
 		099165D1DD05E11819B5E106 /* HostCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDA795678500D6988089B512 /* HostCatalog.swift */; };
@@ -302,6 +303,7 @@
 		11020CFD9564E496189456D7 /* LoadOlderUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadOlderUITests.swift; sourceTree = "<group>"; };
 		13A8A96B32E00B2D74B7D7DE /* TurnNoticeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticeCard.swift; sourceTree = "<group>"; };
 		13D1E5984938119C1E3E0EA0 /* QuestionPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionPagerView.swift; sourceTree = "<group>"; };
+		14EA08B4C3AAC865894FE6A1 /* TranscriptTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTail.swift; sourceTree = "<group>"; };
 		155647F24D35A824AC154886 /* PhoneComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneComponents.swift; sourceTree = "<group>"; };
 		1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDetailState.swift; sourceTree = "<group>"; };
 		18E781B530EDAA7A0C57BBB6 /* ProxyPreferSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPreferSheet.swift; sourceTree = "<group>"; };
@@ -739,6 +741,7 @@
 				B53189F2F3F442A260900B88 /* TranscriptScrimMask.swift */,
 				88F6D8F394B600B6CF2D942D /* TranscriptScrimRowLayers.swift */,
 				E8A86B72C28FBF7B0E9B4F87 /* TranscriptScrimRows.swift */,
+				14EA08B4C3AAC865894FE6A1 /* TranscriptTail.swift */,
 				E663B73B2C53323662E76E4B /* TurnClock.swift */,
 				B8516330BAD617EC489F9B21 /* TurnNoticePreference.swift */,
 				9C7ED5DA9CEE19B4E507FE57 /* TurnSettings.swift */,
@@ -1082,6 +1085,7 @@
 				6AC31C2A811D23EB64F36850 /* TranscriptScrimRowLayers.swift in Sources */,
 				44EB463F57233CB46774297E /* TranscriptScrimRows.swift in Sources */,
 				770A61F2613169130BE764BC /* TranscriptScrimView.swift in Sources */,
+				0740E2CF3E344953963E5796 /* TranscriptTail.swift in Sources */,
 				F512EE7502D385FBF7F1B8C5 /* TurnClock.swift in Sources */,
 				A2088AA6BBD1953A39D85956 /* TurnNoticeCard.swift in Sources */,
 				2FC1D67B5831D9A1572234FD /* TurnNoticePreference.swift in Sources */,
