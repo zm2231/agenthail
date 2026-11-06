@@ -45,15 +45,16 @@ func (c *nativeRecordingClaude) Send(_ context.Context, _ *surface.Session, mess
 }
 
 type humanTurnFixture struct {
-	d       *Daemon
-	r       *registry.Registry
-	claude  *nativeRecordingClaude
-	posts   []string
-	postErr error
-	bridged surface.Session
-	native  surface.Session
-	home    string
-	process *claudetest.Fixture
+	d          *Daemon
+	r          *registry.Registry
+	claude     *nativeRecordingClaude
+	posts      []string
+	postErr    error
+	postStatus int
+	bridged    surface.Session
+	native     surface.Session
+	home       string
+	process    *claudetest.Fixture
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
@@ -74,6 +75,9 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		f.posts = append(f.posts, url+" "+body)
 		if f.postErr != nil {
 			return 0, "", f.postErr
+		}
+		if f.postStatus != 0 {
+			return f.postStatus, `{}`, nil
 		}
 		return http.StatusOK, `{}`, nil
 	})}

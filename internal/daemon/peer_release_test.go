@@ -56,9 +56,9 @@ func TestAReleasedMessageIsNeverSentAgain(t *testing.T) {
 					}
 				}
 				for _, sendErr := range []error{errors.New("send failed"), surface.DeliveryUnavailable(errors.New("busy")), surface.DeliveryTerminal(errors.New("rejected")), surface.DeliveryOutcomeUnknown(errors.New("timed out"))} {
-					d.finishQueueFailure(&registry.QueuedMessage{ID: queueID, SessionID: target.ID, Message: "parked by Claude"}, &target, sendErr, time.Now())
+					d.finishQueueFailure(&registry.QueuedMessage{ID: queueID, SessionID: target.ID, Message: "parked by Claude"}, &target, sendErr, time.Now(), registry.SendTrace{})
 				}
-				d.finishReachedHostOwned(&registry.QueuedMessage{ID: queueID, SessionID: target.ID}, &target, "parked by Claude", surface.DeliveryOutcomeUnknown(errors.New("a paired host owns it")))
+				d.finishReachedHostOwned(&registry.QueuedMessage{ID: queueID, SessionID: target.ID}, &target, "parked by Claude", surface.DeliveryOutcomeUnknown(errors.New("a paired host owns it")), registry.SendTrace{})
 				history, err := r.ListHistory(100, target.ID)
 				if err != nil {
 					t.Fatal(err)

@@ -71,7 +71,7 @@ func TestARefusalThatReturnsWhileTheFirstIsStillAnnouncedIsAnnouncedAgain(t *tes
 				if err != nil || item == nil || item.ID != id {
 					t.Fatalf("claim=%+v err=%v, want %d", item, err, id)
 				}
-				d.finishQueueFailure(item, &target, cause, now)
+				d.finishQueueFailure(item, &target, cause, now, registry.SendTrace{})
 			}
 			notices := func() int {
 				t.Helper()

@@ -100,6 +100,12 @@ type Dispatcher struct {
 	RouteChanged func(session surface.Session)
 }
 
+// Trace is what a send's history records about its route: the route session
+// is on after the send and the Remote Control id it held when it was routed.
+func Trace(adapter surface.Surface, session *surface.Session, author surface.Author, bridge string) registry.SendTrace {
+	return registry.SendTrace{SendRoute: surface.RouteFor(adapter, session, author).String(), Bridge: bridge}
+}
+
 // RefreshRoute points session at what its live process offers before a
 // route is chosen from it.
 func (d Dispatcher) RefreshRoute(ctx context.Context, adapter surface.Surface, session *surface.Session) {
@@ -451,10 +457,14 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 // is sent once more as the next turn, and queued if the session is busy again.
 func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, intent *registry.DeliveryIntent, baselineCompletionID, target string, retry bool) (*Receipt, error) {
 	addressed := *session
+	record := func(entry registry.HistoryEntry) {
+		entry.SendTrace = Trace(adapter, session, options.RouteAuthor(), addressed.Bridge)
+		d.record(entry)
+	}
 	result, err := route.Send(ctx, adapter, session, message, options)
 	if ownedErr := d.RegisterReached(&addressed, session); ownedErr != nil {
 		*session = addressed
-		d.record(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
+		record(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 		return nil, ownedErr
 	}
 	if surface.IsDeliveryHeld(err) {
@@ -464,17 +474,17 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
 			if intent == nil {
-				d.record(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceUnknown})
+				record(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceUnknown})
 				return nil, err
 			}
 			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}
-			d.record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
+			record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
 			return receipt, nil
 		}
 		if intent != nil {
 			d.failIntent(intent, session.ID, err)
 		}
-		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
+		record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result == nil {
@@ -482,7 +492,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		if intent != nil {
 			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 		}
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
+		record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result.Accepted {
@@ -495,16 +505,16 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		d.markSent(receipt, intent, result.UUID, target)
 		if d.Registry != nil && !peerTransport {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
-				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID, Error: err.Error()})
+				record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID, Error: err.Error()})
 			}
 		}
 		if peerTransport {
-			d.record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
+			record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
 			return receipt, nil
 		}
-		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
+		record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID})
 		if result.Notice != "" {
-			d.record(registry.HistoryEntry{Kind: "model", SessionID: session.ID, Message: result.Notice, Result: result.UUID})
+			record(registry.HistoryEntry{Kind: "model", SessionID: session.ID, Message: result.Notice, Result: result.UUID})
 		}
 		return receipt, nil
 	}

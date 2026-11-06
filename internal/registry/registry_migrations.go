@@ -135,6 +135,11 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	for _, column := range []string{"send_route", "bridge"} {
+		if err := ensureColumn(tx, "delivery_history", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	for _, column := range []struct{ name, decl string }{
 		{"reason", `TEXT NOT NULL DEFAULT ''`},
 		{"acknowledged_at_ms", `INTEGER NOT NULL DEFAULT 0`},
