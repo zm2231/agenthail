@@ -121,7 +121,7 @@ func TestAHostedClaudeSessionReportsWhenClaudeCompactsIt(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	if _, err := surface.WriteClaudeCompactSettings(host.Home, surface.ClaudeConfigDir(host.Home),surface.ClaudeCompactChange{Window: "300000"}); err != nil {
+	if _, err := surface.WriteClaudeCompactSettings(host.Home, surface.ClaudeConfigDir(host.Home), surface.ClaudeCompactChange{Window: "300000"}); err != nil {
 		t.Fatal(err)
 	}
 	c := NewClaude(nil, host.Home)
