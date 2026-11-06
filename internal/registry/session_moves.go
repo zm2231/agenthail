@@ -261,7 +261,7 @@ func (r *Registry) AbortMoveIn(id, conversation, sourceHost string) (SessionMove
 // source host mirrored here is taken over; a row another host owns is taken
 // only once that host no longer serves it.
 // The source's alias is bound here when it is free.
-func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, origin *SessionOrigin) ([]CatalogEvent, error) {
+func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alias string, pinnedAt time.Time, origin *SessionOrigin) ([]CatalogEvent, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -309,6 +309,12 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 		}
 	}
 	if err := registerSessionTx(tx, session); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=?,stopped_at_ms=0 WHERE id=?`, milliOrZero(pinnedAt), session.ID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, session.ID); err != nil {
 		return nil, err
 	}
 	if alias != "" {
@@ -471,7 +477,10 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,transcript='',has_local=0,bridge='',pinned_at_ms=0,stopped_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, move.Conversation); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id=?`, move.Conversation); err != nil {

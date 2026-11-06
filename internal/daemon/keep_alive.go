@@ -104,6 +104,7 @@ func (d *Daemon) keepSession(ctx context.Context, sessionID string, now time.Tim
 	}
 	if state.FailedAt.IsZero() != next.FailedAt.IsZero() {
 		d.publishEvent("state.changed", session.ID, map[string]string{"source": "keep-alive"})
+		d.requestCatalogDiscovery()
 	}
 	if !next.FailedAt.IsZero() && !next.Announced {
 		d.announceKeepAliveFailed(session, next)

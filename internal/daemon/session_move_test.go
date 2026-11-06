@@ -158,6 +158,10 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if err := source.reg.SetAlias("builder", session.ID); err != nil {
 		t.Fatal(err)
 	}
+	pinnedAt, err := source.reg.PinSession(session.ID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := source.reg.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +212,12 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	}
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
+	}
+	if kept, err := target.reg.PinnedSessions(); err != nil || len(kept) != 1 || kept[0].Session.ID != session.ID || !kept[0].PinnedAt.Equal(pinnedAt) {
+		t.Fatalf("the target does not keep the pinned session: %+v %v", kept, err)
+	}
+	if left, err := source.reg.SessionPinnedAt(session.ID); err != nil || !left.IsZero() {
+		t.Fatalf("the source kept a pin on a session it no longer runs: %v %v", left, err)
 	}
 	origin, found, err := target.reg.SessionOrigin(session.ID)
 	creatorHost, creator, standIn := surface.UnrepliableSenderOf(origin.CreatorID)
@@ -261,18 +271,25 @@ func TestAMoveTheTargetRefusesLeavesTheSessionWhereItWas(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, checkout, "commit", "--quiet", "-am", "elsewhere")
+	pinnedAt, err := source.reg.PinSession(session.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	sourceTranscript := claudeTranscriptIn(t, source.host.Home, session.ID)
 	if err := target.reg.RemoveProject("project-widget"); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
+	_, err = source.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "server"})
 	var refused MoveRefusedError
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "no checkout") {
 		t.Fatalf("err=%v", err)
 	}
 	if owner, _ := source.reg.SessionHost(session.ID); owner != "" {
 		t.Fatalf("a refused move changed the owner to %q", owner)
+	}
+	if kept, err := source.reg.SessionPinnedAt(session.ID); err != nil || !kept.Equal(pinnedAt) {
+		t.Fatalf("a refused move dropped the pin: %v %v", kept, err)
 	}
 	if claudeTranscriptIn(t, source.host.Home, session.ID) != sourceTranscript {
 		t.Fatal("a refused move took the transcript away")

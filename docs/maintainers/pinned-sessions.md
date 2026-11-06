@@ -9,7 +9,7 @@ and no tokens are spent.
 `session-pin` and `session-unpin` take `sessionId`, through every front end
 (`/api/action`, `/api/v1/actions`, `agenthail thread pin|unpin <target>`).
 Both are idempotent; a pin keeps the time of the first pin. A session on a
-paired host is pinned on that host, which is the one that keeps it.
+paired host is pinned on that host (see [Paired hosts](#paired-hosts)).
 
 Unpinning always works, a project's lead included. A project's first lead is
 pinned when it is assigned. A lead that replaces another, by a new
@@ -46,3 +46,19 @@ resume or a new pin starts the count over.
 
 State lives in `sessions.pinned_at_ms`, `sessions.stopped_at_ms` and
 `session_keep_alive`.
+
+## Paired hosts
+
+Only the host that runs a session keeps it. A pin or unpin of a mirrored
+session is routed to that host like any session action, and fails with the
+host's reachability error while it is down. The owner's catalog row carries
+`pinnedAt` and `keepAlive`, so mirrored rows show its pin, its keeper's
+failure and the `keepAliveFailed` attention as the owner has them; the keeper
+republishes the row when it gives up on a session or it comes back. Only the
+owner sends the failure notification.
+
+A session moved to another host keeps its pin, or its lack of one: the move
+carries `pinnedAt`, and when the session resumes on the new host that host
+takes it in place of any pin, stop or keeper state it had for the session,
+with a fresh keeper count. The old host drops its pin and keeper state with
+the session. A move that fails or is refused leaves the pin where it was.
