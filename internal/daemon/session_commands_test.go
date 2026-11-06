@@ -66,7 +66,7 @@ func TestSessionCommandsIsEmptyForARuntimeWithoutCommandsAndFailsWhenTheRuntimeC
 
 func TestASessionsCommandsAreOneJournalRowThatIsNoTimelineItem(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]*streamedBody{}}
 	source.append(surface.StreamEvent{ID: "user-1", ProviderKey: "user-1", Kind: "message", Role: "user", Title: "user", Text: "hello"})
 	first := &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "review", Description: "Review", ArgumentHint: "[pr]", Insert: "/review"}}}
 	source.append(surface.StreamEvent{ID: "commands", ProviderKey: "commands", Version: 1, Operation: "replace", Kind: "commands", Commands: first})
@@ -100,7 +100,7 @@ func TestASessionsCommandsAreOneJournalRowThatIsNoTimelineItem(t *testing.T) {
 
 func TestAStreamThatStartsOverWithTheSameCommandsLeavesTheirRowAsItIs(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]*streamedBody{}}
 	listed := func() *surface.RuntimeCommands {
 		return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{{Name: "review", Description: "Review", Insert: "/review"}}}
 	}

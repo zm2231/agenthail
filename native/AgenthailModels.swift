@@ -1916,13 +1916,13 @@ struct AttachedFile: Decodable, Equatable, Hashable {
 
 struct SessionStreamItem: Decodable {
     let itemId: String
-    let version: UInt64
+    var version: UInt64
     let op: String
     let kind: String
     let turnId: String?
     let callId: String?
-    let ts: String
-    let body: String?
+    var ts: String
+    var body: String?
     let context: ContextState?
     let goal: GoalState?
     let role: String?
@@ -1930,7 +1930,7 @@ struct SessionStreamItem: Decodable {
     let title: String?
     let status: String?
     var resetsAt: String? = nil
-    let truncated: Bool
+    var truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
     let reason: String?
@@ -1981,6 +1981,77 @@ struct SessionStreamEvent: Decodable {
     var item: TimelineItem? = nil
 }
 
+struct SessionStreamWire: Decodable {
+    var stream: String? = nil
+    var sessionId: String? = nil
+    let seq: UInt64
+    var type: String? = nil
+    var data: SessionStreamItem? = nil
+    var item: TimelineItem? = nil
+    var itemId: String? = nil
+    var from: Int? = nil
+    var text: String? = nil
+    var version: UInt64? = nil
+    var ts: String? = nil
+}
+
+/// A connection's copy of each streamed row. A stream sends a row whole the
+/// first time its connection sees it and only the bytes it gained after that;
+/// `from` counts the UTF-8 bytes the connection holds for the row.
+struct SessionStreamRebuild {
+    enum Outcome {
+        case row(SessionStreamEvent)
+        case resync
+        case skip
+    }
+
+    /// The rows one connection remembers. A row let go that is appended to
+    /// again asks for a resync, which sends it whole.
+    static let rowLimit = 512
+
+    private var rows: [String: (event: SessionStreamEvent, bytes: Int, touched: UInt64)] = [:]
+    private var clock: UInt64 = 0
+
+    var count: Int { rows.count }
+
+    private mutating func keep(_ id: String, _ event: SessionStreamEvent, bytes: Int) {
+        clock += 1
+        rows[id] = (event, bytes, clock)
+        guard rows.count > Self.rowLimit, let oldest = rows.min(by: { $0.value.touched < $1.value.touched })?.key else { return }
+        rows[oldest] = nil
+    }
+
+    mutating func apply(_ wire: SessionStreamWire) -> Outcome {
+        if wire.type == "append" {
+            guard let id = wire.itemId, let from = wire.from, let text = wire.text, let held = rows[id], held.bytes == from else { return .resync }
+            var data = held.event.data
+            let body = (data.body ?? "") + text
+            data.body = body
+            data.version = wire.version ?? data.version
+            data.ts = wire.ts ?? data.ts
+            data.truncated = false
+            var item = held.event.item
+            if var current = item {
+                current.text = body
+                if let ts = wire.ts { current.timestamp = ts }
+                current.truncated = false
+                item = current
+            }
+            let event = SessionStreamEvent(stream: held.event.stream, sessionId: held.event.sessionId, seq: wire.seq, type: "item", data: data, item: item)
+            keep(id, event, bytes: from + text.utf8.count)
+            return .row(event)
+        }
+        guard let data = wire.data else { return .skip }
+        let event = SessionStreamEvent(stream: wire.stream ?? "", sessionId: wire.sessionId ?? "", seq: wire.seq, type: wire.type ?? "item", data: data, item: wire.item)
+        if data.op == "remove" {
+            rows[data.itemId] = nil
+        } else if !data.itemId.isEmpty {
+            keep(data.itemId, event, bytes: (data.body ?? "").utf8.count)
+        }
+        return .row(event)
+    }
+}
+
 struct CatalogStreamEvent: Decodable {
     let stream: String
     let seq: UInt64
@@ -2011,11 +2082,11 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let kind: String
     let role: String?
     let title: String
-    let text: String
-    let timestamp: String?
+    var text: String
+    var timestamp: String?
     let callId: String?
     let status: String?
-    let truncated: Bool
+    var truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
     var attachment: SessionAttachment? = nil

@@ -4,32 +4,58 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
-// The prompt columns are virtual, so they cost no table storage; the two
-// partial indexes store them for user messages only. SQLite computes them for
-// every row it writes, before the partial index predicate, so they read only
-// message payloads that are JSON. A query over them reads
-// plain index values instead of parsing each payload, which the pure-Go
-// SQLite driver makes several times slower than the scan itself.
+// payload_role is written with each row; the other prompt columns are
+// virtual, so they cost no table storage, and the two partial indexes store
+// them for user messages only. SQLite computes a virtual column for every row
+// it writes, so they parse only payloads whose stored role is user. A query
+// over them reads plain index values instead of parsing each payload, which
+// the pure-Go SQLite driver makes several times slower than the scan itself.
+const journalPromptPayload = `CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END`
+
 var journalPromptColumns = []struct{ name, decl string }{
-	{"payload_role", `TEXT GENERATED ALWAYS AS (json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.role')) VIRTUAL`},
-	{"payload_origin", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL`},
-	{"payload_body", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL`},
-	{"payload_item_id", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL`},
-	{"payload_turn_id", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL`},
-	{"payload_ts", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL`},
-	{"payload_truncated", `INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL`},
-	{"payload_at", `REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL`},
+	{"payload_role", `TEXT NOT NULL DEFAULT ''`},
+	{"payload_origin", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.origin'),'')) VIRTUAL`},
+	{"payload_body", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.body'),'')) VIRTUAL`},
+	{"payload_item_id", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.itemId'),'')) VIRTUAL`},
+	{"payload_turn_id", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.turnId'),'')) VIRTUAL`},
+	{"payload_ts", `TEXT GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.ts'),'')) VIRTUAL`},
+	{"payload_truncated", `INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(` + journalPromptPayload + `,'$.truncated'),0)) VIRTUAL`},
+	{"payload_at", `REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(` + journalPromptPayload + `,'$.ts')),julianday(observed_at),0)) VIRTUAL`},
 }
 
 const journalPromptIndexed = `kind, payload_role, payload_origin, payload_body, payload_item_id, payload_turn_id, payload_ts, payload_truncated, body_ref`
 
-func ensureJournalPromptIndexes(tx *sql.Tx) error {
+func journalRole(kind string, payload []byte) string {
+	if kind != "message" && kind != "text" {
+		return ""
+	}
+	role := gjson.GetBytes(payload, "role")
+	if role.Type != gjson.String {
+		return ""
+	}
+	return role.Str
+}
+
+func ensureJournalPromptIndexes(tx *sql.Tx, rebuild bool) error {
+	if rebuild {
+		if err := dropJournalPromptColumns(tx); err != nil {
+			return err
+		}
+	}
 	for _, column := range journalPromptColumns {
 		if err := ensureColumn(tx, "session_journal", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if rebuild {
+		if _, err := tx.Exec(`UPDATE session_journal SET payload_role=json_extract(payload,'$.role') WHERE kind IN ('message','text') AND payload_codec=0 AND json_valid(payload) AND json_type(payload,'$.role')='text'`); err != nil {
 			return err
 		}
 	}
@@ -41,6 +67,25 @@ CREATE INDEX IF NOT EXISTS session_journal_prompts_at
 	ON session_journal(payload_at DESC, session_id DESC, seq DESC, ` + journalPromptIndexed + `)
 	WHERE kind IN ('message','text') AND payload_role='user';`)
 	return err
+}
+
+func dropJournalPromptColumns(tx *sql.Tx) error {
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS session_journal_prompts; DROP INDEX IF EXISTS session_journal_prompts_at`); err != nil {
+		return err
+	}
+	for _, column := range slices.Backward(journalPromptColumns) {
+		found, err := columnExists(tx, "session_journal", column.name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE session_journal DROP COLUMN ` + column.name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // journalPromptsSQL opens with the predicate of the session_journal_prompts

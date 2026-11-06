@@ -39,7 +39,7 @@ type sessionSource struct {
 	followers       map[uint64]chan struct{}
 	nextID          uint64
 	holders         map[string]int
-	appendBodies    map[string]string
+	appendBodies    map[string]*streamedBody
 	appendCursors   map[string]uint64
 	streamCursor    uint64
 	streamCursorSet bool
@@ -124,7 +124,7 @@ func (m *sessionSourceManager) acquire(ctx context.Context, session *surface.Ses
 				return nil, err
 			}
 			sourceCtx, cancel := context.WithCancel(context.Background())
-			source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: sourceCtx, cancel: cancel, seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
+			source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: sourceCtx, cancel: cancel, seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
 			m.sources[session.ID] = source
 			m.running.Add(1)
 			start = true

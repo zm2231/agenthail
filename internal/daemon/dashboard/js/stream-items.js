@@ -6,6 +6,46 @@ export function applyStreamedRow(items, envelope) {
   return [...rest, item];
 }
 
+function utf8Length(text) {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index++) {
+    const unit = text.charCodeAt(index);
+    if (unit < 0x80) bytes += 1;
+    else if (unit < 0x800) bytes += 2;
+    else if (unit >= 0xd800 && unit < 0xdc00 && index + 1 < text.length) { bytes += 4; index++; }
+    else bytes += 3;
+  }
+  return bytes;
+}
+
+// An append's from counts the UTF-8 bytes this connection was sent for the
+// row, so a null result means the copy diverged and the stream must reopen.
+export const streamRebuildRowLimit = 512;
+
+export function streamRebuild() {
+  const rows = new Map();
+  const keep = (id, row) => {
+    rows.delete(id);
+    rows.set(id, row);
+    if (rows.size > streamRebuildRowLimit) rows.delete(rows.keys().next().value);
+  };
+  return (envelope) => {
+    if (envelope.type === "append") {
+      const held = rows.get(envelope.itemId);
+      if (!held || held.bytes !== envelope.from) return null;
+      const body = (held.data.body || "") + envelope.text;
+      const data = { ...held.data, body, version: envelope.version, ts: envelope.ts, final: Boolean(envelope.final), truncated: false };
+      const item = held.item && { ...held.item, text: body, timestamp: envelope.ts, truncated: false };
+      keep(envelope.itemId, { data, item, bytes: held.bytes + utf8Length(envelope.text) });
+      return { stream: envelope.stream, sessionId: envelope.sessionId, seq: envelope.seq, type: "item", data, item };
+    }
+    const row = envelope.data || {};
+    if (row.itemId && row.op === "remove") rows.delete(row.itemId);
+    else if (row.itemId) keep(row.itemId, { data: row, item: envelope.item, bytes: utf8Length(row.body || "") });
+    return envelope;
+  };
+}
+
 export function promptOrigin(value) {
   if (value.role === "peer") return "peer";
   return value.origin || "";

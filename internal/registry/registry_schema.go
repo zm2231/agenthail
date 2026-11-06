@@ -331,6 +331,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
 	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -354,9 +355,18 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	body BLOB NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	written_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
+CREATE TABLE IF NOT EXISTS session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
+);
+CREATE INDEX IF NOT EXISTS session_journal_body_tail_session ON session_journal_body_tail(session_id);
 CREATE TABLE IF NOT EXISTS session_credentials (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,

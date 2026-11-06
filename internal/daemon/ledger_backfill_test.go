@@ -14,7 +14,7 @@ import (
 )
 
 func journalSource(d *Daemon, session surface.Session, adapter surface.Surface) *sessionSource {
-	return &sessionSource{manager: d.sources, session: session, adapter: adapter, epoch: "test", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	return &sessionSource{manager: d.sources, session: session, adapter: adapter, epoch: "test", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 }
 
 func typedPrompt(id, promptID, text string, at time.Time) surface.TimelineItem {
