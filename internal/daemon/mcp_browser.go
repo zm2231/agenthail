@@ -11,7 +11,7 @@ import (
 const browserHowTo = "Drive this tab with snapshot, then act on a ref from it (kind click, type, select, hover, drag, press, scroll or upload); refs last until the next snapshot. Use wait for text, a ref, a URL or network idle. A dialog blocks the page until you answer it with dialog. Tabs stay open between turns; close the ones you opened before you reply unless the person uses them."
 
 type mcpBrowserInput struct {
-	Action       string   `json:"action" jsonschema:"open, navigate, snapshot, act, wait, dialog, resize, list or close."`
+	Action       string   `json:"action" jsonschema:"servers, open, navigate, snapshot, act, wait, dialog, resize, list or close."`
 	Tab          string   `json:"tab,omitempty" jsonschema:"Tab id from open or list."`
 	URL          string   `json:"url,omitempty" jsonschema:"open, navigate; wait: a URL part to reach."`
 	IncludeImage bool     `json:"includeImage,omitempty" jsonschema:"snapshot: also save a screenshot; its path is returned."`
@@ -32,6 +32,9 @@ type mcpBrowserInput struct {
 func (d *Daemon) mcpBrowser(ctx context.Context, caller *mcpCaller, input mcpBrowserInput) (any, error) {
 	if !caller.has("browser.drive") {
 		return nil, refuse("capability_missing", "Driving the browser needs browser.drive.")
+	}
+	if input.Action == "servers" {
+		return d.browserServers(caller)
 	}
 	if d.browserHost == nil {
 		return nil, refuse("unavailable", "This daemon runs no browser host.")
@@ -94,7 +97,7 @@ func browserCall(owner string, input mcpBrowserInput) (map[string]any, time.Dura
 		params["width"], params["height"] = input.Width, input.Height
 	case "list", "close":
 	default:
-		return nil, 0, refuse("invalid", "action must be open, navigate, snapshot, act, wait, dialog, resize, list or close.")
+		return nil, 0, refuse("invalid", "action must be servers, open, navigate, snapshot, act, wait, dialog, resize, list or close.")
 	}
 	return params, timeout, nil
 }
