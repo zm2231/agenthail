@@ -140,3 +140,20 @@ func TestAnUpgradeCountsEverySessionThatWentOfflineAsEnded(t *testing.T) {
 		}
 	}
 }
+
+func TestARetiredSubagentMovedUnderAnotherParentComesBack(t *testing.T) {
+	r := openTestRegistry(t)
+	recordCodexThread(t, r, codexThread("root", "", "", 0, true))
+	recordCodexThread(t, r, codexThread("child", "root", "root", 1, true))
+	recordCodexThread(t, r, codexThread("other", "", "", 0, false))
+	codexSweep(t, r, "root", "child", "other")
+	if !isRetired(t, r, "child") || isRetired(t, r, "other") {
+		t.Fatal("fixture: the child should retire under its ended root and the held thread should not")
+	}
+	if err := r.RegisterSession(codexThread("child", "other", "other", 1, true)); err != nil {
+		t.Fatal(err)
+	}
+	if isRetired(t, r, "child") {
+		t.Fatal("a subagent moved under an unretired parent stayed retired, so that parent's rollup misses it")
+	}
+}
