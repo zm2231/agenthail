@@ -2,10 +2,9 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { renderProjects } from "./projects.js";
 import { scopedSessions } from "./session-scope.js";
-import { listOrderScopes, orderReady } from "./session-order.js";
+import { listedTotal, listingHasMore, listOrderScopes, orderReady } from "./session-order.js";
 import { displayName, rawDisplayName } from "./session-labels.js";
 import { remoteHostName } from "./hosts.js";
-import { backgroundWaiting } from "./presence.js";
 import { sessionButton } from "./session-row.js";
 import { escape, labels } from "./format.js";
 
@@ -47,25 +46,15 @@ export function renderSessions() {
   }
   $("#session-filters").hidden = false;
   $("#show-archived-row").hidden = false;
-  const sessions = scopedSessions().filter((session) => {
-    const matchesQuery =
-      !query ||
-      `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`
-        .toLowerCase()
-        .includes(query);
-    const matchesSurface =
-      app.filters.surface === "all" || session.surface === app.filters.surface;
-    const matchesStatus =
-      app.filters.status === "all" ||
-      session.status === app.filters.status ||
-      (app.filters.status === "background" && backgroundWaiting(session)) ||
-      (app.filters.status === "unavailable" &&
-        ["unknown", "notLoaded"].includes(session.status));
-    return matchesQuery && matchesSurface && matchesStatus;
-  });
+  const paged = app.inboxMode === "all";
+  const sessions = paged ? scopedSessions() : scopedSessions().filter((session) =>
+    !query || `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`.toLowerCase().includes(query));
   const visible = sessions.slice(0, app.sessionLimit);
+  const listScopes = listOrderScopes();
+  const total = paged ? listScopes.reduce((sum, key) => sum + (listedTotal(key) ?? 0), 0) : sessions.length;
+  const hasMore = paged && (visible.length < sessions.length || listScopes.some(listingHasMore));
   const historyResults = app.codexSearch.query === query ? app.codexSearch.results : [];
-  $("#conversation-count").textContent = `${sessions.length}`;
+  $("#conversation-count").textContent = `${total}`;
   $("#session-tools").classList.toggle("hidden", app.inboxMode !== "all");
   syncInboxModeButtons();
   $("#filter-summary").textContent =
@@ -73,9 +62,9 @@ export function renderSessions() {
       ? sessions.length
         ? `Open Claude sessions, working or queued work, and recent sessions (Codex ${app.state.codexRecentHours || 5}-hour window)`
         : "Nothing current right now"
-      : sessions.length > visible.length
-        ? `Showing ${visible.length} of ${sessions.length}`
-        : `${sessions.length} conversations`;
+      : hasMore
+        ? `Showing ${visible.length} of ${total}`
+        : `${total} conversations`;
   const sessionItems = visible.map(sessionButton).join("");
   const historyItems = historyResults
     .map(
@@ -95,8 +84,8 @@ export function renderSessions() {
       ? `${sessionItems}${searchStatus}${historyItems}`
       : `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Search to find an older Codex conversation." : "No conversations in this view."}</p></div>`;
   const more = $("#session-more");
-  more.hidden = app.inboxMode !== "all" || visible.length >= sessions.length;
-  more.textContent = `Show more (${sessions.length - visible.length})`;
+  more.hidden = !hasMore;
+  more.textContent = `Show more (${Math.max(0, total - visible.length)})`;
 }
 
 export function syncInboxModeButtons() {
