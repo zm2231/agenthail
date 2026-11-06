@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,8 +13,10 @@ func (c *Codex) Ended(ctx context.Context, sess *surface.Session) bool {
 	if sess.RuntimeKind != surface.RuntimeCodexAppServer {
 		return false
 	}
-	probe := *sess
-	client, err := c.openRoute(ctx, &probe)
+	client, err := c.openKeptRoute(ctx, sess)
+	if errors.Is(err, surface.ErrDeliveryHeld) {
+		return false
+	}
 	if err != nil {
 		return true
 	}
@@ -31,9 +34,37 @@ func (c *Codex) Wake(ctx context.Context, sess *surface.Session) error {
 		return surface.DeliveryUnavailable(err)
 	}
 	defer releaseCodexWriteLock(lock)
-	client, err := c.openWriter(ctx, sess)
+	client, err := c.openKeptRoute(ctx, sess)
 	if err != nil {
 		return err
 	}
-	return client.Close()
+	defer client.Close()
+	return c.requireDirectInput(ctx, client, sess)
+}
+
+// openKeptRoute opens the app-server for a thread it owns. A thread Desktop
+// has loaded or would take is held by Desktop and left alone.
+func (c *Codex) openKeptRoute(ctx context.Context, sess *surface.Session) (codexClient, error) {
+	runtimes := c.openRuntimes(ctx)
+	if err := runtimes.ownershipUnknown(); err != nil {
+		runtimes.Close()
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	held := surface.DeliveryUnavailable(fmt.Errorf("%w: Codex Desktop holds thread %s", surface.ErrDeliveryHeld, sess.ID))
+	if runtimes.desktopLoaded[sess.ID] {
+		runtimes.Close()
+		return nil, held
+	}
+	probe := *sess
+	c.resolveRoute(ctx, runtimes, &probe)
+	if probe.Transport != codexTransportManaged {
+		runtimes.Close()
+		return nil, held
+	}
+	if runtimes.managed != nil {
+		runtimes.release(runtimes.managed)
+		return runtimes.managed, nil
+	}
+	runtimes.Close()
+	return c.openManaged(ctx)
 }

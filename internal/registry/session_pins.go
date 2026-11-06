@@ -93,9 +93,21 @@ func (r *Registry) ClearSessionStop(sessionID string) error {
 }
 
 func (r *Registry) PinnedSessions() ([]PinnedSession, error) {
+	return r.pinnedSessions(``)
+}
+
+func (r *Registry) PinnedSession(sessionID string) (PinnedSession, bool, error) {
+	sessions, err := r.pinnedSessions(` AND s.id=?`, sessionID)
+	if err != nil || len(sessions) == 0 {
+		return PinnedSession{}, false, err
+	}
+	return sessions[0], true, nil
+}
+
+func (r *Registry) pinnedSessions(filter string, args ...any) ([]PinnedSession, error) {
 	rows, err := r.read.Query(`SELECT s.id,s.pinned_at_ms,COALESCE(k.attempts,0),COALESCE(k.first_attempt_ms,0),COALESCE(k.next_attempt_ms,0),COALESCE(k.healthy_since_ms,0),COALESCE(k.failed_at_ms,0),COALESCE(k.announced,0),COALESCE(k.error,'')
 		FROM sessions s LEFT JOIN session_keep_alive k ON k.session_id=s.id
-		WHERE s.pinned_at_ms>0 AND (s.stopped_at_ms=0 OR s.stopped_at_ms<s.last_active_ms) AND ` + liveLocalSession + ` ORDER BY s.rowid`)
+		WHERE s.pinned_at_ms>0 AND (s.stopped_at_ms=0 OR s.stopped_at_ms<s.last_active_ms) AND `+liveLocalSession+filter+` ORDER BY s.rowid`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -40,15 +40,26 @@ func (d *Daemon) keepPinned(ctx context.Context, now time.Time) {
 		d.log.Printf("read pinned sessions: %s", err)
 		return
 	}
-	for _, p := range pinned {
+	for _, listed := range pinned {
 		if ctx.Err() != nil {
 			return
 		}
-		d.keepSession(ctx, p, now)
+		d.keepSession(ctx, listed.Session.ID, now)
 	}
 }
 
-func (d *Daemon) keepSession(ctx context.Context, p registry.PinnedSession, now time.Time) {
+// keepSession holds the session's keep lock, which pin, unpin, stop and
+// resume also take, so what it reads stays true until it has written.
+func (d *Daemon) keepSession(ctx context.Context, sessionID string, now time.Time) {
+	unlock, ok := d.keepLocks.acquire(sessionID, false)
+	if !ok {
+		return
+	}
+	defer unlock()
+	p, found, err := d.Registry.PinnedSession(sessionID)
+	if err != nil || !found {
+		return
+	}
 	session := p.Session
 	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned {
 		return

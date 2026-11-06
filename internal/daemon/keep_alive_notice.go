@@ -50,6 +50,9 @@ func (d *Daemon) announceKeepAliveFailed(session surface.Session, state registry
 	key := "keep-alive-" + session.ID
 	started := d.background.start(func(ctx context.Context) {
 		defer finished()
+		if current, found, err := d.Registry.PinnedSession(session.ID); err != nil || !found || !current.KeepAlive.FailedAt.Equal(state.FailedAt) || current.KeepAlive.Announced {
+			return
+		}
 		if err := d.notifyDesktop("Agenthail", keepAliveFailedText(d.resolveDisplay(conversationID)), conversationID, "agenthail-"+key, "", nil); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}

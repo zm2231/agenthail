@@ -8,6 +8,8 @@ import (
 )
 
 func (d *Daemon) doSessionPin(pin bool, sessionID string) (actionResult, error) {
+	unlock, _ := d.keepLocks.acquire(sessionID, true)
+	defer unlock()
 	var pinnedAt time.Time
 	var err error
 	if pin {

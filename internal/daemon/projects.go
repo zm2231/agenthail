@@ -664,6 +664,8 @@ func (d *Daemon) forwardProjectAction(ctx context.Context, host *pairedHost, req
 }
 
 func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
+	unlock, _ := d.keepLocks.acquire(sessionID, true)
+	defer unlock()
 	var err error
 	if action == "session-archive" {
 		task, found, taskErr := d.Registry.TaskForChild(sessionID)

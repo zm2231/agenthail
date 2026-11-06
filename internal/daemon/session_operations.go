@@ -82,6 +82,10 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 			err = surface.ErrUnsupported
 			break
 		}
+		if action == "session-lifecycle-stop" || action == "session-lifecycle-resume" {
+			unlock, _ := d.keepLocks.acquire(session.ID, true)
+			defer unlock()
+		}
 		addressed := *session
 		result, err = lifecycle.SessionAction(ctx, session, strings.TrimPrefix(action, "session-lifecycle-"))
 		if err == nil {

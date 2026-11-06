@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,14 +15,26 @@ import (
 
 type keptSurface struct {
 	*daemonSurface
-	ended   map[string]bool
-	wakeErr error
-	woken   []string
+	mu       sync.Mutex
+	ended    map[string]bool
+	wakeErr  error
+	woken    []string
+	inWake   func()
+	inAction func()
 }
 
-func (k *keptSurface) Ended(_ context.Context, sess *surface.Session) bool { return k.ended[sess.ID] }
+func (k *keptSurface) Ended(_ context.Context, sess *surface.Session) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.ended[sess.ID]
+}
 
 func (k *keptSurface) Wake(_ context.Context, sess *surface.Session) error {
+	if k.inWake != nil {
+		k.inWake()
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	k.woken = append(k.woken, sess.ID)
 	if k.wakeErr != nil {
 		return k.wakeErr
@@ -31,8 +44,19 @@ func (k *keptSurface) Wake(_ context.Context, sess *surface.Session) error {
 }
 
 func (k *keptSurface) SessionAction(_ context.Context, sess *surface.Session, action string) (map[string]any, error) {
+	if k.inAction != nil {
+		k.inAction()
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	k.ended[sess.ID] = action == "stop"
 	return map[string]any{"sessionId": sess.ID, "action": action}, nil
+}
+
+func (k *keptSurface) wakes() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.woken)
 }
 
 func keptFixture(t *testing.T) (*Daemon, *registry.Registry, *keptSurface) {
@@ -138,6 +162,54 @@ func TestAPinnedSessionThatCannotBeBroughtBackBacksOffThenNeedsThePersonOnce(t *
 	d.keepPinned(context.Background(), at)
 	if len(kept.woken) != len(keepAliveBackoff)+1 {
 		t.Fatalf("the person's resume did not start the keeper over: %d wakes", len(kept.woken))
+	}
+}
+
+func TestAPinDuringAFailingWakeLeavesNoFailureBehind(t *testing.T) {
+	d, r, kept := keptFixture(t)
+	pinAction(t, d, "session-pin", "to")
+	now := time.Now()
+	if err := r.SaveKeepAlive("to", registry.KeepAlive{Attempts: len(keepAliveBackoff) - 1, FirstAttempt: now, NextAttempt: now}); err != nil {
+		t.Fatal(err)
+	}
+	kept.ended["to"] = true
+	kept.wakeErr = errors.New("Claude refused to resume")
+	waking, release := make(chan struct{}), make(chan struct{})
+	kept.inWake = func() { close(waking); <-release }
+	keeping := make(chan struct{})
+	go func() { d.keepPinned(context.Background(), now); close(keeping) }()
+	<-waking
+	pinned := make(chan struct{})
+	go func() { pinAction(t, d, "session-pin", "to"); close(pinned) }()
+	select {
+	case <-pinned:
+		t.Fatal("the pin finished while the keeper was mid-wake")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-keeping
+	<-pinned
+	p, found, err := r.PinnedSession("to")
+	if err != nil || !found || p.KeepAlive != (registry.KeepAlive{}) {
+		t.Fatalf("after the pin the keeper state is %+v (found=%v err=%v)", p.KeepAlive, found, err)
+	}
+}
+
+func TestTheKeeperNeverWakesASessionBeingStopped(t *testing.T) {
+	d, _, kept := keptFixture(t)
+	pinAction(t, d, "session-pin", "to")
+	kept.ended["to"] = true
+	stopping, release := make(chan struct{}), make(chan struct{})
+	kept.inAction = func() { close(stopping); <-release }
+	stopped := make(chan struct{})
+	go func() { pinAction(t, d, "session-lifecycle-stop", "to"); close(stopped) }()
+	<-stopping
+	d.keepPinned(context.Background(), time.Now())
+	close(release)
+	<-stopped
+	d.keepPinned(context.Background(), time.Now().Add(time.Minute))
+	if kept.wakes() != 0 {
+		t.Fatalf("the keeper woke a session being stopped %d times", kept.wakes())
 	}
 }
 
