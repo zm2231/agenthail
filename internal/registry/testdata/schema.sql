@@ -1,4 +1,4 @@
--- schemaVersion 69
+-- schemaVersion 70
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -961,7 +961,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_catalog_sessions_update
-CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions
+CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

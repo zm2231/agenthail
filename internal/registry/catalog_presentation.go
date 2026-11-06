@@ -13,6 +13,11 @@ type CatalogPresentationSubagent struct {
 	Nickname, Role   string
 }
 
+type CatalogPresentationFreshness struct {
+	Generation uint64
+	Stale      bool
+}
+
 type CatalogPresentationRow struct {
 	ID, HostID                             string
 	Name, Surface, Status, Cwd             string
@@ -25,7 +30,7 @@ type CatalogPresentationRow struct {
 	Alias                                  sql.NullString
 	QueueCount                             int
 	Archived                               bool
-	Freshness                              CatalogFreshness
+	Freshness                              CatalogPresentationFreshness
 	Attention                              string
 	Retired                                bool
 	PinnedAt                               time.Time
@@ -134,14 +139,14 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 	for rows.Next() {
 		var row CatalogPresentationRow
 		var lastActive int64
-		var observed, registered string
+		var registered string
 		var subagent CatalogPresentationSubagent
 		var waiting, background, limit, stop string
 		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
 		var snoozeWake string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
-			&row.Alias, &row.QueueCount, &row.Archived, &observed, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
+			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
 			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake); err != nil {
 			return nil, err
 		}
@@ -157,9 +162,6 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 			row.Subagent = &subagent
 		}
 		row.WaitingOn, row.BackgroundTasks, row.UsageLimit, row.TurnStop = presentationJSON(waiting), presentationJSON(background), presentationJSON(limit), presentationJSON(stop)
-		if row.Freshness.ObservedAt, err = parseTimestamp(observed); err != nil {
-			return nil, err
-		}
 		result = append(result, row)
 	}
 	return result, rows.Err()
@@ -228,7 +230,7 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),CAST(cs.turn_stop AS TEXT),
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
- cs.observed_at,cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
+ cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
  COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
  s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake
  `
