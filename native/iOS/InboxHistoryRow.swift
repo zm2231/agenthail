@@ -18,13 +18,7 @@ struct InboxHistoryRow: View {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
             }
-            Button(action: openSession) {
-                HStack {
-                    Text(message.target).font(.headline)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.caption)
-                }.frame(minHeight: 44, alignment: .leading)
-            }.buttonStyle(.plain).accessibilityIdentifier("inbox-message-\(message.id)")
+            InboxSessionLink(title: message.target, identifier: "inbox-message-\(message.id)", open: openSession)
             if let sender { Text("From \(sender)").font(.footnote).foregroundStyle(PhonePalette.muted) }
             Text(envelope.body).font(.body).lineLimit(4).textSelection(.enabled)
             if message.truncated == true {
