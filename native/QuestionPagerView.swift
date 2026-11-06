@@ -4,14 +4,16 @@ struct QuestionPagerView: View {
     let request: SessionRequest
     let answering: Bool
     let accent: AnyShapeStyle
+    let actionTint: AnyShapeStyle?
     let respond: (RequestDecision) -> Void
     @State private var pager: QuestionPager
     @FocusState private var focused: Bool
 
-    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, respond: @escaping (RequestDecision) -> Void) {
+    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, actionTint: AnyShapeStyle? = nil, respond: @escaping (RequestDecision) -> Void) {
         self.request = request
         self.answering = answering
         self.accent = accent
+        self.actionTint = actionTint
         self.respond = respond
         _pager = State(initialValue: QuestionPagerDrafts.shared.pager(for: request))
     }
@@ -185,10 +187,10 @@ struct QuestionPagerView: View {
         HStack {
             if pager.ask, pager.onReview || pager.isSingle {
                 let ready = !answering && pager.canSubmit
-                PagerActionButton(title: pager.isSingle ? "Submit" : "Submit answers", prominent: ready, enabled: ready, action: advance)
+                PagerActionButton(title: pager.isSingle ? "Submit" : "Submit answers", prominent: ready, enabled: ready, tint: actionTint, action: advance)
             } else if pager.ask {
                 let answered = pager.isAnswered(pager.step)
-                PagerActionButton(title: answered ? "Next" : "Skip", prominent: answered, enabled: !answering, action: advance)
+                PagerActionButton(title: answered ? "Next" : "Skip", prominent: answered, enabled: !answering, tint: actionTint, action: advance)
             } else if pager.onReview || (pager.isSingle && !pager.isOneTap) {
                 Button(pager.isSingle ? "Submit" : "Submit answers") { advance() }
                     .buttonStyle(.borderedProminent)

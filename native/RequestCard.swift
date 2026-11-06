@@ -11,6 +11,7 @@ struct RequestCard: View {
     var asker: String = "The agent"
     var attention = AnyShapeStyle(RoleStyle(.needsYou))
     var surface: AnyShapeStyle? = AnyShapeStyle(.regularMaterial)
+    var actionTint: AnyShapeStyle? = nil
     @State private var form = ElicitationForm()
 
     var heading: String { Self.heading(request, asker: asker) }
@@ -37,7 +38,7 @@ struct RequestCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(request.isAsk ? attention : accent)
                 if request.usesPager {
-                    QuestionPagerView(request: request, answering: answering, accent: accent, respond: respond)
+                    QuestionPagerView(request: request, answering: answering, accent: accent, actionTint: actionTint, respond: respond)
                 } else {
                     Text(request.summary).font(.body.weight(.medium))
                     if let description = request.description, !description.isEmpty {

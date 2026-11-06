@@ -762,7 +762,7 @@ struct SessionScreen: View {
                                 respond: { decision in Task { await model.respond(to: request, sessionID: session.id, decision: decision) } },
                                 leadNow: request.replacedBy.map { model.leadName($0, requestFrom: session.id) },
                                 withdraw: request.replacedBy == nil ? nil : { Task { await model.withdraw(request, sessionID: session.id) } },
-                                asker: liveSession.displayName, attention: AnyShapeStyle(PhonePalette.attention))
+                                asker: liveSession.displayName, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent))
                     .id(request.id)
                     .padding(.horizontal)
                     .padding(.top, 6)

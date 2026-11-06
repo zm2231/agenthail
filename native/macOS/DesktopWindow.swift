@@ -706,7 +706,7 @@ struct ConversationPane: View {
                                             respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
                                             leadNow: request.replacedBy.map { model.sessionName($0) },
                                             withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } },
-                                            asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil)
+                                            asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent))
                                 .id(request.id)
                                 .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
                                 .scrimSurface(radius: 12)

@@ -108,6 +108,7 @@ struct PagerActionButton: View {
     let title: String
     let prominent: Bool
     let enabled: Bool
+    var tint: AnyShapeStyle? = nil
     let action: () -> Void
 
     var body: some View {
@@ -115,6 +116,7 @@ struct PagerActionButton: View {
             Button(title, action: action)
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
+                .tint(tint)
                 .disabled(!enabled)
                 .help("⏎ \(title)")
         } else {
