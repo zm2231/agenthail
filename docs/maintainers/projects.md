@@ -197,7 +197,9 @@ A request for the person outranks a snooze, so snoozing never hides one.
 `session-snooze` takes `sessionId` and either `until` (an RFC 3339 time in the
 future) or `wake: "finished"`. A `until` snooze holds until that time. A
 `finished` snooze holds while the turn that was running when it was set keeps
-running; it needs a working session. Archived sessions cannot be snoozed.
+running; it needs a working session. A session that is archived, or whose
+project is, cannot be snoozed but can be woken. Times are kept to the
+millisecond.
 `session-wake` takes `sessionId` and clears the snooze. Both answer the new
 `snooze` and the `previous` one, so a client undoes either by sending the
 previous snooze back, or `session-wake` when there was none. From the CLI:

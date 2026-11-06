@@ -11,19 +11,14 @@ import (
 )
 
 func (d *Daemon) doSessionSnooze(session *surface.Session, until time.Time, wake string) (actionResult, error) {
-	now := time.Now().UTC()
-	snooze, err := requestedSnooze(session, until, wake, now)
+	snooze, err := requestedSnooze(session, until, wake, time.Now().UTC().Truncate(time.Millisecond))
 	if err != nil {
 		return actionResult{}, err
 	}
-	archive, err := d.Registry.ArchiveState()
-	if err != nil {
-		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
-	}
-	if _, archived := archive.Sessions[session.ID]; archived {
-		return actionResult{}, conflict("an archived session cannot be snoozed; unarchive it first")
-	}
 	previous, err := d.Registry.SnoozeSession(session.ID, snooze)
+	if errors.Is(err, registry.ErrSnoozeArchived) {
+		return actionResult{}, conflict(err.Error())
+	}
 	return d.snoozeResult(session.ID, snoozeRow(snooze), previous, err)
 }
 
@@ -43,7 +38,7 @@ func requestedSnooze(session *surface.Session, until time.Time, wake string, now
 		if !until.After(now) {
 			return registry.Snooze{}, actionFailed(http.StatusBadRequest, "bad_request", "until must be in the future")
 		}
-		return registry.Snooze{At: now, Until: until.UTC(), Wake: registry.SnoozeWakeTime}, nil
+		return registry.Snooze{At: now, Until: until.UTC().Truncate(time.Millisecond), Wake: registry.SnoozeWakeTime}, nil
 	}
 	return registry.Snooze{}, actionFailed(http.StatusBadRequest, "bad_request", `give either until or wake "finished"`)
 }

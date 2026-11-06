@@ -64,6 +64,9 @@ func TestASnoozeUntilFinishedLastsOnlyForTheTurnItWasSetIn(t *testing.T) {
 	if got := sessionInbox(turn("working", now), now); got != InboxRunning {
 		t.Fatalf("a later turn stayed snoozed: %q", got)
 	}
+	if got := sessionInbox(turn("working", snooze.SnoozedAt.Add(400*time.Microsecond)), now); got != InboxSnoozed {
+		t.Fatalf("a turn busy since the snooze's own millisecond counted as later: %q", got)
+	}
 }
 
 func TestTheViewIsRereadWhenASnoozeEnds(t *testing.T) {

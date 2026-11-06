@@ -1,9 +1,40 @@
 package registry
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestASessionOrProjectArchiveRefusesASnoozeButNotAWake(t *testing.T) {
+	r := openTestRegistry(t)
+	recordEndedRow(t, r, surface.Session{ID: "member"}, `{"id":"member","current":false}`)
+	recordEndedRow(t, r, surface.Session{ID: "alone"}, `{"id":"alone","current":false}`)
+	if _, err := r.db.Exec(`UPDATE catalog_sessions SET host_project=? WHERE session_id='member'`, []byte(`{"id":"repo:x","localId":"p-x"}`)); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	snooze := Snooze{At: at, Until: at.Add(time.Hour), Wake: SnoozeWakeTime}
+	if _, err := r.SnoozeSession("member", snooze); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ArchiveProject(ProjectRecord{ID: "p-x", WorkspaceRoot: "/fixture", Title: "x"}, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ArchiveSession("alone", at); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"member", "alone"} {
+		if _, err := r.SnoozeSession(id, snooze); !errors.Is(err, ErrSnoozeArchived) {
+			t.Fatalf("snoozing archived %s: %v", id, err)
+		}
+	}
+	if previous, err := r.WakeSession("member"); err != nil || previous != snooze {
+		t.Fatalf("waking an archived session: %+v %v", previous, err)
+	}
+}
 
 func TestPinAndSnoozeComeBackFromOneReadAndAWakeReturnsTheSnooze(t *testing.T) {
 	r := coordinatorRegistry(t, "pinned", "snoozed", "both", "plain")
