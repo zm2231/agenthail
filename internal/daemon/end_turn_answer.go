@@ -123,5 +123,5 @@ func (d *Daemon) answerTurnEnd(ctx context.Context, adapter surface.Surface, ses
 
 func (d *Daemon) publishTurnAnswer(sessionID string) {
 	d.requestCatalogDiscovery()
-	d.publishEvent("state.changed", sessionID, map[string]string{"source": "turn-answer"})
+	d.publishEvent("state.changed", sessionID, map[string]string{"source": "ask-answered"})
 }
