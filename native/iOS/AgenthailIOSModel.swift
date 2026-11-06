@@ -1297,7 +1297,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         }
         do {
             let (connection, route) = try resolveServer(id)
-            var detail = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true)
+            var detail = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, waitForCatchUp: false)
             detail.session.id = id
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID, server(for: id) === connection else { return }
             if !olderActivity.isEmpty {
@@ -1480,7 +1480,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         let requestServer = server(for: id)
         do {
             let (connection, route) = try resolveServer(id)
-            let page = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor)
+            let page = try await connection.api.sessionDetail(id: route.sessionID, includeTimeline: true, timelineBefore: cursor, waitForCatchUp: false)
             guard selectedSessionID == id, server(for: id) === connection, activityCursor == cursor else { return }
             guard let timeline = page.timeline, timeline.unavailableReason == nil else {
                 throw AgenthailAPIError.unavailable(page.timeline?.unavailableReason ?? "Older activity is unavailable.")

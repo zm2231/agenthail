@@ -123,7 +123,7 @@ func (d *Daemon) mcpReadBack(ctx context.Context, session *surface.Session, curs
 	if err != nil {
 		return nil, refuse("unsupported_surface", "This session's surface is not configured.")
 	}
-	page, err := d.readSessionPage(ctx, session, adapter, before, limit, surfaceOperationTimeout)
+	page, _, err := d.readSessionPage(ctx, session, adapter, before, limit, surfaceOperationTimeout, true)
 	var gap *registry.SessionJournalHistoryGapError
 	if errors.As(err, &gap) {
 		return map[string]any{"sessionId": session.ID, "items": []mcpItemView{}, "truncated": false, "unavailable": "No older history is retained."}, nil

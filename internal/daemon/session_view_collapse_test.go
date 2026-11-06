@@ -33,3 +33,25 @@ func TestIdleFamiliesFillWhatTheActiveOnesLeaveOfFive(t *testing.T) {
 		t.Fatalf("every active family stays shown and no idle one is added past five: %v", got)
 	}
 }
+
+func TestTheCollapsedListingHoldsEachProjectsCollapsedFamiliesInViewOrder(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	rows := []dashboardSession{}
+	for _, id := range []string{"a", "b"} {
+		project := &CatalogProject{ID: id, DisplayName: id}
+		for i := range 7 {
+			rows = append(rows, dashboardSession{ID: fmt.Sprint(id, i), Status: surface.StatusIdle, Project: project, LastActive: now.Add(-time.Hour - time.Duration(i)*time.Minute)})
+		}
+	}
+	plan := newSessionViewPlan(rows, "all", SessionViewFilters{Collapsed: true}, now)
+	ids := []string{}
+	for _, family := range collapsedFamilies(plan.view) {
+		ids = append(ids, family.ID)
+	}
+	if want := []string{"a0", "b0", "a1", "b1", "a2", "b2", "a3", "b3", "a4", "b4"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("collapsed listing=%v want=%v", ids, want)
+	}
+	if plan.view.Counts["all"].Families != 14 {
+		t.Fatalf("the collapsed listing changed the counts: %+v", plan.view.Counts)
+	}
+}

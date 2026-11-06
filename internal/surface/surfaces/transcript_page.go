@@ -69,10 +69,14 @@ func readTranscriptWindow(ctx context.Context, path, source string, floor, befor
 	if floor > end {
 		return nil, fmt.Errorf("activity transcript changed; refresh the session")
 	}
+	starts := newClaudeTurnStartSearch()
+	if source == "codex" {
+		starts = newCodexTurnStartSearch()
+	}
 	for window := timelineFirstWindow; ; window *= 2 {
 		window = min(window, timelineReadBudget)
 		page := *result
-		complete, err := readTranscriptSpan(ctx, file, path, source, floor, max(floor, end-window), end, completeEnd, before, limit, settled, &page)
+		complete, err := readTranscriptSpan(ctx, file, path, source, floor, max(floor, end-window), end, completeEnd, before, limit, settled, starts, &page)
 		if err != nil {
 			return nil, err
 		}

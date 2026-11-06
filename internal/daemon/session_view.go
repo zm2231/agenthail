@@ -14,6 +14,7 @@ type SessionViewFilters struct {
 	Status     string `json:"status,omitempty"`
 	Attention  bool   `json:"attention,omitempty"`
 	SelectedID string `json:"selectedId,omitempty"`
+	Collapsed  bool   `json:"collapsed,omitempty"`
 }
 
 type SessionViewMember struct {

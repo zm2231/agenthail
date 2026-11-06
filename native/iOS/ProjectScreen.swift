@@ -49,22 +49,9 @@ struct ProjectScreen: View {
     private func content(_ project: ListedProject, _ contents: ProjectContents) -> some View {
         let computers = Set(project.state.checkouts.map(\.host.id)).count
         return List {
+            if contents.now.count > 0 { nowSection(contents.now) }
             Section("Lead") { leadCard(project, contents) }
-            if !contents.running.isEmpty {
-                Section("Running now · \(contents.running.count)") { ForEach(contents.running) { row($0) } }
-            }
-            Section {
-                if contents.recent.isEmpty {
-                    Text("Nothing in the last day").foregroundStyle(PhonePalette.muted)
-                }
-                ForEach(contents.recent) { row($0) }
-            } header: {
-                HStack {
-                    Text("Recent")
-                    Spacer()
-                    if !showingEarlier { Button("Earlier") { showingEarlier = true }.textCase(nil).accessibilityIdentifier("project-earlier") }
-                }
-            }
+            if contents.now.count == 0 { nowSection(contents.now) }
             if showingEarlier {
                 Section("Earlier") {
                     ForEach(contents.earlier) { row($0) }
@@ -101,6 +88,38 @@ struct ProjectScreen: View {
                 } label: {
                     Label("Project settings", systemImage: "ellipsis.circle")
                 }
+            }
+        }
+    }
+
+    private func nowSection(_ now: ProjectNow) -> some View {
+        Section {
+            if now.count == 0 {
+                Text("Nothing in the last day").foregroundStyle(PhonePalette.muted)
+            }
+            ForEach(now.groups) { group in
+                if now.showsGroups {
+                    Text(group.title)
+                        .font(.footnote.weight(.semibold)).foregroundStyle(PhonePalette.muted)
+                        .lineLimit(1).truncationMode(.middle)
+                        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden, edges: .bottom)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("project-now-group-" + group.id)
+                }
+                ForEach(group.sessions) { session in
+                    if now.showsGroups, session.id == group.sessions.first?.id {
+                        row(session).listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 11, trailing: 16))
+                    } else {
+                        row(session)
+                    }
+                }
+            }
+        } header: {
+            HStack {
+                Text(now.count == 0 ? "Now" : "Now · \(now.count)")
+                Spacer()
+                if !showingEarlier { Button("Earlier") { showingEarlier = true }.textCase(nil).accessibilityIdentifier("project-earlier") }
             }
         }
     }

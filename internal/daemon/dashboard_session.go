@@ -13,14 +13,21 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) readSessionPage(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int, operationTimeout time.Duration) (*surface.SessionReadResult, error) {
+func (d *Daemon) readSessionPage(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int, operationTimeout time.Duration, wait bool) (*surface.SessionReadResult, bool, error) {
 	if historyBefore, provider := decodeProviderHistoryCursor(before); provider {
 		historyCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 		defer cancel()
-		return d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
+		read, err := d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
+		return read, false, err
 	}
 	if before > 0 {
-		return d.readJournalPage(session.ID, uint64(before), limit)
+		read, err := d.readJournalPage(session.ID, uint64(before), limit)
+		return read, false, err
+	}
+	if !wait && d.sources.journalServable(session, adapter) {
+		caughtUp := d.sources.prime(ctx, session, adapter)
+		read, err := d.readJournalPage(session.ID, 0, limit)
+		return read, !caughtUp, err
 	}
 	seedCtx, cancel := context.WithTimeout(ctx, min(operationTimeout, sessionPageCatchUpWait))
 	seedErr := d.sources.seed(seedCtx, session, adapter)
@@ -29,7 +36,7 @@ func (d *Daemon) readSessionPage(ctx context.Context, session *surface.Session, 
 	if err == nil && seedErr != nil && read.JournalSeq == 0 {
 		err = seedErr
 	}
-	return read, err
+	return read, false, err
 }
 
 func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +88,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	sessionRead, sessionReadErr := d.readSessionPage(r.Context(), session, adapter, timelineBefore, limit, operationTimeout)
+	sessionRead, catchingUp, sessionReadErr := d.readSessionPage(r.Context(), session, adapter, timelineBefore, limit, operationTimeout, r.URL.Query().Get("wait") == "1")
 	var historyGap *registry.SessionJournalHistoryGapError
 	if errors.As(sessionReadErr, &historyGap) {
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{
@@ -97,6 +104,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "limitResume": d.limitResumeRow(session.ID), "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
+	response["catchingUp"] = catchingUp
 	if sessionReadErr != nil {
 		response["readError"] = "Session journal could not be read."
 	} else if sessionRead.UnavailableReason != "" {

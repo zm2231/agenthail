@@ -38,6 +38,10 @@ func parseSessionViewRequest(r *http.Request) (sessionViewRequest, error) {
 		return request, fmt.Errorf("members must be 1")
 	}
 	request.Members = q.Get("members") == "1"
+	if q.Has("collapsed") && q.Get("collapsed") != "1" {
+		return request, fmt.Errorf("collapsed must be 1")
+	}
+	request.Filters.Collapsed = q.Get("collapsed") == "1"
 	if q.Has("attention") && q.Get("attention") != "1" {
 		return request, fmt.Errorf("attention must be 1")
 	}

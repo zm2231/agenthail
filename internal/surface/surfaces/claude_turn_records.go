@@ -2,6 +2,8 @@ package surfaces
 
 import (
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 func claudeRecordStartsTurn(record map[string]any) bool {
@@ -48,4 +50,11 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 	default:
 		return false, false, false
 	}
+}
+
+func claudeLineMayStartTurn(line []byte) bool {
+	if gjson.GetBytes(line, "type").Str != "user" || gjson.GetBytes(line, "message.tool_use_id").Exists() {
+		return false
+	}
+	return !gjson.GetBytes(line, `message.content.#(type=="tool_result").type`).Exists()
 }

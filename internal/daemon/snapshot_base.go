@@ -46,6 +46,7 @@ type snapshotBaseContent struct {
 	Rekeyed          map[string]string           `json:"rekeyed,omitempty"`
 	Coordinators     []registry.CoordinatorEntry `json:"coordinators"`
 	Person           dashboardPerson             `json:"person"`
+	LeadReplacements []dashboardLeadReplacement  `json:"leadReplacements"`
 }
 
 // snapshotBase is the snapshot without sessions or anything derived from them,
@@ -72,7 +73,7 @@ func newSnapshotBase(state dashboardState) snapshotBase {
 	return snapshotBase{UpdatedAt: state.UpdatedAt, EventCursor: state.EventCursor, HostEpoch: state.HostEpoch, CatalogSeq: state.CatalogSeq, snapshotBaseContent: snapshotBaseContent{
 		Daemon: state.Daemon, Surfaces: state.Surfaces, Projects: projects, Queue: state.Queue, Channels: state.Channels, Relays: state.Relays,
 		Attention: state.Attention, DeliveryProblems: state.DeliveryProblems, CodexRecentHours: state.CodexRecentHours, BusyDelivery: state.BusyDelivery,
-		Signin: state.Signin, Rekeyed: state.Rekeyed, Coordinators: state.Coordinators, Person: state.Person,
+		Signin: state.Signin, Rekeyed: state.Rekeyed, Coordinators: state.Coordinators, Person: state.Person, LeadReplacements: state.LeadReplacements,
 	}}
 }
 
