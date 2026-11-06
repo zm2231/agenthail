@@ -33,10 +33,8 @@ struct FloatingGlass<S: Shape>: ViewModifier {
     func body(content: Content) -> some View {
         if let appearance {
             FloatingGlassBody(content: content, shape: shape, interactive: interactive, appearance: appearance)
-        } else if reduceTransparency {
-            content.solidFloating(in: shape)
         } else {
-            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: UIConfig.defaults.composerOpacity)
+            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, solid: reduceTransparency, opacity: UIConfig.defaults.composerOpacity)
         }
     }
 }
@@ -58,11 +56,8 @@ private struct FloatingGlassBody<Content: View, S: Shape>: View {
     }
 
     var body: some View {
-        if appearance.config.solidSurfaces(dark: colorScheme == .dark, reduceTransparency: reduceTransparency) {
-            content.solidFloating(in: shape)
-        } else {
-            FloatingGlassLayers(content: content, shape: shape, interactive: interactive, opacity: appearance.floatingOpacity(key))
-        }
+        let solid = appearance.config.solidSurfaces(reduceTransparency: reduceTransparency)
+        FloatingGlassLayers(content: content, shape: shape, interactive: interactive, solid: solid, opacity: solid ? 1 : appearance.floatingOpacity(key))
     }
 }
 
@@ -70,14 +65,18 @@ private struct FloatingGlassLayers<Content: View, S: Shape>: View {
     let content: Content
     let shape: S
     let interactive: Bool
+    let solid: Bool
     let opacity: Double
 
     var body: some View {
-        let tint = content.background(PhonePalette.ground.opacity(opacity), in: shape)
+        let tint = content
+            .background(PhonePalette.ground.opacity(solid ? 1 : opacity), in: shape)
+            .overlay { if solid { shape.stroke(PhonePalette.hairline) } }
+            .shadow(color: .black.opacity(solid ? 0.12 : 0), radius: solid ? 12 : 0, y: solid ? 4 : 0)
         if #available(iOS 26, *) {
-            tint.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            tint.glassEffect(solid ? .identity : interactive ? .regular.interactive() : .regular, in: shape)
         } else {
-            tint.background(.regularMaterial, in: shape)
+            tint.background { if !solid { shape.fill(.regularMaterial) } }
         }
     }
 }

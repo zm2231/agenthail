@@ -52,7 +52,7 @@ final class TranscriptScrimTests: XCTestCase {
         appearance.preview(try JSONDecoder().decode(UIConfig.self, from: data))
         let key = PhoneAppearance.Key(surface: .transcript, size: size, scale: 3, dark: dark, solid: solid, target: 4.5)
         let spec = appearance.spec(key)
-        let minimum: Float = solid ? 1 : Float(appearance.config.contentOpacity)
+        let minimum: Float = solid ? 1 : Float(appearance.config.paneOpacity)
         let layers = try XCTUnwrap(BackdropRenderer.layers(spec, panes: [.content: BackdropSpec.PaneStyle(minimum: minimum, strength: spec.strength)]))
         let roles = PhonePalette.textRoles(TextColors(appearance.config), dark: dark, increased: false).map { ScrimField.luminance($0.x, $0.y, $0.z) }
         return (layers, ScrimField.boundary(roles: roles, polarity: dark ? .dark : .light, target: 4.5))

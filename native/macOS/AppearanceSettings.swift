@@ -27,6 +27,7 @@ struct AppearanceSettings: View {
 
     var body: some View {
         Form {
+            UIConfigProblems(problems: config.problems)
             Section {
                 Picker("Apply changes to", selection: $draft.scope) {
                     Text("All devices").tag(AppearanceDraft.Scope.everywhere)
@@ -66,8 +67,7 @@ struct AppearanceSettings: View {
                 }
                 Group {
                     row("glass.blur", "Blur") { slider("glass.blur", label: "glass blur", range: 0...64, unit: " pt") }
-                    row("glass.sidebar.opacity", "Sidebar tint") { slider("glass.sidebar.opacity", label: "sidebar tint", range: 0...1) }
-                    row("glass.opacity", "Content tint") { slider("glass.opacity", label: "content tint", range: 0...1) }
+                    row("glass.opacity", "Pane tint") { slider("glass.opacity", label: "pane tint", range: 0...1) }
                     row("glass.composer.opacity", "Floating controls tint") { slider("glass.composer.opacity", label: "floating controls tint", range: 0...1) }
                     row("glass.tint", "Tint colour") {
                         Picker("Tint colour", selection: choice("glass.tint", label: "glass tint")) {

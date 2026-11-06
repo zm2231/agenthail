@@ -18,7 +18,7 @@ struct GlassRowBackground: View {
                     CardSlice(image: image, layer: cards.frame)
                 } else {
                     Rectangle().fill(.ultraThinMaterial)
-                    PhonePalette.ground.opacity(appearance?.config.sidebarOpacity ?? 1)
+                    PhonePalette.ground.opacity(appearance?.config.paneOpacity ?? 1)
                 }
             } else {
                 PhonePalette.ground.opacity(0.35)

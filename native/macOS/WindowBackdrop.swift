@@ -74,17 +74,14 @@ final class WindowBackdrop: ObservableObject {
         if self.gutter != gutter { self.gutter = gutter }
         if border != config.border { border = config.border }
         let workspace = NSWorkspace.shared
-        let solid = config.solidSurfaces(dark: dark, reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency)
+        let solid = config.solidSurfaces(reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency)
         if self.solid != solid { self.solid = solid }
         let floating = solid ? 1 : DesktopGlass.floatingOpacity(config, dark: dark, increaseContrast: workspace.accessibilityDisplayShouldIncreaseContrast)
         if composerOpacity != floating { composerOpacity = floating }
         let feather = CGFloat(config.scrimFeather)
         if self.feather != feather { self.feather = feather }
-        let tints: [PaneRole: CGFloat] = [
-            .sidebar: solid ? 1 : CGFloat(config.sidebarOpacity),
-            .content: solid ? 1 : CGFloat(config.contentOpacity),
-            .chrome: solid ? 1 : CGFloat(config.chromeOpacity),
-        ]
+        let tint = solid ? 1 : CGFloat(config.paneOpacity)
+        let tints: [PaneRole: CGFloat] = [.sidebar: tint, .content: tint, .chrome: tint]
         if self.tints != tints { self.tints = tints }
         if !wanted || layers.map({ $0.layers.polarity != polarity }) == true { layers = nil; rendered = nil }
         schedule()

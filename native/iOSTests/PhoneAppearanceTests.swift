@@ -56,7 +56,7 @@ final class PhoneAppearanceTests: XCTestCase {
 
         let relaunched = PhoneAppearance(cache: cache)
         XCTAssertEqual(relaunched.config, appearance.config)
-        XCTAssertEqual(relaunched.config.contentOpacity, 0.3)
+        XCTAssertEqual(relaunched.config.paneOpacity, 0.3)
     }
 
     func testAnUnreadableBackgroundKeepsTheLastGoodLook() async throws {
@@ -135,7 +135,7 @@ final class PhoneAppearanceTests: XCTestCase {
         appearance.preview(try config([
             "background": "mesh: 2x2, #102030, #203040, #304050, #405060",
             "background.opacity": 0.8, "background.session-opacity": 0.4,
-            "glass.opacity": 0.2, "glass.sidebar.opacity": 0.5, "texture": "scanlines",
+            "glass.opacity": 0.2, "texture": "scanlines",
         ]))
 
         let session = appearance.spec(key(.pane))
@@ -151,7 +151,7 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertEqual(list.texture, "scanlines")
 
         let cards = appearance.spec(key(.cards))
-        XCTAssertEqual(cards.panes.map(\.minimum), [0.5], "cards start from the sidebar tint")
+        XCTAssertEqual(cards.panes.map(\.minimum), [0.2], "cards start from the one pane tint")
         XCTAssertEqual(cards.panes.first?.rect, CGRect(x: 0, y: 0, width: 402, height: 874), "a card can scroll anywhere on screen")
         XCTAssertEqual(cards.texture, "none")
         XCTAssertEqual(cards.size, list.size)
@@ -224,7 +224,7 @@ final class PhoneAppearanceTests: XCTestCase {
         let appearance = PhoneAppearance(cache: nil)
         appearance.preview(try config([
             "background": "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #c8d0e0, #2e3340, #591948, #8a3049, #682e2c",
-            "glass.sidebar.opacity": 0.3,
+            "glass.opacity": 0.3,
         ]))
         let small = PhoneAppearance.Key(surface: .cards, size: CGSize(width: 200, height: 400), scale: 1, dark: dark, solid: solid, target: target)
         let spec = appearance.spec(small)

@@ -721,13 +721,13 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
 {
   const colours = { "var(--paper)": [0.09, 0.094, 0.102], "var(--ink)": [0.93, 0.92, 0.9], "var(--muted)": [0.75, 0.73, 0.7], "var(--quiet)": [0.6, 0.58, 0.56], "var(--accent)": [0.95, 0.45, 0.3] };
   const base = { sessionOpen: false, highContrast: false, reducedTransparency: false, colourOf: (v) => colours[v], width: 1440, height: 900 };
-  const values = { background: "none", glass: "on", "glass.tint": "ground", "glass.opacity": 0.18, "glass.sidebar.opacity": 0.45, "glass.chrome.opacity": 0, "glass.composer.opacity": 0.1, "glass.blur": 30, "glass.border": 0.08, "glass.gutter": 8 };
+  const values = { background: "none", glass: "on", "glass.tint": "ground", "glass.opacity": 0.25, "glass.composer.opacity": 0.1, "glass.blur": 30, "glass.border": 0.08, "glass.gutter": 8 };
   const look = backdropLook(values, "dark", base).glass;
   assert.equal(look.on, true);
-  assert.equal(backdropLook(values, "light", base).glass.on, false, "light draws solid panes, as on the Mac");
+  assert.equal(backdropLook(values, "light", base).glass.on, true, "light keeps glass, as on the Mac");
   assert.equal(backdropLook(values, "light", base).gutter, 8, "with the same gutter around them");
   assert.deepEqual(look.tint, colours["var(--paper)"], "the ground tint is the page's own ground");
-  assert.deepEqual(look.panes, { content: 0.18, sidebar: 0.45, chrome: 0, float: 0.2 }, "floating glass keeps at least 0.2 while readability is on");
+  assert.deepEqual(look.panes, { content: 0.25, sidebar: 0.25, chrome: 0.25, float: 0.2 }, "every pane takes the one glass tint; floating glass keeps at least 0.2 while readability is on");
   assert.equal(backdropLook({ ...values, "glass.readability": "off" }, "dark", base).glass.panes.float, 0.1, "readability off uses the settings exactly");
   assert.equal(backdropLook({ ...values, glass: "off" }, "dark", base).glass.on, false);
   assert.equal(backdropLook(values, "dark", { ...base, reducedTransparency: true }).glass.on, false, "reduced transparency draws solid panes");

@@ -45,16 +45,14 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `background.dim` | `0` | 0 to 0.8. Darkens the background in dark appearance, lightens it in light, before anything else. |
 | `background.opacity` | `1` | 0 to 1. Background strength on New Session and empty views. |
 | `background.session-opacity` | `1` | 0 to 1. Background strength inside a session. |
-| `glass` | `on` | `on` shows translucent panes over the background in dark mode; light mode and `off` use solid surfaces, with the background showing only around them. |
+| `glass` | `on` | `on` shows translucent panes over the background in light and dark appearance; `off` uses solid surfaces. Reduce Transparency always uses solid surfaces. |
 | `glass.blur` | `30` | 0 to 64. Blur radius in points behind panes. |
 | `glass.tint` | `ground` | Tint of panes: `ground`, `accent` or `#rrggbb`. |
-| `glass.opacity` | `0.18` | 0 to 1. Tint of the content pane. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
-| `glass.sidebar.opacity` | `0.45` | 0 to 1. Tint of the sidebar. |
-| `glass.chrome.opacity` | `0` | 0 to 1. Tint of the title bar and status strip. |
+| `glass.opacity` | `0.3` | 0 to 1. Tint of every pane: the sidebar, the content, the title bar and the inspector, so they read as one window. This is a minimum: it is raised around text where the text needs it, and margins and empty areas keep this tint. |
 | `glass.composer.opacity` | `0.5` | 0 to 1. Tint of floating glass: the message box, tab plates and popovers. With `glass.readability = auto` it rises to the least that keeps every text colour readable over the glass and the background under it: about 0.2 with the default colours and target, and more for fainter `color.*` values or a higher `contrast.target`. On the iPhone it also rises over bright art under it. |
 | `glass.readability` | `auto` | `auto` raises the tint of panes, and adds a layer on open areas, only where text needs it to reach `contrast.target`. `off` uses the glass opacities exactly, so text may be harder to read. With Increase Contrast on in Accessibility settings, the app always uses `auto`. |
 | `glass.border` | `0.08` | 0 to 0.3. Opacity of pane hairlines. |
-| `glass.gutter` | `12` | 0 to 16. Points between panes and around them; 0 joins them edge to edge. |
+| `glass.gutter` | `0` | 0 to 16. Points between panes and around them; 0 joins them edge to edge with hairlines between them. |
 | `texture` | `none` | Texture over the background, never over panes or text: `none`, `scanlines`, `grain`. |
 | `texture.strength` | `0.2` | 0 to 0.6. How strongly the texture darkens. |
 | `texture.spacing` | `3` | 2 to 8. Points between scanlines. |
@@ -79,6 +77,8 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 | `statusbar` | `usage, working, needs-you, hosts, terminal` | Items in the bottom strip, in order, or `none`. The connection and its controls always show. |
 
 Whatever the background, text keeps at least `contrast.target` contrast: the app measures the background behind text and darkens or lightens it as much as needed, around the text only, so the background stays visible in margins, gaps and empty views. `glass.readability = off` turns this off.
+
+A line for a key that was removed is skipped, and `agenthail doctor`, `agenthail ui check` and Settings › Appearance name the key that replaced it. `glass.sidebar.opacity` and `glass.chrome.opacity` were removed: `glass.opacity` tints every pane.
 
 ## Text colours
 
@@ -106,7 +106,7 @@ The dashboard reads the `web` device's settings and follows every change as it i
 - `background`, `background.light`, `background.fit`, `background.position`, `background.dim`, `background.opacity`, `background.session-opacity`, `texture`, `texture.strength` and `texture.spacing` draw the background, loaded from the daemon. `background.session-opacity` applies on the Conversations view.
 - `desktop` shows the plain window colour, since a browser cannot show the desktop.
 - While a background is drawn, every piece of text sits on a pane: the top bar, page headings, cards, the Conversations list, the conversation, the Operations tabs, and the composer, menus, dialogs and notices. The background shows only in the `glass.gutter` around and between panes.
-- In dark appearance, `glass` makes the panes translucent: the top bar takes `glass.chrome.opacity`, the Conversations list `glass.sidebar.opacity`, headings and cards `glass.opacity`, and the tabs, composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. Light appearance, `glass = off` and the browser's reduced transparency preference draw solid panes, with a soft shadow under floating ones.
+- `glass` makes the panes translucent in light and dark appearance: the top bar, the Conversations list, headings and cards take `glass.opacity`, and the tabs, composer, menus, dialogs and notices `glass.composer.opacity`, all blurred by `glass.blur` with hairlines at `glass.border`. `glass = off` and the browser's reduced transparency preference draw solid panes, with a soft shadow under floating ones.
 - `glass.tint` works as in the apps. A tint that would leave text below `contrast.target` is moved toward the ground colour until text reads on it, and each kind of pane's tint rises above its opacity as far as the background it can cover needs: a pane that stays put is measured against the art behind it, and one that scrolls against its whole column. `glass.readability = off` uses the opacities exactly.
 - Text keeps `contrast.target`. Text colours that would miss it on the dashboard's own surfaces are lifted toward white in dark, or black in light, until they reach it. With the browser's increased contrast preference, the target is 7.
 

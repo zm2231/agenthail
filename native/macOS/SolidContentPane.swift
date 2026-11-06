@@ -25,10 +25,6 @@ private struct SolidContentPaneBody<Content: View>: View {
     @ObservedObject var backdrop: WindowBackdrop
 
     var body: some View {
-        if backdrop.solid {
-            content.glassPane(.content, fallback: DesktopPalette.window, gaps: gaps)
-        } else {
-            content
-        }
+        content.glassPane(.content, fallback: DesktopPalette.window, gaps: gaps, enabled: backdrop.solid)
     }
 }

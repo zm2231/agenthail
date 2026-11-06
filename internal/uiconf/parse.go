@@ -97,7 +97,7 @@ func Parse(text string) Parsed {
 		}
 		key, ok := Lookup(l.key)
 		if !ok {
-			parsed.Problems = append(parsed.Problems, Problem{Line: number, Key: l.key, Message: "unknown key " + l.key})
+			parsed.Problems = append(parsed.Problems, Problem{Line: number, Key: l.key, Message: unknownKey(l.key)})
 			continue
 		}
 		if problem := checkDevice(l.device); problem != "" {
@@ -193,7 +193,7 @@ func ParseAssignment(text string) (Assignment, error) {
 	}
 	key, ok := Lookup(l.key)
 	if !ok {
-		return Assignment{}, fmt.Errorf("unknown key %s", l.key)
+		return Assignment{}, fmt.Errorf("%s", unknownKey(l.key))
 	}
 	if problem := checkDevice(l.device); problem != "" {
 		return Assignment{}, fmt.Errorf("%s: %s", l.key, problem)
