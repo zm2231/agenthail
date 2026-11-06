@@ -467,6 +467,7 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 
 func TestRuntimeKindStepDerivesEachRowsKindFromItsSurfaceAndTransport(t *testing.T) {
 	r := openTestRegistry(t)
+	asBeforePresentationTriggers(t, r)
 	if _, err := r.db.Exec(`ALTER TABLE sessions DROP COLUMN runtime_kind`); err != nil {
 		t.Fatal(err)
 	}
@@ -602,6 +603,7 @@ func TestOpenAddsQueueUploadsToARegistryAtTheVersionBefore(t *testing.T) {
 		t.Fatal(err)
 	}
 	register(t, r, "target")
+	asBeforePresentationTriggers(t, r)
 	for _, statement := range []string{
 		`ALTER TABLE message_queue DROP COLUMN uploads`,
 		`INSERT INTO message_queue(id,session_id,message,status,updated_at) VALUES(70,'target','read the report','pending','2026-10-19 09:00:00')`,

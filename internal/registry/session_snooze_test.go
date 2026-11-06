@@ -96,6 +96,7 @@ func TestARegistryFromBeforeSnoozeKeepsItsPinsAndGainsSnooze(t *testing.T) {
 	if _, err := old.PinSession("pinned", at); err != nil {
 		t.Fatal(err)
 	}
+	asBeforePresentationTriggers(t, old)
 	for _, statement := range []string{
 		`ALTER TABLE sessions DROP COLUMN snoozed_at_ms`,
 		`ALTER TABLE sessions DROP COLUMN snoozed_until_ms`,

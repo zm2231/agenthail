@@ -66,7 +66,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	stored, uploadErr := d.storedUploads(item.Uploads)
 	if uploadErr != nil {
-		d.finishQueueFailure(item, session, uploadErr, now)
+		d.finishQueueFailure(item, session, uploadErr, now, registry.SendTrace{})
 		return
 	}
 	item.Uploads = stored
@@ -85,6 +85,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	} else if messageUUID != "" {
 		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
 	}
+	d.dispatcher().RefreshRoute(operationCtx, adapter, session)
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session
@@ -103,18 +104,19 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	if !steer || errors.Is(sendErr, surface.ErrNothingToSteer) {
 		steered = nil
 		if sendErr = route.Validate(adapter, options); sendErr == nil {
-			result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
+			result, sendErr = d.dispatcher().SendRouted(operationCtx, adapter, session, route, item.Message, options)
 		}
 	}
 	cancel()
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
 		*session = addressed
-		d.finishReachedHostOwned(item, session, item.Message, ownedErr)
+		d.finishReachedHostOwned(item, session, item.Message, ownedErr, delivery.Trace(adapter, session, options.RouteAuthor(), addressed.Bridge))
 		return
 	}
+	trace := delivery.Trace(adapter, session, options.RouteAuthor(), addressed.Bridge)
 	peerTransport := surface.RouteFor(adapter, session, options.RouteAuthor()).TransportOnly()
 	if sendErr != nil {
-		d.finishQueueFailure(item, session, sendErr, now)
+		d.finishQueueFailure(item, session, sendErr, now, trace)
 		return
 	}
 	if result == nil {
@@ -126,7 +128,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		if err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
 		return
 	}
 	if !result.Accepted {
@@ -138,7 +140,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		if err != nil {
 			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "busy", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
 	if steered == nil && !peerTransport {
@@ -154,13 +156,13 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, evidence, result.UUID); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "ack-error", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
 		return
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: historyKind, SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
 	if result.Notice != "" {
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "model", SessionID: session.ID, QueueID: item.ID, Message: result.Notice, Result: result.UUID})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "model", SessionID: session.ID, QueueID: item.ID, Message: result.Notice, Result: result.UUID})
 	}
 }
 
@@ -171,11 +173,11 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	addressed := *session
 	err := adapter.Compact(operationCtx, session)
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
-		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr)
+		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr, registry.SendTrace{})
 		return
 	}
 	if err != nil {
-		d.finishQueueFailure(item, session, err, time.Now())
+		d.finishQueueFailure(item, session, err, time.Now(), registry.SendTrace{})
 		return
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered, ""); err != nil {
@@ -193,7 +195,7 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "goal"})
 	runner, ok := adapter.(surface.GoalCommandRunner)
 	if !ok {
-		d.finishQueueFailure(item, session, surface.DeliveryTerminal(fmt.Errorf("%s does not run goal commands", adapter.Name()), surface.DeliveryInvalidRequest), time.Now())
+		d.finishQueueFailure(item, session, surface.DeliveryTerminal(fmt.Errorf("%s does not run goal commands", adapter.Name()), surface.DeliveryInvalidRequest), time.Now(), registry.SendTrace{})
 		return
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, goalOperationTimeout)
@@ -201,11 +203,11 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 	addressed := *session
 	err := runner.RunGoalCommand(operationCtx, session, item.Message)
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
-		d.finishReachedHostOwned(item, &addressed, item.Message, ownedErr)
+		d.finishReachedHostOwned(item, &addressed, item.Message, ownedErr, registry.SendTrace{})
 		return
 	}
 	if err != nil {
-		d.finishQueueFailure(item, session, err, time.Now())
+		d.finishQueueFailure(item, session, err, time.Now(), registry.SendTrace{})
 		return
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered, ""); err != nil {
@@ -220,7 +222,7 @@ func (d *Daemon) runQueuedGoal(ctx context.Context, adapter surface.Surface, ses
 // finishReachedHostOwned settles a queue item whose send resumed into a
 // session a paired host owns. The provider took it, so it is never retried,
 // and it is recorded only under the session it was addressed to.
-func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed *surface.Session, message string, ownedErr error) {
+func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed *surface.Session, message string, ownedErr error, trace registry.SendTrace) {
 	err := d.Registry.DeadLetterUnknown(item.ID, ownedErr)
 	if d.settledElsewhere(item.ID, err) {
 		return
@@ -228,10 +230,10 @@ func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed 
 	if err != nil {
 		d.log.Printf("dead-letter queue item %d: %s", item.ID, err)
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "unknown", SessionID: addressed.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 }
 
-func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {
+func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time, trace registry.SendTrace) {
 	message := item.Message
 	if item.Operation == registry.QueueOperationCompact {
 		message = string(item.Operation)
@@ -251,7 +253,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		if refusal != 0 {
 			d.announceRefusal(*session, item.ID, refusal, sendErr)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "deferred", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
 	}
 	if surface.IsDeliveryOutcomeUnknown(sendErr) {
@@ -262,7 +264,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		if err != nil {
 			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "unknown", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		return
 	}
 	if surface.IsDeliveryTerminal(sendErr) {
@@ -273,7 +275,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		if err != nil {
 			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		if notified {
 			if err := d.catalog.flushCommitted(); err != nil {
 				d.log.Printf("publish terminal delivery problem: %s", err)
@@ -289,7 +291,7 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 	if err != nil {
 		d.log.Printf("nack queue item %d: %s", item.ID, err)
 	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{SendTrace: trace, Kind: "failed", SessionID: session.ID, SourceSessionID: item.SourceSessionID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 }
 
 // announceRefusal tells the user, on the desktop and on paired devices, that a

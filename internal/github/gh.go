@@ -53,6 +53,9 @@ func (g GH) graphql(ctx context.Context, host, query string) (graphqlReply, erro
 	if strings.Contains(stdout.String()+stderr.String(), "Bad credentials") {
 		return graphqlReply{}, &UnavailableError{Reason: fmt.Sprintf("GitHub refused gh's sign-in to %s; run gh auth login", host)}
 	}
+	if runErr != nil && strings.Contains(strings.ToLower(stdout.String()+stderr.String()), "rate limit") {
+		return graphqlReply{}, &RateLimitedError{Message: fmt.Sprintf("GitHub rate limit on %s: %s", host, strings.TrimSpace(stderr.String()))}
+	}
 	var reply graphqlReply
 	decodeErr := json.Unmarshal(stdout.Bytes(), &reply)
 	if runErr != nil && (decodeErr != nil || reply.Data == nil) {

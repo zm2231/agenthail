@@ -32,24 +32,29 @@ const (
 
 type nativeRecordingClaude struct {
 	*surfaces.Claude
-	native []string
+	native     []string
+	beforeSend func()
 }
 
 func (c *nativeRecordingClaude) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	if c.beforeSend != nil {
+		c.beforeSend()
+	}
 	c.native = append(c.native, message)
 	return &surface.SendResult{UUID: "peer", Accepted: true}, nil
 }
 
 type humanTurnFixture struct {
-	d       *Daemon
-	r       *registry.Registry
-	claude  *nativeRecordingClaude
-	posts   []string
-	postErr error
-	bridged surface.Session
-	native  surface.Session
-	home    string
-	process *claudetest.Fixture
+	d          *Daemon
+	r          *registry.Registry
+	claude     *nativeRecordingClaude
+	posts      []string
+	postErr    error
+	postStatus int
+	bridged    surface.Session
+	native     surface.Session
+	home       string
+	process    *claudetest.Fixture
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
@@ -70,6 +75,9 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		f.posts = append(f.posts, url+" "+body)
 		if f.postErr != nil {
 			return 0, "", f.postErr
+		}
+		if f.postStatus != 0 {
+			return f.postStatus, `{}`, nil
 		}
 		return http.StatusOK, `{}`, nil
 	})}

@@ -22,10 +22,14 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 
 func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	var commands *commandsWatch
+	var route *streamRoute
 	if uuid == "" {
 		onEvent = serializedEvents(onEvent)
-		listed := *sess
-		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) { return c.Commands(ctx, &listed) }, onEvent)
+		route = c.newStreamRoute(ctx, sess)
+		commands = watchCommands(ctx, func(ctx context.Context) (*surface.RuntimeCommands, error) {
+			listed := route.current()
+			return c.Commands(ctx, &listed)
+		}, onEvent)
 		defer commands.Stop()
 	}
 	path, err := c.sessionTranscript(sess)
@@ -202,6 +206,9 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 		if completed {
 			return nil
+		}
+		if route != nil && route.reread(ctx) {
+			commands.Refresh()
 		}
 		if err := awaitTranscript(ctx, wake); err != nil {
 			return err

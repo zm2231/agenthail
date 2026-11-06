@@ -111,14 +111,19 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 	if !ok || str(record, "sessionId") != sess.ID || sess.HolderStart != "" && recordStart(record) != sess.HolderStart {
 		return false
 	}
-	sess.Bridge = ""
-	if !c.localOnly {
-		sess.Bridge = str(record, "bridgeSessionId")
-	}
+	sess.Bridge = c.recordBridge(record)
 	if sess.Transport == "uds" {
 		return c.peerSocket(ctx, record) != ""
 	}
 	return claudeHosted(sess) || sess.Bridge != ""
+}
+
+func (c *Claude) RefreshRoute(ctx context.Context, sess *surface.Session) {
+	read := *sess
+	c.reachableAsIs(ctx, &read)
+	// reachableAsIs replaces Bridge only once it has read the live process's
+	// own record, so a dead or reassigned process leaves it as stored.
+	sess.Bridge = read.Bridge
 }
 
 // conversation reads which processes hold a conversation. Session records

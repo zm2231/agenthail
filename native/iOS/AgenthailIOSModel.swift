@@ -92,6 +92,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var attachmentCache: [String: Data] = [:]
     private var attachmentCacheBytes = 0
     private let attachmentCacheLimit = 20 * 1024 * 1024
+    private let attachmentLoads = SharedLoads<Data?>()
     @Published var deliveryStatus: [String: String] = [:]
     @Published var controlOutput: [String: String] = [:]
     @Published var deliveryIDs: [String: Int64] = [:]
@@ -940,21 +941,23 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard let attachment = item.attachment, selectedSessionID == sessionID, case let (connection, route)? = try? resolveServer(sessionID) else { return nil }
         let cacheKey = "\(sessionID):\(attachment.id)"
         if let cached = attachmentCache[cacheKey] { return cached }
-        do {
-            let data = try await connection.api.sessionAttachment(sessionID: route.sessionID, id: attachment.id)
-            guard !Task.isCancelled, selectedSessionID == sessionID, server(for: sessionID) === connection else { return nil }
-            if data.count <= attachmentCacheLimit {
-                if attachmentCacheBytes + data.count > attachmentCacheLimit {
-                    attachmentCache.removeAll()
-                    attachmentCacheBytes = 0
+        return await attachmentLoads.value(for: "\(cacheKey)|\(ObjectIdentifier(connection))") { [weak self] in
+            guard let data = try? await connection.api.sessionAttachment(sessionID: route.sessionID, id: attachment.id),
+                  let self, self.selectedSessionID == sessionID, self.server(for: sessionID) === connection else { return nil }
+            if data.count <= self.attachmentCacheLimit {
+                if self.attachmentCacheBytes + data.count > self.attachmentCacheLimit {
+                    self.attachmentCache.removeAll()
+                    self.attachmentCacheBytes = 0
                 }
-                attachmentCache[cacheKey] = data
-                attachmentCacheBytes += data.count
+                self.attachmentCache[cacheKey] = data
+                self.attachmentCacheBytes += data.count
             }
             return data
-        } catch {
-            return nil
         }
+    }
+
+    func cachedAttachment(for item: TimelineItem, sessionID: String) -> Data? {
+        item.attachment.flatMap { attachmentCache["\(sessionID):\($0.id)"] }
     }
 
     func handlePairingURL(_ url: URL) {

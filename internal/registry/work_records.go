@@ -16,6 +16,7 @@ const (
 	WorkSettledArchived     = "archived"
 	WorkSettledPerson       = "person"
 	WorkSettledOrphaned     = "orphaned"
+	WorkSettledMerged       = "merged"
 
 	WorkCleanupPending = "pending"
 	WorkCleanupRemoved = "removed"
