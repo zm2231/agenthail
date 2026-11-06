@@ -106,6 +106,27 @@ func Trace(adapter surface.Surface, session *surface.Session, author surface.Aut
 	return registry.SendTrace{SendRoute: surface.RouteFor(adapter, session, author).String(), Bridge: bridge}
 }
 
+// SendRouted sends message on route. A send that finds its route gone before
+// delivering anything leaves session on the route to take; that route is
+// stored and published first, so what the person sees matches it, and the
+// message is sent once more on it.
+func (d Dispatcher) SendRouted(ctx context.Context, adapter surface.Surface, session *surface.Session, route surface.Route, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	routed := *session
+	result, err := route.Send(ctx, adapter, session, message, options)
+	next := surface.RouteFor(adapter, session, options.RouteAuthor())
+	if !errors.Is(err, surface.ErrRouteChanged) || next == route {
+		return result, err
+	}
+	d.record(registry.HistoryEntry{Kind: "rerouted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), SendTrace: registry.SendTrace{SendRoute: route.String(), Bridge: routed.Bridge}})
+	if err := d.RegisterReached(&routed, session); err != nil {
+		return nil, err
+	}
+	if err := next.Validate(adapter, options); err != nil {
+		return nil, err
+	}
+	return next.Send(ctx, adapter, session, message, options)
+}
+
 // RefreshRoute points session at what its live process offers before a
 // route is chosen from it.
 func (d Dispatcher) RefreshRoute(ctx context.Context, adapter surface.Surface, session *surface.Session) {
@@ -461,7 +482,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 		entry.SendTrace = Trace(adapter, session, options.RouteAuthor(), addressed.Bridge)
 		d.record(entry)
 	}
-	result, err := route.Send(ctx, adapter, session, message, options)
+	result, err := d.SendRouted(ctx, adapter, session, route, message, options)
 	if ownedErr := d.RegisterReached(&addressed, session); ownedErr != nil {
 		*session = addressed
 		record(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})

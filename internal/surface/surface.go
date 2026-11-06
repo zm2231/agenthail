@@ -516,6 +516,11 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrRouteChanged is a send that found its route gone before delivering
+// anything. The session it was given now names the route to take, which the
+// caller publishes before sending again.
+var ErrRouteChanged = errors.New("the session's route changed before delivery")
+
 // ErrNothingToSteer is a steer that found the session idle: its turn ended
 // before the steer reached it.
 var ErrNothingToSteer = errors.New("session idle; nothing to steer")

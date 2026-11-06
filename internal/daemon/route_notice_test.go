@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 func storedTurnNotice(t *testing.T, f *humanTurnFixture, sessionID string) string {
@@ -43,21 +42,26 @@ func TestTheNoticeAPersonSeesMatchesTheRouteTheirSendTakes(t *testing.T) {
 	}
 }
 
-func TestASendThatFindsRemoteControlGoneIsDeliveredAndRecordsTheRouteItTook(t *testing.T) {
+func TestASendThatFindsRemoteControlGonePublishesTheNoteRouteBeforeDeliveringOnIt(t *testing.T) {
 	f := newHumanTurnFixture(t)
+	f.d.discoverCatalog(context.Background())
 	f.postStatus = http.StatusNotFound
-	peers := claudetest.ListenPeerManager(t, f.home)
+	noticeAtSend := ""
+	f.claude.beforeSend = func() { noticeAtSend = storedTurnNotice(t, f, f.bridged.ID) }
 	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"still there?"}`)
 
-	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || peers.Count("still there?") != 1 || len(f.posts) != 1 {
-		t.Fatalf("receipt=%v peer messages=%v posts=%d, want one refused post and the message accepted on the socket", receipt, peers.Messages(), len(f.posts))
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) || len(f.posts) != 1 || len(f.claude.native) != 1 || f.claude.native[0] != "still there?" {
+		t.Fatalf("receipt=%v posts=%d native=%v, want one refused post and the message accepted once on the socket", receipt, len(f.posts), f.claude.native)
+	}
+	if noticeAtSend == "" {
+		t.Fatal("the row still promised the person's own turn when the message went out on the socket as a note")
 	}
 	history, err := f.r.ListHistory(10, f.bridged.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) == 0 || history[0].Kind != "transport-accepted" || history[0].SendRoute != "peer" || history[0].Bridge != "session_bridge" {
-		t.Fatalf("history=%+v, want the send recorded on the peer route with the Remote Control id it was routed by", history)
+	if len(history) < 2 || history[0].Kind != "transport-accepted" || history[0].SendRoute != "peer" || history[1].Kind != "rerouted" || history[1].SendRoute != "human-turn" || history[1].Bridge != "session_bridge" {
+		t.Fatalf("history=%+v, want the gone Remote Control attempt recorded with its id, then the socket delivery", history)
 	}
 	stored, err := f.r.Session(f.bridged.ID)
 	if err != nil {

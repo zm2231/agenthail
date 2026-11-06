@@ -37,7 +37,7 @@ func goneListedSession(t *testing.T, c *Claude, id string) surface.Session {
 	return surface.Session{}
 }
 
-func TestAPersonsMessageReachesTheTerminalWhenItsRemoteControlIsGone(t *testing.T) {
+func TestAPersonsTurnThatMeetsAGoneRemoteControlIsRoutedAgainToTheTerminalsSocket(t *testing.T) {
 	fixture := claudetest.New(t)
 	fixture.Listen()
 	fixture.Transcript(goneConversation, fixture.Home)
@@ -45,20 +45,23 @@ func TestAPersonsMessageReachesTheTerminalWhenItsRemoteControlIsGone(t *testing.
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
 	posts := 0
 	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, goneRemoteControl(&posts))
+	ctx := context.Background()
 
 	session := goneListedSession(t, c, goneConversation)
-	if session.Bridge != "session_gone" || c.Route(&session, surface.AuthorPerson) != surface.RouteHumanTurn {
-		t.Fatalf("session=%+v, want it listed with the Remote Control its record names", session)
+	route := surface.RouteFor(c, &session, surface.AuthorPerson)
+	if session.Bridge != "session_gone" || route != surface.RouteHumanTurn {
+		t.Fatalf("session=%+v route=%v, want it listed with the Remote Control its record names", session, route)
 	}
-	result, err := c.SendHumanTurn(context.Background(), &session, "are you there", nil)
-	if err != nil || result == nil || !result.Accepted {
-		t.Fatalf("result=%+v err=%v, want the message delivered over the messaging socket", result, err)
+	_, err := route.Send(ctx, c, &session, "are you there", surface.SendOptions{Author: surface.AuthorPerson})
+	if !errors.Is(err, surface.ErrRouteChanged) || !surface.IsDeliveryUnavailable(err) || posts != 1 || len(peers.Messages()) != 0 {
+		t.Fatalf("err=%v posts=%d peer messages=%v, want one refused post, nothing delivered and the route reported changed", err, posts, peers.Messages())
 	}
-	if posts != 1 || peers.Count("are you there") != 1 {
-		t.Fatalf("posts=%d peer messages=%v, want one refused post and one socket delivery", posts, peers.Messages())
+	rerouted := surface.RouteFor(c, &session, surface.AuthorPerson)
+	if session.Bridge != "" || rerouted != surface.RoutePeer {
+		t.Fatalf("session=%+v route=%v, want the session left on its socket", session, rerouted)
 	}
-	if session.Bridge != "" || c.Route(&session, surface.AuthorPerson) != surface.RoutePeer {
-		t.Fatalf("session=%+v, want the sent session left on its socket", session)
+	if _, err := rerouted.Send(ctx, c, &session, "are you there", surface.SendOptions{Author: surface.AuthorPerson}); err != nil || peers.Count("are you there") != 1 || posts != 1 {
+		t.Fatalf("err=%v posts=%d peer messages=%v, want the message on the socket once", err, posts, peers.Messages())
 	}
 
 	relisted := goneListedSession(t, c, goneConversation)
