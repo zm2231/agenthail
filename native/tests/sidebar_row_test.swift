@@ -68,6 +68,7 @@ struct SidebarRowTest {
             ("lead", SidebarRowState(session: session("a"), title: "a", canMakeLead: true)),
             ("reason", SidebarRowState(session: session("a"), title: "a", showsReason: true)),
             ("session", SidebarRowState(session: session("a", archived: true), title: "a")),
+            ("family", SidebarRowState(session: session("a"), title: "a", family: SessionFamily(root: session("a"), members: [], workingSubagents: 1))),
         ]
         for (name, other) in changed { check(base != other, "a \(name) change re-renders the row") }
 
@@ -99,6 +100,8 @@ struct SidebarRowTest {
         model.snapshot = listing([session("a", name: "renamed since the row last drew"), session("b")])
         actions.rename()
         check(pane.renamingSession?.name == "renamed since the row last drew", "Rename acts on the session as it is now, not as the row last drew it: \(pane.renamingSession?.name ?? "nil")")
+        actions.adopt()
+        check(pane.adoptingSession?.name == "renamed since the row last drew", "Open in Agenthail acts on the session as it is now: \(pane.adoptingSession?.name ?? "nil")")
         actions.select(keep: false)
         check(pane.selectedSessionID == "a", "selecting from a row selects its session")
         withExtendedLifetime(window) {}
