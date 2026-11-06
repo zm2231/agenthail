@@ -1,5 +1,6 @@
 import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const now = Date.UTC(2026, 10, 3, 12);
@@ -38,7 +39,7 @@ const context = {
   labels: { codex: "Codex", claude: "Claude Code" },
   Date: class extends Date { static now() { return now; } },
 };
-await dashboardModules(["session-order", "project-view","session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
+await dashboardModules(["session-order", "project-view", "project-now", "session-row", "holders", "presence", "hosts", "session-labels", "format"], context);
 const run = (code) => vm.runInContext(code, context);
 let html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /Loading this project/, "a project page waits for its own listing rather than showing an empty or stale one");
@@ -47,9 +48,9 @@ const ids = (list) => list.map((session) => session.id).join(",");
 
 const contents = run("projectContents(app.state.projects[0])");
 assert.equal(contents.leadSession.id, "lead");
-assert.equal(ids(contents.running), "build", "only working sessions are running; a queued idle one is not");
-assert.equal(ids(contents.running), ids(sessions.filter((session) => session.project.id === project.id && !session.subagent && run("sessionRunning")(session))), "Running agrees with the list's running rule");
-assert.equal(ids(contents.recent), "queued,photos,buildbox::ingest", "Recent keeps the daemon's order across computers and leaves out the lead");
+const nowIDs = (now) => ids(now.groups.flatMap((group) => group.sessions));
+assert.equal(nowIDs(contents.now), "build,photos,queued,buildbox::ingest", "Now is every running and current row, working first, then newest, each computer's rows together, and leaves out the lead");
+assert.equal(run("sessionRunning")(sessions[2]), false, "a queued idle session isn't running");
 assert.equal(ids(contents.earlier), "old,older");
 for (const hidden of ["child", "shelved", "elsewhere"]) assert(!JSON.stringify(contents).includes(`"${hidden}"`), `${hidden} does not belong in the project`);
 
@@ -66,7 +67,10 @@ assert.equal(run('leadNote({ name: "ended", sessionId: "s1" })'), "not running �
 
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /<h1>fieldnotes<\/h1><span class="project-note">7 sessions on 2 computers<\/span>/);
-assert.match(html, /Running now · 1/);
+assert.match(html, /<h2>Now · 4<\/h2>/);
+assert.doesNotMatch(html, /Running now|Recent/, "Now replaces both cards");
+assert.match(html, /<h3 class="project-now-group">No folder · this computer<\/h3>/, "rows on two computers are separate groups, named by computer");
+assert.match(html, /<h3 class="project-now-group">No folder · buildbox<\/h3>/);
 assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "the lead says when it was last active, once");
 assert.match(html, /<button class="primary-button" type="button" data-project-resume="lead" data-lifecycle="true">Resume<\/button>/);
 assert.match(html, /data-project-start="repo:github.com\/demo\/fieldnotes" data-checkout="0">New session/);
@@ -86,17 +90,44 @@ assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a s
 assert.equal(run("rowTime")(sessions[3], now), "2h", "an idle row shows its last activity");
 assert.match(html, /<span class="project-row-time">2h<\/span>/);
 
+const waiting = { ...sessions[1], id: "asking", name: "asking", waitingOn: { kind: "question", id: "q", answerable: true }, lastActive: at(4), activity: { busySince: at(90) } };
+const unreachable = { ...sessions[1], id: "buildbox::far", name: "far", host: { ...buildbox, state: "unreachable" }, lastActive: at(7), activity: { busySince: at(90) } };
+const sessionRow = run("sessionButton");
+assert.match(sessionRow(waiting), /<i class="dot waiting">/, "waiting on you has its own colour");
+assert.match(sessionRow(waiting), /Waiting on you/);
+assert.match(sessionRow(unreachable), /<i class="dot unavailable">/);
+assert.match(sessionRow(unreachable), /Unavailable/);
+assert.doesNotMatch(sessionRow(unreachable), /Working/, "a busy row on an unreachable computer doesn't claim to work");
+assert.match(sessionRow(sessions[3]), /<i class="dot idle">/);
+assert.match(sessionRow({ ...sessions[3], currentReason: "open" }), /<i class="dot idle">/, "an open idle session isn't marked as working");
+assert.match(sessionRow(sessions[1]), /<i class="dot active">/);
+assert.match(sessionRow({ ...sessions[3], currentReason: "queued" }), /<i class="dot queued">/);
+assert.equal(run("rowTime")(waiting, now), "4m", "a waiting row shows its last activity, as Mac and iPhone do");
+assert.equal(run("rowTime")(unreachable, now), "7m", "an unreachable row shows its last activity");
+const tokens = readFileSync(new URL("../internal/daemon/dashboard/tokens.css", import.meta.url), "utf8");
+const dotColour = (tone) => tokens.match(new RegExp(`\\.dot\\.${tone}[^{]*\\{\\s*background: var\\(--([a-z]+)\\)`))?.[1];
+assert.equal(dotColour("waiting"), "warn");
+assert.equal(dotColour("idle"), "quiet");
+assert.equal(dotColour("unavailable"), "bad");
+assert.equal(dotColour("active"), "good");
+
 const workingLead = { ...sessions[0], status: "busy", activity: { busySince: at(12) } };
 context.app.state.sessions = [workingLead, ...sessions.slice(1)];
 const pinned = run("projectContents(app.state.projects[0], app.state.sessions)");
 assert.equal(pinned.leadSession.id, "lead");
-assert.equal(ids(pinned.running), "build", "a working lead stays pinned and is not repeated in Running");
+assert(!nowIDs(pinned.now).split(",").includes("lead"), "a working lead stays pinned and is not repeated in Now");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Working 12m</);
+const blockedLead = (patch) => {
+  context.app.state.sessions = [{ ...workingLead, lastActive: at(30), ...patch }, ...sessions.slice(1)];
+  return run("renderProjectView(app.state.projects[0])");
+};
+assert.match(blockedLead({ waitingOn: { kind: "question", id: "q", answerable: true } }), /data-project-lead-status>Codex · Waiting on you · 30 min ago</, "a lead waiting on you says so, with its last activity");
+assert.match(blockedLead({ host: { ...buildbox, state: "unreachable" }, unavailableReason: "buildbox can't be reached" }), /data-project-lead-status>Codex · [^<]*Unavailable · 30 min ago</, "a lead on an unreachable computer doesn't claim to work");
 const delegating = { ...sessions[0], subagents: { count: 1, working: 1 } };
 context.app.state.sessions = [delegating, ...sessions.slice(1)];
 const delegated = run("projectContents(app.state.projects[0], app.state.sessions)");
-assert.equal(ids(delegated.running), "build", "a lead whose subagent works stays pinned, not in Running");
+assert(!nowIDs(delegated.now).split(",").includes("lead"), "a lead whose subagent works stays pinned, not in Now");
 assert.equal(actions(delegating), JSON.stringify([{ kind: "resume", enabled: true, lifecycle: true }, { kind: "open" }]), "an idle lead with a working subagent can still be resumed");
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-status>Codex · Idle · 3 days ago</, "an idle lead with a working subagent reads as idle");

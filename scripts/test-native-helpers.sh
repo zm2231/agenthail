@@ -40,6 +40,7 @@ SOURCES=(
   SessionSelection.swift
   ProjectActions.swift
   ProjectContents.swift
+  ProjectNow.swift
   ScopePages.swift
   ScopeReader.swift
   SessionDisplayKind.swift
@@ -65,6 +66,10 @@ SOURCES=(
   DiffPresentation.swift
   ToolRunSummary.swift
   TranscriptRows.swift
+  TranscriptScrim.swift
+  TranscriptScrimMask.swift
+  TranscriptScrimRowLayers.swift
+  TranscriptScrimRows.swift
   AgentMessage.swift
   ClampedText.swift
   TurnClock.swift
@@ -131,6 +136,7 @@ SOURCES=(
   macOS/TranscriptAgentBlocks.swift
   macOS/TranscriptFollow.swift
   macOS/TranscriptRowAction.swift
+  macOS/TranscriptScrimSource.swift
   macOS/VoiceController.swift
   macOS/AncestorFrames.swift
   macOS/BackdropLayerView.swift
@@ -142,6 +148,8 @@ SOURCES=(
   macOS/ScrimAnchor.swift
   macOS/ScrimMask.swift
   macOS/ScrimRegion.swift
+  macOS/ScrimRows.swift
+  macOS/ScrimRowsOrigin.swift
   macOS/ScrimText.swift
   macOS/ScrollScrim.swift
   macOS/SplitDividerHider.swift

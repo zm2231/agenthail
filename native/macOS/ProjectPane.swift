@@ -7,9 +7,9 @@ extension ProjectContents {
         return host.id + "::" + sessionID
     }
 
-    static func build(_ project: ProjectState, sessions: [SessionState]) -> ProjectContents {
+    static func build(_ project: ProjectState, sessions: [SessionState], localName: String?) -> ProjectContents {
         let lead = project.leads.first
-        return build(lead: lead, leadID: lead.flatMap(leadSessionID), projectID: project.id, sessions: sessions)
+        return build(lead: lead, leadID: lead.flatMap(leadSessionID), projectID: project.id, sessions: sessions, computers: Set(project.checkouts.map(\.host.id)).count, localName: localName ?? "this computer")
     }
 }
 
@@ -42,16 +42,24 @@ struct ProjectPane: View {
     @State private var showingEarlier = false
 
     var body: some View {
-        let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions))
+        let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions), localName: model.snapshot?.daemon.host?.name)
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)
                 HStack(alignment: .top, spacing: DesktopSpace.l) {
                     VStack(alignment: .leading, spacing: DesktopSpace.l) {
-                        if !contents.running.isEmpty { card("Running now · \(contents.running.count)") { rows(contents.running) } }
-                        card("Recent · last 24 hours", trailing: showingEarlier ? nil : ("Show earlier", { showingEarlier = true })) {
-                            if contents.recent.isEmpty { empty("Nothing in the last day") }
-                            rows(contents.recent)
+                        card(contents.now.count == 0 ? "Now" : "Now · \(contents.now.count)", trailing: showingEarlier ? nil : ("Show earlier", { showingEarlier = true })) {
+                            if contents.now.count == 0 { empty("Nothing in the last day") }
+                            ForEach(contents.now.groups) { group in
+                                if contents.now.showsGroups {
+                                    Text(group.title)
+                                        .font(.system(size: DesktopType.secondary, weight: .medium)).foregroundStyle(DesktopPalette.text2)
+                                        .lineLimit(1).truncationMode(.middle)
+                                        .padding(.top, DesktopSpace.xs)
+                                        .accessibilityIdentifier("project-now-group-" + group.id)
+                                }
+                                rows(group.sessions)
+                            }
                         }
                         if showingEarlier {
                             card("Earlier") {
@@ -82,7 +90,7 @@ struct ProjectPane: View {
 
     private func header(_ contents: ProjectContents) -> some View {
         let computers = Set(project.checkouts.map(\.host.id)).count
-        let count = contents.running.count + contents.recent.count + contents.earlier.count + (contents.leadSession == nil ? 0 : 1)
+        let count = contents.now.count + contents.earlier.count + (contents.leadSession == nil ? 0 : 1)
         return HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.s) {
             Text(project.displayName).font(.system(size: DesktopType.display, weight: .semibold)).foregroundStyle(DesktopPalette.text)
             Text("\(SessionTree.sessionCountLabel(count))\(computers > 1 ? " on \(computers) computers" : "")")
@@ -166,7 +174,7 @@ struct ProjectPane: View {
     private func rows(_ sessions: [SessionState]) -> some View {
         ForEach(sessions) { session in
             Button { pane.select(session.id) } label: {
-                SessionRowView(session: session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.sessionAttention[session.id] != nil)
+                SessionRowView(session: session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.sessionAttention[session.id] != nil, saysWaiting: true)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -188,6 +196,7 @@ struct ProjectPane: View {
         .padding(DesktopSpace.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card))
+        .overlay(RoundedRectangle(cornerRadius: DesktopRadius.card).strokeBorder(DesktopPalette.line, lineWidth: 1))
     }
 
     private func empty(_ text: String) -> some View {

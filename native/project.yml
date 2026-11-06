@@ -50,6 +50,7 @@ targets:
       - path: SessionSelection.swift
       - path: ProjectActions.swift
       - path: ProjectContents.swift
+      - path: ProjectNow.swift
       - path: ScopePages.swift
       - path: ScopeReader.swift
       - path: SessionDisplayKind.swift
@@ -84,6 +85,10 @@ targets:
       - path: DiffPresentation.swift
       - path: ToolRunSummary.swift
       - path: TranscriptRows.swift
+      - path: TranscriptScrim.swift
+      - path: TranscriptScrimMask.swift
+      - path: TranscriptScrimRowLayers.swift
+      - path: TranscriptScrimRows.swift
       - path: AgentMessage.swift
       - path: ClampedText.swift
       - path: TurnClock.swift

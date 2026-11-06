@@ -3,8 +3,7 @@ import Foundation
 struct ProjectContents: Equatable {
     var lead: ProjectState.Lead?
     var leadSession: SessionState?
-    var running: [SessionState] = []
-    var recent: [SessionState] = []
+    var now = ProjectNow()
     var earlier: [SessionState] = []
 
     enum LeadAction: Equatable {
@@ -28,14 +27,12 @@ struct ProjectContents: Equatable {
         session.archived != true && (session.isWorking || (session.subagents?.working ?? 0) > 0)
     }
 
-    static func build(lead: ProjectState.Lead?, leadID: String?, projectID: String, sessions: [SessionState]) -> ProjectContents {
+    static func build(lead: ProjectState.Lead?, leadID: String?, projectID: String, sessions: [SessionState], computers: Int, localName: String = "this computer") -> ProjectContents {
         var contents = ProjectContents(lead: lead)
         contents.leadSession = leadID.flatMap { id in sessions.first { $0.id == id } }
         let members = sessions.filter { $0.project?.id == projectID && $0.subagent == nil && $0.archived != true && $0.id != leadID }
-        let idle = members.filter { !running($0) }
-        contents.running = members.filter(running)
-        contents.recent = idle.filter(\.current)
-        contents.earlier = idle.filter { !$0.current }
+        contents.now = ProjectNow(members.filter { running($0) || $0.current }, computers: computers, localName: localName)
+        contents.earlier = members.filter { !$0.current && !running($0) }
         return contents
     }
 }

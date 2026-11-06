@@ -96,7 +96,16 @@ export function planDetail(plan) {
   return plan.current ? `${done} · ${plan.current}` : done;
 }
 
+const downHostStates = new Set(["unreachable", "unauthorized", "incompatible"]);
+
+export function hostDown(session) {
+  return downHostStates.has(session.host?.state || "");
+}
+
+export const unavailable = (session) => hostDown(session) || ["unknown", "notLoaded"].includes(session.status);
+
 export function presenceLabel(session, now = Date.now()) {
+  if (unavailable(session)) return "Unavailable";
   if (session.waitingOn) return waitingLabels[waitingPlace(session)];
   if (limitLabel(session)) return limitLabel(session);
   if (backgroundWaiting(session)) return "Waiting on background work";
@@ -113,8 +122,10 @@ export function presenceLabel(session, now = Date.now()) {
 }
 
 export function presenceTone(session) {
+  if (unavailable(session)) return "unavailable";
+  if (session.waitingOn) return "waiting";
   if (backgroundWaiting(session)) return "background";
-  if (session.status === "busy" || ["working", "open"].includes(session.currentReason)) return "active";
-  if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
-  return session.status;
+  if (session.status === "busy" || session.currentReason === "working") return "active";
+  if (["queued", "blocked"].includes(session.currentReason)) return "queued";
+  return session.status === "idle" || session.currentReason === "open" ? "idle" : session.status;
 }
