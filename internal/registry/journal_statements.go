@@ -16,8 +16,8 @@ const (
 	journalBodySQL              = `SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`
 	journalBodyTailSQL          = `SELECT chunk FROM session_journal_body_tail WHERE ref=? ORDER BY start`
 	journalBodyClearTailSQL     = `DELETE FROM session_journal_body_tail WHERE session_id=? AND ref=?`
-	journalBodyStoreSQL         = `INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,?,?) ON CONFLICT(ref) DO UPDATE SET body=excluded.body,session_id=excluded.session_id,created_at=excluded.created_at`
-	journalBodyStoredLengthSQL  = `SELECT COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=?1 ORDER BY start DESC LIMIT 1),length(body)) FROM session_journal_bodies WHERE session_id=?2 AND ref=?1`
+	journalBodyStoreSQL         = `INSERT INTO session_journal_bodies(ref,session_id,body,created_at,written_seq) VALUES(?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET body=excluded.body,session_id=excluded.session_id,created_at=excluded.created_at,written_seq=excluded.written_seq`
+	journalBodyStoredLengthSQL  = `SELECT COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=?1 ORDER BY start DESC LIMIT 1),length(CAST(body AS BLOB))) FROM session_journal_bodies WHERE session_id=?2 AND ref=?1`
 	journalBodyAppendTailSQL    = `INSERT INTO session_journal_body_tail(ref,session_id,start,chunk) VALUES(?,?,?,?)`
 	journalUpdateAppendedRowSQL = `UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,payload_role=? WHERE session_id=? AND seq=?`
 )

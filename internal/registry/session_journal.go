@@ -378,7 +378,7 @@ func storeSessionJournalBody(tx journalWriter, entry SessionJournalEntry) error 
 	if _, err := tx.Exec(journalBodyClearTailSQL, entry.SessionID, entry.BodyRef); err != nil {
 		return err
 	}
-	_, err := tx.Exec(journalBodyStoreSQL, entry.BodyRef, entry.SessionID, entry.FullBody, formatTimestamp(entry.ObservedAt))
+	_, err := tx.Exec(journalBodyStoreSQL, entry.BodyRef, entry.SessionID, entry.FullBody, formatTimestamp(entry.ObservedAt), entry.Seq)
 	return err
 }
 
