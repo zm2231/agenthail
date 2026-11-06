@@ -158,6 +158,10 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	if err := source.reg.SetAlias("builder", session.ID); err != nil {
 		t.Fatal(err)
 	}
+	pinnedAt, err := source.reg.PinSession(session.ID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := source.reg.RegisterSession(surface.Session{ID: "planner-conversation", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +212,12 @@ func TestAnIdleClaudeSessionMovesToAPairedHostAndRunsThere(t *testing.T) {
 	}
 	if alias, _ := target.reg.LookupAlias("builder"); alias != session.ID {
 		t.Fatalf("target alias=%q", alias)
+	}
+	if kept, err := target.reg.PinnedSessions(); err != nil || len(kept) != 1 || kept[0].Session.ID != session.ID || !kept[0].PinnedAt.Equal(pinnedAt) {
+		t.Fatalf("the target does not keep the pinned session: %+v %v", kept, err)
+	}
+	if left, err := source.reg.SessionPinnedAt(session.ID); err != nil || !left.IsZero() {
+		t.Fatalf("the source kept a pin on a session it no longer runs: %v %v", left, err)
 	}
 	origin, found, err := target.reg.SessionOrigin(session.ID)
 	creatorHost, creator, standIn := surface.UnrepliableSenderOf(origin.CreatorID)

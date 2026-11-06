@@ -31,6 +31,7 @@ type moveManifest struct {
 	Surface        surface.SurfaceKind `json:"surface"`
 	Checkout       moveCheckout        `json:"checkout"`
 	Alias          string              `json:"alias,omitempty"`
+	PinnedAt       time.Time           `json:"pinnedAt,omitzero"`
 	Title          string              `json:"title,omitempty"`
 	Model          string              `json:"model,omitempty"`
 	PermissionMode string              `json:"permissionMode,omitempty"`
@@ -156,7 +157,11 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Root: request.Root, Origin: origin}
+	pinnedAt, err := d.Registry.SessionPinnedAt(session.ID)
+	if err != nil {
+		return sessionMoveResult{}, err
+	}
+	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, Root: request.Root, Origin: origin}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		return sessionMoveResult{}, err
@@ -723,7 +728,7 @@ func (d *Daemon) apiMoveTransferHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	d.catalog.mu.Lock()
-	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, origin)
+	_, err = d.Registry.TakeMovedSession(move.ID, *session, manifest.Alias, manifest.PinnedAt, origin)
 	if err == nil {
 		d.publishCommittedHostWriteLocked("move " + move.ID)
 	}

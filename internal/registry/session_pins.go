@@ -71,6 +71,12 @@ func (r *Registry) UnpinSession(sessionID string) error {
 	return tx.Commit()
 }
 
+func (r *Registry) SessionPinnedAt(sessionID string) (time.Time, error) {
+	var pinned int64
+	err := r.read.QueryRow(`SELECT pinned_at_ms FROM sessions WHERE id=?`, sessionID).Scan(&pinned)
+	return unixMilliOrZero(pinned), err
+}
+
 // A stop holds until the session is next active, resumed or pinned.
 func (r *Registry) RecordSessionStop(sessionID string, at time.Time) error {
 	_, err := r.db.Exec(`UPDATE sessions SET stopped_at_ms=? WHERE id=?`, at.UnixMilli(), sessionID)

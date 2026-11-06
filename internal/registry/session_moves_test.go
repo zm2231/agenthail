@@ -157,13 +157,13 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 		t.Fatal("a move aborted before it arrived was prepared")
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: 77, Transcript: "/home/user/.claude/projects/x/t.jsonl", HasLocal: true}
-	if _, err := r.TakeMovedSession("move-2", session, "builder", nil); !errors.As(err, &MoveConflictError{}) {
+	if _, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil); !errors.As(err, &MoveConflictError{}) {
 		t.Fatalf("a move that never received its files took the session: %v", err)
 	}
 	if err := r.SetMoveState("move-2", MoveReceived, "", MovePrepared); err != nil {
 		t.Fatal(err)
 	}
-	events, err := r.TakeMovedSession("move-2", session, "builder", nil)
+	events, err := r.TakeMovedSession("move-2", session, "builder", time.Time{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,13 +206,13 @@ func TestAMoveInTakesASessionAThirdHostNoLongerServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
-	if _, err := r.TakeMovedSession("move-1", session, "", nil); !errors.As(err, &SessionOwnedError{}) {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("a move took a session another host still serves: %v", err)
 	}
 	if _, _, err := r.RemoveHostCatalogRow(third, moveConversation, entity, "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.TakeMovedSession("move-1", session, "", nil); err != nil {
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil); err != nil {
 		t.Fatalf("a move could not take a session its last host stopped serving: %v", err)
 	}
 	if owner, _ := r.SessionHost(moveConversation); owner != "" {

@@ -130,9 +130,22 @@ func TestAPinnedSessionThatCannotBeBroughtBackBacksOffThenNeedsThePersonOnce(t *
 	start := time.Now()
 	at := start
 	var waits []time.Duration
+	republished := false
 	for pass := 0; pass < 40; pass++ {
 		before := len(kept.woken)
+		select {
+		case <-d.catalogNudge:
+		default:
+		}
 		d.keepPinned(context.Background(), at)
+		if pinned, _ := r.PinnedSessions(); !republished && len(pinned) == 1 && !pinned[0].KeepAlive.FailedAt.IsZero() {
+			select {
+			case <-d.catalogNudge:
+				republished = true
+			default:
+				t.Fatal("giving up on the session did not republish its row for paired hosts")
+			}
+		}
 		if len(kept.woken) > before && len(kept.woken) > 1 {
 			waits = append(waits, at.Sub(start))
 			start = at
