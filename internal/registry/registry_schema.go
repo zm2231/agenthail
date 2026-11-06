@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT '',
 	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
-	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT ''
+	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
+	ended INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS coordinators (
 	project_id TEXT NOT NULL,

@@ -614,10 +614,8 @@ func (r *Registry) recordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 			events = append(events, event)
 		}
 	}
-	if keeping {
-		if err := retireCatalogRowsTx(tx, threshold, observedAt); err != nil {
-			return nil, err
-		}
+	if err := retireCatalogRowsTx(tx, kind, threshold, observedAt); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -634,7 +632,7 @@ func (r *Registry) retireUnobservedSessionTx(tx *sql.Tx, sessionID string, now t
 	if err := tx.QueryRow(`SELECT projection_fingerprint,projection_generation,observed_at FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint, &generation, &observedAt); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET status=? WHERE id=?`, string(surface.StatusOffline), sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET status=?,ended=1 WHERE id=?`, string(surface.StatusOffline), sessionID); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	var session map[string]any

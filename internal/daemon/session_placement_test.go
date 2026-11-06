@@ -85,6 +85,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	},
 	"Plan":              func(r *dashboardSession, _ time.Time) { r.Plan = &surface.Plan{Done: 1, Total: 3} },
 	"Open":              func(r *dashboardSession, _ time.Time) { r.Open = !r.Open },
+	"Ended":             func(r *dashboardSession, _ time.Time) { r.Ended = !r.Ended },
 	"Capabilities":      func(r *dashboardSession, _ time.Time) { r.Capabilities.Send = !r.Capabilities.Send },
 	"ReadOnly":          func(r *dashboardSession, _ time.Time) { r.ReadOnly = !r.ReadOnly },
 	"ReadOnlyReason":    func(r *dashboardSession, _ time.Time) { r.ReadOnlyReason = "elsewhere" },

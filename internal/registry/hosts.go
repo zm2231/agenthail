@@ -414,13 +414,13 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	if !row.RegisteredAt.IsZero() {
 		registered = formatRegisteredAt(row.RegisteredAt)
 	}
-	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?,''),datetime('now')),datetime('now'))
-		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,source=excluded.source,
+	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,ended,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?,''),datetime('now')),datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,ended=excluded.ended,source=excluded.source,
 		transport=excluded.transport,runtime_kind=excluded.runtime_kind,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
 		root_session_id=excluded.root_session_id,subagent_depth=excluded.subagent_depth,agent_nickname=excluded.agent_nickname,agent_role=excluded.agent_role,
 		registered_at=CASE WHEN ?='' THEN sessions.registered_at ELSE excluded.registered_at END,updated_at=datetime('now')`,
-		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role, registered, registered); err != nil {
+		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), b2i(sessionEnded(session)), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role, registered, registered); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	prior, err := readCatalogSessionPrior(tx, session.ID)

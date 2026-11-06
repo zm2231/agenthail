@@ -1,4 +1,4 @@
--- schemaVersion 67
+-- schemaVersion 68
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -774,7 +774,8 @@ CREATE TABLE sessions (
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
 	host_id TEXT NOT NULL DEFAULT '',
 	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
-	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT ''
+	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
+	ended INTEGER NOT NULL DEFAULT 0
 );
 
 -- table signin_bindings
@@ -1232,6 +1233,14 @@ BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.session_id;
 END;
 
+-- trigger catalog_sessions_unretire_family
+CREATE TRIGGER catalog_sessions_unretire_family AFTER UPDATE OF retired ON catalog_sessions
+WHEN OLD.retired=1 AND NEW.retired=0
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id=NEW.session_id
+		OR (root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT root_session_id FROM sessions WHERE id=NEW.session_id))));
+END;
+
 -- trigger message_queue_catalog_delete
 CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue
 WHEN OLD.status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=OLD.session_id AND host_id<>'')
@@ -1300,8 +1309,8 @@ BEGIN
 END;
 
 -- trigger sessions_unretire
-CREATE TRIGGER sessions_unretire AFTER UPDATE OF status,parent_session_id ON sessions
-WHEN NEW.status<>'offline' OR NEW.parent_session_id<>''
+CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
+WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.id AND retired=1;
 END;
