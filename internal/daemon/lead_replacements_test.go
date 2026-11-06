@@ -42,6 +42,9 @@ func TestTheSnapshotShowsAReplacedLeadUntilThePersonAcknowledgesIt(t *testing.T)
 	if lead := f.projectLead(t); lead.Replaced == nil || lead.Replaced.ID != entry.ID {
 		t.Fatalf("project lead=%+v, want its last replacement", lead)
 	}
+	if base := newSnapshotBase(state); len(base.LeadReplacements) != 1 || base.LeadReplacements[0].ID != entry.ID {
+		t.Fatalf("the base snapshot leaves out the open replacement: %+v", base.LeadReplacements)
+	}
 	ack := fmt.Sprintf(`{"action":"lead-replacement-ack","replacementId":%d}`, entry.ID)
 	if response := serveV1Action(f.handler, ack, "ack-1", f.token); response.Code != http.StatusOK {
 		t.Fatalf("ack status=%d body=%s", response.Code, response.Body)
