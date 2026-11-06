@@ -13,7 +13,7 @@ struct FrameOverArtTest {
 
     static func rgb(_ c: AccentContrast.RGB) -> BackdropRGB { BackdropRGB(Float(c.r), Float(c.g), Float(c.b)) }
 
-    static func worst(_ image: CGImage, scale: CGFloat, in rect: CGRect, roles: [BackdropRGB]) -> Float {
+    static func worst(_ image: CGImage, scale: CGFloat, in rect: CGRect, roles: [BackdropRGB], plate: (BackdropRGB, Float)? = nil) -> Float {
         let w = image.width, h = image.height
         var data = [UInt8](repeating: 0, count: w * h * 4)
         data.withUnsafeMutableBytes { raw in
@@ -25,7 +25,11 @@ struct FrameOverArtTest {
         for y in Int(rect.minY * scale)..<Int(rect.maxY * scale) {
             for x in Int(rect.minX * scale)..<Int(rect.maxX * scale) {
                 let i = (y * w + x) * 4
-                let bg = ScrimField.luminance(Float(data[i]) / 255, Float(data[i + 1]) / 255, Float(data[i + 2]) / 255)
+                var pixel = (Float(data[i]) / 255, Float(data[i + 1]) / 255, Float(data[i + 2]) / 255)
+                if let (color, alpha) = plate {
+                    pixel = (pixel.0 + (color.x - pixel.0) * alpha, pixel.1 + (color.y - pixel.1) * alpha, pixel.2 + (color.z - pixel.2) * alpha)
+                }
+                let bg = ScrimField.luminance(pixel.0, pixel.1, pixel.2)
                 for role in lums { worst = min(worst, (max(role, bg) + 0.05) / (min(role, bg) + 0.05)) }
             }
         }
@@ -64,10 +68,12 @@ struct FrameOverArtTest {
                     continue
                 }
                 for text in texts {
-                    let contrast = worst(rendered.image, scale: scale, in: text, roles: roles)
-                    if contrast < Float(config.contrastTarget) {
-                        print("FAIL: \(name) \(dark ? "dark" : "light") text at \(text) reads at \(contrast):1")
-                        failures += 1
+                    for (state, plate) in [("", nil), (" selected", (ground, Float(0.6)))] as [(String, (BackdropRGB, Float)?)] {
+                        let contrast = worst(rendered.image, scale: scale, in: text, roles: roles, plate: plate)
+                        if contrast < Float(config.contrastTarget) {
+                            print("FAIL: \(name) \(dark ? "dark" : "light")\(state) text at \(text) reads at \(contrast):1")
+                            failures += 1
+                        }
                     }
                 }
             }

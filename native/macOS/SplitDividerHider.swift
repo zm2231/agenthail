@@ -21,7 +21,7 @@ private struct SplitDividerHider: ViewModifier {
         @ObservedObject var backdrop: WindowBackdrop
 
         var body: some View {
-            SplitDividerProbe(hidden: backdrop.active && backdrop.gutter > 0)
+            SplitDividerProbe(hidden: backdrop.active && backdrop.gutter > 0, shadowless: backdrop.active)
         }
     }
 }
@@ -29,6 +29,7 @@ private struct SplitDividerHider: ViewModifier {
 /// NSSplitView has no invisible divider setting, and can replace its divider subview on any layout.
 private struct SplitDividerProbe: NSViewRepresentable {
     let hidden: Bool
+    let shadowless: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -37,11 +38,13 @@ private struct SplitDividerProbe: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.hidden = hidden
+        coordinator.shadowless = shadowless
         DispatchQueue.main.async { coordinator.attach(from: view) }
     }
 
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
         coordinator.hidden = false
+        coordinator.shadowless = false
         coordinator.apply()
         coordinator.detach()
     }
@@ -49,6 +52,7 @@ private struct SplitDividerProbe: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var hidden = false
+        var shadowless = false
         private var splits: [WeakSplit] = []
         private var observers: [NSObjectProtocol] = []
 
@@ -73,9 +77,12 @@ private struct SplitDividerProbe: NSViewRepresentable {
 
         func apply() {
             for split in splits.compactMap(\.split) {
-                for divider in split.subviews where ["SplitDividerView", "SplitViewShadowView"].contains(where: String(describing: type(of: divider)).hasSuffix) {
-                    let alpha: CGFloat = hidden ? 0 : 1
-                    if divider.alphaValue != alpha { divider.alphaValue = alpha }
+                for view in split.subviews {
+                    let name = String(describing: type(of: view))
+                    let off = name.hasSuffix("SplitDividerView") ? hidden : name.hasSuffix("SplitViewShadowView") ? hidden || shadowless : nil
+                    guard let off else { continue }
+                    let alpha: CGFloat = off ? 0 : 1
+                    if view.alphaValue != alpha { view.alphaValue = alpha }
                 }
             }
         }

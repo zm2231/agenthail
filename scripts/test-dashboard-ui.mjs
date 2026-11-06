@@ -609,9 +609,12 @@ for (const [name, set] of [["dark", dark], ["light", light]]) {
   await view.render({ ...look, polarity: "light", glass: { ...glass, on: false } });
   assert.equal(answers.length, 4, "solid panes need no measurement");
   assert.ok(attributes.get("data-panes") === "solid" && properties["--pane-gutter"] === "12px" && noGlass(), "solid panes keep the gutter and leave no glass state behind");
+  assert.equal(attributes.has("data-panes-joined"), false, "panes with a gutter keep their own borders and corners");
+  await view.render({ ...look, gutter: 0, glass: { ...glass, on: false } });
+  assert.equal(attributes.has("data-panes-joined"), true, "a zero gutter joins the panes, so each owns one shared edge");
   view.render(look);
   view.render({ ...look, spec: { kind: "none" } });
-  assert.ok(!attributes.has("data-panes") && !attributes.has("data-backdrop") && !("--pane-gutter" in properties) && noGlass(), "removing the background removes the panes");
+  assert.ok(!attributes.has("data-panes") && !attributes.has("data-panes-joined") && !attributes.has("data-backdrop") && !("--pane-gutter" in properties) && noGlass(), "removing the background removes the panes");
 }
 
 {

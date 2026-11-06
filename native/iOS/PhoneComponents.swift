@@ -23,7 +23,13 @@ struct GlassRowBackground: View {
             } else {
                 PhonePalette.ground.opacity(0.35)
             }
-            if selected { Color.accentColor.opacity(0.16) }
+            if selected {
+                PhonePalette.ground.opacity(0.6)
+                HStack {
+                    Rectangle().fill(Color.accentColor).frame(width: 3)
+                    Spacer(minLength: 0)
+                }
+            }
         }
     }
 }

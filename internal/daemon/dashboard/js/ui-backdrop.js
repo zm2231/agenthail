@@ -238,6 +238,7 @@ export function createBackdrop({ document, measure }) {
     else html.removeAttribute("data-panes");
     if (style) html.style.setProperty("--pane-gutter", `${look.gutter}px`);
     else html.style.removeProperty("--pane-gutter");
+    html.toggleAttribute("data-panes-joined", Boolean(style) && look.gutter === 0);
     if (!glass) for (const name of GLASS_PROPERTIES) html.style.removeProperty(name);
     if (!glass) return { panes: {} };
     html.style.setProperty("--glass-tint", channels(glass.tint));

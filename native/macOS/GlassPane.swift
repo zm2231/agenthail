@@ -99,7 +99,7 @@ private struct GlassPaneBody<Content: View>: View {
                         if backdrop.active, backdrop.solid {
                             GlassColumnMask(radius: backdrop.paneRadius)
                         }
-                        if backdrop.active, backdrop.border > 0 || backdrop.solid {
+                        if backdrop.active, backdrop.gutter > 0, backdrop.border > 0 || backdrop.solid {
                             shape.strokeBorder(backdrop.border > 0 ? AnyShapeStyle(DesktopPalette.text.opacity(backdrop.border)) : AnyShapeStyle(DesktopPalette.line), lineWidth: 1)
                         }
                     }

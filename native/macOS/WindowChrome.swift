@@ -231,7 +231,9 @@ struct SessionTabView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 28)
-        .selectionMark(active)
+        .background {
+            if active { RoundedRectangle(cornerRadius: DesktopRadius.row).fill(DesktopPalette.window.opacity(0.6)) }
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { pane.keepTab(tab.id) }
         .onTapGesture { pane.activateTab(tab.id) }
