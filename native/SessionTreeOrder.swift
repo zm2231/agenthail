@@ -9,7 +9,6 @@ extension SessionTree {
             var project = Project(id: viewProject.id, name: viewProject.name, identity: first.root.project, checkouts: [])
             project.collapsed = Set(viewProject.collapsedFamilyIds)
             project.counts = viewProject.counts
-            project.pinned = Set((listed?.families ?? []).filter { $0.projectId == viewProject.id && $0.pinned }.map(\.id))
             for family in families {
                 let checkoutID = checkoutID(of: family.root, view: listed?.families.first { $0.id == family.id })
                 if let index = project.checkouts.firstIndex(where: { $0.id == checkoutID }) {

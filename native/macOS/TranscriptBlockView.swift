@@ -14,9 +14,15 @@ struct TranscriptBlockView: View, @MainActor Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.block == rhs.block && lhs.onEdit == rhs.onEdit }
 
     var body: some View {
-        switch block.kind {
-        case .user(let text, let files):
+        if case .user(let text, let files) = block.kind {
             UserBubble(text: text, receipt: note, time: TurnClock.time(block.timestamp), files: files, onEdit: onEdit.closure, row: block.id)
+        } else {
+            row.transcriptScrimRow()
+        }
+    }
+
+    @ViewBuilder private var row: some View {
+        switch block.kind {
         case .assistant(let text):
             AssistantReply(text: text, note: note, footer: block.finished.map { TurnClock.footer(duration: $0, at: block.timestamp) })
         case .agent(let entry):

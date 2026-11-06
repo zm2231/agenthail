@@ -1,6 +1,7 @@
 import { $ } from "./dom.js";
 import { app } from "./state.js";
 import { renderSessions, sessionBatchSize } from "./sessions.js";
+import { ensureSessionOrder } from "./dashboard-state.js";
 import { cancelCodexSearch, startCodexSearch } from "./session-search.js";
 import { syncConversationLayout } from "./navigation.js";
 
@@ -35,6 +36,7 @@ export function bindSessionEvents() {
     app.showArchived = event.target.checked;
     app.sessionLimit = sessionBatchSize();
     renderSessions();
+    ensureSessionOrder();
   });
   $("#session-more").addEventListener("click", () => {
     app.sessionLimit += sessionBatchSize();

@@ -48,11 +48,24 @@ enum PreviewOrder {
                 projects.append((projectID, project?["displayName"] as? String ?? "No project", [id]))
             }
         }
+        let pinnedFamilies = Set(families.filter { $0["pinned"] as? Bool == true }.compactMap { $0["id"] as? String })
+        func collapsed(_ ids: [String]) -> [String] {
+            var shown = ids.filter(pinnedFamilies.contains)
+            for id in ids where shown.count < 5 && !pinnedFamilies.contains(id) { shown.append(id) }
+            return ids.filter(Set(shown).contains)
+        }
         let count = ["families": families.count, "sessions": sessions.count]
+        let workingRows = sessions.filter(working)
+        let workingRoots = Set(workingRows.map { row in
+            var at = row
+            while let up = parent(at), let next = sessions.first(where: { $0["id"] as? String == up }) { at = next }
+            return at["id"] as? String ?? ""
+        })
+        let running = ["families": workingRoots.count, "sessions": workingRows.count]
         object["view"] = [
-            "counts": ["running": count, "current": count, "recent": count, "all": count, "archived": ["families": 0, "sessions": 0]],
+            "counts": ["running": running, "current": count, "recent": count, "all": count, "archived": ["families": 0, "sessions": 0]],
             "surfaces": [],
-            "projects": projects.map { ["id": $0.id, "name": $0.name, "counts": ["families": $0.families.count, "sessions": $0.families.count], "collapsedFamilyIds": $0.families] },
+            "projects": projects.map { ["id": $0.id, "name": $0.name, "counts": ["families": $0.families.count, "sessions": $0.families.count], "collapsedFamilyIds": collapsed($0.families)] },
             "families": families,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return json }

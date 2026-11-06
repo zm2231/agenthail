@@ -12,7 +12,7 @@ import { cancelCodexSearch } from "./session-search.js";
 import { action } from "./actions.js";
 import { takeBackQueued } from "./queue-take-back.js";
 import { renderDeliveryProblems, renderLeadReplacements } from "./overview.js";
-import { load } from "./dashboard-state.js";
+import { ensureSessionOrder, load } from "./dashboard-state.js";
 import { displayName } from "./session-labels.js";
 import { changeLead, openProjectDialog, projectChange } from "./project-dialog.js";
 import { toggleNewConversationForm } from "./start-form.js";
@@ -98,6 +98,7 @@ export function bindConversationEvents() {
       }
       app.sessionLimit = sessionBatchSize();
       renderSessions();
+      ensureSessionOrder();
       return;
     }
     const projectExpand = event.target.closest("[data-project-expand]");
@@ -116,7 +117,10 @@ export function bindConversationEvents() {
       return;
     }
     const projectOpen = event.target.closest("[data-project-open]");
-    if (projectOpen) return openProject(projectOpen.dataset.projectOpen);
+    if (projectOpen) {
+      openProject(projectOpen.dataset.projectOpen);
+      return ensureSessionOrder();
+    }
     const projectEarlier = event.target.closest("[data-project-earlier]");
     if (projectEarlier) {
       app.projectEarlier = projectEarlier.dataset.projectEarlier;
@@ -151,6 +155,7 @@ export function bindConversationEvents() {
       app.filters.surface = surfaceButton.dataset.surface;
       $("#session-surface-filter").value = app.filters.surface;
       renderSessions();
+      ensureSessionOrder();
       return;
     }
     if (event.target.closest("[data-open-conversations]")) {

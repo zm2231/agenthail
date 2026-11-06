@@ -7,12 +7,15 @@ const errors = [];
 let releaseTools;
 let releaseState;
 let rendered = 0;
+let orderReads = 0;
+let missingOrder = 0;
 let loadRenderer = () => { calls.push("tools"); return new Promise((resolve) => { releaseTools = resolve; }); };
 const selected = [];
 const context = {
   app: { loading: false, hasState: false, audit: {} },
   loadTools: () => loadRenderer(),
-  loadSessionOrder: async () => Infinity,
+  loadSessionOrder: async () => { orderReads++; return Infinity; },
+  orderIsMissing: () => missingOrder-- > 0,
   fetch: (path) => { calls.push(path); return new Promise((resolve) => { releaseState = resolve; }); },
   $: (selector) => { if (!elements.has(selector)) elements.set(selector, {}); return elements.get(selector); },
   renderOverview: () => { rendered++; },
@@ -66,4 +69,11 @@ await context.load(false, false);
 assert.equal(selected.length, 0, "a link opens its target without opening the default session first");
 await context.load();
 assert.deepEqual(selected, ["first"], "ordinary navigation still opens its default conversation");
+const before = orderReads;
+missingOrder = 1;
+await context.load(false, false);
+await new Promise(setImmediate);
+await new Promise(setImmediate);
+assert.equal(orderReads - before, 2, "a view that needs a scope the finished load did not read gets one more read");
+assert.equal(context.app.loading, false);
 console.log("Dashboard load: parallel requests, render barrier, refresh deduplication and failure recovery passed.");
