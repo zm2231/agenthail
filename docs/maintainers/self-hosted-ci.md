@@ -36,6 +36,10 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 
 `scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME`, the job's temp directory and its marker.
 
+## Nightly iPad UI tests
+
+Pull requests run the iOS suites on an iPhone simulator only. `.github/workflows/ipad-nightly.yml` runs the UI tests on an 11-inch iPad Pro simulator, named `Agenthail CI iPad <runner name>`, every night on `main`, and on demand with `workflow_dispatch`. It shares the self-hosted runners with pull requests but runs at night, when few pull request jobs run, so it rarely competes with them for a runner or CPU time; its simulator and DerivedData are its own, so it never disturbs a pull request's simulator. When the run fails or does not finish, `scripts/ci-nightly-issue.sh` opens the issue `Nightly iPad UI tests are failing`, or comments on it if it is already open, with a link to the run and to its test results, or a note that the run stopped before saving any; the next passing run closes it. `scripts/test-ci-nightly-issue.sh` checks that script.
+
 ## Disposable VM runners
 
 `package` and `installer` install the package system-wide with `sudo`, register a LaunchAgent and launch the app, so they run in a macOS virtual machine that is created for one job and deleted afterwards. The host is never modified. macOS allows two macOS virtual machines per host, so there are at most two slots.

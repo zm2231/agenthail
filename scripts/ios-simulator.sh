@@ -85,8 +85,8 @@ physical_path() {
 
 kind="${1:-iphone}"
 case "$kind" in
-  iphone) name="Agenthail iPhone"; family="iPhone" ;;
-  ipad) name="Agenthail iPad"; family="iPad" ;;
+  iphone) name="Agenthail iPhone"; family="iPhone"; model="iPhone" ;;
+  ipad) name="Agenthail iPad"; family="iPad"; model="iPad Pro 11-inch" ;;
   *) usage ;;
 esac
 name="${AGENTHAIL_SIMULATOR_NAME:-$name}"
@@ -96,7 +96,7 @@ udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | firs
 
 if [ -z "$udid" ]; then
   runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
-  device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" '.devicetypes | map(select(.name | startswith($family))) | first | .identifier')"
+  device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg model "$model" '.devicetypes | map(select(.name | startswith($model))) + map(select(.name | startswith($family))) | first | .identifier')"
   udid="$(xcrun simctl create "$name" "$device" "$runtime")"
 fi
 
