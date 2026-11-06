@@ -94,6 +94,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
             .environment(\.revealRow) { top in
                 following = false
+                layout.releaseHold()
                 position.scrollTo(y: top)
             }
             .onChange(of: transcript) {

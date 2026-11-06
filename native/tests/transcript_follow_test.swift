@@ -408,12 +408,26 @@ struct TranscriptFollowTest {
         feed.transcript = "Zc"
         feed.rows = rows("Zc", 100)
         spin(0.6)
+        expectBottom(scroll, "a transcript opened before expanding a row starts at the live edge")
         NotificationCenter.default.post(name: .toggleRow, object: "Zc98")
         spin(0.5)
         NotificationCenter.default.post(name: .collapseRow, object: "Zc98")
-        spin(0.6)
+        spin(1.0)
         let revealedTop = rowTops["Zc98"] ?? -1
         expect(revealedTop >= offset(scroll) && revealedTop < scroll.contentView.bounds.maxY && gap(scroll) >= -2, "collapsing a tail row keeps its top on screen and the view inside the content, offset \(offset(scroll)) row top \(revealedTop) gap \(gap(scroll))")
+
+        feed.transcript = "Zh"
+        feed.rows = rows("Zc", 100)
+        spin(0.6)
+        expectBottom(scroll, "a transcript opened before holding an older page's place starts at the live edge")
+        NotificationCenter.default.post(name: .toggleRow, object: "Zc98")
+        spin(0.5)
+        feed.rows = rows("Zh", 20) + feed.rows
+        spin(0.3)
+        NotificationCenter.default.post(name: .collapseRow, object: "Zc98")
+        spin(1.0)
+        let heldReveal = rowTops["Zc98"] ?? -1
+        expect(heldReveal >= offset(scroll) && heldReveal < scroll.contentView.bounds.maxY, "collapsing a row while an older page's place is held keeps the row's top on screen, offset \(offset(scroll)) row top \(heldReveal)")
 
         feed.transcript = "F"
         feed.rows = rows("F", 1_500)

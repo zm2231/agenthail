@@ -45,6 +45,16 @@ struct TranscriptTailTest {
         unmeasured.update(long, in: "a", rows: [:], visible: below, following: true)
         expect(unmeasured.split(long, in: "a") == open, "a row with no known frame keeps the boundary")
 
+        var removing = TranscriptTail()
+        removing.update(ids, in: "a", rows: [:], visible: visible, following: false)
+        let boundary = removing.split(ids, in: "a")
+        let withoutBoundary = ids.filter { $0 != ids[boundary] }
+        expect(removing.split(withoutBoundary, in: "a") == boundary, "removing the first eager row keeps the row before it lazy")
+        removing.update(withoutBoundary, in: "a", rows: [:], visible: visible, following: false)
+        expect(removing.split(withoutBoundary, in: "a") == boundary, "the boundary moves to the row that took its place")
+        let withoutBoth = withoutBoundary.filter { $0 != withoutBoundary[boundary - 1] && $0 != withoutBoundary[boundary] }
+        expect(removing.split(withoutBoth, in: "a") == TranscriptTail.opening(count: withoutBoth.count), "with both rows gone the boundary opens by the rule")
+
         var empty = TranscriptTail()
         empty.update([], in: "a", rows: [:], visible: visible, following: true)
         expect(empty.split(ids, in: "a") == open, "an empty transcript holds no boundary, so its first rows open by the rule")
