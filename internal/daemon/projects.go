@@ -808,6 +808,9 @@ func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []regis
 			continue
 		}
 		key, repository, ok := d.catalogIdentities.rootRepository(ctx, record.WorkspaceRoot, now)
+		if ok && key != "" {
+			d.observeRepositoryKey(record.WorkspaceRoot, key)
+		}
 		if !ok || (key == record.Key && bytes.Equal(repository, record.Repository)) {
 			continue
 		}

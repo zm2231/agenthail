@@ -17,13 +17,19 @@ type projectLinkSet struct {
 	survivors map[string]string
 	names     map[string]string
 	held      map[string]string
+	moved     map[string]string
 }
 
 func loadProjectLinks(reg *registry.Registry) (projectLinkSet, error) {
-	set := projectLinkSet{survivors: map[string]string{}, names: map[string]string{}, held: map[string]string{}}
+	set := projectLinkSet{survivors: map[string]string{}, names: map[string]string{}, held: map[string]string{}, moved: map[string]string{}}
 	if reg == nil {
 		return set, nil
 	}
+	moved, err := reg.ProjectMoveTargets()
+	if err != nil {
+		return set, err
+	}
+	set.moved = moved
 	links, err := reg.ProjectLinks()
 	if err != nil {
 		return set, err
@@ -83,6 +89,22 @@ func projectIDName(id string, records []registry.ProjectRecord) string {
 	return id
 }
 
+func (s projectLinkSet) follow(found *CatalogProject) *CatalogProject {
+	if found == nil {
+		return nil
+	}
+	to, moved := s.moved[found.Key]
+	if !moved {
+		return found
+	}
+	followed := *found
+	if followed.ID == found.Key {
+		followed.ID = to
+	}
+	followed.Key = to
+	return &followed
+}
+
 func (s projectLinkSet) survivorOf(found *CatalogProject) (string, bool) {
 	if found == nil {
 		return "", false
@@ -111,6 +133,7 @@ func (s projectLinkSet) apply(found *CatalogProject) *CatalogProject {
 		original.ID, original.Key, original.DisplayName, original.LinkedFrom = found.LinkedFrom.ID, found.LinkedFrom.ID, found.LinkedFrom.DisplayName, nil
 		found = &original
 	}
+	found = s.follow(found)
 	survivor, linked := s.survivorOf(found)
 	if !linked {
 		return found
@@ -152,7 +175,7 @@ func shareRoot(a, b []string) bool {
 }
 
 func (s projectLinkSet) equal(other projectLinkSet) bool {
-	return sameStrings(s.survivors, other.survivors) && sameStrings(s.names, other.names)
+	return sameStrings(s.survivors, other.survivors) && sameStrings(s.names, other.names) && sameStrings(s.moved, other.moved)
 }
 
 func sameStrings(a, b map[string]string) bool {

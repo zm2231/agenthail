@@ -19,6 +19,15 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	moved, err := reg.ProjectMoveTargets()
+	if err != nil {
+		return "", err
+	}
+	for index := range records {
+		if to, found := moved[records[index].Key]; found {
+			records[index].Key = to
+		}
+	}
 	if found.LinkedFrom == nil {
 		for _, record := range records {
 			if record.Added && record.ID == found.LocalID {
@@ -37,6 +46,9 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 			continue
 		}
 		return addedLedgerKey(reg, record)
+	}
+	if to, found := moved[found.Key]; found {
+		return to, nil
 	}
 	return found.Key, nil
 }
