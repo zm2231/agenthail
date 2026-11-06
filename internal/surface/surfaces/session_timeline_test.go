@@ -29,18 +29,7 @@ func timelineFixture(t *testing.T, data string) string {
 func TestMain(m *testing.M) {
 	testkit.ClearAgentEnv()
 	transcriptPollInterval = 20 * time.Millisecond
-	// Adapters write state such as the Codex write lock under HOME, so the
-	// package runs against a scratch HOME rather than the developer's own.
-	home, err := os.MkdirTemp("", "surfaces-home-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Setenv("HOME", home)
-	os.Setenv("CFFIXED_USER_HOME", home)
-	code := m.Run()
-	os.RemoveAll(home)
-	os.Exit(code)
+	os.Exit(testkit.RunInOwnHome(m.Run))
 }
 
 // readTimeline reads a transcript page through the adapter's public ReadSession.
