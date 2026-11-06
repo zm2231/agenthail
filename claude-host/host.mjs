@@ -25,6 +25,8 @@ const MAX_IMAGE_BYTES = 5 << 20;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif']);
 const OPEN_TIMEOUT_MS = 60_000;
 const AGENTHAIL_MCP = 'agenthail';
+// A successful call of this tool ends Claude's turn without a reply after it.
+const END_TURN_TOOL = `mcp__${AGENTHAIL_MCP}__agenthail_end_turn`;
 const AGENTHAIL_MCP_TIMEOUT_MS = 3_700_000;
 const TAKE_TIMEOUT_MS = 10_000;
 const HUMAN_KEPT = 64;
@@ -503,7 +505,7 @@ async function open(params) {
         // its task tools (TaskCreate, TaskList and the rest) to an SDK
         // session only when asked too, though a terminal session has them;
         // the host's own environment can still turn them off.
-        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1' }, params.configDir),
+        env: inRoot(checker ? checkerEnv : { CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', ...(params.mcp ? { CLAUDE_CODE_TERMINAL_MCP_TOOLS: END_TURN_TOOL } : {}) }, params.configDir),
         pathToClaudeCodeExecutable: args.claude,
         ...conduct,
         onElicitation: (elicitation, options) => s.elicit(elicitation, options),

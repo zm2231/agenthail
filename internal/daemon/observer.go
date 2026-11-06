@@ -241,6 +241,14 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	if completionChanged {
+		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID); err != nil {
+			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
+		}
+	}
+	if desktopNotificationMessage != "" && observation.Reply.Error == "" {
+		desktopNotificationMessage, mobileNotificationMessage = d.endTurnNotifications(session, observation.CompletedTurnID, desktopNotificationMessage, mobileNotificationMessage)
+	}
 	if observation.ActiveTurnID != "" && observation.ActiveTurnID != previous.ActiveTurnID || completionChanged {
 		if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
 			d.log.Printf("revive session credential %s: %s", d.resolveDisplay(session.ID), err)

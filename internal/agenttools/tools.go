@@ -7,6 +7,8 @@ type Tool struct {
 	AlwaysLoad bool
 }
 
+const EndTurn = "agenthail_end_turn"
+
 var Tools = []Tool{
 	{Name: "agenthail_whoami", Description: "Your session, alias, project, host, coordinator role, capabilities, ceiling and credential expiry."},
 	{Name: "agenthail_sessions", Description: "Sessions you may read: your own, the ones you spawned, and your project's. Paged; pass nextCursor back as cursor. A session that appears while you page shows up when you list again from the start."},
@@ -21,6 +23,7 @@ var Tools = []Tool{
 	{Name: "agenthail_history", Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged. For the person's voice operator only."},
 	{Name: "agenthail_ledger_write", Description: "Record in your project's intent ledger: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},
 	{Name: "agenthail_create", AlwaysLoad: true, Description: "Start a Claude or Codex session with a first message. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. Sessions nest at most 3 deep, with at most 8 running at once per spawner."},
+	{Name: EndTurn, AlwaysLoad: true, Description: "Call this last in every turn, after your reply: it ends the turn and decides whether the person is pinged. needs you when they must decide or act before you go on, with the questions in asks; needs nothing when done. headline is the line shown in their list and notification. If an agent started you, needs you goes to it. A refused call does not end the turn; fix it and call again."},
 	{Name: "agenthail_report", Description: "If your spawner started you as a task, tell it you are done or failed, and the result it should read. The first report settles the task; you can keep working."},
 	{Name: "agenthail_result", AlwaysLoad: true, Description: "A task's state and result, by taskId or child target, for its parent or anyone who can read the child. Long text is clipped to fit."},
 	{Name: "agenthail_wait", AlwaysLoad: true, Description: "Wait until a task settles, its child asks for something, or its goal stops, and say which. Default 600 seconds, at most 3600; a Claude session Agenthail doesn't host waits at most 45, so call again with the cursor. If it times out, the tasks you started are still running, and you get one notice when each settles, so you can end your turn instead of waiting again."},
