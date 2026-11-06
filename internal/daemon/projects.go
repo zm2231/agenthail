@@ -25,7 +25,7 @@ import (
 type catalogViewState struct {
 	archive   registry.ArchiveState
 	attention map[string]bool
-	pins      map[string]registry.SessionPin
+	marks     map[string]registry.SessionMark
 }
 
 func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
@@ -41,11 +41,11 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	for _, item := range items {
 		attention[item.SessionID] = true
 	}
-	pins, err := d.Registry.SessionPins()
+	marks, err := d.Registry.SessionMarks()
 	if err != nil {
-		return catalogViewState{}, fmt.Errorf("read pinned sessions: %w", err)
+		return catalogViewState{}, fmt.Errorf("read pinned and snoozed sessions: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, pins: pins}, nil
+	return catalogViewState{archive: archive, attention: attention, marks: marks}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -96,8 +96,9 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 		row.Project = &project
 	}
 	row.Archived = archived
-	pin := view.pins[row.ID]
-	row.PinnedAt, row.KeepAlive = pin.PinnedAt, keepAliveRow(pin.KeepAlive)
+	mark := view.marks[row.ID]
+	row.PinnedAt, row.KeepAlive = mark.PinnedAt, keepAliveRow(mark.KeepAlive)
+	row.Snooze = snoozeRow(mark.Snooze)
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether
@@ -129,7 +130,7 @@ type dashboardProject struct {
 	Archived     bool                          `json:"archived"`
 	Linked       []CatalogProjectRef           `json:"linked,omitempty"`
 	// LinkHeld is why this host keeps the project apart although a link joins it into another.
-	LinkHeld string `json:"linkHeld,omitempty"`
+	LinkHeld    string              `json:"linkHeld,omitempty"`
 	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
 }
 
@@ -146,12 +147,12 @@ type dashboardProjectCoordinator struct {
 }
 
 type dashboardProjectCheckout struct {
-	Host         dashboardHost `json:"host"`
-	ProjectID    string        `json:"projectId"`
-	RootPath     string        `json:"rootPath"`
-	Added        bool          `json:"added"`
-	SessionCount int           `json:"sessionCount"`
-	Archived     bool          `json:"archived"`
+	Host         dashboardHost      `json:"host"`
+	ProjectID    string             `json:"projectId"`
+	RootPath     string             `json:"rootPath"`
+	Added        bool               `json:"added"`
+	SessionCount int                `json:"sessionCount"`
+	Archived     bool               `json:"archived"`
 	LinkedFrom   *CatalogProjectRef `json:"linkedFrom,omitempty"`
 }
 
@@ -173,7 +174,7 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
-	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current, row.Archived)
+	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current || !row.PinnedAt.IsZero(), row.Archived)
 }
 
 // SessionWorking reports whether a session or one of its observed subagents is

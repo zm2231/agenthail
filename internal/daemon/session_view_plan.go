@@ -18,7 +18,7 @@ type sessionViewPlan struct {
 }
 
 func presentationCurrent(row *dashboardSession) bool {
-	return !row.Archived && (row.Current && row.CurrentReason != "queued" || presentationWorking(row) || row.QueueCount > 0 || row.WaitingOn != nil || row.Attention != nil)
+	return !row.Archived && (row.Current && row.CurrentReason != "queued" || !row.PinnedAt.IsZero() || presentationWorking(row) || row.QueueCount > 0 || row.WaitingOn != nil || row.Attention != nil)
 }
 
 func presentationMatches(row *dashboardSession, scope string, now time.Time) bool {

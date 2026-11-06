@@ -159,29 +159,33 @@ func (r *Registry) SaveKeepAlive(sessionID string, state KeepAlive) error {
 	return err
 }
 
-type SessionPin struct {
+type SessionMark struct {
 	PinnedAt  time.Time
 	KeepAlive KeepAlive
+	Snooze    Snooze
 }
 
-func (r *Registry) SessionPins() (map[string]SessionPin, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.pinned_at_ms,COALESCE(k.failed_at_ms,0),COALESCE(k.error,'') FROM sessions s LEFT JOIN session_keep_alive k ON k.session_id=s.id WHERE s.pinned_at_ms>0 AND s.host_id=''`)
+func (r *Registry) SessionMarks() (map[string]SessionMark, error) {
+	rows, err := r.read.Query(`SELECT s.id,s.pinned_at_ms,COALESCE(k.failed_at_ms,0),COALESCE(k.error,''),s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake
+ FROM sessions s LEFT JOIN session_keep_alive k ON k.session_id=s.id AND s.pinned_at_ms>0
+ WHERE (s.pinned_at_ms>0 OR s.snoozed_at_ms>0) AND s.host_id=''`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	pins := map[string]SessionPin{}
+	marks := map[string]SessionMark{}
 	for rows.Next() {
-		var id string
-		var pinned, failed int64
-		var pin SessionPin
-		if err := rows.Scan(&id, &pinned, &failed, &pin.KeepAlive.Error); err != nil {
+		var id, wake string
+		var pinned, failed, snoozed, until int64
+		var mark SessionMark
+		if err := rows.Scan(&id, &pinned, &failed, &mark.KeepAlive.Error, &snoozed, &until, &wake); err != nil {
 			return nil, err
 		}
-		pin.PinnedAt, pin.KeepAlive.FailedAt = time.UnixMilli(pinned).UTC(), unixMilliOrZero(failed)
-		pins[id] = pin
+		mark.PinnedAt, mark.KeepAlive.FailedAt = unixMilliOrZero(pinned), unixMilliOrZero(failed)
+		mark.Snooze = scanSnooze(snoozed, until, wake)
+		marks[id] = mark
 	}
-	return pins, rows.Err()
+	return marks, rows.Err()
 }
 
 func (r *Registry) MarkKeepAliveAnnounced(sessionID string, failedAt time.Time) error {

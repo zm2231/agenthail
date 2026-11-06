@@ -106,6 +106,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		display := sessionDisplay(row, now)
 		row.Display = &display
 		row.Attention = rowAttention(row, read.Outgoing[record.ID], record.Attention)
+		row.InboxSection = sessionInbox(row, now)
 		row.Placement = sessionPlacement(row)
 		rows = append(rows, row)
 		revision = append(revision, newRevisionRow(record, row))
@@ -181,7 +182,7 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 	}
 	for _, id := range selected {
 		row := *plan.rows[id]
-		hydrated :=d.presentation.fingerprints.rows[internal[id]].row
+		hydrated := d.presentation.fingerprints.rows[internal[id]].row
 		row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot = hydrated.Holders, hydrated.Plan, hydrated.Runtime, hydrated.ClaudeConfigRoot
 		row.ConfiguredModel, row.PendingModel = hydrated.ConfiguredModel, hydrated.PendingModel
 		result.Sessions = append(result.Sessions, row)

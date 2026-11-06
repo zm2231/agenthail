@@ -41,12 +41,14 @@ type dashboardSession struct {
 	Plan              *surface.Plan              `json:"plan,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	RegisteredAt      time.Time                  `json:"registeredAt,omitzero"`
-	QueueCount       int                        `json:"queueCount"`
+	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
 	Archived          bool                       `json:"archived,omitempty"`
 	PinnedAt          time.Time                  `json:"pinnedAt,omitzero"`
 	KeepAlive         *dashboardKeepAlive        `json:"keepAlive,omitempty"`
+	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
+	InboxSection      string                     `json:"inboxSection,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`
