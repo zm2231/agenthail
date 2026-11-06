@@ -44,6 +44,8 @@ func (a *App) turnStop(input io.Reader, now time.Time) map[string]any {
 	if ended, err := store.TurnEnded(session.ID, hook.TurnID); err != nil || ended {
 		return nil
 	}
-	_ = store.MarkTurnNudged(session.ID, now)
+	if store.MarkTurnNudged(session.ID, now) != nil {
+		return nil
+	}
 	return map[string]any{"decision": "block", "reason": turnStopNudge}
 }

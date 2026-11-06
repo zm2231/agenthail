@@ -159,6 +159,16 @@ func TestACodexTooOldToContinueABlockedTurnGetsNoStopHookUntilItIsUpdated(t *tes
 		t.Fatal(err)
 	}
 	requireCodexState(t, CodexHooksInstalled)
+
+	t.Setenv("PATH", bin+":"+path)
+	requireCodexState(t, CodexHooksOutdated)
+	if _, err := InstallCodexContext(codexContext(t), testAgenthail); err != nil {
+		t.Fatal(err)
+	}
+	requireCodexState(t, CodexHooksNoNudge)
+	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), "hook stop") {
+		t.Fatalf("install on a downgraded Codex left the Stop hook:\n%s", config)
+	}
 }
 
 func TestHooksInstallCodexWithoutCodexWritesNothing(t *testing.T) {
