@@ -67,6 +67,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
+                if layout.revealed?.expired == true { layout.revealed = nil }
+                if !following, resting, let target = layout.revealed?.target(in: new, resized: resized) {
+                    settle { $0.scrollTo(y: target) }
+                    return
+                }
                 if !following, !inserted, resting, let target = layout.heldTarget(new) {
                     settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                     return
@@ -95,7 +100,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .environment(\.revealRow) { top in
                 following = false
                 layout.releaseHold()
-                position.scrollTo(y: top)
+                layout.revealed = RevealedRow(top: top)
+                position.scrollTo(y: top.wrappedValue)
             }
             .onChange(of: transcript) {
                 generation &+= 1
@@ -144,6 +150,7 @@ private final class Layout {
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
+    var revealed: RevealedRow?
 
     var heldFromEnd: CGFloat? {
         guard let fromEnd, ContinuousClock.now < fromEnd.until else { return nil }
@@ -156,6 +163,7 @@ private final class Layout {
 
     func releaseHold() {
         fromEnd = nil
+        revealed = nil
     }
 
     /// Earlier rows keep re-measuring after they arrive, moving the rows below them without scrolling, and the geometry action

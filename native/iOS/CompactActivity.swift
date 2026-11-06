@@ -114,7 +114,7 @@ struct CompactActivityGroup: View {
                         Button {
                             // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
                             set(false)
-                            revealRow(top)
+                            revealRow($top)
                         } label: {
                             CollapseLabel(title: "Collapse activity")
                         }
@@ -257,7 +257,7 @@ struct ToolActivityRow: View {
                     }
                     Button {
                         set(false)
-                        revealRow(top)
+                        revealRow($top)
                     } label: {
                         CollapseLabel(title: "Collapse tool")
                     }

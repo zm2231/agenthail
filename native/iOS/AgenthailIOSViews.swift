@@ -660,7 +660,7 @@ struct SessionScreen: View {
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
             .environment(\.revealRow) {
                 olderPlace.release()
-                position.scrollTo(y: $0)
+                position.scrollTo(y: $0.wrappedValue)
             }
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))

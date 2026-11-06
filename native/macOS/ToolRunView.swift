@@ -48,7 +48,7 @@ struct ToolRunView: View {
                         // Collapsing from the end removes the rows on screen; bring the run back rather than leave the offset past the content.
                         opened = rows.choice(false)
                         rows.set(id, open: false)
-                        revealRow(top)
+                        revealRow($top)
                     }
                 }
             }
@@ -184,7 +184,7 @@ struct ToolLine: View {
                     CollapseLine(title: "Collapse tool") {
                         opened = rows.choice(false)
                         rows.set(call.id, open: false)
-                        revealRow(top)
+                        revealRow($top)
                     }
                 }
                 .padding(.leading, ToolLineLabel.indent)
@@ -329,7 +329,7 @@ struct ToolOutputBlock: View {
                     }
                     Button("Show less") {
                         set(0)
-                        revealRow(top)
+                        revealRow($top)
                     }
                 }
                 .font(.system(size: DesktopType.caption))
