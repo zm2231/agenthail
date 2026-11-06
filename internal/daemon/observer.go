@@ -264,7 +264,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)
 	}
-	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
+	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.StatusNotLoaded
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)
 	if steerQueueErr != nil {
 		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)

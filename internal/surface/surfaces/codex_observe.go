@@ -20,6 +20,13 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		return nil, err
 	}
 	observation := codexObservation(thread)
+	// A thread with no settled turn says how it stands only through its own
+	// status; one Codex has not loaded is loaded again by a send.
+	if observation.Status == surface.StatusUnknown {
+		if notLoaded, err := codexThreadReadsNotLoaded(ctx, conn, sess.ID); err == nil && notLoaded {
+			observation.Status = surface.StatusNotLoaded
+		}
+	}
 	if observation.Status == surface.StatusBusy {
 		// Only thread status carries the pending approval and input flags.
 		response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
@@ -47,14 +54,19 @@ const codexTurnInterrupted = "turn interrupted"
 // so that status from such a reader says nothing about the turn. Its completed
 // status is reliable.
 func codexThreadNotLoaded(ctx context.Context, conn codexClient, threadID string) bool {
+	notLoaded, err := codexThreadReadsNotLoaded(ctx, conn, threadID)
+	return err != nil || notLoaded
+}
+
+func codexThreadReadsNotLoaded(ctx context.Context, conn codexClient, threadID string) (bool, error) {
 	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
-		return true
+		return false, err
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
 	status, _ := thread["status"].(map[string]any)
-	return str(status, "type") == "notLoaded"
+	return str(status, "type") == "notLoaded", nil
 }
 
 func dropUnconfirmedTurn(ctx context.Context, conn codexClient, thread *codexThread, observation *surface.TurnObservation) *surface.TurnObservation {
