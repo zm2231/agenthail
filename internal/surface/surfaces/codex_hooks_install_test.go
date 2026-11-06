@@ -109,7 +109,7 @@ func TestHooksInstallCodexWritesIntoAHooksFileThePersonAlreadyUses(t *testing.T)
 	if !ownsCodexContextHook(gjson.GetBytes(data, "hooks.Stop.0.hooks.0.command").String()) {
 		t.Fatalf("hooks.json after install has no Stop hook: %s", data)
 	}
-	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), "agenthail") {
+	if config, _ := os.ReadFile(filepath.Join(home, "config.toml")); strings.Contains(string(config), " --surface codex") {
 		t.Fatalf("install put hooks in config.toml beside hooks.json:\n%s", config)
 	}
 	if info, err := os.Stat(hooks); err != nil || info.Mode().Perm() != 0640 {
