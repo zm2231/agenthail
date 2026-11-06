@@ -21,7 +21,7 @@ private struct SplitDividerHider: ViewModifier {
         @ObservedObject var backdrop: WindowBackdrop
 
         var body: some View {
-            SplitDividerProbe(hidden: backdrop.active && backdrop.gutter > 0, shadowless: backdrop.active)
+            SplitDividerProbe(hidden: backdrop.active, shadowless: backdrop.active)
         }
     }
 }
