@@ -40,6 +40,7 @@ final class BackdropLayerView: NSView {
     private let scrimImage = CALayer()
     private let scrimFlat = CALayer()
     private let scrimMask = CALayer()
+    private let maskRoot = CALayer()
     private let fade = CAGradientLayer()
 
     override init(frame: NSRect) {
@@ -47,7 +48,8 @@ final class BackdropLayerView: NSView {
         wantsLayer = true
         layerContentsRedrawPolicy = .never
         let still: [String: CAAction] = Dictionary(uniqueKeysWithValues: ["contents", "bounds", "position", "frame", "opacity", "hidden", "backgroundColor", "path", "cornerRadius", "mask", "sublayers", "startPoint", "endPoint"].map { ($0, NSNull()) })
-        for layer in [clip, clipShape, box, base, tint, scrim, scrimImage, scrimFlat, scrimMask, fade] { layer.actions = still }
+        for layer in [clip, clipShape, box, base, tint, scrim, scrimImage, scrimFlat, scrimMask, maskRoot, fade] { layer.actions = still }
+        maskRoot.addSublayer(scrimMask)
         base.contentsGravity = .resize
         scrimImage.contentsGravity = .resize
         scrimMask.contentsGravity = .resize
@@ -90,13 +92,17 @@ final class BackdropLayerView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         frames.watch(self) { [weak self] in self?.moved() }
+        if ownsRows { anchor?.rows?.flush() }
         moved()
     }
 
     override func layout() {
         super.layout()
+        if ownsRows { anchor?.rows?.flush() }
         moved()
     }
+
+    private var ownsRows: Bool { style.hostsAnchor && anchor?.host === self }
 
     override func setFrameOrigin(_ newOrigin: NSPoint) {
         super.setFrameOrigin(newOrigin)
@@ -169,16 +175,31 @@ final class BackdropLayerView: NSView {
             scrim.isHidden = false
             return
         }
-        guard let mask = anchor?.mask else {
+        let rows = ownsRows ? anchor?.rows.flatMap { $0.active ? $0 : nil } : nil
+        let mask = anchor?.mask
+        guard mask != nil || rows != nil else {
             scrim.mask = nil
             scrim.isHidden = true
             return
         }
-        scrimMask.contents = mask.image
-        scrimMask.frame = convert(mask.rect, from: nil).offsetBy(dx: -box.frame.minX, dy: -box.frame.minY)
-        scrim.mask = scrimMask
+        maskRoot.frame = box.bounds
+        scrimMask.isHidden = mask == nil
+        if let mask {
+            scrimMask.contents = mask.image
+            scrimMask.frame = convert(mask.rect, from: nil).offsetBy(dx: -box.frame.minX, dy: -box.frame.minY)
+        }
+        if let rows {
+            if rows.root.superlayer !== maskRoot { maskRoot.addSublayer(rows.root) }
+            rows.root.frame = maskRoot.bounds
+            rows.position()
+        } else if let root = anchor?.rows?.root, root.superlayer === maskRoot {
+            root.removeFromSuperlayer()
+        }
+        scrim.mask = maskRoot
         scrim.isHidden = false
     }
+
+    var boxFrame: CGRect { box.frame }
 
     private func placeFade() {
         guard let solid = style.fade else {
