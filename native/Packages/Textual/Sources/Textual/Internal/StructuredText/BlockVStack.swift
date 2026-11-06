@@ -23,9 +23,13 @@ extension StructuredText {
       Group(subviews: content) { children in
         BlockVStackLayout(textAlignment: textAlignment) {
           ForEach(children) {
-            BlockLayoutView($0)
+            BlockLayoutView($0, declared: $0.containerValues.blockSpacing)
           }
         }
+        .containerValue(
+          \.blockSpacing,
+          BlockSpacing.merged(children.map(\.containerValues.blockSpacing))
+        )
       }
     }
   }
@@ -40,22 +44,26 @@ extension StructuredText {
     @Environment(\.listItemSpacingEnabled) private var listItemSpacingEnabled
     @Environment(\.resolvedListItemSpacing) private var resolvedListItemSpacing
 
-    @State private var blockSpacing = BlockSpacing()
+    @State private var reported: BlockSpacing?
 
     private let content: Content
+    private let declared: BlockSpacing?
 
-    init(_ content: Content) {
+    init(_ content: Content, declared: BlockSpacing?) {
       self.content = content
+      self.declared = declared
     }
 
     var body: some View {
-      // Read the block spacing preference and apply it as a layout value
       content
         .onPreferenceChange(BlockSpacingKey.self) { @MainActor value in
-          // Override with the resolved list item spacing if enabled
-          blockSpacing = listItemSpacingEnabled ? resolvedListItemSpacing : value
+          reported = value
         }
-        .layoutValue(key: BlockSpacingKey.self, value: blockSpacing)
+        .layoutValue(
+          key: BlockSpacingKey.self,
+          value: listItemSpacingEnabled
+            ? resolvedListItemSpacing : reported ?? declared ?? BlockSpacing()
+        )
     }
   }
 

@@ -19,7 +19,7 @@ struct WithInlineStyle<Content: View>: View {
   @Environment(\.inlineStyle) private var style
   @Environment(\.textEnvironment) private var environment
 
-  @State private var output: AttributedString?
+  @State private var output = Memo<Tuple<AttributedString, InlineStyle, TextEnvironmentValues>, AttributedString>()
 
   private let input: AttributedString
   private let content: (AttributedString) -> Content
@@ -33,21 +33,17 @@ struct WithInlineStyle<Content: View>: View {
   }
 
   var body: some View {
-    content(output ?? AttributedString())
-      .onChange(of: Tuple(input, style, environment), initial: true) { _, newValue in
-        resolve(
-          attributedString: newValue.values.0,
-          style: newValue.values.1,
-          in: newValue.values.2
-        )
-      }
+    content(
+      output.value(for: Tuple(input, style, environment)) {
+        Self.resolve(attributedString: $0.values.0, style: $0.values.1, in: $0.values.2)
+      })
   }
 
-  private func resolve(
+  private static func resolve(
     attributedString: AttributedString,
     style: InlineStyle,
     in environment: TextEnvironmentValues
-  ) {
+  ) -> AttributedString {
     var output = attributedString
 
     for run in attributedString.runs {
@@ -78,6 +74,6 @@ struct WithInlineStyle<Content: View>: View {
       output[run.range].mergeAttributes(attributes, mergePolicy: .keepNew)
     }
 
-    self.output = output
+    return output
   }
 }

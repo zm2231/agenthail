@@ -11,7 +11,7 @@ extension StructuredText {
   struct Table: View {
     @Environment(\.tableStyle) private var tableStyle
 
-    @State private var spacing = TableCell.Spacing()
+    @State private var reported: TableCell.Spacing?
 
     private let intent: PresentationIntent.IntentType?
     private let content: AttributedSubstring
@@ -28,20 +28,24 @@ extension StructuredText {
     }
 
     var body: some View {
-      let configuration = TableStyleConfiguration(
-        label: .init(label),
-        indentationLevel: indentationLevel
-      )
-      let resolvedStyle = tableStyle.resolve(configuration: configuration)
-        .onPreferenceChange(TableCell.SpacingKey.self) { @MainActor in
-          spacing = $0
-        }
+      // A stand-in resolution exposes the style's cell spacing before the real grid is built.
+      Group(subviews: styled(label: Color.clear)) { declaration in
+        let declared = declaration.lazy.compactMap(\.containerValues.tableCellSpacing).last
+        styled(label: label(spacing: reported ?? declared ?? TableCell.Spacing()))
+          .onPreferenceChange(TableCell.SpacingKey.self) { @MainActor in
+            reported = $0
+          }
+      }
+    }
 
-      AnyView(resolvedStyle)
+    private func styled(label: some View) -> AnyView {
+      let configuration = TableStyleConfiguration(label: .init(label), indentationLevel: indentationLevel)
+      let resolvedStyle = tableStyle.resolve(configuration: configuration)
+      return AnyView(resolvedStyle)
     }
 
     @ViewBuilder
-    private var label: some View {
+    private func label(spacing: TableCell.Spacing) -> some View {
       let rowRuns = content.blockRuns(parent: intent)
 
       Grid(horizontalSpacing: spacing.horizontal, verticalSpacing: spacing.vertical) {
@@ -84,4 +88,8 @@ extension StructuredText {
       }
     }
   }
+}
+
+extension ContainerValues {
+  @Entry var tableCellSpacing: StructuredText.TableCell.Spacing? = nil
 }
