@@ -32,10 +32,14 @@ const (
 
 type nativeRecordingClaude struct {
 	*surfaces.Claude
-	native []string
+	native     []string
+	beforeSend func()
 }
 
 func (c *nativeRecordingClaude) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	if c.beforeSend != nil {
+		c.beforeSend()
+	}
 	c.native = append(c.native, message)
 	return &surface.SendResult{UUID: "peer", Accepted: true}, nil
 }

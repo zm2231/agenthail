@@ -118,6 +118,13 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 	return claudeHosted(sess) || sess.Bridge != ""
 }
 
+func (c *Claude) RefreshRoute(ctx context.Context, sess *surface.Session) {
+	read := *sess
+	if c.reachableAsIs(ctx, &read) {
+		sess.Bridge = read.Bridge
+	}
+}
+
 // conversation reads which processes hold a conversation. Session records
 // show processes that have initialized; the background catalog also shows a
 // job that is still starting and has not written its record.

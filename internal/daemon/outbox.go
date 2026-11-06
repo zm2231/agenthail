@@ -85,6 +85,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	} else if messageUUID != "" {
 		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
 	}
+	d.dispatcher().RefreshRoute(operationCtx, adapter, session)
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session

@@ -95,6 +95,23 @@ type Dispatcher struct {
 	// Oversees reports whether an agent is the session's lead or the session
 	// that started it; without it no agent steers.
 	Oversees func(sourceID string, session surface.Session) bool
+	// RouteChanged publishes a session whose route a send found changed, so
+	// what the person sees matches the route the send takes.
+	RouteChanged func(session surface.Session)
+}
+
+// RefreshRoute points session at what its live process offers before a
+// route is chosen from it.
+func (d Dispatcher) RefreshRoute(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	refresher, ok := adapter.(surface.RouteRefresher)
+	if !ok {
+		return
+	}
+	read := *session
+	refresher.RefreshRoute(ctx, session)
+	if err := d.RegisterReached(&read, session); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Error: err.Error()})
+	}
 }
 
 // MaySteer keeps a worker from pushing its lead mid-turn: an agent steers
@@ -249,6 +266,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		}
 		return receipt, err
 	}
+	d.RefreshRoute(ctx, adapter, session)
 	peer := surface.RouteFor(adapter, session, options.RouteAuthor()) == surface.RoutePeer
 	if d.Registry != nil {
 		if err := d.Registry.EnsureSender(sourceID); err != nil {
@@ -345,6 +363,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
+	d.RefreshRoute(ctx, adapter, session)
 	route := surface.RouteFor(adapter, session, options.RouteAuthor())
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
@@ -678,10 +697,13 @@ func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, 
 // returned error is an unknown outcome naming that host, and the caller must
 // not record anything under the reached id.
 func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) error {
-	if d.Registry == nil || (addressed.ID == reached.ID && addressed.PID == reached.PID && addressed.Transport == reached.Transport) {
+	if d.Registry == nil || (addressed.ID == reached.ID && surface.SameRoute(*addressed, *reached)) {
 		return nil
 	}
 	err := d.Registry.RegisterSession(*reached)
+	if err == nil && d.RouteChanged != nil {
+		d.RouteChanged(*reached)
+	}
 	var owned registry.SessionOwnedError
 	if errors.As(err, &owned) {
 		host := owned.HostID

@@ -673,6 +673,16 @@ type HumanTurnSender interface {
 	SendHumanTurn(ctx context.Context, sess *Session, message string, images Uploads) (*SendResult, error)
 }
 
+// RouteRefresher re-reads what a session's live process offers now, so a send
+// routes on that rather than on a row read earlier.
+type RouteRefresher interface {
+	RefreshRoute(ctx context.Context, sess *Session)
+}
+
+func SameRoute(a, b Session) bool {
+	return a.Bridge == b.Bridge && a.Transport == b.Transport && a.PID == b.PID
+}
+
 type AgenthailTurnSender interface {
 	SendAgenthailTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
