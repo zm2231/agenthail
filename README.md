@@ -336,7 +336,7 @@ To continue an idle Claude session on another paired machine, run `agenthail mov
 
 ## Keep track of what was asked
 
-The intent ledger records what you asked for in a project, from your own words, next to the work agents do about it: goals, asks and their clauses, open questions with their defaults, and work items with comments and logs. A project's lead has your words to it captured by default, without being asked to do anything with them. Turn it on with `agenthail ledger enable` in a project; every session then has your words captured, attaches each of your messages, reads back how it recorded them, and is held at the end of a turn while your words go unrecorded. With `agenthail ledger owner server` one paired machine keeps the project's ledger and the others replicate it, checked by a log digest on every sync. [The intent ledger](docs/ledger.md).
+The intent ledger records what you asked for in a project, from your own words, next to the work agents do about it: goals, asks and their clauses, open questions with their defaults, and work items with comments and logs. A project's lead has your words to it captured by default and attaches each of your messages, reading back how it recorded them; it is not held at the end of a turn for words it leaves unattached. Turn it on with `agenthail ledger enable` in a project; every session then has your words captured, attaches each of your messages, reads back how it recorded them, and is held at the end of a turn while your words go unrecorded. With `agenthail ledger owner server` one paired machine keeps the project's ledger and the others replicate it, checked by a log digest on every sync. [The intent ledger](docs/ledger.md).
 
 ## What Agenthail remembers
 

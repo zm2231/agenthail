@@ -84,7 +84,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger enable [@session] [--attach prompt|checkpoints]
                                  Capture the person's words to every session in this project and ask
                                  each to attach them, or only for one session and its later forks;
-                                 without it, only the lead's words are captured and nothing is asked.
+                                 without it, only the lead's words are captured and the lead is asked
+                                 to attach them; only enable holds a turn for unattached words.
                                  --attach checkpoints asks at points a session already reaches (work
                                  add, claim or submit, a start or compaction, and ledger) instead of
                                  with each message, and the turn gate stops holding for unattached words

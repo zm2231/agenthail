@@ -37,7 +37,7 @@ func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 		}
 	}
 	out := board()
-	if !strings.Contains(out, "to the project's lead; nothing asks it to attach them") || strings.Contains(out, "G2:") {
+	if !strings.Contains(out, "to the project's lead, which attaches each message") || strings.Contains(out, "G2:") {
 		t.Fatalf("unset project board %q", out)
 	}
 	if !strings.Contains(out, "captured words not attached (7), newest 5") || strings.Contains(out, "word b") || !strings.Contains(out, "word g") {

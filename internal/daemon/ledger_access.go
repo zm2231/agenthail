@@ -64,23 +64,25 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 	return targets, access, nil
 }
 
-// ledgerScope is when the person's words to a session start counting in a project, and whether the session is asked to attach them.
+// ledgerScope is when the person's words to a session start counting in a project, whether the session is asked to attach them, and whether
+// its turn is held at the end for words it left unattached.
 type ledgerScope struct {
 	since       time.Time
 	inScope     bool
 	attach      bool
 	checkpoints bool
+	hold        bool
 }
 
-// ledgerSince is the earliest grant that puts sessionID in the project's ledger scope. Enabling the project or granting the session asks it to attach;
-// leading the project alone only captures.
+// ledgerSince is the earliest grant that puts sessionID in the project's ledger scope. Enabling the project, granting the session or leading
+// the project asks it to attach; only enabling or granting holds its turn.
 func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID string, access ledgerAccess) (ledgerScope, error) {
 	captured, err := store.Scope(target.key)
 	if err != nil || captured.State == ledger.LedgerDisabled {
 		return ledgerScope{}, err
 	}
 	scope := ledgerScope{since: captured.Since, inScope: captured.State == ledger.LedgerEnabled}
-	scope.attach = scope.inScope
+	scope.attach, scope.hold = scope.inScope, scope.inScope
 	consider := func(at time.Time) {
 		if !scope.inScope || at.Before(scope.since) {
 			scope.since, scope.inScope = at, true
@@ -88,23 +90,23 @@ func (d *Daemon) ledgerSince(store *ledger.Store, target ledgerTarget, sessionID
 	}
 	if at, ok := access.grants[target.key]; ok {
 		consider(at)
-		scope.attach = true
+		scope.attach, scope.hold = true, true
+	}
+	if target.projectID != "" {
+		lineage := append([]registry.ForkAncestor{{SessionID: sessionID}}, access.ancestors...)
+		for _, member := range lineage {
+			at, coordinator, err := d.Registry.CoordinatorSince(target.projectID, member.SessionID)
+			if err != nil {
+				return ledgerScope{}, err
+			}
+			if coordinator {
+				consider(latest(at, member.Since))
+				scope.attach = true
+			}
+		}
 	}
 	if captured.Attach == ledger.AttachAtCheckpoints {
 		scope.attach, scope.checkpoints = false, scope.attach
-	}
-	if target.projectID == "" {
-		return scope, nil
-	}
-	lineage := append([]registry.ForkAncestor{{SessionID: sessionID}}, access.ancestors...)
-	for _, member := range lineage {
-		at, coordinator, err := d.Registry.CoordinatorSince(target.projectID, member.SessionID)
-		if err != nil {
-			return ledgerScope{}, err
-		}
-		if coordinator {
-			consider(latest(at, member.Since))
-		}
 	}
 	return scope, nil
 }

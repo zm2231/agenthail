@@ -8,7 +8,7 @@ Every change is an event in an append-only log; the board you read is rebuilt fr
 
 ## Capture and scope
 
-Every project with a lead captures the person's words to that lead, from the moment it became the lead, and asks nothing of it: the words are recorded, and the lead attaches them only if it chooses to. Its forks are captured the same way from their creation. The bare `agenthail ledger` command lists the newest five of those words with a count; `--all` lists every one.
+Every project with a lead captures the person's words to that lead, from the moment it became the lead, and asks it to attach each message: a Claude lead gets the readback after each prompt and a Codex lead gets it queued, as in an enabled project. Unlike an enabled project, the lead's turn is not held at its end for words it leaves unattached. A project that attaches at checkpoints asks its lead at those checkpoints instead. Its forks are captured and asked the same way from their creation. The bare `agenthail ledger` command lists the newest five of those words with a count; `--all` lists every one.
 
 ```
 agenthail ledger enable              # capture the person's words to every session in this project, and ask each to attach them

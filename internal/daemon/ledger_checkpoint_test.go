@@ -118,3 +118,21 @@ func TestMCPWorkWritesInCheckpointModeCarryTheWordsLeftToAttach(t *testing.T) {
 		t.Fatalf("a comment is not a checkpoint: %v", comment)
 	}
 }
+
+func TestALeadInAProjectThatAttachesAtCheckpointsIsAskedAtCheckpointsOnly(t *testing.T) {
+	f := gateFixtureIn(t, registry.OriginCoordinator, surface.RuntimeClaudeHost, false)
+	makeCoordinator(t, f.r, f.project, f.session.ID)
+	if err := f.project.store.Enable(f.project.key, ledger.AttachAtCheckpoints); err != nil {
+		t.Fatal(err)
+	}
+	if got := ledgerPost(t, f.d.dashboardHandler(&dashboardServer{token: "test-token"}), ledgerCaptureRequest{SessionID: f.session.ID, PromptID: "p-0", Prompt: "and the docs"}); !got.Captured || got.Attach {
+		t.Fatalf("the lead was asked per message in a project that attaches at checkpoints: %+v", got)
+	}
+	if text := checkpoint(t, f); !strings.Contains(text, "and the docs") {
+		t.Fatalf("checkpoint = %q", text)
+	}
+	f.completeTurn(t, "turn-1")
+	if len(f.fake.sent) != 0 || f.r.QueueCount(f.session.ID) != 0 {
+		t.Fatalf("the lead was held for unattached words at checkpoints: %q", f.fake.sent)
+	}
+}
