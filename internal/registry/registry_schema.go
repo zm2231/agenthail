@@ -503,6 +503,10 @@ CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS catalog_presentation_version (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	version INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS catalog_sessions (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	host_project BLOB NOT NULL,
