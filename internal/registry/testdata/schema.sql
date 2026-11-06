@@ -1,4 +1,4 @@
--- schemaVersion 62
+-- schemaVersion 63
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -481,6 +481,22 @@ CREATE TABLE project_links (
 	origin_host TEXT NOT NULL
 );
 
+-- table project_move_refusals
+CREATE TABLE project_move_refusals (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	at_ms INTEGER NOT NULL
+);
+
+-- table project_moves
+CREATE TABLE project_moves (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
+
 -- table projects
 CREATE TABLE projects (
 	id TEXT PRIMARY KEY,
@@ -554,6 +570,12 @@ CREATE TABLE removed_project_ledgers (
 	workspace_root TEXT PRIMARY KEY,
 	project_id TEXT NOT NULL,
 	removed_at_ms INTEGER NOT NULL
+);
+
+-- table repository_keys
+CREATE TABLE repository_keys (
+	workspace_root TEXT PRIMARY KEY,
+	project_key TEXT NOT NULL
 );
 
 -- table routes
