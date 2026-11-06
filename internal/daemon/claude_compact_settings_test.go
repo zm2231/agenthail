@@ -71,3 +71,59 @@ func TestTheDashboardReadsAndEditsEachClaudeRootsCompactionSettings(t *testing.T
 		t.Fatalf("v1 status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestAgenthailsIdleCompactionIsOnByDefaultAndSetPerRootInItsOwnConfig(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	primary := filepath.Join(home, "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", primary)
+	work := filepath.Join(home, ".claude-work")
+	config := filepath.Join(home, ".agenthail", "config.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte(`{"claudeConfigDirs":["`+work+`"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	router := dashboardRouter(d)
+	read := func() map[string]surface.IdleCompaction {
+		t.Helper()
+		response := serveDashboardRequest(router, http.MethodGet, "/api/claude/compact-settings", "")
+		var body struct {
+			Roots []surface.ClaudeCompactSettings `json:"roots"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		settings := map[string]surface.IdleCompaction{}
+		for _, root := range body.Roots {
+			settings[root.Root] = root.AgenthailIdle
+		}
+		return settings
+	}
+	on := surface.IdleCompaction{Enabled: true, MinContextTokens: surface.DefaultIdleCompactionMinTokens}
+	if got := read(); got[primary] != on || got[work] != on {
+		t.Fatalf("defaults = %+v, want on from %d tokens under every root", got, surface.DefaultIdleCompactionMinTokens)
+	}
+
+	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailIdleCompaction":false,"agenthailIdleMinTokens":300000}`); response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := read(); got[primary] != on || got[work] != (surface.IdleCompaction{Enabled: false, MinContextTokens: 300000}) {
+		t.Fatalf("after turning it off under the work root: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(work, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("Agenthail's own setting wrote Claude's settings file: %v", err)
+	}
+	before, _ := os.ReadFile(config)
+	if !strings.Contains(string(before), `"claudeConfigDirs"`) {
+		t.Fatalf("the config lost its other keys: %s", before)
+	}
+	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailIdleCompaction":true,"agenthailIdleMinTokens":50000}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("a threshold under the minimum: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if after, _ := os.ReadFile(config); string(after) != string(before) {
+		t.Fatalf("a refused change wrote the config:\n%s", after)
+	}
+}
