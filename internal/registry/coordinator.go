@@ -315,6 +315,9 @@ func (r *Registry) ReplaceCoordinator(spec CoordinatorSpec, change CoordinatorCh
 	if previous != nil {
 		action, previousName, previousSession = "replaced", previous.Name, previous.SessionID
 	}
+	if err := pinNewLeadTx(tx, spec.ProjectID, change.SessionID, now); err != nil {
+		return spec, undo, err
+	}
 	if err := recordCoordinatorHistoryTx(tx, spec.ProjectID, action, spec.Name, change.SessionID, previousName, previousSession, change.ChangedBy, now); err != nil {
 		return spec, undo, err
 	}
@@ -671,8 +674,12 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 			return 0, err
 		}
 	}
+	now := time.Now().UTC()
+	if err := pinNewLeadTx(tx, spec.ProjectID, next, now); err != nil {
+		return 0, err
+	}
 	result, err := tx.Exec(`INSERT INTO coordinator_history (project_id,action,name,session_id,previous_name,previous_session_id,changed_by,reason,notify_sender,at_ms) VALUES (?,'replaced',?,?,?,?,?,?,?,?)`,
-		spec.ProjectID, spec.Name, next, spec.Name, previous, handover.ChangedBy, handover.Reason, handover.NotifySender, time.Now().UTC().UnixMilli())
+		spec.ProjectID, spec.Name, next, spec.Name, previous, handover.ChangedBy, handover.Reason, handover.NotifySender, now.UnixMilli())
 	if err != nil {
 		return 0, err
 	}

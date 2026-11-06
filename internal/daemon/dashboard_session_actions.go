@@ -49,6 +49,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionFocus(ctx, session)
 	case "session-archive", "session-unarchive":
 		return d.doSessionArchive(request.Action, session.ID)
+	case "session-pin", "session-unpin":
+		return d.doSessionPin(request.Action == "session-pin", session.ID)
 	case "alias":
 		return d.doSessionAlias(session, request.Alias)
 	}

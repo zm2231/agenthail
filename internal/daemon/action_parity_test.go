@@ -114,6 +114,8 @@ func parityCases() []parityCase {
 		session("session-focus", "session-focus", ``),
 		session("session-archive", "session-archive", ``),
 		session("session-unarchive", "session-unarchive", ``),
+		session("session-pin", "session-pin", ``),
+		session("session-unpin", "session-unpin", ``),
 		session("session-adopt", "session-adopt", ``),
 		session("session-fork", "session-fork", `,"alias":"forked"`),
 		session("native-queue", "native-queue", `,"nativeQueue":{"queueAction":"list"}`),

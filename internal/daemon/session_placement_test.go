@@ -36,6 +36,9 @@ var placementInputMutations = []placementMutation{
 	{"Current", func(r *dashboardSession, _ time.Time) { r.Current = !r.Current }},
 	{"CurrentReason", func(r *dashboardSession, _ time.Time) { r.Current, r.CurrentReason = true, "queued" }},
 	{"Archived", func(r *dashboardSession, _ time.Time) { r.Archived = true }},
+	{"KeepAlive", func(r *dashboardSession, now time.Time) {
+		r.KeepAlive = &dashboardKeepAlive{FailedAt: now, Error: "refused"}
+	}},
 	{"Project", func(r *dashboardSession, _ time.Time) {
 		r.Project = &CatalogProject{ID: "p-delta", DisplayName: "delta"}
 	}},
@@ -94,7 +97,8 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"LiveHiddenSubagents": func(r *dashboardSession, _ time.Time) {
 		r.LiveHiddenSubagents = &surface.SubagentRollup{Count: 2, Working: 1}
 	},
-	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
+	"Listed":   func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
+	"PinnedAt": func(r *dashboardSession, now time.Time) { r.PinnedAt = now },
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
