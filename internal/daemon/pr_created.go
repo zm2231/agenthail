@@ -12,10 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const (
-	createdPRReadTimeout = 30 * time.Second
-	createdPRBodyLimit   = 256 << 10
-)
+const createdPRReadTimeout = 30 * time.Second
 
 var shellTools = []string{"Bash", "exec_command", "shell", "local_shell"}
 
@@ -47,10 +44,10 @@ func (d *Daemon) createdPRs(sessionID string, items []surface.TimelineItem) []gi
 	for _, item := range items {
 		switch item.Kind {
 		case "toolCall":
-			if !slices.Contains(shellTools, item.Title) || !strings.Contains(item.Text, "pr create") {
+			if !slices.Contains(shellTools, item.Title) || !item.Truncated && !strings.Contains(item.Text, "pr create") {
 				continue
 			}
-			if command := shellCommand(d.itemText(sessionID, item)); command != "" {
+			if command := shellCommand(d.itemText(sessionID, item)); strings.Contains(command, "pr create") {
 				commands[item.CallID] = command
 			}
 		case "toolResult":
@@ -66,7 +63,7 @@ func (d *Daemon) itemText(sessionID string, item surface.TimelineItem) string {
 	if !item.Truncated || item.BodyRef == "" {
 		return item.Text
 	}
-	body, _, err := d.Registry.SessionJournalBody(sessionID, item.BodyRef, 0, createdPRBodyLimit)
+	body, _, err := d.Registry.SessionJournalBody(sessionID, item.BodyRef, 0, sessionJournalRetentionBytes)
 	if err != nil {
 		return item.Text
 	}
