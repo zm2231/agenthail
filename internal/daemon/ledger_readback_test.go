@@ -45,9 +45,28 @@ func TestAPersonDeliveryToACodexSessionQueuesItsReadbackOnce(t *testing.T) {
 		t.Fatalf("want one readback for the Codex session only, got %+v", queued)
 	}
 	ref := ledger.DeliveryRef(intent)
-	for _, want := range []string{"utterance " + ref + " in " + p.key, "agenthail ledger attach " + ref + " --as", "Tell the person each readback line"} {
+	for _, want := range []string{"utterance " + ref + " in " + p.key, "agenthail ledger attach " + ref + " --to", "Left out, --as is read from --to and the other flags", "Tell the person each readback line"} {
 		if !strings.Contains(queued[0][1], want) {
 			t.Fatalf("readback %q lacks %q", queued[0][1], want)
 		}
+	}
+}
+
+func TestACodexLeadInAProjectNobodyEnabledHasItsReadbackQueued(t *testing.T) {
+	d, r, _ := ledgerDaemon(t)
+	p := addLedgerProject(t, r, "proj-lead-readback", "lead-readback-key")
+	lead := surface.Session{ID: "codex-lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: p.dir, Status: surface.StatusIdle}
+	if err := r.RegisterSession(lead); err != nil {
+		t.Fatal(err)
+	}
+	makeCoordinator(t, r, p, lead.ID)
+	intent := uuid.NewString()
+	d.personCapture(delivery.PersonCaptureContext{Target: lead, IntentUUID: intent, Message: "plan the release"})
+	var queued int
+	if err := r.ReadDB().QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND delivery_key=?`, lead.ID, "ledger:readback:"+ledger.DeliveryRef(intent)).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Fatalf("the lead of a project nobody enabled has %d readbacks queued, want 1", queued)
 	}
 }

@@ -102,12 +102,19 @@ const context = vm.createContext({
   renderContextUsage: () => { rendered.context++; },
   selectSession: id => { reloaded.push(id); },
   $: selector => elements.get(selector),
+  claimChatSlot: async (onLost) => {
+    slots.lost = onLost;
+    if (!slots.free) return null;
+    slots.held++;
+    return {release: () => { slots.held--; }};
+  },
 });
+const slots = {free: true, held: 0, lost: null};
 await dashboardModules(["session-stream", "stream-items"], context);
 
-vm.runInContext('startLiveStream()', context);
-vm.runInContext('startLiveStream()', context);
+await Promise.all([vm.runInContext('startLiveStream()', context), vm.runInContext('startLiveStream()', context)]);
 assert.equal(instances.length, 1, 'same session must have one EventSource');
+assert.equal(slots.held, 1, 'a live conversation holds one of the browser-wide stream slots');
 assert.equal(instances[0].url, '/api/session-stream?id=session-a&after=42');
 
 instances[0].emit('item', {itemId: 'user-1', op: 'upsert', kind: 'text', role: 'user', body: 'question'});
@@ -139,9 +146,10 @@ const oldSource = instances[0];
 app.selected = {id: 'session-b', surface: 'codex'};
 app.history = history();
 app.history.journalSeq = 7;
-vm.runInContext('startLiveStream()', context);
+await vm.runInContext('startLiveStream()', context);
 assert.equal(instances.length, 2);
 assert.equal(oldSource.closed, true, 'switching sessions must close the old source');
+assert.equal(slots.held, 1, 'switching sessions hands its slot back before taking one');
 oldSource.emit('item', {itemId: 'late-old', op: 'upsert', kind: 'text', role: 'assistant', body: 'stale'});
 assert.equal(app.history.timeline.items.length, 0, 'late events from the old session must be ignored');
 instances[1].emit('item', {itemId: 'new-1', op: 'upsert', kind: 'text', role: 'assistant', body: 'current'});
@@ -152,12 +160,26 @@ assert.equal(reloaded.length, 0, 'transient disconnect keeps automatic resume');
 instances[1].readyState = 2;
 instances[1].emit('error', {});
 assert.deepEqual(reloaded, ['session-b'], 'terminal stream error reloads the bounded page');
+assert.equal(slots.held, 0, 'a stopped stream frees its slot');
+await vm.runInContext('startLiveStream()', context);
+const slotted = instances.at(-1);
+slots.lost();
+assert.equal(slotted.closed, true, 'a slot taken by the focused window stops this stream');
+assert.equal(slots.held, 0);
+slots.free = false;
+const before = instances.length;
+await vm.runInContext('startLiveStream()', context);
+assert.equal(instances.length, before, 'without a free slot an unfocused window opens no stream');
+assert.equal(app.liveSessionID, '', 'and tries again later');
+slots.free = true;
+await vm.runInContext('startLiveStream()', context);
+assert.equal(instances.length, before + 1, 'it streams once a slot is free');
 
 const inline = 'x'.repeat(16384);
 const longRow = body => ({itemId: 'long', op: 'upsert', kind: 'text', role: 'assistant', body, truncated: true, bodyRef: 'ref-long'});
 const longItem = text => ({id: 'long', kind: 'text', role: 'assistant', text, truncated: true, bodyRef: 'ref-long'});
 const longText = () => app.history.timeline.items.find(value => value.id === 'long');
-vm.runInContext('startLiveStream()', context);
+await vm.runInContext('startLiveStream()', context);
 const growing = instances.at(-1);
 growing.send({seq: 20, type: 'item', data: longRow(inline), item: longItem(inline)});
 growing.send({seq: 21, type: 'append', itemId: 'long', from: 16384, text: 'é and more', version: 3, ts: '2026-11-06T00:00:01Z'});
@@ -168,6 +190,7 @@ assert.equal(app.history.exchanges.at(-1).assistant, `${inline}é and more 🙂`
 assert.equal(app.history.journalSeq, 22);
 growing.send({seq: 23, type: 'append', itemId: 'long', from: 7, text: 'wrong', version: 5, ts: '2026-11-06T00:00:03Z'});
 assert.equal(growing.closed, true, 'an append that does not continue the row closes the stream');
+await new Promise(resolve => setImmediate(resolve));
 const resumed = instances.at(-1);
 assert.notEqual(resumed, growing);
 assert.equal(resumed.url, '/api/session-stream?id=session-b&after=22', 'the stream reopens after the last applied row');
@@ -257,6 +280,12 @@ assert.equal(grouped[2].user, undefined);
 assert.equal(vm.runInContext('exchangePrompt(groupItems[0])', groupingContext).label, 'Conversation input');
 assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "peer", sender: "collab"})', groupingContext).label, 'From collab');
 assert.equal(vm.runInContext('exchangePrompt({user: "x", origin: "task-notification"})', groupingContext).label, 'Task notification');
+groupingContext.pageItems = groupingContext.groupItems.slice(0, 5);
+const derived = vm.runInContext('pageHistory({timeline: {items: pageItems}})', groupingContext);
+assert.equal(derived.exchanges.length, 1, 'a page read with its timeline gets its exchanges from the timeline items');
+assert.equal(derived.exchanges[0].assistant, 'one more');
+const sent = vm.runInContext('pageHistory({exchanges: [{user: "kept"}], timeline: {items: pageItems, unavailableReason: "x"}})', groupingContext);
+assert.equal(sent.exchanges[0].user, 'kept', 'exchanges the page sends because its timeline is unavailable are kept');
 const boundedRebuild = vm.runInContext('streamRebuild()', groupingContext);
 const rowLimit = vm.runInContext('streamRebuildRowLimit', groupingContext);
 const wholeRow = (seq, itemId) => boundedRebuild({seq, type: 'item', data: {itemId, kind: 'text', role: 'assistant', body: 'a'}});

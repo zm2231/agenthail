@@ -17,7 +17,9 @@ conversation or a takeover, takes the pin of the lead before it, so an unpin
 survives the swap. Upgrading to schema 59 pins every current lead once.
 
 Rows carry `pinnedAt` (omitted when unpinned) and, after the keeper gave up,
-`keepAlive: {failedAt, error}` with attention kind `keepAliveFailed`.
+`keepAlive: {failedAt, error}` with attention kind `keepAliveFailed`. A pinned
+session counts as current, so it stays in the `current` and `recent` scopes
+however long it has been idle.
 
 ## The keeper
 

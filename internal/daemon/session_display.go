@@ -98,6 +98,9 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		}
 		return SessionDisplay{Kind: "limited", Label: "Usage limit", Detail: detail, ResetsAt: displayInstant(limit.ResetsAt)}
 	}
+	if stop := row.TurnStop; stop != nil {
+		return SessionDisplay{Kind: "stopped", Label: "Stopped", Detail: turnStopDetail(stop)}
+	}
 	if surface.BackgroundRunning(row.BackgroundTasks) {
 		return SessionDisplay{Kind: "finishing", Label: "Finishing", Detail: "Waiting on background work"}
 	}
@@ -112,6 +115,13 @@ func sessionDisplayState(row dashboardSession, now time.Time) SessionDisplay {
 		label = "Ready"
 	}
 	return SessionDisplay{Kind: "idle", Label: label}
+}
+
+func turnStopDetail(stop *surface.TurnStop) string {
+	if stop.Refused {
+		return "Safeguards refused this conversation; start a new one"
+	}
+	return stop.Reason
 }
 
 func presentationWorking(row *dashboardSession) bool {

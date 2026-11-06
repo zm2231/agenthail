@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,10 +12,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
 	"time"
 )
 
 var DebugProfiles = []string{"heap", "allocs", "goroutine"}
+
+const (
+	DefaultCPUProfileSeconds = 30
+	MaxCPUProfileSeconds     = 300
+)
 
 func DebugSocketPath() string {
 	home, _ := os.UserHomeDir()
@@ -101,5 +108,42 @@ func debugProfileHandler() http.Handler {
 			}
 		})
 	}
+	mux.HandleFunc("GET /profiles/cpu", serveCPUProfile)
 	return mux
+}
+
+// serveCPUProfile samples the daemon for the seconds asked, stopping early
+// when the client goes away. The write deadline is moved past the sampling
+// so the profile can still be sent; only one runs at a time.
+func serveCPUProfile(w http.ResponseWriter, r *http.Request) {
+	seconds := DefaultCPUProfileSeconds
+	if raw := r.URL.Query().Get("seconds"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > MaxCPUProfileSeconds {
+			writeAPIError(w, http.StatusBadRequest, "invalid_seconds", fmt.Sprintf("seconds must be between 1 and %d", MaxCPUProfileSeconds))
+			return
+		}
+		seconds = parsed
+	}
+	duration := time.Duration(seconds) * time.Second
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(duration + debugWriteTimeout)); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	var profile bytes.Buffer
+	if err := pprof.StartCPUProfile(&profile); err != nil {
+		writeAPIError(w, http.StatusConflict, "profile_running", err.Error())
+		return
+	}
+	timer := time.NewTimer(duration)
+	select {
+	case <-timer.C:
+	case <-r.Context().Done():
+		timer.Stop()
+		pprof.StopCPUProfile()
+		return
+	}
+	pprof.StopCPUProfile()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	_, _ = w.Write(profile.Bytes())
 }

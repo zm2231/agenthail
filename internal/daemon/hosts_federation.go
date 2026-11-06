@@ -483,6 +483,7 @@ type remoteSnapshot struct {
 	RetiredIDs   []string                    `json:"retiredIds"`
 	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
 	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
+	ProjectMoves []registry.ProjectMove      `json:"projectMoves"`
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *hostOutage) (bool, error) {
@@ -572,6 +573,9 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		}
 	}
 	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
+		return 0, localMirror(err)
+	}
+	if _, err := d.adoptProjectMoves(snapshot.ProjectMoves); err != nil {
 		return 0, localMirror(err)
 	}
 	if err := d.adoptProjectLinks(snapshot.ProjectLinks); err != nil {
@@ -692,6 +696,13 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 			return err
 		}
 		return d.adoptProjectLinks([]registry.ProjectLink{link})
+	case "project.moved":
+		var move registry.ProjectMove
+		if err := json.Unmarshal(envelope.Data, &move); err != nil {
+			return err
+		}
+		_, err := d.adoptProjectMoves([]registry.ProjectMove{move})
+		return err
 	}
 	return nil
 }
@@ -748,7 +759,7 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession) error {
 }
 
 func (d *Daemon) mirrorRemoteRow(host *pairedHost, row dashboardSession) error {
-	session := surface.Session{ID: row.ID, Surface: row.Surface, RuntimeKind: row.RuntimeKind, ConfiguredModel: row.ConfiguredModel, Name: row.Name, Cwd: row.Cwd, Status: row.Status, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
+	session := surface.Session{ID: row.ID, Surface: row.Surface, RuntimeKind: row.RuntimeKind, ConfiguredModel: row.ConfiguredModel, Name: row.Name, Cwd: row.Cwd, Status: row.Status, Ended: row.Ended, LastActive: row.LastActive, Source: row.Source, Transport: row.Transport}
 	if row.Subagent != nil {
 		subagent := *row.Subagent
 		session.Subagent = &subagent

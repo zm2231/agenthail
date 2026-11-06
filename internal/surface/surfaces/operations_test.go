@@ -28,7 +28,7 @@ fi
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
 	c := NewClaude(nil, home)
-	session, turn, err := c.BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "--literal prompt", Cwd: home, Name: "builder", Worktree: "feature", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	session, turn, err := c.BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Message: "--literal prompt", Cwd: home, Name: "builder", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil || session == nil || session.ID != "real-session-id" || session.RuntimeKind != surface.RuntimeClaudeBackground || turn != nil {
 		t.Fatalf("session=%+v turn=%+v err=%v", session, turn, err)
 	}

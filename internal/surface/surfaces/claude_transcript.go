@@ -29,9 +29,11 @@ type claudeTurn struct {
 	Interrupted bool
 	// APIError is the message Claude Code wrote in place of a reply the API
 	// refused; UsageLimited marks a refusal by a usage limit, which lifts at
-	// UsageResetsAt when Claude said when.
+	// UsageResetsAt when Claude said when, and Refused one by the API's
+	// safeguards.
 	APIError      string
 	UsageLimited  bool
+	Refused       bool
 	UsageResetsAt time.Time
 	// LastAt is the newest record the turn wrote, and Tools the tool calls
 	// it started that have no result yet, oldest first.
@@ -263,6 +265,7 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		if record.IsAPIErrorMessage {
 			turn.APIError = strings.TrimSpace(transcriptText(record.Message.Content))
 			turn.UsageLimited = record.Error == "rate_limit" || record.APIError == "usage_limit_reached"
+			turn.Refused = record.Message.StopReason == "refusal"
 			turn.UsageResetsAt = time.Time{}
 			for _, seconds := range []float64{record.QuotaLimits.ResetsAt, record.APIErrorParams.RateLimitInfo.ResetsAt} {
 				if turn.UsageLimited && seconds > 0 {

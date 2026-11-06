@@ -14,7 +14,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 	sess.Status = claudePeerStatus(record)
 	sess.WaitingOn = c.prompts.answeredWait(sess.ID, c.recordWaiting(sess))
 	sess.BackgroundTasks = nil
-	sess.UsageLimit = nil
+	sess.UsageLimit, sess.TurnStop = nil, nil
 	sess.Activity = nil
 	sess.Plan = nil
 	if sess.HasLocal {
@@ -22,7 +22,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 			sess.Status = observation.Status
 			sess.WaitingOn = observation.WaitingOn
 			sess.BackgroundTasks = observation.BackgroundTasks
-			sess.UsageLimit = observation.UsageLimit
+			sess.UsageLimit, sess.TurnStop = observation.UsageLimit, observation.TurnStop
 			sess.Activity = observation.Activity
 			sess.Plan = observation.Plan
 		}

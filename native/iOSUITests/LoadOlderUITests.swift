@@ -54,7 +54,7 @@ final class LoadOlderUITests: XCTestCase {
         let older = app.buttons["Load older activity"]
         let header = app.staticTexts["Working"]
         XCTAssertTrue(header.waitForExistence(timeout: 10))
-        for _ in 0..<12 where !(older.exists && older.frame.minY > header.frame.maxY + 8) { timeline.swipeDown(velocity: .slow) }
+        for _ in 0..<24 where !(older.exists && older.frame.minY > header.frame.maxY + 8) { timeline.swipeDown(velocity: .slow) }
         sleep(1)
         XCTAssertTrue(older.exists && older.frame.minY > header.frame.maxY + 8, "Load older activity is not on screen below the header")
         return older

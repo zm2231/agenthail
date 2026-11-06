@@ -33,20 +33,25 @@ type dashboardSession struct {
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
 	Status            surface.SessionStatus      `json:"status"`
+	Ended             bool                       `json:"ended,omitempty"`
 	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	BackgroundTasks   *surface.BackgroundTasks   `json:"backgroundTasks,omitempty"`
 	UsageLimit        *surface.UsageLimit        `json:"usageLimit,omitempty"`
+	TurnStop          *surface.TurnStop          `json:"turnStop,omitempty"`
 	LimitResume       *dashboardLimitResume      `json:"limitResume,omitempty"`
 	Activity          *surface.Activity          `json:"activity,omitempty"`
 	Plan              *surface.Plan              `json:"plan,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	RegisteredAt      time.Time                  `json:"registeredAt,omitzero"`
-	QueueCount       int                        `json:"queueCount"`
+	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
 	Current           bool                       `json:"current"`
 	Archived          bool                       `json:"archived,omitempty"`
 	PinnedAt          time.Time                  `json:"pinnedAt,omitzero"`
 	KeepAlive         *dashboardKeepAlive        `json:"keepAlive,omitempty"`
+	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
+	InboxSection      string                     `json:"inboxSection,omitempty"`
+	EndTurn           *dashboardEndTurn          `json:"endTurn,omitempty"`
 	CurrentReason     string                     `json:"currentReason,omitempty"`
 	Capabilities      surface.Capabilities       `json:"capabilities"`
 	ReadOnly          bool                       `json:"readOnly,omitempty"`
@@ -56,7 +61,9 @@ type dashboardSession struct {
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
 	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
-	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
+	Worktree          *workView                  `json:"worktree,omitempty"`
+	PRs               []prView                   `json:"prs,omitempty"`
+	ObservedAt       time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
@@ -105,6 +112,7 @@ type dashboardState struct {
 	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
 	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
 	ProjectLinks       []registry.ProjectLink      `json:"projectLinks"`
+	ProjectMoves       []registry.ProjectMove      `json:"projectMoves"`
 	LeadReplacements   []dashboardLeadReplacement  `json:"leadReplacements"`
 	Person             dashboardPerson             `json:"person"`
 	catalogPageApplied bool

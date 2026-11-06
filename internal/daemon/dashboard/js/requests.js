@@ -26,14 +26,15 @@ export async function syncRequests() {
   const panel = $("#request-panel");
   const capabilities = session?.capabilities || app.history?.capabilities || {};
   const readOnly = session?.readOnly ?? app.history?.readOnly;
-  if (!session || !capabilities.respond || readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
+  const ask = session?.endTurn?.requestId && !session.endTurn.answeredAt ? session.endTurn.requestId : "";
+  if (!session || !(capabilities.respond || ask) || readOnly || (session.waitingOn && !session.waitingOn.answerable)) {
     app.requests = null;
     app.requestsKey = "";
     panel.innerHTML = session?.waitingOn ? renderElsewhereWait(session) : "";
     panel.hidden = panel.innerHTML === "";
     return;
   }
-  const key = `${session.id}|${session.waitingOn?.id || ""}`;
+  const key = `${session.id}|${session.waitingOn?.id || ""}|${ask}`;
   if (app.requestsKey === key) return;
   app.requestsKey = key;
   try {
@@ -91,6 +92,7 @@ export function renderRequestCard(request) {
   const created = request.createdAt ? ` · <time datetime="${escape(request.createdAt)}">${escape(new Date(request.createdAt).toLocaleTimeString())}</time>` : "";
   if (request.kind === "input" && request.elicitation) return renderInputRequest(request, created);
   if (request.kind === "question") return renderQuestionCard(request, created);
+  if (request.kind === "ask") return renderQuestionCard(request, created, `${app.selected ? displayName(app.selected) : "The agent"} asks: ${request.title}`);
   const title = request.title || `Claude wants to use ${request.tool}`;
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");

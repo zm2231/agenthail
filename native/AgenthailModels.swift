@@ -569,6 +569,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var turnStop: TurnStopState? = nil
     var limitResume: LimitResumeState? = nil
     var activity: SessionActivity? = nil
     var plan: SessionPlan? = nil
@@ -750,6 +751,17 @@ struct UsageLimitState: Codable, Hashable {
         guard let resetsAt, let date = TimestampParser.date(resetsAt) else { return "Usage limit reached" }
         return "Usage limit, resets \(date.formatted(date: .omitted, time: .shortened))"
     }
+}
+
+/// A session whose last turn a refusal or an API error ended. A refused
+/// conversation refuses every later turn.
+struct TurnStopState: Codable, Hashable {
+    var turnId: String
+    var at: String? = nil
+    var reason: String
+    var refused: Bool? = nil
+
+    var detail: String { refused == true ? "Safeguards refused this conversation; start a new one" : reason }
 }
 
 /// A session a usage limit stopped, as its computer resumes it: waiting for
@@ -1481,7 +1493,10 @@ struct SessionDetail: Decodable {
     let journalSeq: UInt64?
     var alias: String?
     var limitResume: LimitResumeState?
-    let exchanges: [ExchangeState]
+    /// Present only when the timeline cannot be shown; otherwise the
+    /// conversation is the timeline's items and exchangeCount counts it.
+    let exchanges: [ExchangeState]?
+    let exchangeCount: Int?
     var capabilities: Capabilities
     var readOnly: Bool
     var readOnlyReason: String
@@ -1511,12 +1526,12 @@ struct SessionDetail: Decodable {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, limitResume: limitResume, activity: session.activity)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, turnStop: session.turnStop, limitResume: limitResume, activity: session.activity)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
-            (session.waitingOn, session.backgroundTasks, session.usageLimit, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.limitResume, newValue.activity)
+            (session.waitingOn, session.backgroundTasks, session.usageLimit, session.turnStop, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.turnStop, newValue.limitResume, newValue.activity)
         }
     }
 }
@@ -1538,22 +1553,23 @@ struct SessionLiveState: Equatable {
     var waitingOn: WaitingState?
     var backgroundTasks: BackgroundTasks?
     var usageLimit: UsageLimitState?
+    var turnStop: TurnStopState?
     var limitResume: LimitResumeState?
     var activity: SessionActivity?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
          capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
-         limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
+         turnStop: TurnStopState? = nil, limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
-        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, limitResume, activity)
+        (self.waitingOn, self.backgroundTasks, self.usageLimit, self.turnStop, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, turnStop, limitResume, activity)
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, limitResume: live.limitResume, activity: live.activity)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, turnStop: live.turnStop, limitResume: live.limitResume, activity: live.activity)
     }
 }
 
@@ -1571,6 +1587,7 @@ struct RawSession: Decodable {
     var waitingOn: WaitingState? = nil
     var backgroundTasks: BackgroundTasks? = nil
     var usageLimit: UsageLimitState? = nil
+    var turnStop: TurnStopState? = nil
     var activity: SessionActivity? = nil
     var runtimeKind: String? = nil
 

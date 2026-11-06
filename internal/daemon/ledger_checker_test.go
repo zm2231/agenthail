@@ -141,7 +141,7 @@ func TestOneCheckerRunsAtATimeAndOnlyItsTokenReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.d.ledgerManaged(*checker) {
+	if f.d.agenthailStarted(*checker) {
 		t.Fatal("G2 would gate the checker")
 	}
 	if _, err := f.d.dispatcher().Deliver(t.Context(), f.fake, checker, "do something else", ""); !errors.Is(err, registry.ErrDaemonSession) {

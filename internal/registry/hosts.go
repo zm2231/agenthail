@@ -345,11 +345,12 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, fmt.Errorf("host catalog projection must be a JSON object: %w", err)
 	}
 	// The host's projection is the only record of what its session waits on,
-	// runs in the background and is limited by.
+	// runs in the background, is limited by and was stopped by.
 	var asked struct {
 		WaitingOn       *surface.Waiting         `json:"waitingOn"`
 		BackgroundTasks *surface.BackgroundTasks `json:"backgroundTasks"`
 		UsageLimit      *surface.UsageLimit      `json:"usageLimit"`
+		TurnStop        *surface.TurnStop        `json:"turnStop"`
 	}
 	if err := json.Unmarshal(row.Projection, &asked); err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("host catalog waiting state: %w", err)
@@ -367,6 +368,10 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, err
 	}
 	usageLimit, err := encodeCatalogUsageLimit(asked.UsageLimit)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	turnStop, err := encodeCatalogTurnStop(asked.TurnStop)
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -409,13 +414,13 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	if !row.RegisteredAt.IsZero() {
 		registered = formatRegisteredAt(row.RegisteredAt)
 	}
-	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?,''),datetime('now')),datetime('now'))
-		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,source=excluded.source,
+	if _, err := tx.Exec(`INSERT INTO sessions(id,host_id,surface,name,cwd,status,ended,source,transport,runtime_kind,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(NULLIF(?,''),datetime('now')),datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,status=excluded.status,ended=excluded.ended,source=excluded.source,
 		transport=excluded.transport,runtime_kind=excluded.runtime_kind,configured_model=excluded.configured_model,last_active_ms=excluded.last_active_ms,parent_session_id=excluded.parent_session_id,
 		root_session_id=excluded.root_session_id,subagent_depth=excluded.subagent_depth,agent_nickname=excluded.agent_nickname,agent_role=excluded.agent_role,
 		registered_at=CASE WHEN ?='' THEN sessions.registered_at ELSE excluded.registered_at END,updated_at=datetime('now')`,
-		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role, registered, registered); err != nil {
+		session.ID, hostID, string(session.Surface), session.Name, session.Cwd, string(session.Status), b2i(sessionEnded(session)), session.Source, session.Transport, string(session.RuntimeKind), session.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role, registered, registered); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	prior, err := readCatalogSessionPrior(tx, session.ID)
@@ -451,11 +456,11 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, err
 	}
 	observedAt := row.ObservedAt.UTC()
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit)
-		VALUES(?,?,?,?,?,?,?,0,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count,waiting_on,background_tasks,usage_limit,turn_stop)
+		VALUES(?,?,?,?,?,?,?,0,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,retired=0,projection_fingerprint=excluded.projection_fingerprint,
-		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit`,
-		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit); err != nil {
+		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count,waiting_on=excluded.waiting_on,background_tasks=excluded.background_tasks,usage_limit=excluded.usage_limit,turn_stop=excluded.turn_stop`,
+		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
@@ -472,72 +477,6 @@ func appendHostUpsertTx(tx *sql.Tx, entityID string, projection map[string]any, 
 		return CatalogEvent{}, false, err
 	}
 	return appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", entityID, generation), Type: "session.upserted", EntityID: entityID, Payload: payload})
-}
-
-// RefreshHostQueueCounts re-adds this daemon's held sends to every mirrored
-// row whose projected queue count no longer matches, in one transaction so a
-// concurrent mirror write is never overwritten with an older projection.
-func (r *Registry) RefreshHostQueueCounts() (int, error) {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.host_queue_count,cs.observed_at,cs.unavailable_reason
-		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id<>''`)
-	if err != nil {
-		return 0, err
-	}
-	type mirrored struct {
-		id, fingerprint, observedAt, unavailable string
-		generation                               int64
-		hostCount                                int
-	}
-	candidates, err := appendRows(nil, rows, func(scanner rowScanner) (mirrored, error) {
-		var row mirrored
-		err := scanner.Scan(&row.id, &row.fingerprint, &row.generation, &row.hostCount, &row.observedAt, &row.unavailable)
-		return row, err
-	})
-	if err != nil {
-		return 0, err
-	}
-	changed := 0
-	for _, row := range candidates {
-		held, err := queueCountTx(tx, row.id)
-		if err != nil {
-			return 0, err
-		}
-		var projection map[string]any
-		if err := json.Unmarshal([]byte(row.fingerprint), &projection); err != nil {
-			continue
-		}
-		want := row.hostCount + held
-		if current, ok := projection["queueCount"].(float64); ok && int(current) == want {
-			continue
-		}
-		projection["queueCount"] = want
-		encoded, err := json.Marshal(projection)
-		if err != nil {
-			return 0, err
-		}
-		entityID, _ := projection["id"].(string)
-		if entityID == "" {
-			continue
-		}
-		generation, err := nextProjectionGenerationTx(tx)
-		if err != nil {
-			return 0, err
-		}
-		if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, string(encoded), generation, row.id); err != nil {
-			return 0, err
-		}
-		observedAt, _ := parseTimestamp(row.observedAt)
-		if _, _, err := appendHostUpsertTx(tx, entityID, projection, generation, observedAt, row.unavailable); err != nil {
-			return 0, err
-		}
-		changed++
-	}
-	return changed, tx.Commit()
 }
 
 func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason string) (CatalogEvent, bool, error) {

@@ -137,3 +137,14 @@ func (s *Store) Board(projectKey string) (*Board, error) {
 	release()
 	return board, nil
 }
+
+func (s *Store) Forget(projectKeys ...string) {
+	if s.cache == nil {
+		return
+	}
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	for _, key := range projectKeys {
+		delete(s.cache.boards, key)
+	}
+}

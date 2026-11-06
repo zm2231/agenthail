@@ -127,6 +127,9 @@ func (p daemonSessionPageResponse) result(session *surface.Session) *surface.Ses
 		if result.UnavailableReason == "" {
 			result.UnavailableReason = p.Timeline.UnavailableReason
 		}
+		if p.Exchanges == nil {
+			result.Exchanges = surface.ExchangesFromItems(result.Items, result.Source)
+		}
 	}
 	boundSession := session
 	if p.Session.ID != "" {

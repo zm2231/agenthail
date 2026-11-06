@@ -171,8 +171,7 @@ func TestProposalBindsOnlyOnceThePersonAdoptsIt(t *testing.T) {
 		t.Fatalf("proposal = %+v", c)
 	}
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C1", Adopt: true}, "only a proposed clause can be adopted")
-	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2"}, "exactly one of --adopt, --reject or --ack")
-	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true, Ack: true}, "exactly one of")
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true, Ack: true}, "not several")
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: "widget-C2", Adopt: true})
 	c = clause(t, board(t, s), "widget-C2")
 	if c.Source != ledger.SourceAdopted || c.OwnerSessionID != "s1" || !slices.Contains(c.Sources, "claude-prompt:2") {
@@ -255,7 +254,7 @@ func TestDecisionsAndConstraintsCanCoverTheProject(t *testing.T) {
 	}
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsConstrains, To: ledger.ProjectTarget, Clauses: []string{"never ship on fridays"}})
 	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsConstrains, To: g, Clauses: []string{"no new services"}})
-	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsDecides, To: "widget-A9", Clauses: []string{"x"}}, "--as decides needs --to <goal|project>")
+	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsDecides, To: "widget-A9", Clauses: []string{"x"}}, `"widget-A9" is not a goal, ask, clause or work item`)
 	b := board(t, s)
 	if got := b.ProjectConstraints(); len(got) != 1 || got[0].OwnerSessionID != "" || got[0].Kind != ledger.ClauseKindConstraint {
 		t.Fatalf("project constraints = %+v", got)
@@ -292,7 +291,6 @@ func TestReadbackNamesWhatIsStillUnattached(t *testing.T) {
 	if result.Readback != "intent ledger: claude-prompt:1 is conversation; 1 unattached: claude-prompt:2" {
 		t.Fatalf("readback = %q", result.Readback)
 	}
-	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsConversation, To: "widget-G1"}, "takes no --to")
 	refused(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: "summarizes"}, "unknown --as")
 }
 

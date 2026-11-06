@@ -133,6 +133,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if state.ProjectLinks, err = d.sharedProjectLinks(); err != nil {
 		return dashboardState{}, fmt.Errorf("read project links: %w", err)
 	}
+	if state.ProjectMoves, err = d.sharedProjectMoves(); err != nil {
+		return dashboardState{}, fmt.Errorf("read project moves: %w", err)
+	}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
@@ -204,6 +207,14 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read project leads: %w", err)
 	}
+	works, err := d.Registry.SessionWork()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session worktrees: %w", err)
+	}
+	sessionPRs, err := d.Registry.SessionPRs()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session pull requests: %w", err)
+	}
 	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
@@ -233,6 +244,12 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			observedAt = now.UTC()
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
+		if work, found := works[session.ID]; found {
+			entry.Worktree = newWorkView(work)
+		}
+		if prs := sessionPRs[session.ID]; len(prs) > 0 {
+			entry.PRs = d.prViews(prs)
+		}
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt
 		}

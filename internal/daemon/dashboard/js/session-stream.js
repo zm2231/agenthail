@@ -6,11 +6,15 @@ import { renderChat } from "./chat.js";
 import { renderContextUsage } from "./context-usage.js";
 import { applyStreamedRow, exchangesFromItems, streamRebuild } from "./stream-items.js";
 import { selectSession } from "./session-selection.js";
+import { claimChatSlot } from "./chat-slots.js";
 
 export function stopLiveStream(clear = false) {
   if (app.liveSource) app.liveSource.close();
   app.liveSource = null;
   app.liveSessionID = "";
+  app.liveClaim = null;
+  app.liveSlot?.release();
+  app.liveSlot = null;
   if (clear) {
     app.liveText = "";
     app.liveTools = [];
@@ -35,7 +39,7 @@ export function renderLiveTurn() {
   if (wasPinned) body.scrollTop = body.scrollHeight;
 }
 
-export function startLiveStream() {
+export async function startLiveStream() {
   const session = app.selected;
   const canStream = app.history?.capabilities?.stream;
   const viewingChat = location.hash === "#conversations" && (!mobileConversationView() || app.mobileChatOpen);
@@ -43,9 +47,24 @@ export function startLiveStream() {
     stopLiveStream();
     return;
   }
-  if (app.liveSource && app.liveSessionID === session.id) return;
+  if ((app.liveSource || app.liveClaim) && app.liveSessionID === session.id) return;
   stopLiveStream(true);
   app.liveSessionID = session.id;
+  const claim = {};
+  app.liveClaim = claim;
+  const slot = await claimChatSlot(() => {
+    if (app.liveSlot === slot) stopLiveStream();
+  });
+  if (app.liveClaim !== claim) {
+    slot?.release();
+    return;
+  }
+  app.liveClaim = null;
+  if (!slot) {
+    app.liveSessionID = "";
+    return;
+  }
+  app.liveSlot = slot;
   const source = new EventSource(`/api/session-stream?id=${encodeURIComponent(session.id)}&after=${app.history.journalSeq || 0}`);
   app.liveSource = source;
   const rebuild = streamRebuild();

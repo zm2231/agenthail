@@ -75,7 +75,8 @@ func TestTerminalPromptSendsClaudesPromptIDToTheDaemon(t *testing.T) {
 	text := output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
 	for _, want := range []string{
 		"utterance claude-prompt:bb6af0fd in test-key",
-		"agenthail ledger attach claude-prompt:bb6af0fd --as",
+		"agenthail ledger attach claude-prompt:bb6af0fd --to",
+		"Left out, --as is read from --to and the other flags",
 		"Put each readback line attach prints in your reply",
 		"Still unattached from earlier: claude-prompt:earlier",
 	} {
@@ -111,6 +112,6 @@ func TestTerminalPromptAddsNoLedgerContextWhenOnlyCaptured(t *testing.T) {
 		t.Fatalf("want 1 capture call, got %d", len(calls()))
 	}
 	if output != nil && strings.Contains(output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string), "intent ledger") {
-		t.Fatalf("a lead whose words are only captured was asked to attach: %v", output)
+		t.Fatalf("a session whose words are only captured was asked to attach: %v", output)
 	}
 }

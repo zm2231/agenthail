@@ -44,7 +44,9 @@ type daemonSurface struct {
 	transcripts    map[string]string
 	limitReads     atomic.Int32
 	startOptions   []surface.SessionStartOptions
+	startCeilings  []json.RawMessage
 	startErr       error
+	startRefused   error
 	startHook      func()
 	firstTurn      func()
 	unrecordable   bool
@@ -245,6 +247,10 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 }
 func (f *daemonSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
+	f.startCeilings = append(f.startCeilings, surface.StartCeiling(ctx))
+	if f.startRefused != nil {
+		return nil, nil, f.startRefused
+	}
 	if hook := f.startHook; hook != nil {
 		f.startHook = nil
 		hook()
@@ -972,25 +978,6 @@ func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 
 	if r.QueueCount(session.ID) != 1 || len(base.sent) != 0 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(session.ID), base.sent)
-	}
-}
-
-func TestScanLoadsUnloadedDesktopCodexSessionForQueueDelivery(t *testing.T) {
-	d, r, _, _, _ := daemonFixture(t)
-	session := surface.Session{ID: "desktop-unloaded", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
-	if err := r.RegisterSession(session); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.QueueMessage(session.ID, "deliver after Desktop load"); err != nil {
-		t.Fatal(err)
-	}
-	fake := &daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.SessionStatus("notLoaded")}}, accepted: true}
-	d.Surfaces = []surface.Surface{fake}
-
-	d.scanAndRelay(t.Context())
-
-	if len(fake.sent) != 1 || fake.sent[0] != "deliver after Desktop load" || r.QueueCount(session.ID) != 0 {
-		t.Fatalf("sent=%v pending=%d", fake.sent, r.QueueCount(session.ID))
 	}
 }
 

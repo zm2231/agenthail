@@ -464,8 +464,7 @@ private struct MenuBarLabel: View {
             return
         }
         if let sessionID = request.sessionID { model.openSession(reference: sessionID) }
-        NSApplication.shared.activate()
-        openWindow(id: "main")
+        MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
         if request.newSession { model.openNewSession() }
         if request.palette { model.paletteVisible = true }
         if let text = request.sharedText { model.receiveSharedText(text) }
@@ -563,8 +562,7 @@ private struct AgenthailMenuContent: View {
     }
 
     private func open() {
-        NSApplication.shared.activate()
-        openWindow(id: "main")
+        MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
     }
 }
 
@@ -605,7 +603,7 @@ private struct AgenthailMenuBarApp: App {
         .windowStyle(.hiddenTitleBar)
 
         Window("Voice", id: "voice") {
-            VoiceWindow(voice: voice) { model.openSession(reference: $0) }
+            VoiceWindow(voice: voice, mainWindow: { model.mainWindow }) { model.openSession(reference: $0) }
                 .textColors(model.interface)
         }
         .defaultSize(width: 460, height: 620)

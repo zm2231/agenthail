@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type ledgerCall struct {
@@ -93,15 +94,24 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 	if err != nil {
 		return err
 	}
+	notCarried, err := a.registry().ProjectMoveRefusalsOf(key)
+	if err != nil {
+		return err
+	}
+	if !hasFlag(args, "--json") {
+		for _, refusal := range notCarried {
+			fmt.Println(notCarriedLine(refusal))
+		}
+	}
 	if scope.State == ledger.LedgerDisabled {
 		if hasFlag(args, "--json") {
-			return emit(map[string]any{"projectKey": key, "capture": "disabled"})
+			return emit(map[string]any{"projectKey": key, "capture": "disabled", "notCarried": notCarried})
 		}
 		fmt.Printf("ledger is disabled for this project (%s)\n", key)
 		fmt.Println("enable with: agenthail ledger enable")
 		return nil
 	}
-	capture, coverage := "lead", "capturing the person's words to the project's lead; nothing asks it to attach them. To ask every session to attach each message: agenthail ledger enable"
+	capture, coverage := "lead", "capturing the person's words to the project's lead, which attaches each message; its turn is not held for words it leaves unattached. To ask every session to attach each message: agenthail ledger enable"
 	if scope.State == ledger.LedgerEnabled {
 		capture = "enabled"
 		coverage = "capturing since " + scope.Since.Local().Format(time.DateTime) + "; words from before then are not in the ledger"
@@ -137,6 +147,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 			"checks":             board.GoalChecks(),
 			"unattached":         attachment.Unattached,
 			"attachedElsewhere":  attachment.Elsewhere,
+			"notCarried":         notCarried,
 		}
 		if scope.State == ledger.LedgerEnabled {
 			out["captureSince"], out["attach"] = scope.Since, scope.Attach
@@ -179,7 +190,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 const ledgerLeadWordsShown = 5
 
 const ledgerAttachInOneCall = `attach your own in one call, one fragment per intent:
-  agenthail ledger attach <utterance> --as <...> --to <...> --clause "..." --and <utterance> --as ...`
+  agenthail ledger attach <utterance> --to <...> --clause "..." [--as <...>] --and <utterance> ...`
 
 func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)
@@ -356,4 +367,8 @@ func (a *App) ledgerShow(store *ledger.Store, args []string, id string) error {
 		}
 	}
 	return fmt.Errorf("%q is not a work item or an ask in this project; agenthail ledger list shows the items", id)
+}
+
+func notCarriedLine(refusal registry.ProjectMoveRefusal) string {
+	return fmt.Sprintf("history under %s was not carried to %s when the project's remote changed: %s", refusal.From, refusal.To, refusal.Reason)
 }

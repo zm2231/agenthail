@@ -101,7 +101,7 @@ func TestALateRemovalOfTheReplacedFileKeepsTheNewWatch(t *testing.T) {
 	}
 	// The old file's removal, as the platform can report it after the reader
 	// already watches the new file.
-	w.notify(path, true, false)
+	w.notify(path, true)
 	drain(wake)
 	appendLine(t, path, "appended to the new file")
 	awaitWake(t, wake, "append to the replacement after the old file's removal")
@@ -276,5 +276,49 @@ func TestAFileAndItsDirectoryAreFollowedApart(t *testing.T) {
 	awaitWake(t, file, "an append after the directory reader left")
 	if !w.Watched(path) {
 		t.Fatal("releasing the directory dropped the file's watch")
+	}
+}
+
+func TestAFolderCreatedInAFollowedFolderWakesForItsOwnNewEntries(t *testing.T) {
+	w := New(DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = w.Close() })
+	for round := range 50 {
+		root := t.TempDir()
+		parent := w.FollowDir(root)
+		day := filepath.Join(root, "06")
+		if err := os.Mkdir(day, 0700); err != nil {
+			t.Fatal(err)
+		}
+		awaitWake(t, parent, "a new folder")
+		child := w.FollowDir(day)
+		if child.C() == nil {
+			t.Fatal("new folder not watched")
+		}
+		if w.dirs[root].own == w.dirs[day].own {
+			t.Fatal("a folder and its parent share a platform watcher")
+		}
+		appendLine(t, filepath.Join(root, "sibling.json"), "{}")
+		awaitWake(t, parent, "a sibling of the new folder")
+		appendLine(t, filepath.Join(day, fmt.Sprintf("%d.json", round)), "{}")
+		awaitWake(t, child, "the new folder's first entry")
+		parent.Release()
+		appendLine(t, filepath.Join(day, "after-parent.json"), "{}")
+		awaitWake(t, child, "an entry after the parent's reader left")
+		child.Release()
+	}
+}
+
+func TestReleasingAFolderClosesItsPlatformWatcher(t *testing.T) {
+	w := New(DefaultLimit, t.Logf)
+	t.Cleanup(func() { _ = w.Close() })
+	dir := t.TempDir()
+	wake := w.FollowDir(dir)
+	if wake.C() == nil {
+		t.Fatal("directory not watched")
+	}
+	own := w.dirs[dir].own
+	wake.Release()
+	if len(w.dirs) != 0 || own.WatchList() != nil {
+		t.Fatalf("dirs=%d watching=%v after the last reader left", len(w.dirs), own.WatchList())
 	}
 }

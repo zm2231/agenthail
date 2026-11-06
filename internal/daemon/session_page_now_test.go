@@ -79,15 +79,12 @@ func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t 
 	started := time.Now()
 	handler.ServeHTTP(response, request)
 	elapsed := time.Since(started)
-	var page struct {
-		Exchanges  []pageExchange `json:"exchanges"`
-		JournalSeq uint64         `json:"journalSeq"`
-	}
+	var page timelinePage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
 		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
 	}
-	if elapsed >= catchUpDelay/2 || len(page.Exchanges) != 2 || page.JournalSeq == 0 {
-		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page once the wait runs out", elapsed, len(page.Exchanges), page.JournalSeq)
+	if elapsed >= catchUpDelay/2 || len(page.exchanges(t)) != 2 || page.JournalSeq == 0 {
+		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page once the wait runs out", elapsed, len(page.exchanges(t)), page.JournalSeq)
 	}
 
 	server := httptest.NewServer(handler)

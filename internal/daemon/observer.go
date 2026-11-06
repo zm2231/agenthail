@@ -76,10 +76,11 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		// An exited Claude session stays a delivery target whatever its stored
-		// status, since a send resumes it; it is observed only to drain its queue.
-		exited := claudeProcessExited(session)
-		if !isTask && ((exited && queueCounts[session.ID] == 0) || (!exited && relayTargetInactive(session))) {
+		// An exited or offline Claude session stays a delivery target, since a
+		// send resumes it; it is observed only to drain its queue. An offline
+		// one may have no PID left to tell whether its process exited.
+		resumable := claudeProcessExited(session) || (session.Surface == surface.KindClaude && relayTargetInactive(session))
+		if !isTask && ((resumable && queueCounts[session.ID] == 0) || (!resumable && relayTargetInactive(session))) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}
@@ -181,7 +182,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	session.Status = observation.Status
 	session.WaitingOn = observation.WaitingOn
 	session.BackgroundTasks = observation.BackgroundTasks
-	session.UsageLimit = observation.UsageLimit
+	session.UsageLimit, session.TurnStop = observation.UsageLimit, observation.TurnStop
+	if session.TurnStop != nil {
+		d.noticeTurnStop(*session)
+	}
 	session.Activity = observation.Activity
 	session.Plan = observation.Plan
 	if session.Source != source || session.Transport != transport {
@@ -241,6 +245,15 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	if completionChanged {
+		if err := d.Registry.BindTurnCompletion(session.ID, observation.CompletedTurnID); err != nil {
+			d.log.Printf("bind turn completion %s: %s", d.resolveDisplay(session.ID), err)
+		}
+	}
+	notice := turnCompletedNotice{desktop: desktopNotificationMessage, mobile: mobileNotificationMessage}
+	if notice.desktop != "" && observation.Reply.Error == "" {
+		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.desktop, notice.mobile)
+	}
 	if observation.ActiveTurnID != "" && observation.ActiveTurnID != previous.ActiveTurnID || completionChanged {
 		if err := d.Registry.ReviveSessionCredential(session.ID, time.Now()); err != nil {
 			d.log.Printf("revive session credential %s: %s", d.resolveDisplay(session.ID), err)
@@ -257,14 +270,18 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
+		if d.agenthailStarted(*session) {
+			observed := *session
+			d.background.start(func(ctx context.Context) { d.linkCreatedPRs(ctx, adapter, observed) })
+		}
 	}
-	if desktopNotificationMessage != "" {
-		d.notifyTurnCompleted(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
+	if notice.desktop != "" {
+		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)
 	}
 	if terminalCompletion {
 		d.gateLedgerTurn(*session, observation.CompletedTurnID)
 	}
-	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
+	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.StatusNotLoaded
 	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)
 	if steerQueueErr != nil {
 		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)

@@ -11,6 +11,12 @@ type dashboardActionRequest struct {
 	surface.TurnOptions
 	Name            string                     `json:"name"`
 	Worktree        string                     `json:"worktree"`
+	Isolation       string                     `json:"isolation"`
+	Base            string                     `json:"base"`
+	ForceIgnored    bool                       `json:"forceIgnored"`
+	Op              string                     `json:"op"`
+	PR              string                     `json:"pr"`
+	Repo            string                     `json:"repo"`
 	Agent           string                     `json:"agent"`
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`
@@ -57,6 +63,8 @@ type dashboardActionRequest struct {
 	Instructions    *string                    `json:"instructions"`
 	Replace         bool                       `json:"replace"`
 	ChangedAt       time.Time                  `json:"changedAt"`
+	Until           time.Time                  `json:"until"`
+	Wake            string                     `json:"wake"`
 	ChangedBy       string                     `json:"changedBy"`
 	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 	Task            bool                       `json:"task,omitempty"`

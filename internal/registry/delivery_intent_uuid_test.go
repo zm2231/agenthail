@@ -35,6 +35,7 @@ func TestDeliveryIntentsCarryAUUIDFromBeforeTheyHadOne(t *testing.T) {
 	if _, err := r.db.Exec(`DROP INDEX delivery_intents_uuid`); err != nil {
 		t.Fatal(err)
 	}
+	asBeforePresentationTriggers(t, r)
 	if _, err := r.db.Exec(`ALTER TABLE delivery_intents DROP COLUMN uuid; PRAGMA user_version=17`); err != nil {
 		t.Fatal(err)
 	}

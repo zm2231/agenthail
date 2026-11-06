@@ -30,7 +30,9 @@ func TestMain(m *testing.M) {
 			return 0
 		}, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
 	}
-	os.Exit(testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
+	os.Exit(testkit.RunInOwnHome(func() int {
+		return testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen)
+	}))
 }
 
 // runAgenthail runs this binary's main with args under a scratch HOME.

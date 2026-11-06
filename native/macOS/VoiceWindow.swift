@@ -3,12 +3,13 @@ import SwiftUI
 
 struct VoiceWindow: View {
     @ObservedObject var voice: VoiceController
+    let mainWindow: () -> NSWindow?
     let openSession: (String) -> Void
 
     var body: some View {
         Group {
             if let call = voice.call {
-                VoiceCallView(call: call, openSession: openSession)
+                VoiceCallView(call: call, mainWindow: mainWindow, openSession: openSession)
             } else {
                 Color.clear
             }
@@ -22,6 +23,7 @@ struct VoiceWindow: View {
 
 struct VoiceCallView: View {
     @ObservedObject var call: VoiceOperatorModel
+    let mainWindow: () -> NSWindow?
     let openSession: (String) -> Void
     @Environment(\.openWindow) private var openWindow
     @State private var confirmTargetInterrupt = false
@@ -44,8 +46,7 @@ struct VoiceCallView: View {
                             Spacer()
                             Button("Open timeline") {
                                 openSession(session.id)
-                                NSApplication.shared.activate()
-                                openWindow(id: "main")
+                                MainWindowShow.show(mainWindow()) { openWindow(id: "main") }
                             }
                                 .buttonStyle(.link)
                         }

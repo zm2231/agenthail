@@ -86,6 +86,13 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		readback = fmt.Sprintf("%s handed off by %s (%s), open for the next session", item.ID, req.SessionID, item.origin())
 	case WorkClose:
 		word, evidence := closeReason(payload.Reason)
+		readAsDone := ""
+		if word != "" && word != workCloseDone && !slices.Contains(workCloseReasons, word) {
+			word, evidence = workCloseDone, payload.Reason
+			payload.Reason = workCloseDone + ": " + evidence
+			last := len(workCloseReasons) - 1
+			readAsDone = fmt.Sprintf(" (read as done; start the reason with %s or %s to close it as not done)", strings.Join(workCloseReasons[:last], ", "), workCloseReasons[last])
+		}
 		switch {
 		case word == workCloseDone && (item.Assignee != "" || item.State == WorkInReview):
 			return "", nil, "", refuse("%s is %s by %s; claimed work is finished through submit and review", item.ID, item.State, item.Assignee)
@@ -93,9 +100,9 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 			return "", nil, "", refuse("close --reason done needs what finished %s, such as \"done: PR #12\" or a commit", item.ID)
 		case word == workCloseDone:
 			payload.ToState = WorkDone
-			readback = fmt.Sprintf("%s done (%s): %s", item.ID, item.origin(), evidence)
+			readback = fmt.Sprintf("%s done (%s): %s%s", item.ID, item.origin(), evidence, readAsDone)
 		case !slices.Contains(workCloseReasons, word):
-			return "", nil, "", refuse("close needs --reason starting with done (and what finished it), %s; claimed work is finished through submit and review", strings.Join(workCloseReasons, ", "))
+			return "", nil, "", refuse("close needs --reason: what finished %s (\"done: PR #12\"), or %s and why", item.ID, strings.Join(workCloseReasons, ", "))
 		}
 		payload.Assignee = ""
 	case WorkDelete, WorkRestore, WorkReopen:

@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/filewake"
+	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -92,6 +93,7 @@ type Daemon struct {
 	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
+	repositoryKeys    repositoryKeyWatch
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
 	ledgerHub         *ledgerChangeHub
@@ -121,9 +123,14 @@ type Daemon struct {
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
+	workClean                sync.Mutex
+	workWake                 chan struct{}
+	github                   github.Client
+	prWatch                  prWatchState
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
+	turnStopNoticeMu         sync.Mutex
 	taskRequestsRead         map[string]taskRequestRead
 	replacements             replacementAnnouncer
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
@@ -194,6 +201,8 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		background:        newBackgroundWork(),
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
+		workWake:          make(chan struct{}, 1),
+		github:            github.GH{},
 		g2:                newG2Counter(time.Now()),
 	}
 	if reg != nil {
@@ -218,6 +227,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	d.catalog = newCatalogHub(reg)
 	d.catalogIdentities.changed = d.requestCatalogDiscovery
+	d.catalogIdentities.observeRoot = d.observeRepositoryKey
 	if prompts := d.claudePrompts(); prompts != nil {
 		prompts.OnPromptChange(d.claudePromptChanged)
 	}
@@ -341,6 +351,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runLimitResumes(ctx)
 	go d.runKeepAlive(ctx)
 	go d.runGoalSweeps(ctx)
+	go d.runWorkCleans(ctx)
+	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.background.start(d.runJournalSweeps)

@@ -1043,6 +1043,30 @@
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
   },
+  "api/action pr unknown op": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"op must be link, unlink, watch or unwatch\"}}\n"
+  },
+  "api/action pr unlink not linked": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"https://github.com/acme/app/pull/1 is not linked to this session\"}}\n"
+  },
   "api/action project action unknown": {
     "status": 400,
     "header": {
@@ -2303,6 +2327,42 @@
     },
     "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
   },
+  "api/action session-snooze": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"previous\":null,\"sessionId\":\"to\",\"snooze\":{\"snoozedAt\":\"\u003ctime\u003e\",\"until\":\"\u003ctime\u003e\",\"wake\":\"time\"}}\n"
+  },
+  "api/action session-snooze empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_request\",\"message\":\"give either until or wake \\\"finished\\\"\"}}\n"
+  },
+  "api/action session-snooze finished idle": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"the session is not working, so there is no turn to wait for\"}}\n"
+  },
   "api/action session-unarchive": {
     "status": 200,
     "header": {
@@ -2326,6 +2386,18 @@
       ]
     },
     "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
+  },
+  "api/action session-wake": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"previous\":null,\"sessionId\":\"to\",\"snooze\":null}\n"
   },
   "api/action status": {
     "status": 200,
@@ -2458,6 +2530,18 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
+  },
+  "api/action work-clean": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
   },
   "api/v1/actions alias": {
     "status": 200,
@@ -3502,6 +3586,30 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"control_failed\",\"message\":\"the runtime broke\"},\"result\":{\"sessionId\":\"to\",\"action\":\"permission-mode\",\"evidence\":\"delivered\",\"source\":\"parity\",\"output\":\"plan\"}}\n"
+  },
+  "api/v1/actions pr unknown op": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"op must be link, unlink, watch or unwatch\"}}\n"
+  },
+  "api/v1/actions pr unlink not linked": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"https://github.com/acme/app/pull/1 is not linked to this session\"}}\n"
   },
   "api/v1/actions project action unknown": {
     "status": 400,
@@ -4763,6 +4871,42 @@
     },
     "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
   },
+  "api/v1/actions session-snooze": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"previous\":null,\"sessionId\":\"to\",\"snooze\":{\"snoozedAt\":\"\u003ctime\u003e\",\"until\":\"\u003ctime\u003e\",\"wake\":\"time\"}}\n"
+  },
+  "api/v1/actions session-snooze empty": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"bad_request\",\"message\":\"give either until or wake \\\"finished\\\"\"}}\n"
+  },
+  "api/v1/actions session-snooze finished idle": {
+    "status": 409,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"conflict\",\"message\":\"the session is not working, so there is no turn to wait for\"}}\n"
+  },
   "api/v1/actions session-unarchive": {
     "status": 200,
     "header": {
@@ -4786,6 +4930,18 @@
       ]
     },
     "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions session-wake": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"previous\":null,\"sessionId\":\"to\",\"snooze\":null}\n"
   },
   "api/v1/actions status": {
     "status": 200,
@@ -4918,5 +5074,17 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
+  },
+  "api/v1/actions work-clean": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
   }
 }

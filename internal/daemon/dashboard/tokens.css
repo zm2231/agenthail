@@ -694,7 +694,8 @@ textarea:focus-visible {
 .dot.waiting {
   background: var(--warn);
 }
-.dot.unavailable {
+.dot.unavailable,
+.dot.stopped {
   background: var(--bad);
 }
 .dot.idle {
@@ -3024,6 +3025,12 @@ select {
   font-size: 0.75rem;
 }
 .pager-review-row.unanswered span {
+  color: var(--accent);
+}
+.pager-option .pager-suggested {
+  color: var(--accent);
+}
+.pager-links a {
   color: var(--accent);
 }
 .request-actions {

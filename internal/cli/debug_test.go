@@ -137,3 +137,38 @@ func TestDebugHeapRemovesAProfileThatFailsToClose(t *testing.T) {
 		t.Fatalf("a profile that failed to close was left: %v", entries)
 	}
 }
+
+func TestDebugCPUAsksTheDaemonForTheRequestedSeconds(t *testing.T) {
+	var asked []string
+	serveFakeDebugSocket(t, func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.String())
+		w.Write([]byte("cpu profile"))
+	})
+	dir := t.TempDir()
+	app := &App{catalogDaemonRunning: func() bool { return true }}
+	for _, args := range [][]string{{"debug", "cpu", dir}, {"debug", "cpu", dir, "5"}} {
+		output, err := captureStdout(t, func() error { return app.Run(args) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := strings.TrimSpace(output)
+		if filepath.Dir(path) != dir || !strings.HasPrefix(filepath.Base(path), "cpu-") || !strings.HasSuffix(path, ".pb.gz") {
+			t.Fatalf("written to %q", path)
+		}
+		if data, err := os.ReadFile(path); err != nil || string(data) != "cpu profile" {
+			t.Fatalf("%q %v", data, err)
+		}
+		os.Remove(path)
+	}
+	if strings.Join(asked, " ") != "/profiles/cpu?seconds=30 /profiles/cpu?seconds=5" {
+		t.Fatalf("asked %v", asked)
+	}
+	for _, bad := range []string{"0", "301", "soon"} {
+		if err := app.Run([]string{"debug", "cpu", dir, bad}); err == nil || !strings.Contains(err.Error(), "seconds") {
+			t.Fatalf("%s: err=%v", bad, err)
+		}
+	}
+	if len(asked) != 2 {
+		t.Fatalf("a bad duration reached the daemon: %v", asked)
+	}
+}

@@ -25,7 +25,8 @@ import (
 type catalogViewState struct {
 	archive   registry.ArchiveState
 	attention map[string]bool
-	pins      map[string]registry.SessionPin
+	marks     map[string]registry.SessionMark
+	turnEnds  map[string]registry.TurnEnd
 }
 
 func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
@@ -41,11 +42,15 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	for _, item := range items {
 		attention[item.SessionID] = true
 	}
-	pins, err := d.Registry.SessionPins()
+	marks, err := d.Registry.SessionMarks()
 	if err != nil {
-		return catalogViewState{}, fmt.Errorf("read pinned sessions: %w", err)
+		return catalogViewState{}, fmt.Errorf("read pinned and snoozed sessions: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, pins: pins}, nil
+	turnEnds, err := d.Registry.CurrentTurnEnds()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read turn ends: %w", err)
+	}
+	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -96,8 +101,12 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 		row.Project = &project
 	}
 	row.Archived = archived
-	pin := view.pins[row.ID]
-	row.PinnedAt, row.KeepAlive = pin.PinnedAt, keepAliveRow(pin.KeepAlive)
+	mark := view.marks[row.ID]
+	row.PinnedAt, row.KeepAlive = mark.PinnedAt, keepAliveRow(mark.KeepAlive)
+	row.Snooze = snoozeRow(mark.Snooze)
+	if end, ok := view.turnEnds[row.ID]; ok {
+		row.EndTurn = endTurnRow(&end)
+	}
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether
@@ -129,7 +138,7 @@ type dashboardProject struct {
 	Archived     bool                          `json:"archived"`
 	Linked       []CatalogProjectRef           `json:"linked,omitempty"`
 	// LinkHeld is why this host keeps the project apart although a link joins it into another.
-	LinkHeld string `json:"linkHeld,omitempty"`
+	LinkHeld    string              `json:"linkHeld,omitempty"`
 	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
 }
 
@@ -146,12 +155,12 @@ type dashboardProjectCoordinator struct {
 }
 
 type dashboardProjectCheckout struct {
-	Host         dashboardHost `json:"host"`
-	ProjectID    string        `json:"projectId"`
-	RootPath     string        `json:"rootPath"`
-	Added        bool          `json:"added"`
-	SessionCount int           `json:"sessionCount"`
-	Archived     bool          `json:"archived"`
+	Host         dashboardHost      `json:"host"`
+	ProjectID    string             `json:"projectId"`
+	RootPath     string             `json:"rootPath"`
+	Added        bool               `json:"added"`
+	SessionCount int                `json:"sessionCount"`
+	Archived     bool               `json:"archived"`
 	LinkedFrom   *CatalogProjectRef `json:"linkedFrom,omitempty"`
 }
 
@@ -173,7 +182,7 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
-	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current, row.Archived)
+	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current || !row.PinnedAt.IsZero(), row.Archived)
 }
 
 // SessionWorking reports whether a session or one of its observed subagents is
@@ -676,6 +685,9 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 		if err == nil && found && task.State == registry.TaskRunning {
 			d.publishTaskSettled(sessionID, registry.TaskCancelled, "")
 		}
+		if err == nil {
+			d.settleWork(sessionID, registry.WorkSettledArchived)
+		}
 	} else {
 		err = d.Registry.UnarchiveSession(sessionID)
 	}
@@ -799,6 +811,9 @@ func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []regis
 			continue
 		}
 		key, repository, ok := d.catalogIdentities.rootRepository(ctx, record.WorkspaceRoot, now)
+		if ok && key != "" {
+			d.observeRepositoryKey(record.WorkspaceRoot, key)
+		}
 		if !ok || (key == record.Key && bytes.Equal(repository, record.Repository)) {
 			continue
 		}
