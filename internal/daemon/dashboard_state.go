@@ -248,7 +248,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			entry.Worktree = newWorkView(work)
 		}
 		if prs := sessionPRs[session.ID]; len(prs) > 0 {
-			entry.PRs = newPRViews(prs)
+			entry.PRs = d.prViews(prs)
 		}
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt

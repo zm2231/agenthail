@@ -94,7 +94,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	rows := make([]dashboardSession, 0, len(read.Rows))
 	revision := make([]revisionRow, 0, len(read.Rows))
 	for _, record := range read.Rows {
-		row, err := presentationRow(record, d.presentation.fingerprints.rows[record.ID])
+		row, err := presentationRow(record, d.presentation.fingerprints.rows[record.ID], d.prViews)
 		if err != nil {
 			return nil, err
 		}

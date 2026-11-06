@@ -77,7 +77,7 @@ func (c *presentationFingerprints) adopt(read registry.CatalogPresentation) erro
 	return nil
 }
 
-func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint) (dashboardSession, error) {
+func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint, prViews func([]registry.SessionPR) []prView) (dashboardSession, error) {
 	row := source.row
 	row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot, row.ConfiguredModel, row.PendingModel = nil, nil, nil, nil, "", ""
 	row.Name, row.Surface, row.Status, row.Cwd = record.Name, surface.SurfaceKind(record.Surface), surface.SessionStatus(record.Status), record.Cwd
@@ -127,7 +127,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		row.Worktree = workRow(record.Work)
 		row.PRs = nil
 		if len(record.PRs) > 0 {
-			row.PRs = newPRViews(record.PRs)
+			row.PRs = prViews(record.PRs)
 		}
 	}
 	return row, nil

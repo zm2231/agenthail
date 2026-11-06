@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -28,6 +29,54 @@ type SessionPR struct {
 	Checks     string
 	LastReadAt time.Time
 	LinkedAt   time.Time
+
+	FailedChecks   []string
+	PassedHead     string
+	ConflictHead   string
+	RemarksThrough time.Time
+	RemarkIDs      []string
+	Wakes          int
+	CommentWakes   int
+	ReadFailures   int
+}
+
+func (r *Registry) WatchedPRs() ([]SessionPR, error) {
+	return r.sessionPRs(`WHERE watch=1 AND unlinked=0`)
+}
+
+// RecordPRRead is false when the pull request was unwatched or unlinked
+// since the read began; that read must not wake anyone.
+func (r *Registry) RecordPRRead(pr SessionPR, at time.Time) (bool, error) {
+	failed, err := jsonList(pr.FailedChecks)
+	if err != nil {
+		return false, err
+	}
+	remarks, err := jsonList(pr.RemarkIDs)
+	if err != nil {
+		return false, err
+	}
+	result, err := r.db.Exec(`UPDATE session_prs SET title=?,state=?,head_sha=?,mergeable=?,review=?,checks=?,failed_checks=?,passed_head=?,conflict_head=?,remarks_through_ms=?,remark_ids=?,wakes=?,comment_wakes=?,read_failures=0,last_read_at_ms=?,watch=?
+WHERE session_id=? AND repo=? AND number=? AND unlinked=0 AND watch=1`,
+		pr.Title, pr.State, pr.HeadSHA, pr.Mergeable, pr.Review, pr.Checks, failed, pr.PassedHead, pr.ConflictHead, unixMilli(pr.RemarksThrough), remarks, pr.Wakes, pr.CommentWakes, at.UnixMilli(), pr.Watch,
+		pr.SessionID, pr.Repo, pr.Number)
+	if err != nil {
+		return false, err
+	}
+	recorded, err := result.RowsAffected()
+	return recorded == 1, err
+}
+
+func (r *Registry) RecordPRReadFailure(sessionID, repo string, number int) error {
+	_, err := r.db.Exec(`UPDATE session_prs SET read_failures=read_failures+1 WHERE session_id=? AND repo=? AND number=?`, sessionID, repo, number)
+	return err
+}
+
+func jsonList(values []string) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(values)
+	return string(encoded), err
 }
 
 // LinkPR records a pull request for a session. An explicit link restores one
@@ -123,7 +172,8 @@ func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, e
 }
 
 func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
-	rows, err := r.read.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
+	rows, err := r.read.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms,
+	failed_checks,passed_head,conflict_head,remarks_through_ms,remark_ids,wakes,comment_wakes,read_failures FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -131,9 +181,21 @@ func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
 	var out []SessionPR
 	for rows.Next() {
 		var pr SessionPR
-		var read, linked int64
-		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &read, &linked); err != nil {
+		var read, linked, through int64
+		var failed, remarks string
+		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &read, &linked,
+			&failed, &pr.PassedHead, &pr.ConflictHead, &through, &remarks, &pr.Wakes, &pr.CommentWakes, &pr.ReadFailures); err != nil {
 			return nil, err
+		}
+		for raw, list := range map[string]*[]string{failed: &pr.FailedChecks, remarks: &pr.RemarkIDs} {
+			if raw != "" {
+				if err := json.Unmarshal([]byte(raw), list); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if through > 0 {
+			pr.RemarksThrough = time.UnixMilli(through).UTC()
 		}
 		if read > 0 {
 			pr.LastReadAt = time.UnixMilli(read).UTC()

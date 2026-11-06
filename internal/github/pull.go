@@ -28,6 +28,7 @@ type Client interface {
 	// BranchPullRequests reads, in one request per GitHub host, the pull
 	// requests opened from each branch within its own repository.
 	BranchPullRequests(ctx context.Context, branches []Branch) (map[Branch][]PullRequest, error)
+	Watch(ctx context.Context, host string, refs []Ref) (Watch, error)
 }
 
 const pullFields = `number url title state headRefOid headRefName createdAt isCrossRepository`

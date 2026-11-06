@@ -683,7 +683,7 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			row.Worktree = newWorkView(work)
 		}
 		if len(prs) > 0 {
-			row.PRs = newPRViews(prs)
+			row.PRs = d.prViews(prs)
 		}
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)

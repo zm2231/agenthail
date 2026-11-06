@@ -27,6 +27,7 @@ type prView struct {
 	Mergeable string `json:"mergeable,omitempty"`
 	Review    string `json:"review,omitempty"`
 	Checks    string `json:"checks,omitempty"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 func (d *Daemon) changePRs(write func(*registry.Registry) (bool, error)) (bool, error) {
@@ -37,12 +38,28 @@ func (d *Daemon) changePRs(write func(*registry.Registry) (bool, error)) (bool, 
 	return changed, err
 }
 
-func newPRViews(prs []registry.SessionPR) []prView {
+func (d *Daemon) prViews(prs []registry.SessionPR) []prView {
 	views := make([]prView, 0, len(prs))
 	for _, pr := range prs {
-		views = append(views, prView{Repo: pr.Repo, Number: pr.Number, URL: pr.URL, Source: pr.Source, Watch: pr.Watch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA, Mergeable: pr.Mergeable, Review: pr.Review, Checks: pr.Checks})
+		views = append(views, prView{Repo: pr.Repo, Number: pr.Number, URL: pr.URL, Source: pr.Source, Watch: pr.Watch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA,
+			Mergeable: pr.Mergeable, Review: pr.Review, Checks: pr.Checks, Problem: d.prProblem(pr)})
 	}
 	return views
+}
+
+func (d *Daemon) prProblem(pr registry.SessionPR) string {
+	if !pr.Watch {
+		return ""
+	}
+	if repo, ok := github.ParseRepo(pr.Repo); ok {
+		if problem := d.prWatch.problem(repo.Host); problem != "" {
+			return problem
+		}
+	}
+	if pr.ReadFailures >= prReadFailureLimit {
+		return "GitHub has not returned this pull request on the last few reads"
+	}
+	return ""
 }
 
 func prSource(p principal) string {
@@ -98,7 +115,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
-	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "prs": newPRViews(prs)}), nil
+	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "prs": d.prViews(prs)}), nil
 }
 
 func githubFailure(ref github.Ref, err error) error {

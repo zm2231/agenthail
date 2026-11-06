@@ -17,6 +17,35 @@ type fakeGitHub struct {
 	branches    map[github.Branch][]github.PullRequest
 	err         error
 	branchReads [][]github.Branch
+	statuses    map[github.Ref]github.Status
+	viewer      string
+	watchErr    error
+	watchReads  [][]github.Ref
+}
+
+func (f *fakeGitHub) Watch(_ context.Context, host string, refs []github.Ref) (github.Watch, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.watchReads = append(f.watchReads, refs)
+	if f.watchErr != nil {
+		return github.Watch{}, f.watchErr
+	}
+	watch := github.Watch{Viewer: f.viewer, Statuses: map[github.Ref]github.Status{}, RateRemaining: 5000}
+	for _, ref := range refs {
+		if status, ok := f.statuses[ref]; ok && ref.Host == host {
+			watch.Statuses[ref] = status
+		}
+	}
+	return watch, nil
+}
+
+func (f *fakeGitHub) setStatus(status github.Status) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.statuses == nil {
+		f.statuses = map[github.Ref]github.Status{}
+	}
+	f.statuses[status.Ref] = status
 }
 
 func (f *fakeGitHub) PullRequest(_ context.Context, ref github.Ref) (github.PullRequest, error) {
