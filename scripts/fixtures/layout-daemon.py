@@ -139,8 +139,17 @@ if __name__ == "__main__":
         ask = RESPONSES["/api/v1/requests"]["requests"][0]
         SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
         SESSION["attention"] = {"kind": "ask", "reason": ask["title"]}
+        one = {"families": 1, "sessions": 1}
+        RESPONSES["/api/v1/snapshot"]["view"] = {
+            "counts": {"running": {"families": 0, "sessions": 0}, "current": one, "recent": one, "all": one, "archived": {"families": 0, "sessions": 0}},
+            "surfaces": [],
+            "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["displayName"], "counts": one, "collapsedFamilyIds": [SESSION["id"]]}],
+            "families": [{"id": SESSION["id"], "rootId": SESSION["id"], "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
+                          "members": [{"id": SESSION["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0}],
+        }
         RESPONSES["/api/v1/history"] = {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []}
         RESPONSES["/api/v1/projects/activity"] = {"projects": []}
+        RESPONSES["/api/v1/session-options"] = {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []}
         RESPONSES["/api/v1/session"] = {
             "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
             "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
