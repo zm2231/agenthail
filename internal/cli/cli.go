@@ -171,6 +171,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdHistory(rest)
 	case "thread":
 		return a.cmdThread(rest)
+	case "pr":
+		return a.cmdPR(rest)
 	case "hosts":
 		return a.cmdHosts(rest)
 	case "move":

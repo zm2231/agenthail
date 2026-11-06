@@ -321,6 +321,21 @@ func newViewFixture(t *testing.T) *viewFixture {
 				}
 			}
 		}},
+		{"a pull request linked, unlinked or watched", func(rng *rand.Rand) {
+			id, number := session(rng), 1+rng.Intn(2)
+			var err error
+			switch rng.Intn(3) {
+			case 0:
+				_, err = reg.LinkPR(registry.SessionPR{SessionID: id, Repo: "github.com/acme/app", Number: number, URL: fmt.Sprint("https://github.com/acme/app/pull/", number), Source: registry.PRSourceAgent, Title: fmt.Sprint("change ", rng.Intn(3))}, rng.Intn(2) == 0, f.clock)
+			case 1:
+				_, err = reg.UnlinkPR(id, "github.com/acme/app", number)
+			default:
+				_, err = reg.SetPRWatch(id, "github.com/acme/app", number, rng.Intn(2) == 0)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"a runtime completion", func(rng *rand.Rand) {
 			if err := reg.SaveRuntimeState(session(rng), surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: fmt.Sprint("turn-", rng.Intn(3))}); err != nil {
 				t.Fatal(err)
@@ -376,6 +391,9 @@ func newViewFixture(t *testing.T) *viewFixture {
 			t.Fatal(err)
 		}
 		if _, err := reg.ActivateWork(filled.WorktreePath, "s5"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reg.LinkPR(registry.SessionPR{SessionID: "s3", Repo: "github.com/acme/app", Number: 9, URL: "https://github.com/acme/app/pull/9", Source: registry.PRSourceBranch, Title: "filled"}, false, f.clock); err != nil {
 			t.Fatal(err)
 		}
 		if err := reg.SetAlias("filled", "s0"); err != nil {

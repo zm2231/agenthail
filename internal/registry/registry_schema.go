@@ -516,6 +516,33 @@ CREATE TABLE IF NOT EXISTS work_records (
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS work_records_session ON work_records(session_id) WHERE session_id<>'';
+CREATE TABLE IF NOT EXISTS session_prs (
+	session_id TEXT NOT NULL,
+	repo TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	url TEXT NOT NULL,
+	source TEXT NOT NULL,
+	unlinked INTEGER NOT NULL DEFAULT 0,
+	watch INTEGER NOT NULL DEFAULT 1,
+	title TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT '',
+	head_sha TEXT NOT NULL DEFAULT '',
+	mergeable TEXT NOT NULL DEFAULT '',
+	review TEXT NOT NULL DEFAULT '',
+	checks TEXT NOT NULL DEFAULT '',
+	failed_checks TEXT NOT NULL DEFAULT '',
+	passed_head TEXT NOT NULL DEFAULT '',
+	conflict_head TEXT NOT NULL DEFAULT '',
+	remarks_through_ms INTEGER NOT NULL DEFAULT 0,
+	remark_ids TEXT NOT NULL DEFAULT '',
+	wakes INTEGER NOT NULL DEFAULT 0,
+	comment_wakes INTEGER NOT NULL DEFAULT 0,
+	read_failures INTEGER NOT NULL DEFAULT 0,
+	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
+	linked_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (session_id, repo, number)
+);
+CREATE INDEX IF NOT EXISTS session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked=0;
 CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL

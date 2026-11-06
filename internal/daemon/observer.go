@@ -269,6 +269,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
+		if d.agenthailStarted(*session) {
+			observed := *session
+			d.background.start(func(ctx context.Context) { d.linkCreatedPRs(ctx, adapter, observed) })
+		}
 	}
 	if notice.desktop != "" {
 		d.notifyTurnCompleted(notice, session.ID, observation.CompletedTurnID)

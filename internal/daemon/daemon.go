@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/filewake"
+	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -124,6 +125,7 @@ type Daemon struct {
 	goalSweep                *goalSweeper
 	workClean                sync.Mutex
 	workWake                 chan struct{}
+	github                   github.Client
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
@@ -199,6 +201,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
 		workWake:          make(chan struct{}, 1),
+		github:            github.GH{},
 		g2:                newG2Counter(time.Now()),
 	}
 	if reg != nil {
@@ -348,6 +351,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runKeepAlive(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
+	go d.runPRSweeps(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.background.start(d.runJournalSweeps)

@@ -17,6 +17,8 @@ Session commands:
   thread <archive|unarchive> <target>  Hide a session until it is active again
   thread adopt <target>        Open a terminal Claude session in Agenthail
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
+  pr <link|unlink|watch|unwatch> <url|number> [--repo <owner/name>] [--session <target>] [--json]
+                                 Link a pull request to your session, or to --session; gh pr create links its own
   list [--all|--archived|--recent|--running] [--project <name|id>|--cwd <path>] [--wide]
                                  List daemon catalog conversations; --recent adds the last 24h;
                                  --cwd lists the project that holds that folder
