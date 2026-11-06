@@ -5,8 +5,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/github"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 type fakeGitHub struct {
@@ -98,5 +100,58 @@ func TestAnAgentLinksUnlinksAndWatchesPullRequests(t *testing.T) {
 	}
 	if prs, _ := f.r.PRsForSession("to"); len(prs) != 0 {
 		t.Fatalf("a refused link recorded %+v", prs)
+	}
+}
+
+func TestAPullRequestLinkedOutsideTheDaemonShowsInTheNextSessionView(t *testing.T) {
+	d, reg, _, _, _ := daemonFixture(t)
+	viewed := func() []prView {
+		t.Helper()
+		view, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "all", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range view.Sessions {
+			if row.ID == "from" {
+				return row.PRs
+			}
+		}
+		t.Fatal("from is not in the session view")
+		return nil
+	}
+	d.discoverCatalog(context.Background())
+	if prs := viewed(); len(prs) != 0 {
+		t.Fatalf("before linking: %+v", prs)
+	}
+	if _, err := reg.LinkPR(registry.SessionPR{SessionID: "from", Repo: "github.com/acme/app", Number: 7, URL: "https://github.com/acme/app/pull/7", Source: registry.PRSourceBranch, Title: "Seven"}, false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if prs := viewed(); len(prs) != 1 || prs[0].Number != 7 || prs[0].Title != "Seven" || !prs[0].Watch {
+		t.Fatalf("after linking: %+v", prs)
+	}
+	if _, err := reg.UnlinkPR("from", "github.com/acme/app", 7); err != nil {
+		t.Fatal(err)
+	}
+	if prs := viewed(); len(prs) != 0 {
+		t.Fatalf("after unlinking: %+v", prs)
+	}
+}
+
+func TestAPullRequestLinkedWatchedOrUnlinkedRepublishesItsSessionsRow(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	f.d.github = &fakeGitHub{prs: map[github.Ref]github.PullRequest{{Repo: acmeApp, Number: 42}: acmePR(42, "Fix the login")}}
+	for _, action := range []string{"link", "unwatch", "unlink"} {
+		select {
+		case <-f.d.catalogNudge:
+		default:
+		}
+		if out, refused := callMCP(t, f.child, "agenthail_pr", map[string]any{"action": action, "pr": "https://github.com/acme/app/pull/42", "clientRequestId": action}); refused {
+			t.Fatalf("%s: %v", action, out)
+		}
+		select {
+		case <-f.d.catalogNudge:
+		default:
+			t.Fatalf("%s did not republish the session's row", action)
+		}
 	}
 }

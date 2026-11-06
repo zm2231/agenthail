@@ -27,6 +27,7 @@ var presentationInputs = []presentationInput{
 	{table: "coordinator_replaced"},
 	{table: "turn_ends"},
 	{table: "work_records", columns: presentationWorkColumns, when: `%[1]s.session_id<>''`},
+	{table: "session_prs", columns: presentationPRColumns, when: `%[1]s.unlinked=0`},
 	{table: "catalog_retired_version"},
 	{table: "session_runtime", columns: "session_id,completed_turn_id", changed: true},
 	{table: "session_keep_alive", columns: "session_id,failed_at_ms,error"},

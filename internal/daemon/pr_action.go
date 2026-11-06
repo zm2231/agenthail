@@ -29,6 +29,14 @@ type prView struct {
 	Checks    string `json:"checks,omitempty"`
 }
 
+func (d *Daemon) changePRs(write func(*registry.Registry) (bool, error)) (bool, error) {
+	changed, err := write(d.Registry)
+	if err == nil && changed {
+		d.requestCatalogDiscovery()
+	}
+	return changed, err
+}
+
 func newPRViews(prs []registry.SessionPR) []prView {
 	views := make([]prView, 0, len(prs))
 	for _, pr := range prs {
@@ -61,11 +69,14 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 		if err != nil {
 			return actionResult{}, githubFailure(ref, err)
 		}
-		if _, err := d.Registry.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true, time.Now()); err != nil {
+		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+			_, err := r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true, time.Now())
+			return err == nil, err
+		}); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	case "unlink":
-		changed, err := d.Registry.UnlinkPR(session.ID, repo, ref.Number)
+		changed, err := d.changePRs(func(r *registry.Registry) (bool, error) { return r.UnlinkPR(session.ID, repo, ref.Number) })
 		if err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
@@ -73,7 +84,9 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", fmt.Sprintf("%s is not linked to this session", ref.URL()))
 		}
 	default:
-		changed, err := d.Registry.SetPRWatch(session.ID, repo, ref.Number, request.Op == "watch")
+		changed, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+			return r.SetPRWatch(session.ID, repo, ref.Number, request.Op == "watch")
+		})
 		if err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
@@ -81,7 +94,6 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 			return actionResult{}, actionFailed(http.StatusNotFound, "not_found", fmt.Sprintf("%s is not linked to this session; link it first", ref.URL()))
 		}
 	}
-	d.requestCatalogDiscovery()
 	prs, err := d.Registry.PRsForSession(session.ID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())

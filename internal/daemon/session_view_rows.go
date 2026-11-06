@@ -125,6 +125,10 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		row.Snooze = snoozeRow(record.Snooze)
 		row.EndTurn = endTurnRow(record.TurnEnd)
 		row.Worktree = workRow(record.Work)
+		row.PRs = nil
+		if len(record.PRs) > 0 {
+			row.PRs = newPRViews(record.PRs)
+		}
 	}
 	return row, nil
 }

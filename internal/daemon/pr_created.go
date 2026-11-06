@@ -24,17 +24,12 @@ func (d *Daemon) linkCreatedPRs(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("pull requests created by %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	linked := false
 	for _, ref := range d.createdPRs(session.ID, read.Items) {
-		added, err := d.Registry.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false, time.Now())
-		if err != nil {
+		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+			return r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false, time.Now())
+		}); err != nil {
 			d.log.Printf("link %s to %s: %s", ref.URL(), d.resolveDisplay(session.ID), err)
-			continue
 		}
-		linked = linked || added
-	}
-	if linked {
-		d.requestCatalogDiscovery()
 	}
 }
 

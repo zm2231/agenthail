@@ -1132,6 +1132,24 @@ BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
 
+-- trigger catalog_presentation_version_session_prs_delete
+CREATE TRIGGER catalog_presentation_version_session_prs_delete AFTER DELETE ON session_prs WHEN OLD.unlinked=0
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_prs_insert
+CREATE TRIGGER catalog_presentation_version_session_prs_insert AFTER INSERT ON session_prs WHEN NEW.unlinked=0
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_session_prs_update
+CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,linked_at_ms ON session_prs WHEN NEW.unlinked=0 OR OLD.unlinked=0
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
 -- trigger catalog_presentation_version_session_runtime_delete
 CREATE TRIGGER catalog_presentation_version_session_runtime_delete AFTER DELETE ON session_runtime
 BEGIN

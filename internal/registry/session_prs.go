@@ -1,6 +1,10 @@
 package registry
 
-import "time"
+import (
+	"context"
+	"database/sql"
+	"time"
+)
 
 const (
 	PRSourceAgent   = "agent"
@@ -95,6 +99,27 @@ func (r *Registry) SessionHasPRIn(sessionID, repo string) (bool, error) {
 	var count int
 	err := r.read.QueryRow(`SELECT COUNT(*) FROM session_prs WHERE session_id=? AND repo=?`, sessionID, repo).Scan(&count)
 	return count > 0, err
+}
+
+// presentationPRColumns are the session_prs columns a session row shows or
+// orders by; changing one moves the presentation version.
+const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,linked_at_ms"
+
+func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]SessionPR{}
+	for rows.Next() {
+		var pr SessionPR
+		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks); err != nil {
+			return nil, err
+		}
+		out[pr.SessionID] = append(out[pr.SessionID], pr)
+	}
+	return out, rows.Err()
 }
 
 func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
