@@ -147,8 +147,8 @@ the model reads it with the result of the tool call that is running (observed
 with Claude Code 2.1.316). Compact, model, interrupt, steer and the `control`
 commands (context, usage, status, effort, rename) require a Remote Control
 attachment. A session the Claude host runs has no Remote Control: it takes
-interrupt, steer, model and permission-mode changes through the host, and has
-no compact or `control` commands.
+interrupt, steer, compact, model and permission-mode changes through the host,
+and has no `control` commands.
 
 An agent's words never become a Claude session's own turn; only the person,
 Agenthail and the CLI run outside any session (under its label) write one.

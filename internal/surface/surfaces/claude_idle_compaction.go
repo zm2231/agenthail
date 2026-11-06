@@ -55,6 +55,8 @@ func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session)
 			state.LastRequestAt = at
 			state.ContextTokens = usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
 			state.CompactedSince = false
+			// A cache read refreshes the entry it reads for that entry's own
+			// TTL, so the cache in effect is the one the last write chose.
 			if usage.CacheCreationTokens > 0 {
 				state.OneHourCache = usage.CacheCreation.OneHour > 0
 			}
