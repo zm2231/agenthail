@@ -42,7 +42,9 @@ A failure is deletable when its intent is `failed` and it failed while still
 `submitted` (the provider refused the send) or `queued` (the queue row died
 before any attempt left it unconfirmed). The registry records the status an
 intent failed from in `delivery_intents.failed_from`. A failure from `sent`,
-`unknown` or `held` may have reached the session and is never deletable;
+`unknown` or `held` may have reached the session and is never deletable. A
+drop the target's Claude reports means it took the message, so it is recorded
+as failing from `held` even when the report beats the sender's own record;
 neither is a `submitted` or `unknown` intent that has not failed.
 
 ### Failed send and steer replies

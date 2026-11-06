@@ -124,6 +124,24 @@ func TestDeleteRefusesAMessageThatMayHaveReachedItsSession(t *testing.T) {
 		t.Fatalf("drop changed=%v err=%v", changed, err)
 	}
 	assertAPIV1Error(t, postActionAs(t, handler, "secret", fmt.Sprintf(`{"action":"delivery-delete","deliveryId":%d}`, held.ID)), http.StatusConflict, "conflict")
+	early, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "from", TargetSessionID: "to", Message: "dropped before the send was recorded", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, queuedID, err := r.QueueDeliveryWithIntent("to", "dropped while queued", "", surface.SendOptions{SourceSessionID: "from"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := r.DeliveryIntent(queuedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, taken := range []*registry.DeliveryIntent{early, queued} {
+		if changed, err := r.DropPeerMessage(registry.PeerMessage{MsgID: taken.UUID, TargetSessionID: "to", SenderSessionID: "from"}, "dropped"); err != nil || !changed {
+			t.Fatalf("drop %d changed=%v err=%v", taken.ID, changed, err)
+		}
+		assertAPIV1Error(t, postActionAs(t, handler, "secret", fmt.Sprintf(`{"action":"delivery-delete","deliveryId":%d}`, taken.ID)), http.StatusConflict, "conflict")
+	}
 	pending, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "from", TargetSessionID: "to", Message: "possibly delivered", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 	if err != nil {
 		t.Fatal(err)
