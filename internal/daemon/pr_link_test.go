@@ -21,9 +21,13 @@ type fakeGitHub struct {
 	viewer      string
 	watchErr    error
 	watchReads  [][]github.Ref
+	duringRead  func()
 }
 
 func (f *fakeGitHub) Watch(_ context.Context, host string, refs []github.Ref) (github.Watch, error) {
+	if f.duringRead != nil {
+		f.duringRead()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.watchReads = append(f.watchReads, refs)

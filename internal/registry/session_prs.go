@@ -44,9 +44,9 @@ func (r *Registry) WatchedPRs() ([]SessionPR, error) {
 	return r.sessionPRs(`WHERE watch=1 AND unlinked=0`)
 }
 
-// RecordPRRead is false when the pull request was unwatched or unlinked
-// since the read began; that read must not wake anyone.
-func (r *Registry) RecordPRRead(pr SessionPR, at time.Time) (bool, error) {
+// RecordPRRead is false when the row changed since the read saw readWakes:
+// re-watch and re-link bump wakes too. That read must not wake anyone.
+func (r *Registry) RecordPRRead(pr SessionPR, readWakes int, at time.Time) (bool, error) {
 	failed, err := jsonList(pr.FailedChecks)
 	if err != nil {
 		return false, err
@@ -56,9 +56,9 @@ func (r *Registry) RecordPRRead(pr SessionPR, at time.Time) (bool, error) {
 		return false, err
 	}
 	result, err := r.db.Exec(`UPDATE session_prs SET title=?,state=?,head_sha=?,mergeable=?,review=?,checks=?,failed_checks=?,passed_head=?,conflict_head=?,remarks_through_ms=?,remark_ids=?,wakes=?,comment_wakes=?,read_failures=0,last_read_at_ms=?,watch=?
-WHERE session_id=? AND repo=? AND number=? AND unlinked=0 AND watch=1`,
+WHERE session_id=? AND repo=? AND number=? AND unlinked=0 AND watch=1 AND wakes=?`,
 		pr.Title, pr.State, pr.HeadSHA, pr.Mergeable, pr.Review, pr.Checks, failed, pr.PassedHead, pr.ConflictHead, unixMilli(pr.RemarksThrough), remarks, pr.Wakes, pr.CommentWakes, at.UnixMilli(), pr.Watch,
-		pr.SessionID, pr.Repo, pr.Number)
+		pr.SessionID, pr.Repo, pr.Number, readWakes)
 	if err != nil {
 		return false, err
 	}
@@ -84,7 +84,7 @@ func jsonList(values []string) (string, error) {
 // person's unlink holds. False when the session already had it linked.
 func (r *Registry) LinkPR(link SessionPR, explicit bool, at time.Time) (bool, error) {
 	result, err := r.db.Exec(`INSERT INTO session_prs(session_id,repo,number,url,source,title,state,head_sha,linked_at_ms) VALUES(?,?,?,?,?,?,?,?,?)
-ON CONFLICT(session_id,repo,number) DO UPDATE SET unlinked=0,watch=1,source=excluded.source,url=excluded.url,linked_at_ms=excluded.linked_at_ms,
+ON CONFLICT(session_id,repo,number) DO UPDATE SET unlinked=0,watch=1,wakes=wakes+1,comment_wakes=0,source=excluded.source,url=excluded.url,linked_at_ms=excluded.linked_at_ms,
 	title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE title END,
 	state=CASE WHEN excluded.state<>'' THEN excluded.state ELSE state END,
 	head_sha=CASE WHEN excluded.head_sha<>'' THEN excluded.head_sha ELSE head_sha END
@@ -109,7 +109,8 @@ func (r *Registry) UnlinkPR(sessionID, repo string, number int) (bool, error) {
 }
 
 func (r *Registry) SetPRWatch(sessionID, repo string, number int, watch bool) (bool, error) {
-	result, err := r.db.Exec(`UPDATE session_prs SET watch=? WHERE session_id=? AND repo=? AND number=? AND unlinked=0`, watch, sessionID, repo, number)
+	result, err := r.db.Exec(`UPDATE session_prs SET watch=?1,wakes=wakes+(?1 AND NOT watch),comment_wakes=CASE WHEN ?1 AND NOT watch THEN 0 ELSE comment_wakes END
+WHERE session_id=?2 AND repo=?3 AND number=?4 AND unlinked=0`, watch, sessionID, repo, number)
 	if err != nil {
 		return false, err
 	}

@@ -111,17 +111,18 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 				if err := d.Registry.RecordPRReadFailure(row.SessionID, row.Repo, row.Number); err != nil {
 					return err
 				}
+				changed = changed || row.ReadFailures+1 == prReadFailureLimit
 				continue
 			}
 			verdict := decidePR(row, status, watch.Viewer)
-			recorded, err := d.Registry.RecordPRRead(verdict.row, now)
+			recorded, err := d.Registry.RecordPRRead(verdict.row, row.Wakes, now)
 			if err != nil {
 				return err
 			}
 			if !recorded {
 				continue
 			}
-			changed = changed || prShownChange(row, verdict.row)
+			changed = changed || prShownChange(row, verdict.row) || row.ReadFailures >= prReadFailureLimit
 			if len(verdict.reasons) > 0 {
 				d.wakeForPR(verdict.row, verdict.reasons)
 			}
