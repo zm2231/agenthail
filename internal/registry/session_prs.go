@@ -66,9 +66,13 @@ WHERE session_id=? AND repo=? AND number=? AND unlinked=0 AND watch=1 AND wakes=
 	return recorded == 1, err
 }
 
-func (r *Registry) RecordPRReadFailure(sessionID, repo string, number int) error {
-	_, err := r.db.Exec(`UPDATE session_prs SET read_failures=read_failures+1 WHERE session_id=? AND repo=? AND number=?`, sessionID, repo, number)
-	return err
+func (r *Registry) RecordPRReadFailure(sessionID, repo string, number, readWakes int) (bool, error) {
+	result, err := r.db.Exec(`UPDATE session_prs SET read_failures=read_failures+1 WHERE session_id=? AND repo=? AND number=? AND unlinked=0 AND watch=1 AND wakes=?`, sessionID, repo, number, readWakes)
+	if err != nil {
+		return false, err
+	}
+	recorded, err := result.RowsAffected()
+	return recorded == 1, err
 }
 
 func jsonList(values []string) (string, error) {

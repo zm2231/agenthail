@@ -127,6 +127,22 @@ func TestARewatchDuringAReadOutlivesThatRead(t *testing.T) {
 	}
 }
 
+func TestAReadThatMissesAPullRequestDuringARewatchCountsNothing(t *testing.T) {
+	w := newWatchRig(t)
+	rewatch := func() {
+		w.personSets("unwatch")
+		w.personSets("watch")
+	}
+	w.fake.duringRead = rewatch
+	for range prReadFailureLimit {
+		w.tick()
+	}
+	pr, _, _ := w.d.Registry.SessionPR("to", acmeApp.String(), 42)
+	if pr.ReadFailures != 0 || w.d.prProblem(pr) != "" {
+		t.Fatalf("reads begun before each re-watch counted failures=%d problem=%q", pr.ReadFailures, w.d.prProblem(pr))
+	}
+}
+
 func TestAPullRequestGitHubStopsReturningShowsItsProblem(t *testing.T) {
 	w := newWatchRig(t)
 	drain := func() bool {

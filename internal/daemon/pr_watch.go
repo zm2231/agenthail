@@ -108,10 +108,11 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 		for _, row := range hostRows {
 			status, found := watch.Statuses[prRef(row)]
 			if !found {
-				if err := d.Registry.RecordPRReadFailure(row.SessionID, row.Repo, row.Number); err != nil {
+				recorded, err := d.Registry.RecordPRReadFailure(row.SessionID, row.Repo, row.Number, row.Wakes)
+				if err != nil {
 					return err
 				}
-				changed = changed || row.ReadFailures+1 == prReadFailureLimit
+				changed = changed || recorded && row.ReadFailures+1 == prReadFailureLimit
 				continue
 			}
 			verdict := decidePR(row, status, watch.Viewer)
