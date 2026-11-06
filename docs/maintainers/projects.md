@@ -188,7 +188,9 @@ inbox it belongs to. The first that applies wins:
 | `needsYou` | it has `attention` |
 | `snoozed` | its snooze still holds |
 | `running` | it is working, finishing background work, or has queued messages |
-| `done` | otherwise |
+
+Any other row has no `inboxSection`. A `done` section needs a session's
+end-of-turn record, which rows do not carry yet.
 
 A request for the person outranks a snooze, so snoozing never hides one.
 

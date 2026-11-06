@@ -28,17 +28,17 @@ func TestEachRowLandsInOneInboxSection(t *testing.T) {
 		row  dashboardSession
 		want string
 	}{
-		{"idle", inboxRow("idle", nil), InboxDone},
-		{"offline", inboxRow("offline", nil), InboxDone},
+		{"idle", inboxRow("idle", nil), ""},
+		{"offline", inboxRow("offline", nil), ""},
 		{"working", inboxRow("working", nil), InboxRunning},
 		{"finishing", inboxRow("finishing", nil), InboxRunning},
 		{"queued", inboxRow("queued", nil), InboxRunning},
 		{"waiting on the person", inboxRow("waiting", func(r *dashboardSession) { r.Attention = asks }), InboxNeedsYou},
 		{"snoozed until later", inboxRow("idle", func(r *dashboardSession) { r.Snooze = later }), InboxSnoozed},
-		{"snooze has passed", inboxRow("idle", func(r *dashboardSession) { r.Snooze = past }), InboxDone},
+		{"snooze has passed", inboxRow("idle", func(r *dashboardSession) { r.Snooze = past }), ""},
 		{"a request outranks a snooze", inboxRow("waiting", func(r *dashboardSession) { r.Snooze, r.Attention = later, asks }), InboxNeedsYou},
 		{"archived outranks a request", inboxRow("waiting", func(r *dashboardSession) { r.Archived, r.Attention = true, asks }), InboxArchived},
-		{"no display yet", dashboardSession{ID: "s"}, InboxDone},
+		{"no display yet", dashboardSession{ID: "s"}, ""},
 	}
 	for _, c := range cases {
 		if got := sessionInbox(c.row, now); got != c.want {
@@ -58,7 +58,7 @@ func TestASnoozeUntilFinishedLastsOnlyForTheTurnItWasSetIn(t *testing.T) {
 	if got := sessionInbox(turn("working", now.Add(-5*time.Minute)), now); got != InboxSnoozed {
 		t.Fatalf("the snoozed turn shows as %q", got)
 	}
-	if got := sessionInbox(turn("idle", time.Time{}), now); got != InboxDone {
+	if got := sessionInbox(turn("idle", time.Time{}), now); got != "" {
 		t.Fatalf("a finished turn shows as %q", got)
 	}
 	if got := sessionInbox(turn("working", now), now); got != InboxRunning {

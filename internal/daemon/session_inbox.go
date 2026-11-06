@@ -10,7 +10,6 @@ const (
 	InboxNeedsYou = "needsYou"
 	InboxRunning  = "running"
 	InboxSnoozed  = "snoozed"
-	InboxDone     = "done"
 	InboxArchived = "archived"
 )
 
@@ -67,5 +66,5 @@ func sessionInbox(row dashboardSession, now time.Time) string {
 	case rowRunning(row):
 		return InboxRunning
 	}
-	return InboxDone
+	return ""
 }
