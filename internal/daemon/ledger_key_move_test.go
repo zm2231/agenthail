@@ -89,3 +89,61 @@ func TestARemoteChangeCarriesTheProjectsLedger(t *testing.T) {
 		})
 	}
 }
+
+func TestARemoteChangeCarriesTheProjectsLeadAndLinks(t *testing.T) {
+	f := newRemoteMoveFixture(t, false)
+	const before, after = "repo:github.com/example/notes", "repo:github.com/example/renamed-notes"
+	joined := widgetRepo(t, "https://github.com/example/notes-docs.git")
+	if _, err := f.r.SetCoordinator(registry.CoordinatorSpec{ProjectID: before, ProjectRoot: f.repo, Name: "notes-lead", Surface: "claude", Cwd: f.repo}, registry.CoordinatorChange{SessionID: "worker", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.SetProjectLink("repo:github.com/example/notes-docs", before, true); err != nil {
+		t.Fatal(err)
+	}
+
+	f.setRemote(t, "https://github.com/example/renamed-notes.git")
+	if lead, err := f.r.Coordinator(after); err != nil || lead.Name != "notes-lead" {
+		t.Fatalf("the lead did not move with the project: %+v %v", lead, err)
+	}
+	if project, err := ResolvePathProject(context.Background(), f.r, joined); err != nil || project.ID != after {
+		t.Fatalf("the linked project resolves as %+v %v, want %s", project, err, after)
+	}
+	links, err := f.r.ProjectLinks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.Linked && (link.Survivor == before || link.Joined == before) {
+			t.Fatalf("a link still names the old key: %+v", link)
+		}
+	}
+}
+
+func TestARemoteChangeOntoAnotherLedgerKeepsBothAndSaysSo(t *testing.T) {
+	f := newRemoteMoveFixture(t, false)
+	const before, taken = "repo:github.com/example/notes", "repo:github.com/example/other"
+	for _, key := range []string{before, taken} {
+		if err := f.store.Enable(key, ledger.AttachEachPrompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.post("p1", "notes history")
+
+	f.setRemote(t, "https://github.com/example/other.git")
+	if texts := utteranceTexts(t, f.store, before); !slices.Equal(texts, []string{"notes history"}) {
+		t.Fatalf("the refused move lost the old ledger: %q", texts)
+	}
+	board, err := f.d.ledgerRead(taken, ledger.ReadRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusals, _ := board["notCarried"].([]registry.ProjectMoveRefusal)
+	if len(refusals) != 1 || refusals[0].From != before || refusals[0].To != taken {
+		t.Fatalf("the board does not say the history stayed behind: %+v", board["notCarried"])
+	}
+
+	f.setRemote(t, "https://github.com/example/notes.git")
+	if refusals, err := f.r.ProjectMoveRefusals(); err != nil || len(refusals) != 0 {
+		t.Fatalf("renaming back left the refusal: %+v %v", refusals, err)
+	}
+}

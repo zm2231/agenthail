@@ -28,8 +28,6 @@ func (m ProjectMove) newerThan(other ProjectMove) bool {
 	return m.OriginHost > other.OriginHost
 }
 
-// ProjectMoveRefusal is a move that was not made because both projects
-// already hold history of the same kind, which cannot be merged.
 type ProjectMoveRefusal struct {
 	From   string    `json:"from"`
 	To     string    `json:"to"`
@@ -51,7 +49,6 @@ func (r *Registry) ProjectMoves() ([]ProjectMove, error) {
 	})
 }
 
-// ProjectMoveTargets maps each moved project id to the id it is now.
 func (r *Registry) ProjectMoveTargets() (map[string]string, error) {
 	moves, err := r.ProjectMoves()
 	if err != nil {
@@ -88,10 +85,7 @@ func (r *Registry) projectMoveRefusals(query string, args ...any) ([]ProjectMove
 	})
 }
 
-// ObserveRepositoryKey records the key the repository folder root resolves
-// to. When it differs from the key last seen there, the project moves to the
-// new key with everything it holds. A folder without a key keeps the last
-// one it had.
+// A folder whose remote is gone keeps the last key it had.
 func (r *Registry) ObserveRepositoryKey(root, key string) (ProjectMoveOutcome, error) {
 	if root == "" || key == "" {
 		return ProjectMoveOutcome{}, nil
@@ -134,8 +128,6 @@ func (r *Registry) ObserveRepositoryKey(root, key string) (ProjectMoveOutcome, e
 	return outcome, tx.Commit()
 }
 
-// AdoptProjectMoves applies the shared moves a paired host made that are
-// newer than this host's own record of the same project.
 func (r *Registry) AdoptProjectMoves(moves []ProjectMove) ([]ProjectMoveOutcome, error) {
 	tx, err := r.db.Begin()
 	if err != nil {

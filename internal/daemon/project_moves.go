@@ -50,7 +50,9 @@ func (d *Daemon) projectMovesApplied(outcomes []registry.ProjectMoveOutcome) {
 			if err := d.refreshProjectLinks(); err != nil {
 				d.log.Printf("project links: %s", err)
 			}
-			d.ledgerChanged(outcome.Move.To)
+			if outcome.Move.To != "" {
+				d.ledgerChanged(outcome.Move.To)
+			}
 			d.repositoryKeys.pending.Store(true)
 			d.requestCatalogDiscovery()
 		case outcome.NewRefusal:

@@ -17,6 +17,7 @@ type ProjectMoveOutcome struct {
 func applyProjectMoveTx(tx *sql.Tx, move ProjectMove) (ProjectMoveOutcome, error) {
 	outcome := ProjectMoveOutcome{Move: move}
 	if move.To == "" {
+		outcome.Moved = true
 		return outcome, putProjectMoveTx(tx, move)
 	}
 	current, found, err := projectMoveTx(tx, move.From)
