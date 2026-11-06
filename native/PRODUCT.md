@@ -6,7 +6,7 @@
 
 ios
 
-Minimum iOS/iPadOS 18. Textual 0.5.0 supplies maintained native Markdown rendering; this release deliberately raises the minimum from iOS 17.
+Minimum iOS/iPadOS 18. Textual 0.5.0, vendored in `Packages/Textual`, supplies native Markdown rendering; this release deliberately raises the minimum from iOS 17.
 
 ## Users
 

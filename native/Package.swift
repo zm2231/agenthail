@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "AgenthailMac", targets: ["AgenthailMac"])
     ],
     dependencies: [
-        .package(url: "https://github.com/gonzalezreal/textual", exact: "0.5.0"),
+        .package(path: "Packages/Textual"),
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.1.0")
     ],
     targets: [
@@ -20,7 +20,7 @@ let package = Package(
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")
             ],
             path: ".",
-            exclude: ["Agenthail.xcodeproj", "iOS", "iOSTests", "iOSUITests", "tests", "DESIGN.md", "PRODUCT.md", "project.yml", "GenerateIcon.swift"],
+            exclude: ["Agenthail.xcodeproj", "Packages", "iOS", "iOSTests", "iOSUITests", "tests", "DESIGN.md", "PRODUCT.md", "project.yml", "GenerateIcon.swift"],
             sources: [
                 "AgenthailApp.swift",
                 "DuplicateApplicationPolicy.swift",
