@@ -515,6 +515,7 @@ struct SessionScreen: View {
     @State private var userScrolling = false
     @State private var position = ScrollPosition()
     @State private var olderPlace = OlderPlaceHold()
+    @State private var memo = TimelineMemo()
     private static let rowSpacing: CGFloat = 12
 
     private var displayTitle: String {
@@ -525,9 +526,10 @@ struct SessionScreen: View {
         model.selectedDetail?.session.id == session.id ? model.selectedDetail : nil
     }
     private var items: [TimelineItem] {
-        let latest = detail?.timeline?.items ?? []
-        let ids = Set(latest.map(\.id))
-        return model.olderActivity.filter { !ids.contains($0.id) } + latest
+        memo.items(latest: detail?.timeline?.items ?? [], older: model.olderActivity)
+    }
+    private var groups: [TimelineGroup] {
+        memo.groups(latest: detail?.timeline?.items ?? [], older: model.olderActivity, foldAgents: !expandAgents)
     }
 
     static func showsActivity(timeline: SessionTimeline, itemCount: Int, activityCursor: Int64?, exchangeCount: Int) -> Bool {
@@ -535,14 +537,14 @@ struct SessionScreen: View {
     }
 
     private var firstRowID: String? {
-        activityOnly ? items.first.map { TranscriptRowID.item($0.id) } : TimelineGroup.make(items, foldAgents: !expandAgents).first?.id
+        activityOnly ? items.first.map { TranscriptRowID.item($0.id) } : groups.first?.id
     }
 
     private var latestRowID: String? {
         guard let detail, let timeline = detail.timeline else { return nil }
         let items = items
         guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchangeCount ?? 0) else { return nil }
-        return activityOnly ? items.last.map { TranscriptRowID.item($0.id) } : TimelineGroup.make(items, foldAgents: !expandAgents).last?.id
+        return activityOnly ? items.last.map { TranscriptRowID.item($0.id) } : groups.last?.id
     }
 
     private func scrollToLatest() {
@@ -638,7 +640,7 @@ struct SessionScreen: View {
                         IOSTimelineRow(item: item, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt(row, generation: rowsGeneration).tracksOlderPlace(row, leading: item.id == leading, in: olderPlace).probesScrollJump(row).onAppear { if item.id == items.last?.id { openingRowAppeared(row) } }.id(row)
                     }
                 } else {
-                    let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
+                    let groups = self.groups
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
                             .rebuilt(group.id, generation: rowsGeneration)
@@ -1351,9 +1353,7 @@ struct IOSTimelineRow: View {
         default: item.title
         }
     }
-    private var firstLine: String {
-        item.text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-    }
+    private var firstLine: String { TimelineItem.firstLine(item.text) }
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
