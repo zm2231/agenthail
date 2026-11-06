@@ -91,14 +91,25 @@ case "$kind" in
 esac
 name="${AGENTHAIL_SIMULATOR_NAME:-$name}"
 
-devices="$(xcrun simctl list devices available --json)"
-udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
+find_or_create() {
+  local devices udid runtime device
+  devices="$(xcrun simctl list devices available --json)"
+  udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
+  if [ -z "$udid" ]; then
+    runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
+    device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg model "$model" '.devicetypes | map(select(.name | startswith($model))) + map(select(.name | startswith($family))) | first | .identifier')"
+    udid="$(xcrun simctl create "$name" "$device" "$runtime")"
+  fi
+  printf '%s\n' "$udid"
+}
 
-if [ -z "$udid" ]; then
-  runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
-  device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg model "$model" '.devicetypes | map(select(.name | startswith($model))) + map(select(.name | startswith($family))) | first | .identifier')"
-  udid="$(xcrun simctl create "$name" "$device" "$runtime")"
+if [ -n "${AGENTHAIL_SIMULATOR_FIND_LOCKED:-}" ]; then
+  find_or_create
+  exit 0
 fi
+# One machine-wide lock, so two first runs cannot both create the simulator.
+udid="$(AGENTHAIL_SIMULATOR_FIND_LOCKED=1 lockf -k /tmp/agenthail-simulator-create.lock "$0" "$kind")"
+[ -n "$udid" ]
 
 case "${2:-}" in
   "") ;;
