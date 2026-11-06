@@ -156,7 +156,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		Seq   uint64
 		View  SessionView
 		Rows  []revisionRow
-	}{read.HostEpoch + ":" + d.presentation.epoch, read.CatalogSeq, semantic, revision})
+	}{read.HostEpoch + ":" + build.key.epoch, read.CatalogSeq, semantic, revision})
 	if err != nil {
 		return nil, err
 	}
