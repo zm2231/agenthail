@@ -2,15 +2,19 @@ import Foundation
 
 struct QuestionPager: Hashable {
     let questions: [SessionRequest.Question]
+    // An ended turn's ask is answered by one message, so it never sends on a tap, takes a note, and has nothing to decline.
+    let ask: Bool
+    var note = ""
     private(set) var step = 0
     private(set) var picks: [Int: Set<Int>] = [:]
     private(set) var typed: [Int: String] = [:]
 
-    init(questions: [SessionRequest.Question]) {
+    init(questions: [SessionRequest.Question], ask: Bool = false) {
         self.questions = questions
+        self.ask = ask
     }
 
-    var isOneTap: Bool { questions.count == 1 && !questions[0].multiSelect }
+    var isOneTap: Bool { !ask && questions.count == 1 && !questions[0].multiSelect }
     var isSingle: Bool { questions.count == 1 }
     var reviewStep: Int { questions.count }
     var onReview: Bool { !isSingle && step == reviewStep }
@@ -57,8 +61,21 @@ struct QuestionPager: Hashable {
         }
         picks[step] = [option]
         typed[step] = nil
-        step += 1
+        if !isSingle { step += 1 }
         return nil
+    }
+
+    mutating func pick(_ option: Int) -> RequestDecision? {
+        choose(option).map(decision)
+    }
+
+    mutating func submit() -> RequestDecision? {
+        next().map(decision)
+    }
+
+    func decision(_ answers: [String: String]) -> RequestDecision {
+        let note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RequestDecision(behavior: "allow", message: ask && !note.isEmpty ? note : nil, answers: answers)
     }
 
     mutating func type(_ text: String) {

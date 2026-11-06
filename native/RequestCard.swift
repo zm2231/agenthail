@@ -8,7 +8,15 @@ struct RequestCard: View {
     /// Who leads the project now, for a request from a lead a restart replaced.
     var leadNow: String? = nil
     var withdraw: (() -> Void)? = nil
+    var asker: String = "The agent"
     @State private var form = ElicitationForm()
+
+    var heading: String { Self.heading(request, asker: asker) }
+
+    static func heading(_ request: SessionRequest, asker: String) -> String {
+        if request.isAsk { return "\(asker) asks: \(request.title ?? "")" }
+        return request.isQuestion ? "Claude asks" : "Claude wants your approval"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -23,10 +31,10 @@ struct RequestCard: View {
             if request.kind == "input", let elicitation = request.elicitation {
                 inputView(elicitation)
             } else {
-                Label(request.isQuestion ? "Claude asks" : "Claude wants your approval", systemImage: request.isQuestion ? "questionmark.bubble" : "hand.raised")
+                Label(heading, systemImage: request.usesPager ? "questionmark.bubble" : "hand.raised")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(accent)
-                if request.isQuestion {
+                if request.usesPager {
                     QuestionPagerView(request: request, answering: answering, accent: accent, respond: respond)
                 } else {
                     Text(request.summary).font(.body.weight(.medium))

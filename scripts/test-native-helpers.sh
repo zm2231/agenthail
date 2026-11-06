@@ -43,9 +43,12 @@ SOURCES=(
   HolderPins.swift
   OperationsRefreshPolicy.swift
   RequestAnswer.swift
+  RequestAnswerFailure.swift
+  SessionEndTurn.swift
   QuestionPager.swift
   QuestionPagerDrafts.swift
   QuestionPagerView.swift
+  QuestionPagerParts.swift
   RequestCard.swift
   RequestNotifications.swift
   SessionSelection.swift

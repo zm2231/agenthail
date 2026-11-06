@@ -60,6 +60,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
     @Published var sessionRequests: SessionRequests?
     @Published var answeringRequest: String?
+    @Published private(set) var retiredAsks = RetiredAsks()
     private var sessionRequestsKey: String?
     @Published var selectedSessionID: String? {
         didSet {
@@ -1332,12 +1333,13 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     }
 
     func syncRequests(for session: SessionState) async {
-        guard session.capabilities.respond, !session.isReadOnly else {
+        if retiredAsks.settles(session) { retiredAsks.settle(session) }
+        guard RequestSync.lists(session) else {
             if sessionRequests != nil { sessionRequests = nil }
             sessionRequestsKey = nil
             return
         }
-        let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
+        let key = RequestSync.cacheKey(session)
         guard sessionRequestsKey != key else { return }
         sessionRequestsKey = key
         await fetchRequests(session.id, key: key)
@@ -1361,16 +1363,17 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         guard answeringRequest == nil else { return }
         answeringRequest = request.id
         defer { answeringRequest = nil }
+        var failure: RequestAnswerFailure?
         do {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
             operationError = nil
-        } catch AgenthailAPIError.requestStale {
-            sessionRequests = sessionRequests?.removing(request.id)
-            operationError = "That request was already answered or has expired."
         } catch {
-            operationError = error.localizedDescription
+            failure = RequestAnswerFailure(error)
+            if failure?.dropsCard == true { sessionRequests = sessionRequests?.removing(request.id) }
+            operationError = failure?.message
         }
+        if RequestAnswerFailure.retires(request, failure: failure) { retiredAsks.retire(request.id, in: sessionID) }
         await fetchRequests(sessionID, key: sessionRequestsKey)
         await refreshSession(sessionID)
     }

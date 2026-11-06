@@ -88,17 +88,23 @@ struct QuestionPagerView: View {
                 Text(question.header).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             Text(question.question).font(.body.weight(.medium))
+            if let links = question.links {
+                PagerLinks(links: links, accent: accent)
+            }
             ForEach(question.options.indices, id: \.self) { index in
-                optionRow(question.options[index], index: index, multiSelect: question.multiSelect)
+                optionRow(question.options[index], index: index, multiSelect: question.multiSelect, suggested: question.suggested == index)
             }
             TextField("Other answer", text: Binding(get: { pager.typedAnswer(at: pager.step) }, set: { pager.type($0) }))
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { advance() }
                 .disabled(answering)
+            if pager.ask, pager.isSingle {
+                PagerNoteField(note: $pager.note, disabled: answering)
+            }
         }
     }
 
-    private func optionRow(_ option: SessionRequest.Option, index: Int, multiSelect: Bool) -> some View {
+    private func optionRow(_ option: SessionRequest.Option, index: Int, multiSelect: Bool, suggested: Bool) -> some View {
         let picked = pager.isPicked(index, at: pager.step)
         let number = index + 1
         return Button {
@@ -111,7 +117,12 @@ struct QuestionPagerView: View {
                 #endif
                 Image(systemName: picked ? (multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle") : (multiSelect ? "square" : "circle"))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.label)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(option.label)
+                        if suggested {
+                            SuggestedMark(accent: accent)
+                        }
+                    }
                     if !option.description.isEmpty {
                         Text(option.description).font(.caption).foregroundStyle(RoleStyle(.muted))
                     }
@@ -154,6 +165,9 @@ struct QuestionPagerView: View {
             if !pager.canSubmit {
                 Text("Answer every question to submit.").font(.caption).foregroundStyle(RoleStyle(.muted))
             }
+            if pager.ask {
+                PagerNoteField(note: $pager.note, disabled: answering)
+            }
         }
     }
 
@@ -175,19 +189,21 @@ struct QuestionPagerView: View {
                     .disabled(answering)
             }
             Spacer()
-            Button("Decline", role: .destructive) { respond(.deny) }
-                .disabled(answering)
+            if !pager.ask {
+                Button("Decline", role: .destructive) { respond(.deny) }
+                    .disabled(answering)
+            }
         }
     }
 
     private func choose(_ option: Int) {
         focused = true
-        if let answers = pager.choose(option) { respond(.answers(answers)) }
+        if let decision = pager.pick(option) { respond(decision) }
     }
 
     private func advance() {
         guard !answering else { return }
-        if let answers = pager.next() { respond(.answers(answers)) }
+        if let decision = pager.submit() { respond(decision) }
     }
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {

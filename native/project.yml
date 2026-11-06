@@ -102,9 +102,12 @@ targets:
       - path: VoiceOperatorModel.swift
       - path: RequestNotifications.swift
       - path: RequestAnswer.swift
+      - path: RequestAnswerFailure.swift
+      - path: SessionEndTurn.swift
       - path: QuestionPager.swift
       - path: QuestionPagerDrafts.swift
       - path: QuestionPagerView.swift
+      - path: QuestionPagerParts.swift
       - path: RequestCard.swift
       - path: PairedCredential.swift
       - path: PushReceipts.swift
