@@ -107,7 +107,7 @@ export function bindConversationEvents() {
       if (app.expandedProjects.has(id)) app.expandedProjects.delete(id);
       else app.expandedProjects.add(id);
       renderSessions();
-      return;
+      return ensureSessionOrder();
     }
     const archivedProjects = event.target.closest(".archived-projects > summary");
     if (archivedProjects) {

@@ -159,7 +159,11 @@ func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest
 		}
 		plan.view.Families = []SessionViewFamily{}
 	} else {
-		rest := familiesAfter(plan.view.Families, request.After)
+		families := plan.view.Families
+		if request.Filters.Collapsed {
+			families = collapsedFamilies(plan.view)
+		}
+		rest := familiesAfter(families, request.After)
 		end := min(request.Limit, len(rest))
 		if end < len(rest) {
 			result.NextCursor = encodeSessionViewCursor(request, rest[end-1].key)

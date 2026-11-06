@@ -691,7 +691,15 @@ textarea:focus-visible {
 .dot.active {
   background: var(--good);
 }
-.dot.idle,
+.dot.waiting {
+  background: var(--warn);
+}
+.dot.unavailable {
+  background: var(--bad);
+}
+.dot.idle {
+  background: var(--quiet);
+}
 .dot.blocked,
 .dot.queued {
   background: var(--accent);

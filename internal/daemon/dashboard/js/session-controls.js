@@ -16,6 +16,11 @@ export function bindSessionEvents() {
       app.codexSearch = { query: "", results: [], loading: false, error: "", timer: null, controller: null };
     }
     renderSessions();
+    clearTimeout(app.listQueryTimer);
+    app.listQueryTimer = setTimeout(() => {
+      app.listQuery = query.toLowerCase();
+      ensureSessionOrder();
+    }, 250);
   });
   $("#session-surface-filter").addEventListener("change", (event) => {
     app.sessionLimit = sessionBatchSize();
@@ -25,11 +30,13 @@ export function bindSessionEvents() {
     app.codexSearch = { query: "", results: [], loading: false, error: "", timer: null, controller: null };
     if (query.length >= 3 && ["all", "codex"].includes(app.filters.surface)) startCodexSearch(query);
     renderSessions();
+    ensureSessionOrder();
   });
   $("#session-status-filter").addEventListener("change", (event) => {
     app.sessionLimit = sessionBatchSize();
     app.filters.status = event.target.value;
     renderSessions();
+    ensureSessionOrder();
   });
   window.addEventListener("beforeunload", cancelCodexSearch);
   $("#show-archived").addEventListener("change", (event) => {
@@ -41,6 +48,7 @@ export function bindSessionEvents() {
   $("#session-more").addEventListener("click", () => {
     app.sessionLimit += sessionBatchSize();
     renderSessions();
+    ensureSessionOrder();
   });
   $("#mobile-chat-back").addEventListener("click", () => {
     app.mobileChatOpen = false;

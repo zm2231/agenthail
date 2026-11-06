@@ -19,13 +19,13 @@ const sessions = [
 ];
 const family = (id, projectId) => ({ id, rootId: id, projectId, members: [{ id, depth: 0, contextOnly: false }] });
 const widgetOrder = ["lead", "busy", "queued", "flagged", "w3", "w0", "w1", "w2", "w4", "w5", "w6"];
+const rows = new Map(sessions.map((session) => [session.id, session]));
+const listing = (projects, families) => ({ view: { projects }, families, rows, cursor: "" });
 const sessionOrder = {
-  current: { projects: [], families: [family("busy", widget.id), family("w0", widget.id), family("far", vps.id), family("loose", "")] },
-  all: {
-    projects: [{ id: widget.id, collapsedFamilyIds: widgetOrder.slice(0, 9) }, { id: vps.id, collapsedFamilyIds: ["far"] }],
-    families: [...widgetOrder.map((id) => family(id, widget.id)), family("far", vps.id), family("loose", "")],
-  },
-  archived: { projects: [{ id: notes.id, collapsedFamilyIds: ["kept"] }, { id: widget.id, collapsedFamilyIds: ["hidden"] }], families: [family("kept", notes.id), family("hidden", widget.id)] },
+  current: listing([], [family("busy", widget.id), family("w0", widget.id), family("far", vps.id), family("loose", "")]),
+  all: listing([{ id: widget.id, counts: { families: 11, sessions: 11 }, collapsedFamilyIds: widgetOrder.slice(0, 9) }, { id: vps.id, counts: { families: 1, sessions: 1 }, collapsedFamilyIds: ["far"] }], [...widgetOrder.slice(0, 9).map((id) => family(id, widget.id)), family("far", vps.id), family("loose", "")]),
+  archived: listing([{ id: notes.id, counts: { families: 1, sessions: 1 }, collapsedFamilyIds: ["kept"] }, { id: widget.id, collapsedFamilyIds: ["hidden"] }], [family("kept", notes.id), family("hidden", widget.id)]),
+  [`project:all:${widget.id}`]: listing([], widgetOrder.map((id) => family(id, widget.id))),
 };
 const context = {
   app: { state: { sessions, projects: [widget, vps, notes], attention: [{ sessionId: "flagged" }] }, sessionOrder, inboxMode: "current", showArchived: false, expandedProjects: new Set(), openArchivedProjects: false, selected: null },
@@ -50,9 +50,19 @@ const expanded = vm.runInContext('renderProjects("")', context).html;
 assert.equal([...expanded.slice(0, expanded.indexOf("</section>")).matchAll(/data-session="([^"]+)"/g)].map((match) => match[1]).join(","), widgetOrder.join(","), "an expanded project shows every family in the daemon's order");
 assert.match(expanded, /Show less/);
 context.app.expandedProjects.clear();
-context.app.sessionOrder = { ...sessionOrder, all: { ...sessionOrder.all, projects: [...sessionOrder.all.projects].reverse() } };
+context.app.sessionOrder = { ...sessionOrder, all: { ...sessionOrder.all, view: { projects: [...sessionOrder.all.view.projects].reverse() } } };
 const reordered = vm.runInContext('renderProjects("")', context).html;
 assert(reordered.indexOf('data-project-open="h1::project-widget"') < reordered.indexOf('data-project-open="project-widget"'), "projects follow the daemon's project order");
+context.app.listQuery = "far";
+context.app.sessionOrder = { ...sessionOrder, all: listing([{ id: vps.id, counts: { families: 1, sessions: 1 }, collapsedFamilyIds: ["far"] }], [family("far", vps.id)]) };
+const searched = vm.runInContext('renderProjects("far")', context).html;
+assert(searched.includes('data-session="far"') && !searched.includes('data-project-open="project-widget"'), "a search lists the projects the daemon matched, with their matching sessions");
+context.app.listQuery = "";
+context.app.expandedProjects.add(widget.id);
+context.app.sessionOrder = { ...sessionOrder, [`project:all:${widget.id}`]: undefined };
+const opening = vm.runInContext('renderProjects("")', context).html;
+assert.equal([...opening.slice(0, opening.indexOf("</section>")).matchAll(/data-session="([^"]+)"/g)].length, 9, "an expanded project keeps its collapsed rows until its own listing arrives");
+context.app.expandedProjects.clear();
 context.app.sessionOrder = sessionOrder;
 assert.match(widgetSection, /<button class="project-name" type="button" data-project-open="project-widget"[^>]*>widget<\/button><span class="project-count" title="(\d+) sessions">\1<\/span>/, "the project header opens the project and counts its sessions");
 for (const id of ["w0", "w4", "busy", "queued", "flagged", "lead"]) assert.match(widgetSection, new RegExp(`data-session="${id}"`), `${id} is visible in a collapsed project`);
