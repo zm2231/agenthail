@@ -617,12 +617,12 @@ struct SessionScreen: View {
                 }
                 if activityOnly {
                     let leading = items.first?.id
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).id($0.id) }
+                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).probesScrollJump($0.id).id($0.id) }
                 } else {
                     let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
-                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).id(group.id)
+                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id).id(group.id)
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -674,6 +674,7 @@ struct SessionScreen: View {
             .id(jumps)
         }
         .scrollPosition($position)
+        .scrollJumpProbe()
         .accessibilityIdentifier("session-timeline")
         .phoneBackdrop(.transcript)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -723,8 +724,10 @@ struct SessionScreen: View {
             if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
         }
 #if DEBUG
-        .overlay(alignment: .topLeading) { ScrollCountLabel() }
-#endif
+        .overlay(alignment: .topLeading) {
+            ScrollCountLabel()
+            if ScrollJumpProbe.enabled { ScrollJumpLabel() }
+        }#endif
         .edgeBar(.top, spacing: 0) {
             if let detail { SessionSummary(detail: detail, session: liveSession) { showingInfo = true } }
         }
