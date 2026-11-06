@@ -67,10 +67,10 @@ func (d *Daemon) mcpEndTurn(_ context.Context, caller *mcpCaller, input mcpEndTu
 	return result, nil
 }
 
-// Only a session an agent started reports to one; the person hears the rest.
+// Only a session an agent or a coordinator started reports to one; the person hears the rest.
 func (d *Daemon) endTurnHearer(session surface.Session) (noticeRecipient, bool) {
 	origin, found, err := d.Registry.SessionOrigin(session.ID)
-	if err != nil || !found || origin.Via != registry.OriginAgent {
+	if err != nil || !found || origin.Via != registry.OriginAgent && origin.Via != registry.OriginCoordinator {
 		return noticeRecipient{}, false
 	}
 	return d.noticeRecipient(session)
