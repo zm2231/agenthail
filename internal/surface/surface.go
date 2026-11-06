@@ -19,10 +19,11 @@ const (
 type SessionStatus string
 
 const (
-	StatusIdle    SessionStatus = "idle"
-	StatusBusy    SessionStatus = "busy"
-	StatusOffline SessionStatus = "offline"
-	StatusUnknown SessionStatus = "unknown"
+	StatusIdle      SessionStatus = "idle"
+	StatusBusy      SessionStatus = "busy"
+	StatusOffline   SessionStatus = "offline"
+	StatusUnknown   SessionStatus = "unknown"
+	StatusNotLoaded SessionStatus = "notLoaded"
 )
 
 // WaitingKind names what an open turn is waiting for from its user.
