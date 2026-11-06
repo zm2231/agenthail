@@ -30,7 +30,8 @@ final class InboxRowHitAreaUITests: XCTestCase {
         let frame = row.frame
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10), "a tap between the title and the chevron opens the session", file: file, line: line)
-        XCTAssertTrue(app.tab("Sessions").isSelected, file: file, line: line)
+        app.backToSessions(file: file, line: line)
+        XCTAssertTrue(app.tab("Sessions").waitForExistence(timeout: 5) && app.tab("Sessions").isSelected, "the session opened in the Sessions tab", file: file, line: line)
         XCTAssertGreaterThanOrEqual(frame.height, 44, "the row answers taps across its whole 44 pt height", file: file, line: line)
     }
 }
