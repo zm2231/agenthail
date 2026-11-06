@@ -2,6 +2,7 @@ package testkit
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -43,6 +44,10 @@ func TestEveryTestPackageRunsInItsOwnHome(t *testing.T) {
 			return nil
 		}
 		tests, _ := filepath.Glob(filepath.Join(path, "*_test.go"))
+		tests = slices.DeleteFunc(tests, func(test string) bool {
+			built, err := build.Default.MatchFile(path, filepath.Base(test))
+			return err != nil || !built
+		})
 		if len(tests) > 0 && !slices.ContainsFunc(tests, runsInOwnHome) {
 			relative, _ := filepath.Rel(root, path)
 			missing = append(missing, relative)
