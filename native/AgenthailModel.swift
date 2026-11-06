@@ -469,7 +469,7 @@ final class AgenthailModel: ObservableObject {
 
     func openCreatedSession(_ id: String, in pane: SessionPane? = nil, started: Bool = false) async {
         await refresh(fresh: true)
-        if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
+        if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id, waitForCatchUp: false) {
             pin(detail.sessionState(open: true, host: snapshot?.daemon.pairedHost(owning: detail.session.id)))
         }
         guard let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) else { return }
