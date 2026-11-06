@@ -5,7 +5,8 @@ import (
 )
 
 // SessionCapabilities narrows Capabilities for a session the host runs, which
-// takes steer, interrupt and model changes but no Remote Control commands, and
+// takes steer, interrupt, compact and model changes but no Remote Control
+// commands, and
 // for any other session Control cannot reach through Remote Control: a CLI
 // session reached only over its native peer socket, or any session on an
 // install without Remote Control. Hosted and socket sessions stream only from
@@ -20,7 +21,6 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	capabilities.GoalSet = sess == nil || c.canSendHumanTurn(sess)
 	if claudeHosted(sess) {
 		capabilities.Stream = true
-		capabilities.Compact = false
 		capabilities.Commands = false
 		capabilities.Respond = true
 		capabilities.PermissionMode = true

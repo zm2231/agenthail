@@ -48,10 +48,12 @@ type claudeToolCall struct {
 }
 
 type claudeRecord struct {
-	Type       string `json:"type"`
-	UUID       string `json:"uuid"`
-	ParentUUID string `json:"parentUuid"`
-	CommandRun *struct {
+	Type             string `json:"type"`
+	UUID             string `json:"uuid"`
+	ParentUUID       string `json:"parentUuid"`
+	PromptID         string `json:"promptId"`
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	CommandRun       *struct {
 		Command string `json:"command"`
 		Args    string `json:"args"`
 	} `json:"commandRun"`
@@ -326,28 +328,57 @@ func isClaudeInterruptMarker(text string) bool {
 	return strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to interrupt")
 }
 
-func readClaudeCompactCompletion(path string, offset int64, requestUUID string) (bool, error) {
+// readClaudeCompactCompletion reports whether the /compact sent as requestUUID
+// compacted the conversation, or the error Claude gave instead. Over Remote
+// Control the boundary follows the request. A session the SDK runs records
+// the request after the boundary, as the command of the prompt whose summary
+// hangs from that boundary.
+func readClaudeCompactCompletion(path string, offset int64, requestUUID string) (completed bool, rejected string, err error) {
 	matchedRequest := false
-	completed := false
-	err := findJSONLFrom(path, offset, func(line []byte) (bool, error) {
+	boundaries := map[string]bool{}
+	summaryParent := map[string]string{}
+	err = findJSONLFrom(path, offset, func(line []byte) (bool, error) {
 		var record claudeRecord
 		if json.Unmarshal(line, &record) != nil {
 			return false, nil
 		}
-		if record.Type == "user" && record.UUID == requestUUID && strings.TrimSpace(transcriptText(record.Message.Content)) == "/compact" {
-			matchedRequest = true
+		if record.Type == "system" && record.Subtype == "compact_boundary" {
+			if matchedRequest {
+				completed = true
+				return true, nil
+			}
+			boundaries[record.UUID] = true
 			return false, nil
 		}
-		if matchedRequest && record.Type == "system" && record.Subtype == "compact_boundary" {
-			completed = true
-			return true, nil
+		if record.IsCompactSummary && record.PromptID != "" {
+			summaryParent[record.PromptID] = record.ParentUUID
+			return false, nil
+		}
+		if record.Type == "user" && record.UUID == requestUUID && isClaudeCompactCommand(transcriptText(record.Message.Content)) {
+			matchedRequest = true
+			if parent, ok := summaryParent[record.PromptID]; ok && record.PromptID != "" && boundaries[parent] {
+				completed = true
+				return true, nil
+			}
+			return false, nil
+		}
+		if matchedRequest && record.ParentUUID == requestUUID {
+			if output, failed := claudeLocalCommandOutput(record.Content + transcriptText(record.Message.Content)); failed {
+				rejected = output
+				return true, nil
+			}
 		}
 		if _, human := claudePromptText(record.Origin.Kind, transcriptText(record.Message.Content)); matchedRequest && record.Type == "user" && human {
 			return false, fmt.Errorf("another prompt arrived before the compact boundary")
 		}
 		return false, nil
 	})
-	return completed, err
+	return completed, rejected, err
+}
+
+func isClaudeCompactCommand(text string) bool {
+	text = strings.TrimSpace(text)
+	return text == "/compact" || (claudeCommandInvocation(text) && claudeCommandLine(text) == "/compact")
 }
 
 func transcriptText(content any) string {
