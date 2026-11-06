@@ -1,4 +1,4 @@
--- schemaVersion 66
+-- schemaVersion 67
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -361,6 +361,11 @@ CREATE TABLE host_identity (
 	host_id TEXT NOT NULL,
 	name TEXT NOT NULL
 );
+
+-- table host_queue_dirty
+CREATE TABLE host_queue_dirty (
+	session_id TEXT PRIMARY KEY
+) WITHOUT ROWID;
 
 -- table hosts
 CREATE TABLE hosts (
@@ -1260,6 +1265,38 @@ BEGIN
 		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now')
 	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
+END;
+
+-- trigger message_queue_host_count_delete
+CREATE TRIGGER message_queue_host_count_delete AFTER DELETE ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id=OLD.session_id AND host_id<>'';
+END;
+
+-- trigger message_queue_host_count_insert
+CREATE TRIGGER message_queue_host_count_insert AFTER INSERT ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id=NEW.session_id AND host_id<>'';
+END;
+
+-- trigger message_queue_host_count_update
+CREATE TRIGGER message_queue_host_count_update AFTER UPDATE OF status,session_id ON message_queue
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE id IN (OLD.session_id,NEW.session_id) AND host_id<>'';
+END;
+
+-- trigger sessions_host_count_insert
+CREATE TRIGGER sessions_host_count_insert AFTER INSERT ON sessions
+WHEN NEW.host_id<>''
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) VALUES(NEW.id);
+END;
+
+-- trigger sessions_host_count_mirrored
+CREATE TRIGGER sessions_host_count_mirrored AFTER UPDATE OF host_id ON sessions
+WHEN NEW.host_id<>''
+BEGIN
+	INSERT OR IGNORE INTO host_queue_dirty(session_id) VALUES(NEW.id);
 END;
 
 -- trigger sessions_unretire

@@ -355,6 +355,14 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(catalogPresentationVersionSchema()); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(hostQueueDirtySchema); err != nil {
+		return err
+	}
+	if version < 67 {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO host_queue_dirty(session_id) SELECT id FROM sessions WHERE host_id<>''`); err != nil {
+			return err
+		}
+	}
 	if version < 29 {
 		if _, err := tx.Exec(`UPDATE catalog_sessions SET ` + catalogCurrentAssignment("catalog_sessions")); err != nil {
 			return err

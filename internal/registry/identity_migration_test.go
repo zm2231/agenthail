@@ -86,6 +86,10 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	if r.QueueCount("conversation-worker") != 1 || r.QueueCount("conversation-native") != 1 {
 		t.Fatalf("queues worker=%d native=%d", r.QueueCount("conversation-worker"), r.QueueCount("conversation-native"))
 	}
+	var marked int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM host_queue_dirty WHERE session_id IN ('conversation-worker','conversation-native')`).Scan(&marked); err != nil || marked != 2 {
+		t.Fatalf("a queue-count mark did not follow its session: marked=%d err=%v", marked, err)
+	}
 	rekeys, err := r.SessionRekeys()
 	if err != nil || len(rekeys) != 3 || rekeys[rekeyedBridge] != "conversation-worker" || rekeys[collidedBridge] != "conversation-native" || rekeys[launchedBridge] != "conversation-launch" {
 		t.Fatalf("rekeys=%v err=%v", rekeys, err)
@@ -195,7 +199,9 @@ func seedVersion13(t *testing.T, r *Registry) {
 		exec(`INSERT INTO api_action_reservations(idempotency_key,session_id,action,source_session_id,receipt) VALUES(?,?,'send',?,?)`, "key-"+id, id, id, `{"sessionId":"`+id+`"}`)
 		exec(`INSERT INTO daemon_events(event_type,entity_id,payload,created_at) VALUES('session.status',?,?,?)`, id, []byte(`{"sessionId":"`+id+`"}`), now)
 		exec(`INSERT INTO daemon_event_items(dedupe_key,event_id) VALUES(?,1)`, "status:"+id)
+		exec(`INSERT INTO host_queue_dirty(session_id) VALUES(?)`, id)
 	}
+	exec(`INSERT INTO host_queue_dirty(session_id) VALUES('conversation-native')`)
 	exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES('conversation-native','{}','{}',?)`, now)
 	exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES('conversation-native',1)`)
 	for _, id := range []string{rekeyedBridge, collidedBridge} {
