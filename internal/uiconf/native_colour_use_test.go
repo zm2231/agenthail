@@ -23,7 +23,7 @@ type statusColour struct {
 
 func statusColourUses(accessor, role string) *regexp.Regexp {
 	return regexp.MustCompile(fmt.Sprintf(
-		`DesktopPalette\.%[1]s(Background|Line)?\b|PhonePalette\.%[1]s\b|PaletteTokens\.%[1]s\b|(RoleStyle|DesktopStyle\.role|\.role|RoleInlineStyle\.[A-Za-z]+)\(\s*\.%[2]s\b|roles\[\s*\.%[2]s\s*\]|TextRole\.%[2]s\b`,
+		`DesktopPalette\.%[1]s(Background|Line)?\b|PhonePalette\.%[1]s\b|PaletteTokens\.%[1]s\b|(RoleStyle|DesktopStyle\.role|\.role|RoleInlineStyle\.[A-Za-z]+)\(\s*\.%[2]s\b|roles\[\s*\.%[2]s\s*\]|TextRole\.%[2]s\b|\[TextRole\]\s*=\s*\[[^\]]*\.%[2]s\b|:\s*TextRole\??\s*=\s*\.%[2]s\b`,
 		accessor, role))
 }
 
@@ -56,8 +56,17 @@ var statusColours = map[string]statusColour{
 			"macOS/DesktopWindow.swift":      {2, "working subagents and the finishing ring"},
 			"macOS/StatusTail.swift":         {1, "the working count"},
 			"macOS/SubagentsSection.swift":   {1, "a working subagent"},
+			"macOS/DesktopGlass.swift":       {1, "the working role a selected row must stay readable for"},
 			"macOS/UsageAccountsPanel.swift": {1, "sessions working on an account"},
 			"macOS/WorkingSpinner.swift":     {1, "the working spinner"},
+		},
+	},
+	"status dot": {
+		job:  "a session's status dot, which picks amber for needs-you, blue for working and green for finished-unseen",
+		uses: regexp.MustCompile(`DesktopPalette\.statusColor\b`),
+		files: map[string]colourUse{
+			"macOS/DesktopWindow.swift": {1, "the sidebar row's status dot"},
+			"macOS/WindowChrome.swift":  {1, "the tab's status dot"},
 		},
 	},
 	"green": {
@@ -169,6 +178,8 @@ func TestTheColourUseCheckCatchesEachWayAColourIsReached(t *testing.T) {
 		"the desktop role style":        {"iOS/A.swift": "PhonePalette.attention", "macOS/E.swift": "DesktopStyle.role(.needsYou)"},
 		"an inline role":                {"iOS/A.swift": "PhonePalette.attention", "F.swift": "RoleInlineStyle.color(.needsYou, colors)"},
 		"a palette alias":               {"iOS/A.swift": "PhonePalette.attention", "macOS/G.swift": "let p = DesktopPalette.self"},
+		"a role collection":             {"iOS/A.swift": "PhonePalette.attention", "macOS/H.swift": "static let roles: [TextRole] = [.body,\n    .needsYou]"},
+		"a typed role":                  {"iOS/A.swift": "PhonePalette.attention", "macOS/I.swift": "let role: TextRole = .needsYou"},
 		"the last use removed":          {"iOS/A.swift": "Text(\"x\")"},
 	}
 	for name, sources := range cases {
@@ -178,6 +189,11 @@ func TestTheColourUseCheckCatchesEachWayAColourIsReached(t *testing.T) {
 	}
 	if problems := checkStatusColourUses(map[string]string{"iOS/A.swift": "PhonePalette.attention"}, listed); len(problems) != 0 {
 		t.Errorf("the listed use failed: %v", problems)
+	}
+	dots := map[string]statusColour{"status dot": statusColours["status dot"]}
+	extra := map[string]string{"macOS/DesktopWindow.swift": "DesktopPalette.statusColor(s)", "macOS/WindowChrome.swift": "DesktopPalette.statusColor(s)", "macOS/J.swift": "DesktopPalette.statusColor(s)"}
+	if problems := checkStatusColourUses(extra, dots); len(problems) == 0 {
+		t.Error("a new status dot passed the check")
 	}
 }
 
