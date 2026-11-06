@@ -9,12 +9,24 @@ final class ScrimAnchor {
     var feather: CGFloat = CGFloat(BackdropRenderer.paneFeather)
     var inset: CGFloat = 0
     var radius: CGFloat = 0
-    weak var host: NSView?
+    weak var host: NSView? {
+        didSet { rows?.host = host as? BackdropLayerView }
+    }
     private var regions: [ObjectIdentifier: WeakView<ScrimRegionView>] = [:]
     private var consumers: [ObjectIdentifier: WeakView<BackdropLayerView>] = [:]
     private(set) var mask: (image: CGImage, rect: CGRect)?
     private var built: (area: CGRect, regions: [CGRect], feather: CGFloat)?
     private var updating = false
+    private(set) var rows: ScrimRows?
+
+    lazy var transcript: TranscriptScrim = {
+        let rows = ScrimRows()
+        rows.host = host as? BackdropLayerView
+        self.rows = rows
+        let transcript = TranscriptScrim(shape: .panels)
+        transcript.attach(rows)
+        return transcript
+    }()
 
     var area: CGRect? {
         guard let host, host.window != nil else { return nil }

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,5 +32,31 @@ func TestClaudeSubagentPageListsWorkingThenRecentAndCountsAll(t *testing.T) {
 	empty, _ := json.Marshal(newClaudeSubagentPage(nil, false).links)
 	if string(empty) != "[]" {
 		t.Fatalf("no subagents encoded as %s", empty)
+	}
+}
+
+func TestWorkingClaudeSubagentsKeepTheirPlaceWhileTheyWrite(t *testing.T) {
+	now := time.Now()
+	links := []surface.ClaudeSubagentLink{
+		{AgentID: "first", Working: true, StartedAt: now.Add(-time.Hour), LastActive: now.Add(-time.Minute)},
+		{AgentID: "second", Working: true, StartedAt: now.Add(-time.Minute), LastActive: now.Add(-time.Hour)},
+		{AgentID: "twin", Working: true, StartedAt: now.Add(-time.Minute), LastActive: now},
+	}
+	order := func() []string {
+		var ids []string
+		for _, link := range newClaudeSubagentPage(links, true).links {
+			ids = append(ids, link.AgentID)
+		}
+		return ids
+	}
+	before := order()
+	if !slices.Equal(before, []string{"second", "twin", "first"}) {
+		t.Fatalf("working subagents are not newest started first: %v", before)
+	}
+	for index := range links {
+		links[index].LastActive = now.Add(time.Duration(len(links)-index) * time.Second)
+	}
+	if after := order(); !slices.Equal(after, before) {
+		t.Fatalf("writing moved working subagents: %v then %v", before, after)
 	}
 }

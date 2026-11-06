@@ -195,7 +195,7 @@ struct SessionSidebar: View {
                     }
                     ForEach(tree.projects) { project in
                         let expanded = expandedProjects.contains(project.id)
-                        let shown = expanded ? project : project.collapsed(keeping: pane.selectedSessionID)
+                        let shown = project.shown(expanded: expanded, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
                             ProjectHeaderView(name: project.name, hosts: project.hosts, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived, sessionCount: project.counts.sessions)
@@ -217,8 +217,8 @@ struct SessionSidebar: View {
                                     familyRows(family, attention: tree.attention)
                                 }
                             }
-                            if project.familyTotal > shown.sessionCount || expanded && project.familyTotal > project.collapsed.count {
-                                Button(expanded ? "Show less" : "Show \(project.familyTotal - shown.sessionCount) more") {
+                            if let more = project.moreLabel(expanded: expanded, keeping: pane.selectedSessionID) {
+                                Button(more) {
                                     if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
                                 }
                                 .buttonStyle(.plain)
@@ -358,7 +358,7 @@ extension SessionSidebar {
         }
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
-            let shown = expandedProjects.contains(project.id) ? project : project.collapsed(keeping: pane.selectedSessionID)
+            let shown = project.shown(expanded: expandedProjects.contains(project.id), keeping: pane.selectedSessionID)
             for family in shown.checkouts.flatMap(\.families) {
                 let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
                 ids += rows.filter { !ids.contains($0) }
@@ -905,7 +905,6 @@ struct TranscriptView: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var underfilled = false
-    @State private var textHeight: CGFloat?
     @State private var paneWidth: CGFloat = 0
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -919,12 +918,14 @@ struct TranscriptView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
+                        .transcriptScrimRow()
                         .padding(.bottom, DesktopSpace.s)
                 }
                 if let error = pane.detail?.readError {
                     Text(error)
                         .font(.system(size: DesktopType.body))
                         .foregroundStyle(DesktopPalette.text2)
+                        .transcriptScrimRow()
                         .padding(.bottom, DesktopSpace.s)
                 }
                 if blocks.isEmpty && sends.isEmpty && !session.isWorking && pane.detail != nil && (pane.olderCursor ?? 0) == 0 {
@@ -935,6 +936,7 @@ struct TranscriptView: View {
                             .font(.system(size: DesktopType.body))
                             .foregroundStyle(DesktopPalette.text2)
                     }
+                    .transcriptScrimRow()
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 }
@@ -957,6 +959,7 @@ struct TranscriptView: View {
                     }
                     .font(.system(size: DesktopType.body))
                     .foregroundStyle(DesktopPalette.text2)
+                    .transcriptScrimRow()
                     .padding(.top, DesktopSpace.m)
                 }
             }
@@ -966,25 +969,16 @@ struct TranscriptView: View {
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
+            .transcriptScrimContent()
+            .transcriptScrimOrigin()
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
             .environment(\.expandAgentMessages, expandAgents)
         }
         .clipped()
+        .transcriptScrimSource()
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
-        .background {
-            Color.clear
-                .frame(width: layout.column + layout.overhang, height: textHeight)
-                .scrimText()
-                .frame(width: layout.column + 2 * layout.overhang, alignment: .trailing)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-        .onScrollGeometryChange(for: CGFloat?.self) { geometry in
-            ScrollScrim.height(content: geometry.contentSize.height - Self.bottomPadding, viewport: geometry.containerSize.height)
-        } action: { _, height in
-            textHeight = height
-        }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5
@@ -1028,6 +1022,7 @@ struct TranscriptView: View {
                             .frame(maxWidth: 360)
                     }
                 }
+                .scrimText()
             }
         }
         .overlay(alignment: .top) {
@@ -1182,6 +1177,7 @@ struct UserBubble: View {
                 bubble
             }
         }
+        .transcriptScrimRow()
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 120)
         .onHover { hovering = $0 }

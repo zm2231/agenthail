@@ -2,7 +2,7 @@ import { app } from "./state.js";
 import { escape, labels, timeAgo } from "./format.js";
 import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
-import { projectSessions } from "./session-order.js";
+import { orderReady, projectSessions } from "./session-order.js";
 import { projectNow } from "./project-now.js";
 import { hostDown, presenceLabel, unavailable } from "./presence.js";
 
@@ -114,6 +114,7 @@ function folders(project) {
 }
 
 export function renderProjectView(project) {
+  if (!orderReady(["all"])) return `<header class="project-view-header"><h1>${escape(project.displayName)}</h1></header><div class="empty-state compact"><p>Loading this project.</p></div>`;
   const contents = projectContents(project);
   const computers = new Set((project.checkouts || []).map((checkout) => checkout.host.id)).size;
   const count = contents.now.count + contents.earlier.length + (contents.leadSession ? 1 : 0);

@@ -58,8 +58,10 @@ every hidden subagent row, so clients know there are rows to fetch. Catalog rows
 `/api/v1/catalog-events`) carry both fields as `subagent` and `subagents`.
 `/api/v1/session-metadata` lists a Claude session's subagents in
 `claudeSubagents` with `agentType`, `description`, `toolUseId`, `depth`,
-`working`, `lastActive`, and `transcriptPath`: the working ones first, then the
-eight most recently active. `claudeSubagentsTotal` counts every subagent the
+`working`, `startedAt`, `lastActive`, and `transcriptPath`: the working ones
+first, newest started first, so a subagent keeps its place while it writes; then
+the eight most recently active. `startedAt` is the timestamp of the subagent
+transcript's first identifying record. `claudeSubagentsTotal` counts every subagent the
 session has, and `subagents=all` returns all of them in the same order. A paired
 host forwards the query to the host that runs the session. A host from before
 this paging returns its whole list and no total; clients then take the list's

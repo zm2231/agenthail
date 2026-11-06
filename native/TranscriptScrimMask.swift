@@ -1,14 +1,56 @@
 import CoreGraphics
 
 struct TranscriptScrimMask: Equatable {
+    enum Shape: Equatable {
+        case band
+        case panels
+    }
+
     static let feather: CGFloat = 6
     static let core: CGFloat = 2
     static var reach: CGFloat { core + feather * 2 }
     static let far: CGFloat = 100_000
+    static let turnGap: CGFloat = 16
+    // Wider than any laid-out gap between rows: a wider space holds rows not reported yet.
+    static let unreported: CGFloat = 32
 
     var layers: [CGRect]
 
-    init(rows: [CGRect]) {
+    init(rows: [CGRect], shape: Shape = .band, end: CGFloat? = nil) {
+        switch shape {
+        case .band: self.init(band: rows)
+        case .panels: self.init(panels: rows, end: end)
+        }
+    }
+
+    static func layer(row: CGRect) -> CGRect? {
+        row.width > 0 && row.height > 0 ? row.insetBy(dx: -reach, dy: -reach) : nil
+    }
+
+    private init(panels rows: [CGRect], end: CGFloat?) {
+        let rows = rows.filter { $0.width > 0 && $0.height > 0 }.sorted { $0.minY < $1.minY }
+        guard let first = rows.first, let left = rows.map(\.minX).min(), let right = rows.map(\.maxX).max() else {
+            layers = []
+            return
+        }
+        func span(_ top: CGFloat, _ bottom: CGFloat) -> CGRect { CGRect(x: left, y: top, width: right - left, height: bottom - top) }
+        var cores = [span(-Self.far, first.minY)]
+        var panel = span(first.minY, first.maxY)
+        for row in rows.dropFirst() {
+            let gap = row.minY - panel.maxY
+            if gap < Self.turnGap || gap > Self.unreported {
+                panel = panel.union(span(row.minY, row.maxY))
+            } else {
+                cores.append(panel)
+                panel = span(row.minY, row.maxY)
+            }
+        }
+        if let end, end > panel.maxY { panel = panel.union(span(panel.maxY, end)) }
+        cores.append(panel)
+        layers = cores.map { $0.insetBy(dx: -Self.reach, dy: -Self.reach) }
+    }
+
+    private init(band rows: [CGRect]) {
         var cores = Self.merged(rows.filter { $0.width > 0 && $0.height > 0 })
         if let top = cores.map(\.minY).min(), let bottom = cores.map(\.maxY).max(),
            let left = cores.map(\.minX).min(), let right = cores.map(\.maxX).max() {

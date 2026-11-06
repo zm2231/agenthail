@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func spawnBearer(t *testing.T, spawn claudehosttest.Spawn) string {
@@ -159,5 +161,85 @@ func TestACoordinatorStartedByItsFirstMessageHoldsItsLeadCredentialAtOnce(t *tes
 	}
 	if replaced := f.replacedTokens(t, spec.SessionID); len(replaced) != 0 {
 		t.Fatalf("the coordinator's credential was swapped after its first turn began: %d swaps", len(replaced))
+	}
+}
+
+func TestAPersonsMessageThatStartsACoordinatorIsThePersonsTurn(t *testing.T) {
+	f := newMCPClaudeFixture(t)
+	f.addProject(t)
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-new","surface":"claude","cwd":%q,"name":"captain"}`, f.host.Cwd))
+	if sent := f.action(t, `{"action":"coordinator-send","name":"captain","message":"hello","author":"person"}`); sent["started"] != true {
+		t.Fatalf("send did not start the coordinator: %s", redacted(sent))
+	}
+	spec, err := f.registry.CoordinatorNamed("captain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
+	turns := f.host.Turns(t, spec.SessionID)
+	if len(turns) != 1 || turnOrigin(t, turns[0]) != "human" {
+		t.Fatalf("turns = %+v, want one human turn", turns)
+	}
+}
+
+func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *testing.T) {
+	for _, order := range []string{"journal first", "installed hook first", "host hook first"} {
+		t.Run(order, func(t *testing.T) { startCoordinatorAndCapture(t, order) })
+	}
+}
+
+func startCoordinatorAndCapture(t *testing.T, order string) {
+	f := newMCPClaudeFixture(t)
+	root, err := canonicalCatalogPath(f.host.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "repo:example.com/lead"
+	if err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", Key: key, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	store := ledger.NewStore(f.registry.WriteDB(), f.registry.ReadDB())
+	if err := store.Enable(key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	f.action(t, fmt.Sprintf(`{"action":"coordinator-new","surface":"claude","cwd":%q,"name":"captain"}`, f.host.Cwd))
+	f.action(t, `{"action":"coordinator-send","name":"captain","message":"hello","author":"person"}`)
+	spec, err := f.registry.CoordinatorNamed("captain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the first turn", 15*time.Second, func() bool { return len(f.host.Turns(t, spec.SessionID)) > 0 })
+	turn := f.host.Turns(t, spec.SessionID)[0]
+	coordinator, err := f.registry.Session(spec.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := f.daemon.dashboardHandler(&dashboardServer{token: "test-token"})
+	installed := ledgerCaptureRequest{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text}
+	host := ledgerCaptureRequest{SessionID: spec.SessionID, PromptID: "first", Prompt: turn.Text, MessageUUID: turn.UUID}
+	copies := []ledgerCaptureRequest{installed, host}
+	switch order {
+	case "journal first":
+		journalSource(f.daemon, *coordinator, nil).append(liveEvent(typedPrompt(turn.UUID, "first", turn.Text, time.Now())))
+	case "host hook first":
+		copies = []ledgerCaptureRequest{host, installed}
+	}
+	for _, copy := range copies {
+		ledgerPost(t, handler, copy)
+	}
+	if resp := ledgerPost(t, handler, installed); resp.Ref != ledger.DeliveryRef(turn.UUID) {
+		t.Fatalf("a hook copy of the first turn named %q, want the delivery %s", resp.Ref, turn.UUID)
+	}
+	board, err := store.Board(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, u := range board.Utterances() {
+		texts = append(texts, u.Text)
+	}
+	if len(texts) != 1 || texts[0] != "hello" {
+		t.Fatalf("the board holds %q, want the person's words once", texts)
 	}
 }

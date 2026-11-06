@@ -21,7 +21,11 @@ func (d *Daemon) dispatcher() delivery.Dispatcher {
 			d.publishEvent("state.changed", "", map[string]string{"source": "delivery-problem"})
 		},
 		PersonCapture: d.personCapture,
-		Oversees:      d.oversees,
+		PersonStart: func(start delivery.PersonStartContext) func(string) {
+			d.delivered.addStart(start.IntentUUID, start.Turn, start.Message, time.Now())
+			return func(sessionID string) { d.delivered.settleStart(start.IntentUUID, sessionID) }
+		},
+		Oversees: d.oversees,
 	}
 }
 

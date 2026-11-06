@@ -33,7 +33,7 @@ const all = {
   families: [family("queued"), family("build", "child"), family("photos"), family("buildbox::ingest"), family("lead"), family("old"), family("older"), { ...family("elsewhere"), projectId: "repo:github.com/demo/other" }],
 };
 const context = {
-  app: { state: { sessions, projects, attention: [] }, sessionOrder: { all, current: { projects: [], families: [] }, archived: { projects: [], families: [family("shelved")] } }, selected: null, selectedProject: null, projectEarlier: null },
+  app: { state: { sessions, projects, attention: [] }, sessionOrder: { all, current: { projects: [], families: [] }, archived: { projects: [], families: [family("shelved")] } }, sessionOrderRead: [], selected: null, selectedProject: null, projectEarlier: null },
   labels: { codex: "Codex", claude: "Claude Code" },
   Date: class extends Date { static now() { return now; } },
 };
@@ -61,6 +61,9 @@ assert.equal(run('leadNote({ name: "fresh" })'), "starts with the first message 
 assert.equal(run('leadNote({ name: "ended", sessionId: "s1" })'), "not running · the next message picks it up", "a lead with a conversation never claims it has not started");
 
 let html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /Loading this project/, "a project page waits for the All order rather than showing an empty or stale one");
+run('app.sessionOrderRead = ["current", "all"]');
+html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /<h1>fieldnotes<\/h1><span class="project-note">7 sessions on 2 computers<\/span>/);
 assert.match(html, /<h2>Now · 4<\/h2>/);
 assert.doesNotMatch(html, /Running now|Recent/, "Now replaces both cards");

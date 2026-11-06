@@ -26,6 +26,7 @@ type ClaudeSubagentLink struct {
 	ToolUseID       string    `json:"toolUseId,omitempty"`
 	Depth           int       `json:"depth"`
 	Working         bool      `json:"working"`
+	StartedAt       time.Time `json:"startedAt,omitzero"`
 	LastActive      time.Time `json:"lastActive,omitempty"`
 	TranscriptPath  string    `json:"transcriptPath"`
 }

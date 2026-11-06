@@ -64,12 +64,24 @@ func (r *Registry) AddProject(project ProjectRecord) error {
 		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM removed_project_ledgers WHERE workspace_root=? AND project_id=?`, project.WorkspaceRoot, project.ID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
-// RemoveProject deletes an added project. Its sessions are untouched.
+// RemoveProject deletes an added project. Its sessions are untouched, and a
+// ledger it holds under its own id is kept for its folder.
 func (r *Registry) RemoveProject(id string) error {
-	result, err := r.db.Exec(`DELETE FROM projects WHERE id=? AND added=1`, id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := keepRemovedProjectLedger(tx, id, time.Now()); err != nil {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM projects WHERE id=? AND added=1`, id)
 	if err != nil {
 		return err
 	}
@@ -78,7 +90,7 @@ func (r *Registry) RemoveProject(id string) error {
 	} else if changed == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	return tx.Commit()
 }
 
 // SetProjectTitle names an added project; an id of no added project is

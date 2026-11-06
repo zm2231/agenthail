@@ -298,6 +298,19 @@ struct SessionPreview: View {
             limited[4]["status"] = "idle"
             snapshot["sessions"] = limited
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-crowded") {
+            var crowded = snapshot["sessions"] as! [[String: Any]]
+            let idle = crowded[1]
+            let tasks = ["Tidy the release notes", "Trim the onboarding copy", "Check the sync retries", "Rename the export flags", "Sort the crash reports", "Split the settings screen"]
+            for (index, task) in tasks.enumerated() {
+                var row = idle
+                row["id"] = "crowded-\(index + 1)"
+                row["name"] = task
+                row["lastActive"] = "2026-09-1\(index)T09:00:00Z"
+                crowded.append(row)
+            }
+            snapshot["sessions"] = crowded
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-host-offline") {
             var offline = snapshot["sessions"] as! [[String: Any]]
             offline[4]["host"] = ["id": "h0123456789ab", "name": "vps.example.ts.net", "state": "unreachable"]

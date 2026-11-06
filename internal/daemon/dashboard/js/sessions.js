@@ -2,6 +2,7 @@ import { app } from "./state.js";
 import { $ } from "./dom.js";
 import { renderProjects } from "./projects.js";
 import { scopedSessions } from "./session-scope.js";
+import { listOrderScopes, orderReady } from "./session-order.js";
 import { displayName, rawDisplayName } from "./session-labels.js";
 import { remoteHostName } from "./hosts.js";
 import { backgroundWaiting } from "./presence.js";
@@ -24,6 +25,14 @@ export function renderSessions() {
     const value = badge.dataset.inboxCount === "projects" ? (app.state.projects || []).filter((project) => !project.archived).length : counts[badge.dataset.inboxCount];
     badge.textContent = value === undefined ? "" : ` ${value}`;
   });
+  if (!orderReady(listOrderScopes())) {
+    syncInboxModeButtons();
+    $("#conversation-count").textContent = "";
+    $("#filter-summary").textContent = "Loading";
+    $("#session-list").innerHTML = '<div class="empty-state compact"><p>Loading this list.</p></div>';
+    $("#session-more").hidden = true;
+    return;
+  }
   if (app.inboxMode === "projects") {
     const projects = renderProjects(query);
     $("#conversation-count").textContent = `${projects.count}`;

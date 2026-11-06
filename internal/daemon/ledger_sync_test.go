@@ -53,9 +53,9 @@ func capturePrompt(t *testing.T, node *federationNode, session, prompt, text str
 	return captured.Ref
 }
 
-func eventLog(t *testing.T, reg *registry.Registry, order string) (string, int) {
+func eventLog(t *testing.T, key string, reg *registry.Registry, order string) (string, int) {
 	t.Helper()
-	rows, err := reg.ReadDB().Query(`SELECT `+order+`, actor_host_id, origin_seq, type, payload, actor_session_id, ref, created_at FROM ledger_events WHERE project_key=? AND `+order+`>0 ORDER BY `+order, widgetKey)
+	rows, err := reg.ReadDB().Query(`SELECT `+order+`, actor_host_id, origin_seq, type, payload, actor_session_id, ref, created_at FROM ledger_events WHERE project_key=? AND `+order+`>0 ORDER BY `+order, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,15 +71,15 @@ func eventLog(t *testing.T, reg *registry.Registry, order string) (string, int) 
 		lines = append(lines, fmt.Sprintf("%d %s/%d %s %s %s %s %s", seq, host, origin, typ, payload, actor, ref, at))
 	}
 	var unsequenced int
-	if err := reg.ReadDB().QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=? AND `+order+`=0`, widgetKey).Scan(&unsequenced); err != nil {
+	if err := reg.ReadDB().QueryRow(`SELECT COUNT(*) FROM ledger_events WHERE project_key=? AND `+order+`=0`, key).Scan(&unsequenced); err != nil {
 		t.Fatal(err)
 	}
 	return strings.Join(lines, "\n"), unsequenced
 }
 
-func boardView(t *testing.T, reg *registry.Registry) string {
+func boardView(t *testing.T, key string, reg *registry.Registry) string {
 	t.Helper()
-	board, err := ledger.NewStore(reg.WriteDB(), reg.ReadDB()).Board(widgetKey)
+	board, err := ledger.NewStore(reg.WriteDB(), reg.ReadDB()).Board(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func boardView(t *testing.T, reg *registry.Registry) string {
 	return string(data)
 }
 
-func sameLedgerOnBothHosts(t *testing.T, mac, owner *federationNode) {
+func sameLedgerOnBothHosts(t *testing.T, key string, mac, owner *federationNode) {
 	t.Helper()
 	var replica, authoritative string
 	var waiting int
@@ -100,11 +100,11 @@ func sameLedgerOnBothHosts(t *testing.T, mac, owner *federationNode) {
 		}
 	})
 	testkit.Eventually(t, "the mac's log matches the owner's", 20*time.Second, func() bool {
-		replica, waiting = eventLog(t, mac.reg, "owner_seq")
-		authoritative, _ = eventLog(t, owner.reg, "seq")
+		replica, waiting = eventLog(t, key, mac.reg, "owner_seq")
+		authoritative, _ = eventLog(t, key, owner.reg, "seq")
 		return waiting == 0 && replica == authoritative
 	})
-	if got, want := boardView(t, mac.reg), boardView(t, owner.reg); got != want {
+	if got, want := boardView(t, key, mac.reg), boardView(t, key, owner.reg); got != want {
 		t.Fatalf("boards differ\nmac   %s\nowner %s", got, want)
 	}
 }
@@ -129,20 +129,20 @@ func TestALedgerKeptOnAnotherHostReplicatesBothWays(t *testing.T) {
 	if assigned.Owner != record.ID || !assigned.Adopted {
 		t.Fatalf("owner = %+v", assigned)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 
 	var added ledger.WorkResult
 	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "add the index"}, &added)
 	if added.Item.ID != "widget-W1" {
 		t.Fatalf("proxied add = %+v", added)
 	}
-	if !strings.Contains(boardView(t, mac.reg), "add the index") {
+	if !strings.Contains(boardView(t, widgetKey, mac.reg), "add the index") {
 		t.Fatal("the mac does not read its own proxied write back")
 	}
 	mustLedger(t, owner, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "remote-a", Action: ledger.WorkComment, ItemID: "widget-W1", Text: "written on the owner"}, nil)
 	mustLedger(t, mac, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkClaim, ItemID: "widget-W1"}, nil)
 	capturePrompt(t, mac, "local-a", "p-2", "and keep it fast")
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 
 	var item ledger.WorkItem
 	board, _ := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Board(widgetKey)
@@ -168,19 +168,19 @@ func TestAProxiedWriteWhoseAnswerIsLostLandsOnce(t *testing.T) {
 	if n := countEvents(t, owner.reg, ledger.EventWorkItem, ""); n != 1 || added.Item.ID != "widget-W1" {
 		t.Fatalf("owner holds %d work items after a lost answer; result %+v", n, added)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 }
 
 func TestTheLargestStorableWordsReplayAndLargerOnesBlockNothing(t *testing.T) {
 	mac, owner, _ := ledgerOnTwoHosts(t)
 	capturePrompt(t, mac, "local-a", "p-1", "build search")
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 
 	huge := capturePrompt(t, mac, "local-a", "p-huge", strings.Repeat("a", 2*ledger.MaxEventBytes))
 	big := capturePrompt(t, mac, "local-a", "p-big", strings.Repeat("b", ledger.MaxEventBytes-2048))
 	after := capturePrompt(t, mac, "local-a", "p-after", "and after it")
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	for _, ref := range []string{huge, big, after} {
 		if n := countEvents(t, owner.reg, ledger.EventUtterance, ref); n != 1 {
 			t.Fatalf("%s landed %d times on the owner", ref, n)
@@ -203,7 +203,7 @@ func TestAMacOfflineCapturesThenAttachesOnceTheOwnerIsBack(t *testing.T) {
 	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Search"}, nil)
 	mustLedger(t, mac, "/api/v1/ledger/attach", ledger.AttachRequest{ProjectKey: widgetKey, SessionID: "local-a", UtteranceID: first, As: ledger.AsNewAsk, To: "widget-G1", Clauses: []string{"build search"}}, nil)
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 
 	owner.gate.proxyDown.Store(true)
 	offline := capturePrompt(t, mac, "local-a", "p-2", "and export to csv")
@@ -228,12 +228,12 @@ func TestAMacOfflineCapturesThenAttachesOnceTheOwnerIsBack(t *testing.T) {
 		code, _ := ledgerRequest(t, mac, "/api/v1/ledger/attach", attach)
 		return code == http.StatusOK
 	})
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	if n := countEvents(t, owner.reg, ledger.EventUtterance, offline); n != 1 {
 		t.Fatalf("the offline words landed %d times on the owner", n)
 	}
 	if n := countEvents(t, owner.reg, ledger.EventClause, "export to csv"); n != 1 {
-		log, _ := eventLog(t, owner.reg, "seq")
+		log, _ := eventLog(t, widgetKey, owner.reg, "seq")
 		t.Fatalf("the attach landed %d times on the owner:\n%s", n, log)
 	}
 	testkit.Eventually(t, "doctor sees the sync healthy again", 20*time.Second, func() bool {
@@ -298,7 +298,7 @@ func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.
 	if text := checkpoint(); text != "" {
 		t.Fatalf("the replica still shows words the owner has attached: %q", text)
 	}
-	sameLedgerOnBothHosts(t, mac, owner)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	written := func(node *federationNode) (bySelf, byOthers int) {
 		t.Helper()
 		var self string
@@ -316,5 +316,43 @@ func TestAReplicaShowsTheWordsLeftToAttachAfterItsWritesGoToTheOwner(t *testing.
 	}
 	if bySelf, byOthers := written(mac); bySelf != 0 || byOthers != 2 {
 		t.Fatalf("the replica holds %d work item and attach events it wrote and %d from the owner; want 0 and 2", bySelf, byOthers)
+	}
+}
+
+func TestAKeylessProjectsLedgerReplicatesToItsOwner(t *testing.T) {
+	mac, owner, record := pairedFederation(t)
+	path := plainFolder(t)
+	id := addFolderProject(t, mac.daemon, path)
+	moveSession(t, mac, "local-a", path, time.Now())
+	key := ledgerKeyAt(t, mac.reg, path)
+	if key != registry.LedgerProjectKey(id) {
+		t.Fatalf("ledger key = %q", key)
+	}
+	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(key, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	first := capturePrompt(t, mac, "local-a", "p-1", "keep notes")
+	var assigned ledgerOwnerResponse
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: key, Host: "vps"}, &assigned)
+	if assigned.Owner != record.ID || !assigned.Adopted {
+		t.Fatalf("owner = %+v", assigned)
+	}
+	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: key, SessionID: "local-a", Name: "Notes"}, nil)
+	capturePrompt(t, mac, "local-a", "p-2", "and tidy them")
+	sameLedgerOnBothHosts(t, key, mac, owner)
+	if !strings.Contains(boardView(t, key, owner.reg), first) {
+		t.Fatal("the owner's board lacks the words captured before it owned the ledger")
+	}
+}
+
+func TestAKeylessLedgerWithOnlyAnOwnerIsNotLinkedAway(t *testing.T) {
+	mac, _, _ := pairedFederation(t)
+	path := plainFolder(t)
+	id := addFolderProject(t, mac.daemon, path)
+	other := addFolderProject(t, mac.daemon, plainFolder(t))
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: ledgerKeyAt(t, mac.reg, path), Host: "vps"}, nil)
+	refused := runDashboardAction(t, mac.daemon, `{"action":"project-link","projectId":"`+id+`","survivor":"`+other+`"}`)
+	if refused.Code != http.StatusConflict || apiErrorCode(t, refused) != "project_history" {
+		t.Fatalf("linking away a project whose ledger has an owner: %d %s", refused.Code, refused.Body)
 	}
 }
