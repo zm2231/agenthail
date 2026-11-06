@@ -145,13 +145,21 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 }
 
 func codexTurnMeterAt(ctx context.Context, file *os.File, offset int64) (*codexTurnMeter, error) {
+	return codexTurnMeterFrom(ctx, file, offset, newCodexTurnStartSearch())
+}
+
+func newCodexTurnStartSearch() *turnStartSearch {
+	return newTurnStartSearch(lineContains([]byte(`_started"`)), codexRecordStartsTurn)
+}
+
+func codexTurnMeterFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*codexTurnMeter, error) {
 	meter := newCodexTurnMeter()
-	from, found, err := turnReplayStart(ctx, file, offset, []byte(`_started"`), codexRecordStartsTurn)
+	from, found, err := turnReplayStart(ctx, file, offset, starts)
 	if err != nil || !found {
 		return meter, err
 	}
 	meter.between = from == 0
-	err = scanTranscriptRecords(ctx, file, from, offset, func(record map[string]any, _ int64, _ []byte) {
+	err = scanTranscriptRecords(ctx, file, from, offset, true, func(record map[string]any, _ int64, _ []byte) {
 		meter.observe(record)
 	})
 	return meter, err
@@ -192,7 +200,7 @@ func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface
 	if err != nil {
 		return nil
 	}
-	end, found, err := transcriptRecordBefore(ctx, file, info.Size(), []byte(turnID), func(record map[string]any) bool {
+	end, found, err := transcriptRecordBefore(ctx, file, info.Size(), lineContains([]byte(turnID)), func(record map[string]any) bool {
 		_, ended := codexRecordEndsTurn(record)
 		return ended && codexRecordTurnID(record) == turnID
 	})
@@ -204,7 +212,7 @@ func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface
 		return nil
 	}
 	var turn *surface.TurnMetadata
-	_ = scanTranscriptRecords(ctx, file, end, info.Size(), func(record map[string]any, _ int64, _ []byte) {
+	_ = scanTranscriptRecords(ctx, file, end, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
 		if turn == nil {
 			turn = meter.observe(record)
 		}
