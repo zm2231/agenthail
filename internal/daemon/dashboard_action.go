@@ -9,6 +9,7 @@ type actionOperation func(*Daemon, context.Context, principal, dashboardActionRe
 
 var typedActions = map[string]actionOperation{
 	"delivery-dismiss":     (*Daemon).doDeliveryDismiss,
+	"delivery-delete":      (*Daemon).doDeliveryDelete,
 	"lead-replacement-ack": (*Daemon).doLeadReplacementAck,
 	"queue-retry":          (*Daemon).doQueueRetry,
 	"queue-cancel":         (*Daemon).doQueueCancel,

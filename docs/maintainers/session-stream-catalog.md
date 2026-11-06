@@ -97,7 +97,9 @@ durable problems that are still unresolved and recent (see
 `delivery-problems.md`). Each problem carries its numeric `deliveryId`, an RFC3339
 timestamp, and the persisted status/evidence fields. `POST /api/action` with
 `{"action":"delivery-dismiss","deliveryId":123}` atomically marks that
-problem dismissed; the operation is idempotent and never resends the message.
+problem dismissed; the operation is idempotent and never resends the message. A
+problem marked `deletable` takes `delivery-delete` instead, which also
+cancels its dead queue row.
 
 `GET /api/v1/session?id=<id>` returns a bounded page from the session journal.
 When `id` is not a session ID, an exact, case-sensitive handle (with or

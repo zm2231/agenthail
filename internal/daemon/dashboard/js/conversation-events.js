@@ -179,16 +179,17 @@ export function bindConversationEvents() {
       }
       return;
     }
-    const deliveryDismiss = event.target.closest("[data-delivery-dismiss]");
-    if (deliveryDismiss) {
-      deliveryDismiss.disabled = true;
+    const deliveryButton = event.target.closest("[data-delivery-dismiss], [data-delivery-delete]");
+    if (deliveryButton) {
+      deliveryButton.disabled = true;
       try {
-        const deliveryId = Number(deliveryDismiss.dataset.deliveryDismiss);
-        await action("delivery-dismiss", { deliveryId });
+        const deleting = "deliveryDelete" in deliveryButton.dataset;
+        const deliveryId = Number(deleting ? deliveryButton.dataset.deliveryDelete : deliveryButton.dataset.deliveryDismiss);
+        await action(deleting ? "delivery-delete" : "delivery-dismiss", { deliveryId });
         app.state.deliveryProblems = app.state.deliveryProblems.filter(item => item.deliveryId !== deliveryId);
         renderDeliveryProblems();
       } catch (error) {
-        deliveryDismiss.disabled = false;
+        deliveryButton.disabled = false;
         toast(friendlyError(error));
       }
       return;

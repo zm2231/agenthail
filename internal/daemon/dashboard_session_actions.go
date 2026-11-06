@@ -109,7 +109,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached}
 		receipt, actionErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, request.Message, "", options)
 		if actionErr != nil {
-			return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", actionErr.Error())
+			return actionResult{}, d.sendFailed(http.StatusBadGateway, "bad_gateway", actionErr)
 		}
 		result = receipt
 	case "steer":
@@ -203,9 +203,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			return actionResult{}, &actionError{Status: http.StatusBadGateway, Code: "control_failed", Message: err.Error(), Extra: map[string]any{"result": control}}
 		}
 		if surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest {
-			return actionResult{}, invalidRequest(err.Error())
+			return actionResult{}, d.sendFailed(http.StatusBadRequest, "invalid_request", err)
 		}
-		return actionResult{}, actionFailed(http.StatusBadGateway, "bad_gateway", err.Error())
+		return actionResult{}, d.sendFailed(http.StatusBadGateway, "bad_gateway", err)
 	}
 	return actionOK(map[string]any{"ok": true, "result": result}), nil
 }
