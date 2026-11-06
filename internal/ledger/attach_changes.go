@@ -45,14 +45,17 @@ func (p *attachPlan) react() error {
 			chosen++
 		}
 	}
-	if chosen != 1 {
-		return refuse("--as reacts needs exactly one of --adopt, --reject or --ack")
+	if chosen > 1 {
+		return refuse("--as reacts takes one of --adopt, --reject or --ack, not several")
 	}
 	if len(p.req.Clauses) > 0 {
-		return refuse("--as reacts takes no --clause; refine the wording with --as refines")
+		defer func() { p.summary += "; the --clause was not recorded: a reaction keeps the wording (reword it with --as refines)" }()
 	}
 	if p.req.Ack {
 		return p.ackCut()
+	}
+	if chosen == 0 {
+		return p.plainReaction()
 	}
 	c, err := p.targetClause()
 	if err != nil {
@@ -81,6 +84,20 @@ func (p *attachPlan) react() error {
 	p.effects = append(p.effects, id)
 	p.summary = fmt.Sprintf("%s cut, pending the person's ack (%s)", c.ID, id)
 	return p.add(EventCut, CutPayload{CutID: id, ClauseID: c.ID, Reason: "rejected in " + p.utterance.ID, AuthorSession: p.req.SessionID, FromUtterance: p.utterance.ID})
+}
+
+func (p *attachPlan) plainReaction() error {
+	if p.req.To == "" {
+		p.summary = p.utterance.ID + " is a reaction; nothing changed"
+		return nil
+	}
+	c, err := p.targetClause()
+	if err != nil {
+		return err
+	}
+	p.effects = append(p.effects, c.ID)
+	p.summary = fmt.Sprintf("%s is a reaction to %s; nothing changed (add --adopt or --reject to change it)", p.utterance.ID, c.ID)
+	return nil
 }
 
 func (p *attachPlan) ackCut() error {

@@ -3,6 +3,7 @@ package ledger
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -83,7 +84,7 @@ func (s *Store) Attach(req AttachRequest) (AttachResult, error) {
 			return AttachResult{}, refuse("%s is attached elsewhere: %s", req.UtteranceID, other)
 		}
 	}
-	attach, err := json.Marshal(AttachPayload{UtteranceID: req.UtteranceID, SessionID: req.SessionID, As: req.As, To: req.To, GoalID: plan.goalID, Effects: plan.effects})
+	attach, err := json.Marshal(AttachPayload{UtteranceID: req.UtteranceID, SessionID: req.SessionID, As: plan.req.As, To: plan.req.To, GoalID: plan.goalID, Effects: plan.effects})
 	if err != nil {
 		return AttachResult{}, err
 	}
@@ -116,6 +117,9 @@ type attachPlan struct {
 	events    []Event
 	effects   []string
 	summary   string
+	notes     []string
+
+	madeGoal, madeGoalName string
 }
 
 func personCapture(capturedBy string) bool {
@@ -123,14 +127,27 @@ func personCapture(capturedBy string) bool {
 }
 
 func (p *attachPlan) build() error {
-	req := p.req
-	if req.UtteranceID != "" {
-		u := p.board.utterances[req.UtteranceID]
+	if p.req.UtteranceID != "" {
+		u := p.board.utterances[p.req.UtteranceID]
 		if u == nil || !personCapture(u.CapturedBy) {
-			return refuse("%s is not a captured person utterance in %s", req.UtteranceID, req.ProjectKey)
+			return refuse("%s is not a captured person utterance in %s", p.req.UtteranceID, p.req.ProjectKey)
 		}
 		p.utterance = u
 	}
+	if err := p.resolveTarget(); err != nil {
+		return err
+	}
+	if err := p.relate(); err != nil {
+		return err
+	}
+	if len(p.notes) > 0 {
+		p.summary += " (" + strings.Join(p.notes, "; ") + ")"
+	}
+	return nil
+}
+
+func (p *attachPlan) relate() error {
+	req := p.req
 	switch req.As {
 	case AsNewAsk, AsExtends, AsConstrains:
 		return p.addClauses()
@@ -156,11 +173,24 @@ func (p *attachPlan) build() error {
 	case AsAnswers:
 		return p.answer()
 	}
-	if req.To != "" || len(req.Clauses) > 0 {
-		return refuse("--as conversation takes no --to or --clause")
-	}
 	p.summary = req.UtteranceID + " is conversation"
+	if dropped := p.unrecorded(); dropped != "" {
+		p.summary += "; " + dropped + " not recorded: conversation binds nothing (attach --as constrains to bind it)"
+	}
 	return nil
+}
+
+func (p *attachPlan) unrecorded() string {
+	var parts []string
+	if p.req.To != "" {
+		parts = append(parts, "--to "+p.req.To)
+	}
+	if n := len(p.req.Clauses); n == 1 {
+		parts = append(parts, "the --clause")
+	} else if n > 1 {
+		parts = append(parts, fmt.Sprintf("%d --clause texts", n))
+	}
+	return strings.Join(parts, " and ")
 }
 
 func (p *attachPlan) add(typ EventType, payload any) error {
@@ -175,6 +205,9 @@ func (p *attachPlan) add(typ EventType, payload any) error {
 func (p *attachPlan) label(id string) string {
 	if g := p.board.goals[id]; g != nil {
 		return fmt.Sprintf("%s (%s)", g.ID, g.Name)
+	}
+	if id != "" && id == p.madeGoal {
+		return fmt.Sprintf("%s (%s)", id, p.madeGoalName)
 	}
 	if id == "" || id == ProjectTarget {
 		return "the project"

@@ -59,11 +59,10 @@ func (p *attachPlan) clauseTarget() (string, string, error) {
 	req := p.req
 	switch req.As {
 	case AsNewAsk:
-		g := p.board.goals[req.To]
-		if g == nil {
+		if !p.isGoal(req.To) {
 			return "", "", refuse("--as new-ask needs --to <goal>; %q is not a goal in %s (create one with: agenthail ledger goal <name>)", req.To, req.ProjectKey)
 		}
-		p.goalID = g.ID
+		p.goalID = req.To
 		return "", "", nil
 	case AsExtends:
 		ask := p.board.asks[req.To]

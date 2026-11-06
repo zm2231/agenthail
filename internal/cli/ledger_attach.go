@@ -157,7 +157,7 @@ func attachSegments(args []string) [][]string {
 	return segments
 }
 
-const attachUsage = `usage: agenthail ledger attach <utterance_id> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> [--to <goal|ask|clause|project>] [--clause "..."] [--and <utterance_id> --as ... ]...`
+const attachUsage = `usage: agenthail ledger attach <utterance_id> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> [--to <goal|ask|clause|item|project>] [--clause "..."] [--and <utterance_id> --as ... ]...`
 
 func (a *App) ledgerAttach(args []string, propose bool) error {
 	segments := attachSegments(args)
