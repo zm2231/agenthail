@@ -177,6 +177,7 @@ func (p *attachPlan) relate() error {
 	if dropped := p.unrecorded(); dropped != "" {
 		p.summary += "; " + dropped + " not recorded: conversation binds nothing (attach --as constrains to bind it)"
 	}
+	p.req.To = ""
 	return nil
 }
 

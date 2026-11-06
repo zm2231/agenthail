@@ -159,6 +159,9 @@ func (p *attachPlan) toClause() error {
 	if ask == nil || len(ask.Clauses) == 0 {
 		return nil
 	}
+	if req.As == AsReacts && !req.Adopt && !req.Reject && len(ask.Clauses) > 1 {
+		return nil
+	}
 	if len(ask.Clauses) == 1 {
 		p.retarget(ask.Clauses[0].ID, "")
 		return nil

@@ -91,12 +91,19 @@ func (p *attachPlan) plainReaction() error {
 		p.summary = p.utterance.ID + " is a reaction; nothing changed"
 		return nil
 	}
-	c, err := p.targetClause()
+	goalID, err := p.board.targetGoal(p.req.To)
 	if err != nil {
 		return err
 	}
-	p.effects = append(p.effects, c.ID)
-	p.summary = fmt.Sprintf("%s is a reaction to %s; nothing changed (add --adopt or --reject to change it)", p.utterance.ID, c.ID)
+	p.goalID = goalID
+	if p.req.To != ProjectTarget {
+		p.effects = append(p.effects, p.req.To)
+	}
+	change := " (add --adopt or --reject to change it)"
+	if p.board.clauses[p.req.To] == nil {
+		change = ""
+	}
+	p.summary = fmt.Sprintf("%s is a reaction to %s; nothing changed%s", p.utterance.ID, p.label(p.req.To), change)
 	return nil
 }
 

@@ -1,6 +1,9 @@
 package ledger_test
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -87,9 +90,54 @@ func TestConversationAndPlainReactionsAreRecordedAndSayWhatWasLeftOut(t *testing
 	if c := clause(t, board(t, s), "widget-C1"); c.State != ledger.StateCaptured || len(c.Cuts) != 0 {
 		t.Fatalf("a plain reaction changed the clause: %+v", c)
 	}
+	if to := attachedTo(t, s, "claude-prompt:2"); to != "" {
+		t.Fatalf("conversation recorded --to %q it said it did not keep", to)
+	}
 	attach(t, s, ledger.AttachRequest{As: ledger.AsExtends, To: "widget-A1", Clauses: []string{"cache results"}, Source: ledger.SourceProposed})
 	adopted := attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:4", As: ledger.AsReacts, To: "widget-C2", Adopt: true, Clauses: []string{"cache results per user"}})
 	readback(t, adopted, "widget-C2 adopted; the --clause was not recorded: a reaction keeps the wording (reword it with --as refines)")
+}
+
+func attachedTo(t *testing.T, s *ledger.Store, utterance string) string {
+	t.Helper()
+	events, err := s.Events(project, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		var p ledger.AttachPayload
+		if e.Type == ledger.EventAttach && json.Unmarshal(e.Payload, &p) == nil && p.UtteranceID == utterance {
+			return p.To
+		}
+	}
+	t.Fatalf("no attach event for %s", utterance)
+	return ""
+}
+
+func TestAPlainReactionToAnythingChangesNothing(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	capture(t, s, project, "claude-prompt:2", "and exports")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsExtends, To: "widget-A1", Clauses: []string{"exports"}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "the index leaks a handle"})
+	for i, tc := range []struct{ to, want string }{
+		{"widget-G1", "is a reaction to widget-G1 (Search); nothing changed"},
+		{ledger.ProjectTarget, "is a reaction to the project; nothing changed"},
+		{"widget-A1", "is a reaction to widget-A1; nothing changed"},
+		{"widget-W1", "is a reaction to the project; nothing changed (found work widget-W1 hangs off no clause, so --to widget-W1 read as the project)"},
+	} {
+		ref := fmt.Sprintf("claude-prompt:%d", 10+i)
+		capture(t, s, project, ref, "nice")
+		result := attach(t, s, ledger.AttachRequest{UtteranceID: ref, As: ledger.AsReacts, To: tc.to})
+		if !strings.HasPrefix(result.Readback, "intent ledger: "+ref+" "+tc.want) {
+			t.Fatalf("react to %s: readback %q", tc.to, result.Readback)
+		}
+	}
+	for _, id := range []string{"widget-C1", "widget-C2"} {
+		if c := clause(t, board(t, s), id); c.State != ledger.StateCaptured || len(c.Cuts) != 0 {
+			t.Fatalf("a plain reaction changed %s: %+v", id, c)
+		}
+	}
 }
 
 func TestClosingWithAPlainReasonIsReadAsDone(t *testing.T) {
