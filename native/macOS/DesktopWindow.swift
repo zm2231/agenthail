@@ -899,6 +899,7 @@ struct TranscriptView: View {
     @State private var underfilled = false
     @State private var paneWidth: CGFloat = 0
     @State private var tailLayout = TranscriptTailLayout()
+    @State private var settledSlots = StableSlots()
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @AppStorage(AgentFold.defaultsKey) private var expandAgents = false
@@ -909,10 +910,10 @@ struct TranscriptView: View {
         let count: Int
     }
 
-    private func blockRow(_ index: Int, _ block: TranscriptBlock, in blocks: [TranscriptBlock], canResend: Bool) -> some View {
-        TranscriptBlockView(block: block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
+    private func blockRow(_ slot: TranscriptSlot, canResend: Bool) -> some View {
+        TranscriptBlockView(block: slot.block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
             .equatable()
-            .padding(.top, TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil))
+            .padding(.top, slot.gap)
     }
 
     var body: some View {
@@ -921,6 +922,8 @@ struct TranscriptView: View {
         let layout = DesktopColumns.transcript(pane: paneWidth)
         let ids = blocks.map(\.id)
         let split = tailLayout.tail.split(ids, in: session.id)
+        let slots = TranscriptSlot.slots(blocks)
+        let settled = settledSlots.keep(slots.prefix(split))
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -948,15 +951,13 @@ struct TranscriptView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 }
-                ForEach(Array(blocks.enumerated().prefix(split)), id: \.element.id) { index, block in
-                    blockRow(index, block, in: blocks, canResend: canResend)
-                }
+                ForEach(settled) { blockRow($0, canResend: canResend) }
             }
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(blocks.enumerated().dropFirst(split)), id: \.element.id) { index, block in
-                    blockRow(index, block, in: blocks, canResend: canResend)
-                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { tailLayout.rows[block.id] = $0 }
-                        .onDisappear { tailLayout.rows[block.id] = nil }
+                ForEach(slots.dropFirst(split)) { slot in
+                    blockRow(slot, canResend: canResend)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { tailLayout.rows[slot.id] = $0 }
+                        .onDisappear { tailLayout.rows[slot.id] = nil }
                 }
                 ForEach(Array(sends.enumerated()), id: \.element.id) { index, send in
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, onEdit: canResend ? { text in
