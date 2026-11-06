@@ -213,3 +213,39 @@ func TestAHostGitHubRefusesShowsItsProblemAndBacksOff(t *testing.T) {
 		t.Fatalf("after the backoff = %+v", views)
 	}
 }
+
+func TestAHostsGitHubProblemReachesASessionViewAlreadyBuilt(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	ref := linkWatched(t, r, "to", 42)
+	fake := &fakeGitHub{}
+	fake.setStatus(openStatus(ref, "aaaaaaa1111"))
+	d.github = fake
+	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(t.Context())
+	if prs := viewedPRs(t, d, "to"); len(prs) != 1 || prs[0].Problem != "" {
+		t.Fatalf("before the refusal = %+v", prs)
+	}
+	fake.watchErr = &github.UnavailableError{Reason: "gh is not signed in to github.com; run gh auth login"}
+	_ = d.watchPRs(t.Context(), time.Now())
+	d.discoverCatalog(t.Context())
+	if prs := viewedPRs(t, d, "to"); len(prs) != 1 || !strings.Contains(prs[0].Problem, "gh auth login") {
+		t.Fatalf("after the refusal = %+v", prs)
+	}
+}
+
+func viewedPRs(t *testing.T, d *Daemon, id string) []prView {
+	t.Helper()
+	view, err := d.readSessionView(t.Context(), sessionViewRequest{Scope: "all", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range view.Sessions {
+		if row.ID == id {
+			return row.PRs
+		}
+	}
+	t.Fatalf("%s is not in the session view", id)
+	return nil
+}

@@ -157,10 +157,10 @@ func (r *Registry) SessionHasPRIn(sessionID, repo string) (bool, error) {
 
 // presentationPRColumns are the session_prs columns a session row shows or
 // orders by; changing one moves the presentation version.
-const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,linked_at_ms"
+const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms"
 
 func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`)
+	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,read_failures FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, e
 	out := map[string][]SessionPR{}
 	for rows.Next() {
 		var pr SessionPR
-		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks); err != nil {
+		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &pr.ReadFailures); err != nil {
 			return nil, err
 		}
 		out[pr.SessionID] = append(out[pr.SessionID], pr)

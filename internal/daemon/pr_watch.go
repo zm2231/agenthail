@@ -85,7 +85,7 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			byHost[repo.Host] = append(byHost[repo.Host], row)
 		}
 	}
-	changed := false
+	problemChanged := false
 	var failures []error
 	for host, hostRows := range byHost {
 		if !d.prWatch.ready(host, now) {
@@ -100,7 +100,7 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			}
 		}
 		watch, err := d.github.Watch(ctx, host, refs)
-		changed = d.prWatch.record(host, now, watch, err) || changed
+		problemChanged = d.prWatch.record(host, now, watch, err) || problemChanged
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -108,22 +108,26 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 		for _, row := range hostRows {
 			status, found := watch.Statuses[prRef(row)]
 			if !found {
-				recorded, err := d.Registry.RecordPRReadFailure(row.SessionID, row.Repo, row.Number, row.Wakes)
-				if err != nil {
+				if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+					recorded, err := r.RecordPRReadFailure(row.SessionID, row.Repo, row.Number, row.Wakes)
+					return recorded && row.ReadFailures+1 == prReadFailureLimit, err
+				}); err != nil {
 					return err
 				}
-				changed = changed || recorded && row.ReadFailures+1 == prReadFailureLimit
 				continue
 			}
 			verdict := decidePR(row, status, watch.Viewer)
-			recorded, err := d.Registry.RecordPRRead(verdict.row, row.Wakes, now)
-			if err != nil {
+			recorded := false
+			if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
+				var err error
+				recorded, err = r.RecordPRRead(verdict.row, row.Wakes, now)
+				return recorded && (prShownChange(row, verdict.row) || row.ReadFailures >= prReadFailureLimit), err
+			}); err != nil {
 				return err
 			}
 			if !recorded {
 				continue
 			}
-			changed = changed || prShownChange(row, verdict.row) || row.ReadFailures >= prReadFailureLimit
 			if len(verdict.reasons) > 0 {
 				d.wakeForPR(verdict.row, verdict.reasons)
 			}
@@ -132,7 +136,7 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			}
 		}
 	}
-	if changed {
+	if problemChanged {
 		d.requestCatalogDiscovery()
 	}
 	return errors.Join(failures...)

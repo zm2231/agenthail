@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -32,5 +33,40 @@ func TestAnUnlinkedPullRequestStaysUnlinkedUntilLinkedExplicitly(t *testing.T) {
 	got, found, err := r.SessionPR("s1", pr.Repo, 42)
 	if err != nil || !found || got.Source != PRSourceAgent || !got.Watch {
 		t.Fatalf("SessionPR = %+v, %v, %v", got, found, err)
+	}
+}
+
+func TestAWatchReadMovesTheSessionViewKeyOnlyWhenWhatItShowsChanges(t *testing.T) {
+	r := openTestRegistry(t)
+	at := time.UnixMilli(1_800_000_000_000)
+	if _, err := r.LinkPR(SessionPR{SessionID: "s1", Repo: "github.com/acme/app", Number: 42, URL: "https://github.com/acme/app/pull/42", Source: PRSourceAgent}, true, at); err != nil {
+		t.Fatal(err)
+	}
+	read := func(checks string) (moved bool) {
+		t.Helper()
+		pr, _, err := r.SessionPR("s1", "github.com/acme/app", 42)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, err := r.ReadCatalogPresentationKey(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		pr.State, pr.Checks = "open", checks
+		at = at.Add(time.Minute)
+		if recorded, err := r.RecordPRRead(pr, pr.Wakes, at); err != nil || !recorded {
+			t.Fatalf("read = %v, %v", recorded, err)
+		}
+		after, err := r.ReadCatalogPresentationKey(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return after != before
+	}
+	if !read("passing") {
+		t.Fatal("a read that changed the checks kept the view key")
+	}
+	if read("passing") {
+		t.Fatal("a read that changed nothing shown moved the view key")
 	}
 }
