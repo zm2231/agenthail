@@ -40,7 +40,7 @@ enum PreviewStream {
         default:
             let paragraphs = (0...(step - 3)).map { "Paragraph \($0 + 1) of reply \(turn). " + String(repeating: "The pending build survives reconnecting and the queued instruction keeps its identity. ", count: 3 + turn % 4) }
             let structure = step >= 4 && turn % 2 == 0 ? ["## Checks for turn \(turn)\n\n- Reconnect\n  - Queue identity\n    1. Saved\n    2. Replayed\n\n```swift\nawait session.resume(turn: \(turn))\n```\n\n| Check | Result |\n| --- | --- |\n| Reconnect | Passed |\n| Identity | Passed |"] : []
-            data.merge(["itemId": "reply-\(turn)", "kind": "message", "role": "assistant", "title": "assistant", "body": (paragraphs + structure).joined(separator: "\n\n")]) { $1 }
+            data.merge(["itemId": "reply-\(turn)", "kind": "message", "role": "assistant", "title": "assistant", "body": (paragraphs.dropLast() + structure + paragraphs.suffix(1)).joined(separator: "\n\n")]) { $1 }
         }
         return ["stream": "session", "sessionId": session, "seq": base + UInt64(k), "type": "item", "data": data]
     }
