@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -50,6 +51,41 @@ func (a *App) deadlineContext(timeout time.Duration) (context.Context, context.C
 		return nil, nil, err
 	}
 	return ctx, func() { release(); cancel() }, nil
+}
+
+const cleanupBudget = 2 * time.Second
+
+// cleanUp runs a write that must happen even past the command's deadline, bounded by its own short budget.
+func (a *App) cleanUp(what string, write func() error) {
+	a.registryMu.Lock()
+	outer := a.writeDeadline
+	if a.releaseWrites != nil {
+		a.releaseWrites()
+	}
+	parent := context.Background()
+	if outer != nil {
+		parent = context.WithoutCancel(outer)
+	}
+	ctx, cancel := context.WithTimeout(parent, cleanupBudget)
+	defer cancel()
+	a.writeDeadline, a.releaseWrites = ctx, nil
+	err := a.bindWritesLocked()
+	a.registryMu.Unlock()
+	if err == nil {
+		err = write()
+	}
+	a.registryMu.Lock()
+	if a.releaseWrites != nil {
+		a.releaseWrites()
+	}
+	a.writeDeadline, a.releaseWrites = outer, nil
+	if rebind := a.bindWritesLocked(); err == nil {
+		err = rebind
+	}
+	a.registryMu.Unlock()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agenthail: %s: %v\n", what, err)
+	}
 }
 
 const controlCommandTimeout = 30 * time.Second

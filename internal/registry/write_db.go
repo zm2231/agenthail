@@ -83,24 +83,28 @@ func retryBusy[T any](w *writeDB, attempt func(context.Context) (T, error)) (T, 
 	}
 	wait := boundRetryFirst
 	for {
-		if err := ctx.Err(); err != nil {
+		// Past the deadline a write still lands when the lock is free, but never waits for it.
+		expired := ctx.Err() != nil
+		attemptCtx, busy := ctx, boundBusyTimeout
+		if expired {
+			attemptCtx, busy = context.WithoutCancel(ctx), 0
+		}
+		if _, err := w.raw.ExecContext(attemptCtx, fmt.Sprintf("PRAGMA busy_timeout=%d", busy.Milliseconds())); err != nil {
 			var zero T
 			return zero, fmt.Errorf("registry write: %w", err)
 		}
-		if _, err := w.raw.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", boundBusyTimeout.Milliseconds())); err != nil {
-			var zero T
-			return zero, fmt.Errorf("registry write: %w", err)
-		}
-		value, err := attempt(ctx)
+		value, err := attempt(attemptCtx)
 		if !isBusy(err) {
 			return value, err
+		}
+		if expired {
+			var zero T
+			return zero, fmt.Errorf("registry write: %w (%v)", ctx.Err(), err)
 		}
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			var zero T
-			return zero, fmt.Errorf("registry write: %w (%v)", ctx.Err(), err)
 		case <-timer.C:
 		}
 		wait = min(wait*2, boundRetryMax)

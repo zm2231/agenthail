@@ -144,7 +144,7 @@ func (a *App) cmdThread(args []string) error {
 	if err != nil {
 		return fmt.Errorf("reserve thread alias: %w", err)
 	}
-	defer func() { _ = a.registry().ReleaseAliasReservation(reservation) }()
+	defer a.cleanUp("free the name @"+reservation.Name, func() error { return a.registry().ReleaseAliasReservation(reservation) })
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
 	var readyErr error
@@ -164,9 +164,9 @@ func (a *App) cmdThread(args []string) error {
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if work != nil {
 		if session == nil {
-			if err := worktree.Abandon(context.WithoutCancel(ctx), a.registry(), *work); err != nil {
-				fmt.Fprintf(os.Stderr, "take back worktree %s: %s\n", work.WorktreePath, err)
-			}
+			a.cleanUp("take back worktree "+work.WorktreePath, func() error {
+				return worktree.Abandon(context.WithoutCancel(ctx), a.registry(), *work)
+			})
 		} else if activated, err := a.registry().ActivateWork(work.WorktreePath, session.ID); err != nil || !activated {
 			fmt.Fprintf(os.Stderr, "record worktree %s: activated=%t %v\n", work.WorktreePath, activated, err)
 		}

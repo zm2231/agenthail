@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func holdRegistryWriteLock(t *testing.T, path string) {
+func holdRegistryWriteLock(t *testing.T, path string) (unlock func()) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -26,11 +27,16 @@ func holdRegistryWriteLock(t *testing.T, path string) {
 	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
-		conn.Close()
-		db.Close()
-	})
+	var once sync.Once
+	unlock = func() {
+		once.Do(func() {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			conn.Close()
+			db.Close()
+		})
+	}
+	t.Cleanup(unlock)
+	return unlock
 }
 
 func TestEveryTimedCommandEndsAtItsTimeoutWhileTheRegistryIsBusy(t *testing.T) {

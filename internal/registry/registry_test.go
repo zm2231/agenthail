@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -109,7 +110,7 @@ func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) 
 	if err := os.Mkdir(state, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r, err := OpenDefault(true)
+	r, err := OpenDefault(context.Background(), true)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -149,7 +149,7 @@ func (a *App) cmdSend(args []string) error {
 			if notionName, err = a.registry().ReserveAlias(syntheticNotionName, time.Now().Add(timeout+threadNameMargin)); err != nil {
 				return fmt.Errorf("reserve thread alias: %w", err)
 			}
-			defer func() { _ = a.registry().ReleaseAliasReservation(notionName) }()
+			defer a.cleanUp("free the name @"+notionName.Name, func() error { return a.registry().ReleaseAliasReservation(notionName) })
 		}
 	}
 	if unreadable != nil {

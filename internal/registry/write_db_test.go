@@ -83,6 +83,29 @@ func TestABoundWriteWaitsForTheLockUntilItsDeadline(t *testing.T) {
 	tx.Rollback()
 }
 
+func TestAWriteBoundToAnEndedDeadlineLandsOnlyWhenTheLockIsFree(t *testing.T) {
+	r := openTestRegistry(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	release, err := r.WriteWithin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := r.db.Exec(`CREATE TABLE write_bound_free (x INTEGER)`); err != nil {
+		t.Fatalf("a write past its deadline with the lock free failed: %v", err)
+	}
+	lockRegistry(t, r.Path())
+	started := time.Now()
+	_, err = r.db.Exec(`CREATE TABLE write_bound_busy (x INTEGER)`)
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("a write past its deadline waited %s for the lock", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v, want the ended deadline", err)
+	}
+}
+
 func TestOneBindingAtATimeAndReleaseRestoresTheBusyTimeout(t *testing.T) {
 	r := openTestRegistry(t)
 	if got := busyTimeout(t, r); got != int(defaultBusyTimeout.Milliseconds()) {

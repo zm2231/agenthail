@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -83,14 +84,14 @@ func defaultPath() string {
 }
 
 func Open(path string) (*Registry, error) {
-	return open(path, false, true)
+	return open(context.Background(), path, false, true)
 }
 
-func OpenDefault(allowUpgrade bool) (*Registry, error) {
-	return open(defaultPath(), true, allowUpgrade)
+func OpenDefault(ctx context.Context, allowUpgrade bool) (*Registry, error) {
+	return open(ctx, defaultPath(), true, allowUpgrade)
 }
 
-func open(path string, private, allowUpgrade bool) (*Registry, error) {
+func open(ctx context.Context, path string, private, allowUpgrade bool) (*Registry, error) {
 	if err := refuseSudoHomeFor(path); err != nil {
 		return nil, err
 	}
@@ -105,6 +106,14 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 	r, err := connect(path)
 	if err != nil {
 		return nil, err
+	}
+	if ctx.Done() != nil {
+		release, err := r.WriteWithin(ctx)
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
+		defer release()
 	}
 	current, err := r.current()
 	if err != nil {
