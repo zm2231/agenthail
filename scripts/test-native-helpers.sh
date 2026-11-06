@@ -71,6 +71,7 @@ SOURCES=(
   ClaudeSubagentList.swift
   SessionStore.swift
   StatusRefreshPolicy.swift
+  SnapshotRefreshPolicy.swift
   ToolPresentation.swift
   TextDiff.swift
   ToolDiffCache.swift

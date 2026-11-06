@@ -26,10 +26,6 @@ struct ListedProject: Equatable {
 
 @MainActor
 final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
-    static func shouldRefreshSnapshot(for eventType: String) -> Bool {
-        eventType == "stream.reset" || eventType == "state.changed" || eventType == "settings.updated" || eventType.hasPrefix("device.")
-    }
-
     static let voiceHostKey = "voiceHost"
     var hostRefreshWait: Duration = HostRefresh.wait
 
