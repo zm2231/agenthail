@@ -53,6 +53,36 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 	}
 }
 
+func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
+	app, starter, cwd := cardFixture(t)
+	pending, err := app.Registry.IssuePendingCredential(nil, time.Now(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := app.Registry.ClaimPendingCredential(pending.Ref, "thread-new", time.Now()); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+	var firstPrompt map[string]any
+	starter.ready = true
+	starter.during = func() {
+		hook := `{"session_id":"thread-new","hook_event_name":"UserPromptSubmit","prompt":"Build it"}`
+		firstPrompt = app.sessionContext(strings.NewReader(hook), "codex", 0, time.Now())
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "planner-conversation")
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--json"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output, _ := firstPrompt["hookSpecificOutput"].(map[string]any)
+	text, _ := output["additionalContext"].(string)
+	for _, want := range []string{"You are @builder", "@planner started you", `agenthail_send {"target":"@planner","message":"<result>"}`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the first prompt's context does not say %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestAHostedLeadIsToldToReadAndAnswerPromptsWithTheTools(t *testing.T) {
 	app, _, _ := cardFixture(t)
 	if _, err := app.Registry.IssueSessionCredential("lead-conversation", time.Now()); err != nil {

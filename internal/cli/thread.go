@@ -121,6 +121,9 @@ func (a *App) cmdThread(args []string) error {
 	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
+	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
+		return a.registry().RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+	})
 
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if session != nil {

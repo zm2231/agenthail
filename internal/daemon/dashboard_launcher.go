@@ -71,6 +71,9 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	if pick != nil {
 		extra = map[string]any{"account": pick}
 	}
+	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
+		return d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+	})
 	session, sent, startErr := starter.StartSession(ctx, options)
 	if session == nil {
 		if startErr == nil {
