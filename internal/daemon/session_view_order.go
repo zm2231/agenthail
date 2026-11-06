@@ -19,6 +19,9 @@ func (p *sessionViewPlan) deadlines(row dashboardSession) {
 	if row.UsageLimit != nil {
 		p.deadline(row.UsageLimit.ResetsAt)
 	}
+	if row.Snooze != nil {
+		p.deadline(row.Snooze.Until)
+	}
 	if row.Activity != nil {
 		last := row.Activity.LastProgressAt
 		if last.IsZero() {

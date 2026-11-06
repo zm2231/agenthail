@@ -193,6 +193,9 @@ func migrateTx(tx *sql.Tx) error {
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
 		{"pinned_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_until_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snooze_wake", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err

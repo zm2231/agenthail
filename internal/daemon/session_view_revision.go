@@ -12,12 +12,13 @@ type revisionRow struct {
 	Current       bool
 	CurrentReason string
 	Attention     *SessionAttention
-	LimitResume   *dashboardLimitResume
+	InboxSection  string
+	LimitResume  *dashboardLimitResume
 	Host          *dashboardHost
 	ReplacedLead  []registry.CoordinatorTenure
 }
 
 func newRevisionRow(record registry.CatalogPresentationRow, row dashboardSession) revisionRow {
 	record.Freshness.ObservedAt = time.Time{}
-	return revisionRow{Record: record, Display: row.Display, Current: row.Current, CurrentReason: row.CurrentReason, Attention: row.Attention, LimitResume: row.LimitResume, Host: row.Host, ReplacedLead: row.ReplacedLead}
+	return revisionRow{Record: record, Display: row.Display, Current: row.Current, CurrentReason: row.CurrentReason, Attention: row.Attention, InboxSection: row.InboxSection, LimitResume: row.LimitResume, Host: row.Host, ReplacedLead: row.ReplacedLead}
 }

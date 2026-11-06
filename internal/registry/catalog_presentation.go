@@ -29,6 +29,7 @@ type CatalogPresentationRow struct {
 	Retired                                      bool
 	PinnedAt                                     time.Time
 	KeepAlive                                    KeepAlive
+	Snooze                                       Snooze
 }
 
 type CatalogPresentation struct {
@@ -111,14 +112,16 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var observed, registered string
 		var subagent CatalogPresentationSubagent
 		var waiting, background, limit string
-		var pinnedAt, keepAliveFailedAt int64
+		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
+		var snoozeWake string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit,
 			&row.Alias, &row.QueueCount, &row.Archived, &observed, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
-			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error); err != nil {
+			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake); err != nil {
 			return nil, err
 		}
 		row.PinnedAt, row.KeepAlive.FailedAt = unixMilliOrZero(pinnedAt), unixMilliOrZero(keepAliveFailedAt)
+		row.Snooze = scanSnooze(snoozedAt, snoozedUntil, snoozeWake)
 		if row.RegisteredAt, err = parseRegisteredAt(registered); err != nil {
 			return nil, err
 		}
@@ -201,7 +204,8 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.observed_at,cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
- COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,'')
+ COALESCE(at.reason,''),cs.retired,s.registered_at,s.pinned_at_ms,COALESCE(ka.failed_at_ms,0),COALESCE(ka.error,''),
+ s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake
  `
 
 const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id

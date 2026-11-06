@@ -48,6 +48,8 @@ const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive|pin|unpin> <target> [--json]
+       agenthail thread snooze <target> (--until <time|duration> | --until-finished) [--json]
+       agenthail thread wake <target> [--json]
        agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
@@ -61,6 +63,9 @@ func (a *App) cmdThread(args []string) error {
 	}
 	if len(args) > 0 && threadMarks[args[0]] != "" {
 		return a.cmdThreadArchive(args)
+	}
+	if len(args) > 0 && (args[0] == "snooze" || args[0] == "wake") {
+		return a.cmdThreadSnooze(args)
 	}
 	if len(args) > 0 && args[0] == "adopt" {
 		return a.cmdThreadAdopt(args)

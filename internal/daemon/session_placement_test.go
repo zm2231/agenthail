@@ -58,13 +58,17 @@ var placementInputMutations = []placementMutation{
 	{"ObservedSubagents", func(r *dashboardSession, _ time.Time) {
 		r.ObservedSubagents = &surface.SubagentRollup{Count: 1, Working: 1}
 	}},
+	{"PinnedAt", func(r *dashboardSession, now time.Time) { r.PinnedAt = now }},
+	{"Snooze", func(r *dashboardSession, now time.Time) {
+		r.Snooze = &dashboardSnooze{SnoozedAt: now, Until: now.Add(time.Hour), Wake: registry.SnoozeWakeTime}
+	}},
 	{"Host", func(r *dashboardSession, _ time.Time) {
 		r.Host = &dashboardHost{ID: "h1", Name: "vps", State: hostStateUnreachable}
 	}},
 }
 
 // Attention and ReplacedLead reach clients as delivery.* and coordinator.* events; RegisteredAt never changes after insert.
-var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "ReplacedLead": true, "Display": true, "ID": true, "Placement": true}
+var placementExempt = map[string]bool{"RegisteredAt": true, "Attention": true, "ReplacedLead": true, "Display": true, "InboxSection": true, "ID": true, "Placement": true}
 
 var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"RuntimeKind":     func(r *dashboardSession, _ time.Time) { r.RuntimeKind = surface.RuntimeClaudeCLI },
@@ -97,8 +101,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"LiveHiddenSubagents": func(r *dashboardSession, _ time.Time) {
 		r.LiveHiddenSubagents = &surface.SubagentRollup{Count: 2, Working: 1}
 	},
-	"Listed":   func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
-	"PinnedAt": func(r *dashboardSession, now time.Time) { r.PinnedAt = now },
+	"Listed": func(r *dashboardSession, _ time.Time) { r.Listed = !r.Listed },
 }
 
 func TestSessionPlacementClassifiesEveryRowField(t *testing.T) {
