@@ -99,6 +99,7 @@ jobs:
           node scripts/test-dashboard-projects.mjs
           node scripts/test-dashboard-project-view.mjs
           node scripts/test-dashboard-session-order.mjs
+          node scripts/test-dashboard-project-now.mjs
           node scripts/test-dashboard-holders.mjs
           node scripts/test-dashboard-model.mjs
           node scripts/test-dashboard-config-roots.mjs

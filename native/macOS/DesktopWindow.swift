@@ -566,6 +566,7 @@ struct SessionRowView: View {
     /// Why the session needs the person, shown under its title.
     var reason: String? = nil
     var finishedUnseen = false
+    var saysWaiting = false
 
     var body: some View {
         let kind = SessionDisplayKind.of(session)
@@ -592,6 +593,13 @@ struct SessionRowView: View {
                         }
                     }
                 }
+            }
+            if saysWaiting && kind == .waiting {
+                Text(SessionDisplayKind.label(session))
+                    .font(.system(size: DesktopType.caption, weight: .medium))
+                    .foregroundStyle(DesktopPalette.attention)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
             }
             if let host = session.shortRemoteHostName {
                 HostBadge(name: host, unavailable: kind == .unavailable)
