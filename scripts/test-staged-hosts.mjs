@@ -1,4 +1,5 @@
 // Usage: node scripts/test-staged-hosts.mjs INSTALL_ROOT [--files-only]
+import './test-home.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';

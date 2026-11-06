@@ -1,3 +1,4 @@
+import "./test-home.mjs";
 import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from 'node:assert/strict';
 import vm from 'node:vm';

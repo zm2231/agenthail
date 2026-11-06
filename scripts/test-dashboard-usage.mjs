@@ -1,3 +1,4 @@
+import "./test-home.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { POLL_MS, accounts, activeSessions, byHost, problemTone, render, renderPanel, shortLabel, start, text, visible } from "../internal/daemon/dashboard/js/usage.js";

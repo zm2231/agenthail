@@ -1,3 +1,4 @@
+import "./test-home.mjs";
 import assert from "node:assert/strict";
 import { accounts, activeSessions, byProxy, render, renderPanel } from "../internal/daemon/dashboard/js/usage.js";
 import { strip } from "../internal/daemon/dashboard/js/usage-strip.js";

@@ -1,3 +1,4 @@
+import "./test-home.mjs";
 import { dashboardModules } from "./dashboard-modules.mjs";
 import assert from "node:assert/strict";
 import * as tools from "../internal/daemon/dashboard/js/tool-activity.js";

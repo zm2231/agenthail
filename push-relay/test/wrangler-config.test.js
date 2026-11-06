@@ -1,3 +1,4 @@
+import "../../scripts/test-home.mjs"
 import test from "node:test"
 import assert from "node:assert/strict"
 import { renderWranglerConfig } from "../scripts/render-wrangler-config.mjs"
