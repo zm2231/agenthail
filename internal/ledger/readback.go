@@ -16,8 +16,8 @@ func QueuedReadbackInstruction(ref, projectKey string, unattached []string) stri
 
 func readback(lead, ref, report string, unattached []string) string {
 	text := fmt.Sprintf(`[intent ledger] %s
-  agenthail ledger attach %s --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> --to <goal|ask|clause|item|project> --clause "<their words, broadest reading>"
-Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. %s Never narrow what they asked; anything you leave out is a cut they must ack.`, lead, ref, report)
+  agenthail ledger attach %s --to <goal|ask|clause|item|project> --clause "<their words, broadest reading>" [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation>]
+--as is read from --to when left out; the readback says how. Goals: agenthail ledger goals; new goal: agenthail ledger goal <name>. %s Never narrow what they asked; anything you leave out is a cut they must ack.`, lead, ref, report)
 	if len(unattached) > 0 {
 		text += "\nStill unattached from earlier: " + strings.Join(unattached, ", ")
 	}
@@ -54,7 +54,7 @@ func CheckpointInstruction(projectKey string, words []UtteranceView) string {
 		fmt.Fprintf(&b, "  and %d more; agenthail ledger --all lists them\n", more)
 	}
 	b.WriteString(`Attach them in one call, one fragment per intent, separated by --and:
-  agenthail ledger attach <utterance> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> --to <goal|ask|clause|item|project> --clause "<their words, broadest reading>" --and <utterance> --as ...
+  agenthail ledger attach <utterance> --to <goal|ask|clause|item|project> --clause "<their words, broadest reading>" [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation>] --and <utterance> ...
 Never narrow what they asked; anything you leave out is a cut they must ack.`)
 	return b.String()
 }
