@@ -202,7 +202,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		goalSweep:         newGoalSweeper(),
 		workWake:          make(chan struct{}, 1),
 		github:            github.GH{},
-		g2:               newG2Counter(time.Now()),
+		g2:                newG2Counter(time.Now()),
 	}
 	if reg != nil {
 		reg.SetBusyPolicy(d.busyPolicy)
