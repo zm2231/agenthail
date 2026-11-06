@@ -19,8 +19,13 @@ turns, so the page starts at the oldest included prompt. A page reads at most
 the session's retained journal and returns the whole exchanges that fit 1 MB
 of journal rows; a single turn longer than that starts mid-turn and is marked
 truncated. Exchange text shares a 512 KB budget across every exchange of the
-page, so no exchange is dropped. `exchanges` and `timeline.items` describe
-the same turns. `timelineBefore` requests turns strictly before the returned
+page, so no exchange is dropped. `exchangeCount` counts the page's
+exchanges. With `timeline=1` the page carries `timeline.items` and leaves out
+`exchanges`, which clients build from those items; it sends `exchanges` (and
+its `transcriptOriginalBytes`, `transcriptReturnedBytes`,
+`transcriptOriginalExchanges` and `transcriptReturnedExchanges`) only when
+the timeline is unavailable, for a client that shows the conversation without
+it. `timelineBefore` requests turns strictly before the returned
 `timeline.nextBefore` cursor. Items retain
 their identity, role, title, status and retained body reference. If retention
 has pruned history needed by `timelineBefore`, or the journal has no older-history

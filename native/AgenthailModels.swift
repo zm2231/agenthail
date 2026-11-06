@@ -1481,7 +1481,10 @@ struct SessionDetail: Decodable {
     let journalSeq: UInt64?
     var alias: String?
     var limitResume: LimitResumeState?
-    let exchanges: [ExchangeState]
+    /// Present only when the timeline cannot be shown; otherwise the
+    /// conversation is the timeline's items and exchangeCount counts it.
+    let exchanges: [ExchangeState]?
+    let exchangeCount: Int?
     var capabilities: Capabilities
     var readOnly: Bool
     var readOnlyReason: String

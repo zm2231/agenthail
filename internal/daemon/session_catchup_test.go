@@ -41,17 +41,48 @@ func readDashboardExchanges(t *testing.T, handler http.Handler, sessionID, query
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	var page struct {
-		Exchanges []pageExchange `json:"exchanges"`
-		ReadError string         `json:"readError"`
-	}
+	var page timelinePage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
 	if page.ReadError != "" {
 		t.Fatalf("readError=%q", page.ReadError)
 	}
-	return page.Exchanges
+	return page.pageExchanges(t)
+}
+
+type timelinePage struct {
+	Exchanges     json.RawMessage         `json:"exchanges"`
+	ExchangeCount int                     `json:"exchangeCount"`
+	Timeline      surface.SessionTimeline `json:"timeline"`
+	JournalSeq    uint64                  `json:"journalSeq"`
+	CatchingUp    bool                    `json:"catchingUp"`
+	ReadError     string                  `json:"readError"`
+}
+
+func (p timelinePage) exchanges(t *testing.T) []surface.Exchange {
+	t.Helper()
+	if p.Exchanges != nil {
+		t.Fatalf("a page with its timeline also carries exchanges: %s", p.Exchanges)
+	}
+	exchanges := surface.ExchangesFromItems(p.Timeline.Items, p.Timeline.Source)
+	if len(exchanges) != p.ExchangeCount {
+		t.Fatalf("exchangeCount=%d, the timeline holds %d exchanges", p.ExchangeCount, len(exchanges))
+	}
+	return exchanges
+}
+
+func (p timelinePage) pageExchanges(t *testing.T) []pageExchange {
+	t.Helper()
+	encoded, err := json.Marshal(p.exchanges(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exchanges []pageExchange
+	if err := json.Unmarshal(encoded, &exchanges); err != nil {
+		t.Fatal(err)
+	}
+	return exchanges
 }
 
 // readDashboardExchangesWhen reads the session page until ready holds: a

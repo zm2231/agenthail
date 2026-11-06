@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -165,5 +168,27 @@ func TestReplyAfterABuiltInCommandIsTheModelsReplyWhileLastIsTheCommand(t *testi
 	last, err := captureStdout(t, func() error { return app.Run([]string{"last", "claude:s"}) })
 	if err != nil || !strings.Contains(last, "/echo READY") {
 		t.Fatalf("last=%s err=%v", last, err)
+	}
+}
+
+func TestTheDaemonPageClientReadsExchangesFromTheTimelineItCarries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("timeline") != "1" {
+			t.Errorf("query=%s, want the timeline", r.URL.RawQuery)
+		}
+		fmt.Fprint(w, `{"session":{"id":"s"},"readSource":"journal","exchangeCount":2,"timeline":{"source":"journal","nextBefore":0,"truncated":false,"items":[
+			{"id":"1","kind":"message","role":"user","text":"first question","turnId":"a"},
+			{"id":"2","kind":"message","role":"assistant","text":"first answer","turnId":"a"},
+			{"id":"3","kind":"message","role":"user","text":"second question","turnId":"b"},
+			{"id":"4","kind":"message","role":"assistant","text":"second answer","turnId":"b"}]}}`)
+	}))
+	defer server.Close()
+	client := &daemonSessionPageClient{baseURL: server.URL, token: "t", httpClient: server.Client()}
+	read, err := client.ReadSession(context.Background(), &surface.Session{ID: "s"}, surface.SessionReadRequest{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Exchanges) != 2 || read.Exchanges[0].User != "first question" || read.Exchanges[1].Assistant != "second answer" || len(read.Items) != 4 {
+		t.Fatalf("exchanges=%+v items=%d", read.Exchanges, len(read.Items))
 	}
 }
