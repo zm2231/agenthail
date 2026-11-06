@@ -101,8 +101,16 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		})
 		return
 	}
-	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
-	response := map[string]any{"session": session, "alias": alias, "limitResume": d.limitResumeRow(session.ID), "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	response := map[string]any{"session": session, "alias": alias, "limitResume": d.limitResumeRow(session.ID), "exchangeCount": len(sessionRead.Exchanges), "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": sessionRead.Truncated}
+	if timeline := r.URL.Query().Get("timeline") == "1"; !timeline || sessionRead.UnavailableReason != "" {
+		exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
+		response["exchanges"] = exchanges
+		response["transcriptTruncated"] = transcript.Truncated || sessionRead.Truncated
+		response["transcriptOriginalBytes"] = transcript.OriginalBytes
+		response["transcriptReturnedBytes"] = transcript.ReturnedBytes
+		response["transcriptOriginalExchanges"] = transcript.OriginalExchanges
+		response["transcriptReturnedExchanges"] = len(exchanges)
+	}
 	response["journalSeq"] = sessionRead.JournalSeq
 	response["catchingUp"] = catchingUp
 	if sessionReadErr != nil {

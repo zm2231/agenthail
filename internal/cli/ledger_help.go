@@ -50,12 +50,17 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger goal <name>             Create a goal, or show the one with that name
   ledger asks | ledger ask <ask_id>
                                  List all asks, or show one with its clauses
-  ledger attach <utterance_id> --as <how> [--to <id|project>] [--clause "..."] [--and <utterance_id> --as ...]...
+  ledger attach <utterance_id> [--to <id|project>] [--clause "..."] [--as <how>] [--and <utterance_id> ...]...
                                  Attach the person's words, several fragments in one call with --and:
                                  new-ask, extends, constrains, refines,
                                  reacts (--adopt|--reject a clause, --ack a cut), delegates [--session],
                                  decides, conversation; --covers <cut> withdraws a checker's cut
-                                 with a clause from the words it was raised from
+                                 with a clause from the words it was raised from. Without --as it
+                                 is read from the flags: words on a clause or ask extend the ask,
+                                 on a goal or the project start a new ask, on a question answer it;
+                                 no --clause is a reaction, and neither --to nor --clause conversation.
+                                 Rewording (refines), acking (--ack), an answer that rewords or decides
+                                 (answers) and constrains/decides need saying
   ledger propose --to <id|project> --clause "..."
                                  Propose clauses; they bind once the person adopts them
   ledger question --to <id|project> "<question>" --recommendation "..." --default "..."

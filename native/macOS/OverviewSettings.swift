@@ -147,8 +147,7 @@ private struct SurfaceCard: View {
         model.search("")
         model.sessionFilter = .all
         model.sessionRefinement.surface = overview.surface.name
-        NSApplication.shared.activate()
-        openWindow(id: "main")
+        MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
     }
 
     private var color: DesktopStyle {

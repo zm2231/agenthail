@@ -190,7 +190,7 @@ func (a *App) ledgerBoard(store *ledger.Store, args []string) error {
 const ledgerLeadWordsShown = 5
 
 const ledgerAttachInOneCall = `attach your own in one call, one fragment per intent:
-  agenthail ledger attach <utterance> --as <...> --to <...> --clause "..." --and <utterance> --as ...`
+  agenthail ledger attach <utterance> --to <...> --clause "..." [--as <...>] --and <utterance> ...`
 
 func (a *App) ledgerAsks(store *ledger.Store, args []string) error {
 	key, err := ledgerProjectKey(a)

@@ -45,7 +45,7 @@ func TestAPersonDeliveryToACodexSessionQueuesItsReadbackOnce(t *testing.T) {
 		t.Fatalf("want one readback for the Codex session only, got %+v", queued)
 	}
 	ref := ledger.DeliveryRef(intent)
-	for _, want := range []string{"utterance " + ref + " in " + p.key, "agenthail ledger attach " + ref + " --as", "Tell the person each readback line"} {
+	for _, want := range []string{"utterance " + ref + " in " + p.key, "agenthail ledger attach " + ref + " --to", "Left out, --as is read from --to and the other flags", "Tell the person each readback line"} {
 		if !strings.Contains(queued[0][1], want) {
 			t.Fatalf("readback %q lacks %q", queued[0][1], want)
 		}

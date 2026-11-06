@@ -111,6 +111,7 @@ SOURCES=(
   macOS/ComposerPaste.swift
   macOS/ContextBreakdown.swift
   macOS/LocalSend.swift
+  macOS/MainWindowShow.swift
   macOS/Overview.swift
   macOS/QueueFacts.swift
   ScrimField.swift
@@ -124,6 +125,10 @@ SOURCES=(
   macOS/NewSessionDraft.swift
   macOS/NewSessionLabels.swift
   macOS/SessionPane.swift
+  macOS/SidebarRow.swift
+  macOS/StatusItemsState.swift
+  macOS/StatusItems.swift
+  macOS/ReadableButtonStyle.swift
   macOS/SessionRefinementMenu.swift
   macOS/SessionSidebarHeader.swift
   macOS/SessionTabs.swift

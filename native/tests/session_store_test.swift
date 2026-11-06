@@ -8,7 +8,7 @@ struct SessionStoreTest {
         func detail(_ id: String, items: [(String, String)] = [("a", "a1")], nextBefore: Int64? = 40) -> SessionDetail {
             let rows = items.map { #"{"id":"\#($0.0)","kind":"message","role":"assistant","title":"message","text":"\#($0.1)","truncated":false}"# }.joined(separator: ",")
             let before = nextBefore.map(String.init) ?? "null"
-            let json = #"{"session":{"id":"\#(id)","surface":"claude","name":"n","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"journalSeq":100,"exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"readOnly":false,"readOnlyReason":"","timeline":{"items":[\#(rows)],"nextBefore":\#(before),"truncated":false}}"#
+            let json = #"{"session":{"id":"\#(id)","surface":"claude","name":"n","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"journalSeq":100,"exchangeCount":0,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"readOnly":false,"readOnlyReason":"","timeline":{"items":[\#(rows)],"nextBefore":\#(before),"truncated":false}}"#
             return try! JSONDecoder().decode(SessionDetail.self, from: Data(json.utf8))
         }
         func item(_ id: String, _ text: String) -> TimelineItem {
