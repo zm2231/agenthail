@@ -334,10 +334,12 @@ func projectAction(ctx context.Context, client *daemonAPIClient, payload map[str
 	return json.Unmarshal(data, answer)
 }
 
+var threadMarks = map[string]string{"archive": "archived", "unarchive": "unarchived", "pin": "pinned", "unpin": "unpinned"}
+
 func (a *App) cmdThreadArchive(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 2 {
-		return fmt.Errorf("usage: agenthail thread <archive|unarchive> <target> [--json]")
+		return fmt.Errorf("usage: agenthail thread <archive|unarchive|pin|unpin> <target> [--json]")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), a.DefaultTimeout)
 	defer cancel()
@@ -362,7 +364,7 @@ func (a *App) cmdThreadArchive(args []string) error {
 	if hasFlag(args, "--json") {
 		return emit(answer)
 	}
-	fmt.Printf("%sd %s\n", positional[0], positional[1])
+	fmt.Printf("%s %s\n", threadMarks[positional[0]], positional[1])
 	return nil
 }
 

@@ -2291,6 +2291,18 @@
     },
     "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
   },
+  "api/action session-pin": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
+  },
   "api/action session-unarchive": {
     "status": 200,
     "header": {
@@ -2302,6 +2314,18 @@
       ]
     },
     "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/action session-unpin": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
   },
   "api/action status": {
     "status": 200,
@@ -4727,6 +4751,18 @@
     },
     "body": "{\"error\":{\"code\":\"session_operation_failed\",\"message\":\"the runtime broke\"}}\n"
   },
+  "api/v1/actions session-pin": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
+  },
   "api/v1/actions session-unarchive": {
     "status": 200,
     "header": {
@@ -4738,6 +4774,18 @@
       ]
     },
     "body": "{\"archived\":false,\"ok\":true,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions session-unpin": {
+    "status": 200,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
   },
   "api/v1/actions status": {
     "status": 200,

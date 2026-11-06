@@ -1,4 +1,4 @@
--- schemaVersion 58
+-- schemaVersion 59
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -659,6 +659,18 @@ CREATE TABLE session_journal_state (
 	swept_seq INTEGER NOT NULL DEFAULT 0
 );
 
+-- table session_keep_alive
+CREATE TABLE session_keep_alive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
+	failed_at_ms INTEGER NOT NULL DEFAULT 0,
+	announced INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT ''
+);
+
 -- table session_moves
 CREATE TABLE session_moves (
 	id TEXT PRIMARY KEY,
@@ -723,7 +735,8 @@ CREATE TABLE sessions (
 	parent_session_id TEXT NOT NULL DEFAULT '', root_session_id TEXT NOT NULL DEFAULT '',
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
-	host_id TEXT NOT NULL DEFAULT ''
+	host_id TEXT NOT NULL DEFAULT '',
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table signin_bindings
