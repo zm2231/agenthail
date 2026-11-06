@@ -1,0 +1,160 @@
+# Work record: end of turn, worktrees, pull requests
+
+Agenthail keeps a record of the work in each session it launches, beside the session catalog, and gives agents tools built on it. Three capabilities, in order: a structured end of turn, a worktree per task, and pull requests linked to sessions and watched.
+
+## What agents actually use
+
+Measured over every Claude transcript in one config root: about 1,400 `agenthail` CLI calls (1,062 of them `send`, 115 `help`) against 9 MCP calls. Two causes, both observed:
+
+- The start card teaches seven CLI lines and no MCP tool (`internal/agentcard/render.go:21-37`).
+- Claude defers every `mcp__agenthail__*` tool behind ToolSearch, so an MCP call costs a load step; Bash is always loaded.
+
+The design follows from that:
+
+1. **Mechanics before instructions.** Most of the three capabilities need no agent call at all: the Stop hook asks for the end of turn, `gh pr create` links its PR, a merged PR settles the session. What an agent must know fits in two card lines.
+2. **One service, three faces.** The work record lives in a new `internal/workrecord` package over the registry. Writes go through `performAction`, the path the CLI (`internal/cli/daemon_api.go:110`) and MCP writes (`internal/daemon/mcp_write.go:29-46`) already share. One spec table per tool (name, one-line use, input struct) registers the MCP tool, builds the CLI help, and supplies the card line, so the three cannot drift.
+3. **Hosted sessions are taught the tools.** A session holding a live Agenthail MCP credential (every Claude host session and every Codex thread Agenthail starts) gets a card naming MCP tools; a terminal session without the server keeps the CLI card. A small core is always loaded through `_meta["anthropic/alwaysLoad"]: true` (supported by Claude Code 2.1.316): `agenthail_send`, `agenthail_create`, `agenthail_wait`, `agenthail_result`, and later `agenthail_end_turn` and `agenthail_pr`. Everything else stays deferred. `agenthail_end_turn` is MCP only, because the Stop hook and the clients need its structure and validation, and it is named in `CLAUDE_CODE_TERMINAL_MCP_TOOLS` so its result ends the turn without a filler reply.
+4. **A budget test.** A Go test pins the bytes of the rendered card, the always-loaded tool JSON and the whole tool list. Growth fails the test until the pinned numbers are raised in the same change.
+
+### Text injected
+
+| Piece | Today | After |
+|---|---|---|
+| Start card (once per session) | 1,666 bytes (test fixture) | slice 0: 1,702 for the tool card, CLI card unchanged; later slices +300 at most |
+| Always-loaded tool schemas, Claude | 0 | slice 0: 3,993 bytes for send, create, wait, result; then `agenthail_end_turn` and `agenthail_pr` |
+| MCP tool list JSON | 18,849 bytes, 26 tools | slice 0: 19,001 (the `_meta` marks); later +2 tools, at most +4 KB |
+| Nudge, only when a turn skips the call | 0 | at most 300 bytes, once per turn |
+| PR wake, only on a change that needs the agent | 0 | at most 600 bytes each |
+
+Whether Codex defers MCP tools is not yet verified; if it does not, the two new tools cost Codex their full schema each turn, which is why the PR tool is one action tool rather than five.
+
+## Data model
+
+Tables beside the catalog, keyed by session id, one migration per slice. Each takes the next free schema number when it lands, after rechecking main and every open PR.
+
+**`sessions.pinned_at`, `sessions.stopped_by_person_at`, `keep_alive`** (pinned sessions)
+
+| Column | Meaning |
+|---|---|
+| `sessions.pinned_at` | unix ms, null when unpinned; set by `session-pin`, cleared by `session-unpin` |
+| `sessions.stopped_by_person_at` | the person stopped it; cleared by their next send or resume |
+| `keep_alive(session_id, failures, next_at, failed_at)` | backoff state; `failed_at` set after the fifth failure in 30 minutes |
+
+**`turn_ends`**, primary key `(session_id, started_at)`
+
+A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex with its hooks installed), or when `agenthail_end_turn` is called with no open row. The observer binds `completed_turn_id` when it sees the turn complete. A call is a repeat when the latest row has ended and no newer turn has started or completed.
+
+| Column | Meaning |
+|---|---|
+| `completed_turn_id` | the runtime's turn id, bound at completion |
+| `needs` | `you` or `nothing` |
+| `headline` | one line, at most 80 characters |
+| `asks_json` | `[{question, options:[{label, does}], suggested, links:[{title, url}]}]` |
+| `next_json` | follow-ups, at most 3 |
+| `source` | `tool`, `nudged` (tool after the Stop hook), `text` (parsed from the reply), `none` |
+| `answered_at`, `answer_message_id` | set when the person's one reply is queued |
+| `created_at` | |
+
+**`work_records`**, primary key `session_id`
+
+| Column | Meaning |
+|---|---|
+| `repo_root`, `worktree_path`, `branch`, `base_ref`, `base_commit` | what was made |
+| `state` | `active`, `settled` |
+| `settled_reason` | `pr_merged`, `task_reported`, `archived`, `person` |
+| `cleanup` | `pending`, `removed`, or `kept` with `cleanup_reason` (dirty, unpushed, running) |
+| `created_at`, `settled_at` | |
+
+**`session_prs`**, primary key `(session_id, repo, number)`
+
+| Column | Meaning |
+|---|---|
+| `url`, `source` | `agent`, `created` (from `gh pr create`), `branch` (found by the work record's branch), `person` |
+| `watch` | on by default |
+| `title`, `state`, `head_sha`, `mergeable`, `review` | last read; `review` is `approved`, `changes_requested` or `none` |
+| `failed_checks`, `passed_head`, `conflict_head`, `remarks_through`, `remark_ids` | what has already woken the agent, so a change wakes it once |
+| `wakes`, `read_failures`, `last_read_at`, `linked_at` | |
+
+**`work_files`**, primary key `(session_id, path)`, and **`work_commits`**, primary key `(session_id, sha)`
+
+Derived in the daemon from the session's tool events, with no model: Claude `Edit`, `Write`, `MultiEdit` and `NotebookEdit`, Codex file changes, and shell calls running `git commit`.
+
+| Column | Meaning |
+|---|---|
+| `work_files`: `added`, `removed`, `last_at` | lines changed, summed per path |
+| `work_commits`: `subject`, `at`, `pushed` | `pushed` once a remote branch contains it |
+
+A session with none of these rows looks exactly as it does today; adopted terminal sessions gain only what they opt into (an end-of-turn call, an explicit PR link).
+
+## Tools
+
+### `agenthail_end_turn` (MCP, always loaded, terminal)
+
+```
+headline  string, at most 80        sidebar and push line
+needs     "you" | "nothing"
+asks      at most 4: question (at most 160), options 1 to 6 of {label (at most 40), does (at most 90)},
+          suggested (index), links at most 3 of {title, url}
+next      at most 3 strings, with needs "nothing"
+```
+
+Refused, with a message the agent can act on: `needs: "you"` with no ask; asks with `needs: "nothing"`; `suggested` out of range; a second call in one turn. Description, about 600 bytes: write your reply first, then call this as the last thing in every turn; it decides whether the person is pinged.
+
+**A session that reports to an agent** (spawned task, worker under @lead) ends its turn the same way, but `needs: "you"` goes to its spawner or lead as a message, the same routing as permission prompts. The person sees it when the lead escalates it, or when the session has no lead.
+
+**Skipped call.** Claude host: a Stop hook in `claude-host/host.mjs` blocks once (`stop_hook_active` guards the second stop; not while background tasks run) with the nudge. Codex: the per-thread hook config gains a Stop hook, `agenthail hook stop --surface codex`, that asks the daemon whether the turn has a `turn_ends` row; the Codex 0.163 binary carries `stop_hook_active`, and a spike with its own `CODEX_HOME` and app-server confirms the block semantics before that code lands. If the turn still ends without the call, the observer parses a closing "What I need from you" list or "Nothing needed from you" line from the reply (`source: text`); otherwise `source: none` and today's "finished" push stands.
+
+**Effects.** `rowAttention` (`internal/daemon/session_attention.go:5-25`) gains kind `ask`, after `request`, for an unanswered `needs: "you"` with no newer person message. The turn-completed push (`observer.go:223-230`) says "needs you: headline" or "done: headline". The open ask is listed by `/api/v1/requests` as a request of kind `ask`, so the phone's notification buttons (`surface/request_actions.go:35-61`) and the existing question pager work for it unchanged.
+
+**One reply.** New action `turn-answer {sessionId, turnId, picks:[{ask, option | text}], note}`. The daemon composes one numbered message, "1. Deploy the fix? Deploy it" per ask plus the note, queues it through the normal send path, and marks the row answered. Composing in the daemon keeps Mac, iOS, web and the notification buttons identical.
+
+### `isolation: "worktree"` on `agenthail_create` and `agenthail thread create --worktree`
+
+Optional `branch` (default `ah/<alias or 8 hex>`) and `base` (default the spawner's `HEAD` commit, so a child sees committed parent work; the task result says when that `HEAD` was behind its upstream). The daemon finds the main checkout through `git rev-parse --git-common-dir`, adds `<main>/.worktrees/<branch slug>` (the convention host moves already use, `session_move_git.go:191`), starts the session in the same relative folder inside it, and writes `work_records`. Refused when the folder or branch exists, or the cwd is not in a repository.
+
+**Settle and clean up.** A session settles when its task reports, its last linked PR merges, or it is archived. Cleanup then runs `git worktree remove` without force and deletes the branch only when it is merged into the base or contained in a remote branch. It keeps the worktree, recording why, when there are tracked or untracked changes, commits not on any remote, or a live turn. The kept reason shows in the work panel; `agenthail work clean <target>` retries. Claude's own `worktree` passthrough (`host.mjs:447`, `dashboard_action_request.go`) is removed, since this replaces it.
+
+### `agenthail_pr` (MCP) and `agenthail pr` (CLI)
+
+```
+action   "link" | "unlink" | "watch" | "unwatch"
+pr       URL, or number with repo
+session  optional; default yourself
+```
+
+**Automatic link.** When the daemon ingests a finished shell call whose command starts with `gh pr create` and whose output has a line that is only a PR URL, it links that PR with `source: created`. It ports T3's guards (`PullRequestSyncReactor.ts:58-174`): unwrap `sh -lc`, strip heredocs, quotes and comments, and skip when the script also lists PRs or prints more URLs than it created. A work record's branch also links any PR opened on it, by anyone (`source: branch`).
+
+**Watch.** Every 2 minutes, one `gh api graphql` query per repository reads state, mergeability, head, check rollup and reviews for its watched PRs, through the person's own `gh` sign-in; without one, the panel says so and nothing wakes. A wake is queued into the session as an `[agenthail]` turn when, per head: a check newly fails; all required checks pass; the branch conflicts; or someone else reviews or comments. A new head re-arms all of these. A task that has already reported is not woken; its spawner is. Ten comment-only wakes in a row end the watch. Closed unmerged wakes once and stops. **Merged** wakes no one, settles the session, and starts worktree cleanup.
+
+## Clients
+
+This work owns the data, the API fields and the actions (`session-pin`, `session-unpin`, `turn-answer`, `pr`), and the end-of-turn card's content. The sidebar rows, the details and work panel layout and the window frame belong to the client redesign, which binds to these fields as they land and reviews the card's look.
+
+- **Composer card** (Mac, iOS, web): the headline, then the asks through the existing `QuestionPager` and `question-pager.js` with the suggested option marked, then one Send that posts `turn-answer`. A single single-select ask on the phone sends on one tap. It uses the redesign's tokens and row grammar.
+- **Row fields**: `endTurn.headline` for the row subtitle, `ask` attention for the Needs you band, a derived done state for a `needs: "nothing"` idle session, and `pinnedAt`. Placement and controls are the redesign's.
+- **Work fields**: branch, worktree path, kept-cleanup reason, each PR with its state, review and check summary, `work.files` and `work.commits`. The panel is the redesign's.
+- **Push**: needs you and done text from the headline; ask buttons through the request path above.
+
+## Slices
+
+Each slice is one PR, builds on a working product, and lands with the budget test updated.
+
+| # | Slice | Acceptance tests |
+|---|---|---|
+| 0 | Tool spec table and budget test | `tools/list` is generated from the spec; the test pins card, always-loaded and list bytes and fails on growth |
+| 1 | Pinned sessions stay up: `pinned_at`, `session-pin`/`session-unpin` (CLI `agenthail pin`/`unpin`), keeper | a pinned session that exits is resumed once, and after a daemon restart; the resume sends no input (no host turn, no `turn/start`); archived or person-stopped sessions are never resumed; a mirrored row from a paired host is skipped; a failing resume follows 30s, 1m, 2m, 4m, 8m, then `keepAliveFailed` attention exactly once; a project's first lead starts pinned, a replacement lead inherits the old one's pin, and unpin always works |
+| 2 | `agenthail_end_turn`, `turn_ends`, `ask` attention, push text | MCP call stores the row; each refusal case; a needs-you turn puts the row in the Needs you band and the push says "needs you: headline"; a worker's needs-you reaches its spawner or lead, not the person |
+| 3 | Nudge and fallback | claude-host test with a fake query: a turn without the call is blocked once, not twice, not while background tasks run; Codex Stop hook tested against a scratch app-server; parser table tests built from real reply endings |
+| 4 | One reply and the card | `turn-answer` queues exactly one numbered message, idempotent on retry, and clears the attention; notification buttons answer an ask; the card's content in `QuestionPager` in web, Mac and iOS |
+| 5 | Worktree isolation, `work_records`, cleanup | temporary repository: create makes branch and worktree and starts there; settle removes a clean merged worktree; dirty or unpushed is kept with its reason; Claude passthrough removed |
+| 6 | PR link, `session_prs` | explicit link and unlink through CLI and MCP; `gh pr create` cases link, guarded cases do not; branch link; without `gh` or a sign-in, link refuses with the reason |
+| 7 | PR watch and settle | fake GitHub reads: a failing check wakes once per head; a new head re-arms; conflict wakes once; merged settles the session and removes its worktree without a wake |
+| 8 | Files and commits | recorded transcripts of Claude and Codex edits and commits produce the expected `work_files` and `work_commits` rows; a commit is marked pushed once a remote branch has it |
+| 9 | Work data on the API | the session view carries branch, worktree, PRs with checks, files, commits and kept reason; the panel itself is the client redesign's |
+
+## Decisions
+
+1. Hosted sessions are taught MCP tools, with a small always-loaded core; terminal sessions keep the CLI card. One spec table generates both cards and the MCP tool list.
+2. The worktree base defaults to the spawner's `HEAD`, with an explicit `base` (for example `origin/main`). The task result says when `HEAD` was behind its upstream.
+3. GitHub goes through whatever `gh` is signed into, including `GH_TOKEN` setups. Agenthail stores no token. Without `gh` or a sign-in, PR features are off and the work panel says why.
+4. A worker's needs-you goes to its spawner or lead, the same routing as permission prompts. The person sees it when the lead escalates it, or when the session has no lead.

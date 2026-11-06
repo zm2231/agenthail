@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -59,13 +60,16 @@ type Card struct {
 	Decides     bool                `json:"decides,omitempty"`
 	InboundHeld string              `json:"inboundHeld,omitempty"`
 	Ask         *Ask                `json:"ask,omitempty"`
+	MCP         bool                `json:"mcp,omitempty"`
 	Commands    []Command           `json:"commands,omitempty"`
 }
 
 func Unresolved(reason string) Card { return Card{Reason: reason} }
 
 // Project returns nil for a folder outside every project. PromptsHeld
-// reports whether Agenthail holds a terminal Claude session's prompts.
+// reports whether Agenthail holds a terminal Claude session's prompts. MCP
+// reports whether the session holds a live credential for Agenthail's MCP
+// server, and so has its tools.
 type Sources struct {
 	Registry     *registry.Registry
 	Project      func(ctx context.Context, cwd string) (*Project, error)
@@ -73,6 +77,7 @@ type Sources struct {
 	PromptsHeld  func(surface.Session) bool
 	InboundHeld  func(surface.Session) string
 	PromptHearer func(ctx context.Context, session surface.Session) string
+	MCP          func(surface.Session) bool
 }
 
 func (s Sources) For(ctx context.Context, session surface.Session) (Card, error) {
@@ -107,6 +112,7 @@ func (s Sources) For(ctx context.Context, session surface.Session) (Card, error)
 	if card.Lead != nil && card.Lead.Self && session.RuntimeKind == surface.RuntimeClaudeCLI && s.InboundHeld != nil {
 		card.InboundHeld = s.InboundHeld(session)
 	}
+	card.MCP = s.MCP != nil && session.Surface != surface.KindNotion && s.MCP(session)
 	card.ReportTo = reportTo(card)
 	card.Commands = commands(card)
 	return card, nil
@@ -247,20 +253,14 @@ func commands(card Card) []Command {
 	if card.Surface == surface.KindNotion {
 		return nil
 	}
-	var out []Command
-	if card.ReportTo != "" {
-		out = append(out, Command{Use: "report a result or a blocker", Line: fmt.Sprintf(`agenthail send %s "<result>"`, card.ReportTo)})
-	}
-	out = append(out,
-		Command{Use: "message another session", Line: `agenthail send <@alias|session-id> "<message>"`},
-		Command{Use: "find sessions and their aliases", Line: "agenthail list --json"},
-		Command{Use: "read a session's latest output", Line: "agenthail last <@alias|session-id>"},
-	)
+	in := agenttools.CardInput{ReportTo: card.ReportTo, MCP: card.MCP}
 	if card.Project != nil {
-		out = append(out, Command{Use: "tell every session in this project", Line: fmt.Sprintf(`agenthail channel send '#%s' "<message>"`, card.Project.ID)})
+		in.Project = card.Project.ID
 	}
-	return append(out,
-		Command{Use: "start a helper session", Line: `agenthail thread create <claude|codex> "<task>" --alias <name>`},
-		Command{Use: "check who you are now", Line: "agenthail whoami --json"},
-	)
+	lines := agenttools.CardLines(in)
+	out := make([]Command, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, Command{Use: line.Use, Line: line.Line})
+	}
+	return out
 }

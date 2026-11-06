@@ -21,11 +21,17 @@ type starterCLISurface struct {
 	delivery *surface.SendResult
 	err      error
 	wait     bool
+	ready    bool
 	during   func()
 }
 
 func (f *starterCLISurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.options = append(f.options, options)
+	if f.ready && f.session != nil {
+		if err := surface.SessionReady(ctx, *f.session); err != nil {
+			return f.session, nil, err
+		}
+	}
 	if f.during != nil {
 		f.during()
 	}
