@@ -81,11 +81,7 @@ test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/che
 test "$(readlink "$work/home/.hermes/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
 PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
 (cd "$root" && PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")
-"$root/runtime/node/bin/node" --check "$root/claude-host/host.mjs"
-(cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('./checker.mjs').then(module => { if (!module.checkerOptions) process.exit(1) })")
-(cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
-"$root/runtime/node/bin/node" --check "$root/browser-host/host.mjs"
-(cd "$root/browser-host" && "$root/runtime/node/bin/node" -e "import('./browser.mjs').then(module => { if (!module.pinnedShell().version) process.exit(1) })")
+"$root/runtime/node/bin/node" "$(dirname "$0")/test-staged-hosts.mjs" "$root"
 
 linkage="$work/linkage.txt"
 while IFS= read -r path; do

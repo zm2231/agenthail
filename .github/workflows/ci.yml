@@ -246,10 +246,19 @@ jobs:
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
           mkdir -p "$RUNNER_TEMP/inspect"
           tar -xzf dist/agenthail-v0.0.0-ci-linux-amd64.tar.gz -C "$RUNNER_TEMP/inspect"
+          tar -xzf dist/agenthail-v0.0.0-ci-linux-arm64.tar.gz -C "$RUNNER_TEMP/inspect"
           root="$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-amd64"
           test "$("$root/runtime/node/bin/node" --version)" = v22.23.1
-          (cd "$root/claude-host" && "$root/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
-          (cd "$root/browser-host" && "$root/runtime/node/bin/node" -e "import('./browser.mjs').then(module => { if (!module.pinnedShell().version) process.exit(1) })")
+          "$root/runtime/node/bin/node" scripts/test-staged-hosts.mjs "$root"
+          node scripts/test-staged-hosts.mjs "$RUNNER_TEMP/inspect/agenthail-v0.0.0-ci-linux-arm64" --files-only
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-linux-archives
+          path: |
+            dist/agenthail-v0.0.0-ci-linux-*.tar.gz
+            dist/agenthail-v0.0.0-ci-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 3
 
   installer:
     needs: gate
@@ -306,6 +315,12 @@ jobs:
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
         run: scripts/test-pkg-artifact.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-pkg
+          path: dist/Agenthail-v0.0.0-ci-arm64.pkg
+          if-no-files-found: error
+          retention-days: 3
       - name: Verify main window layout at narrow widths
         run: |
           pkgutil --expand-full dist/Agenthail-v0.0.0-ci-arm64.pkg "$RUNNER_TEMP/layout-pkg"

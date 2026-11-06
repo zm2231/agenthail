@@ -49,6 +49,8 @@ scripts/build-pkg.sh
 scripts/test-pkg-artifact.sh dist/Agenthail-v0.1.6-arm64.pkg
 ```
 
+`scripts/test-staged-hosts.mjs <install root>` checks that every module of `claude-host/` and `browser-host/` was staged, then starts each host's `host.mjs` from that root with the shipped Node and a temporary working directory, so it resolves only staged files, and checks that it answers `hello`. The package verifier runs it on the pkg payload; CI and the release run it on the amd64 archive, and the file check alone on arm64, whose Node the runner cannot execute.
+
 Production builds fail closed without Developer ID Application, Developer ID Installer, and notary credentials. Local package development can use `AGENTHAIL_ALLOW_DIRTY=1 AGENTHAIL_ALLOW_UNNOTARIZED=1`.
 
 The release workflow expects these repository secrets:

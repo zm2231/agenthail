@@ -254,8 +254,9 @@ jobs:
           if [ "$ARCH" = "amd64" ]; then
             "$RUNNER_TEMP/inspect/$name/agenthail" version --json | jq -e --arg version "$AGENTHAIL_VERSION" '.version == $version'
             test "$("$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" --version)" = v22.23.1
-            (cd "$RUNNER_TEMP/inspect/$name/claude-host" && "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" -e "import('@anthropic-ai/claude-agent-sdk').then(module => { if (!module.query) process.exit(1) })")
-            (cd "$RUNNER_TEMP/inspect/$name/browser-host" && "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" -e "import('./browser.mjs').then(module => { if (!module.pinnedShell().version) process.exit(1) })")
+            "$RUNNER_TEMP/inspect/$name/runtime/node/bin/node" scripts/test-staged-hosts.mjs "$RUNNER_TEMP/inspect/$name"
+          else
+            node scripts/test-staged-hosts.mjs "$RUNNER_TEMP/inspect/$name" --files-only
           fi
       - uses: actions/upload-artifact@v7
         with:
