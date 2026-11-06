@@ -22,7 +22,7 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 	if input.ObservedAt.IsZero() {
 		input.ObservedAt = time.Now().UTC()
 	}
-	tx, err := r.db.Begin()
+	tx, err := r.beginJournal()
 	if err != nil {
 		return SessionJournalEntry{}, err
 	}
@@ -35,7 +35,7 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 		return SessionJournalEntry{}, ErrSessionJournalBodyMoved
 	}
 	var stored int
-	if err := tx.QueryRow(`SELECT COALESCE((SELECT start+length(chunk) FROM session_journal_body_tail WHERE ref=?1 ORDER BY start DESC LIMIT 1),length(body)) FROM session_journal_bodies WHERE session_id=?2 AND ref=?1`, input.BodyRef, input.SessionID).Scan(&stored); err != nil {
+	if err := tx.QueryRow(journalBodyStoredLengthSQL, input.BodyRef, input.SessionID).Scan(&stored); err != nil {
 		if err == sql.ErrNoRows {
 			return SessionJournalEntry{}, ErrSessionJournalBodyMoved
 		}
@@ -50,17 +50,17 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 		return SessionJournalEntry{}, fmt.Errorf("%w: %d > %d", ErrSessionJournalEntryTooLarge, input.Bytes, retention.Bytes)
 	}
 	var next int64
-	if err := tx.QueryRow(`SELECT next_seq FROM session_journal_state WHERE session_id=?`, input.SessionID).Scan(&next); err != nil {
+	if err := tx.QueryRow(journalNextSeqSQL, input.SessionID).Scan(&next); err != nil {
 		return SessionJournalEntry{}, err
 	}
 	input.Seq, input.Position = uint64(next+1), existing.Position
-	if _, err := tx.Exec(`INSERT INTO session_journal_body_tail(ref,session_id,start,chunk) VALUES(?,?,?,?)`, input.BodyRef, input.SessionID, from, tail); err != nil {
+	if _, err := tx.Exec(journalBodyAppendTailSQL, input.BodyRef, input.SessionID, from, tail); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,payload_role=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, journalRole(input.Kind, input.Payload), input.SessionID, existing.Seq); err != nil {
+	if _, err := tx.Exec(journalUpdateAppendedRowSQL, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, journalRole(input.Kind, input.Payload), input.SessionID, existing.Seq); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,retained_bytes=retained_bytes+? WHERE session_id=?`, input.Seq, input.Bytes-existing.Bytes, input.SessionID); err != nil {
+	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-existing.Bytes, input.SessionID); err != nil {
 		return SessionJournalEntry{}, err
 	}
 	if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
@@ -71,13 +71,13 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 
 func readSessionJournalFullBody(q bodyQuerier, sessionID, ref string) ([]byte, bool, error) {
 	var body []byte
-	if err := q.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, ref).Scan(&body); err != nil {
+	if err := q.QueryRow(journalBodySQL, sessionID, ref).Scan(&body); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, false, nil
 		}
 		return nil, false, err
 	}
-	rows, err := q.Query(`SELECT chunk FROM session_journal_body_tail WHERE ref=? ORDER BY start`, ref)
+	rows, err := q.Query(journalBodyTailSQL, ref)
 	if err != nil {
 		return nil, false, err
 	}
@@ -92,8 +92,8 @@ func readSessionJournalFullBody(q bodyQuerier, sessionID, ref string) ([]byte, b
 	return body, true, rows.Err()
 }
 
-func deleteSessionJournalBody(tx *sql.Tx, sessionID, ref string) error {
-	if _, err := tx.Exec(`DELETE FROM session_journal_body_tail WHERE session_id=? AND ref=?`, sessionID, ref); err != nil {
+func deleteSessionJournalBody(tx journalWriter, sessionID, ref string) error {
+	if _, err := tx.Exec(journalBodyClearTailSQL, sessionID, ref); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, ref)

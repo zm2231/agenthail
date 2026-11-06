@@ -25,6 +25,7 @@ type Registry struct {
 	seen          deviceSeen
 	retryBackoff  time.Duration
 	migration     *MigrationTiming
+	journal       journalStatements
 }
 
 func (r *Registry) SetRetryBackoff(backoff time.Duration) {
@@ -109,18 +110,30 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 		r.Close()
 		return nil, err
 	}
-	if current {
-		return r, nil
+	if !current {
+		if err := r.migrate(allowUpgrade); err != nil {
+			r.Close()
+			return nil, err
+		}
+		if _, err := r.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+			r.Close()
+			return nil, fmt.Errorf("enable registry WAL: %w", err)
+		}
 	}
-	if err := r.migrate(allowUpgrade); err != nil {
-		r.Close()
+	if err := r.prepare(); err != nil {
 		return nil, err
 	}
-	if _, err := r.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("enable registry WAL: %w", err)
-	}
 	return r, nil
+}
+
+func (r *Registry) prepare() error {
+	prepared, err := prepareJournalStatements(r.db)
+	if err != nil {
+		r.Close()
+		return fmt.Errorf("prepare registry statements: %w", err)
+	}
+	r.journal = prepared
+	return nil
 }
 
 func OpenCurrent(path string) (*Registry, error) {
@@ -145,6 +158,9 @@ func OpenCurrent(path string) (*Registry, error) {
 	if version != schemaVersion {
 		r.Close()
 		return nil, fmt.Errorf("registry is schema %d; this agenthail uses %d", version, schemaVersion)
+	}
+	if err := r.prepare(); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
@@ -209,5 +225,5 @@ func (r *Registry) Close() error {
 	r.seen.mu.Unlock()
 	r.writeStamps(pending)
 	defer closeOpenLock(r.openLock)
-	return errors.Join(r.read.Close(), r.db.Close())
+	return errors.Join(r.journal.close(), r.read.Close(), r.db.Close())
 }
