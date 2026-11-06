@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -74,7 +75,9 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 
 func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, wake <-chan struct{}) {
 	sse.Open(w)
-	toItem := d.journalItemReader(sessionID)
+	stream := newSessionStreamWriter(w, sessionID, d.journalItemReader(sessionID), func(ref string, head, from int) (registry.SessionJournalBodyView, bool, error) {
+		return d.Registry.SessionJournalBodyView(sessionID, ref, head, from)
+	})
 	watermark := window.LatestSeq
 	if watermark < after {
 		watermark = after
@@ -83,7 +86,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 		if !d.apiEventStreamAuthorized(r) {
 			return
 		}
-		if err := writeSessionStreamEntry(w, sessionID, entry, toItem); err != nil {
+		if err := stream.write(entry); err != nil {
 			return
 		}
 		if entry.Seq > watermark {
@@ -92,7 +95,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 	}
 	follow := func() bool {
 		more, _ := readSessionJournalAfter(d.Registry, sessionID, &watermark, func(entry registry.SessionJournalEntry) bool {
-			return d.apiEventStreamAuthorized(r) && writeSessionStreamEntry(w, sessionID, entry, toItem) == nil
+			return d.apiEventStreamAuthorized(r) && stream.write(entry) == nil
 		})
 		flusher.Flush()
 		return more
@@ -147,10 +150,14 @@ func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry regi
 		item := toItem(row)
 		envelope.Item = &item
 	}
+	return writeSessionStreamEnvelope(w, envelope)
+}
+
+func writeSessionStreamEnvelope(w io.Writer, envelope sessionStreamEnvelope) error {
 	encoded, err := marshalAPIJSON(envelope)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", entry.Seq, encoded)
+	_, err = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", envelope.Seq, encoded)
 	return err
 }
