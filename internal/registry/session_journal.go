@@ -204,7 +204,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 				}
 			}
 			input.Position = existing.Position
-			if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
+			if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=?,payload_role=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, journalRole(input.Kind, input.Payload), input.SessionID, existing.Seq); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
 			if err := storeSessionJournalBody(tx, input); err != nil {
@@ -220,7 +220,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		}
 	}
 	input.Position = input.Seq
-	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_role) VALUES(?,?,?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Position, input.Kind, input.ProviderKey, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.BodyRef, journalRole(input.Kind, input.Payload)); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	if err := storeSessionJournalBody(tx, input); err != nil {
@@ -469,7 +469,7 @@ func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJour
 	if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
-	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?,?)`)
+	insert, err := tx.Prepare(`INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_role) VALUES(?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +484,7 @@ func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJour
 		if entry.ObservedAt.IsZero() {
 			entry.ObservedAt = time.Now().UTC()
 		}
-		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, formatTimestamp(entry.ObservedAt), entry.Bytes, entry.BodyRef); err != nil {
+		if _, err := insert.Exec(sessionID, entry.Seq, entry.Position, entry.Kind, entry.ProviderKey, entry.Payload, formatTimestamp(entry.ObservedAt), entry.Bytes, entry.BodyRef, journalRole(entry.Kind, entry.Payload)); err != nil {
 			return nil, err
 		}
 		if err := storeSessionJournalBody(tx, *entry); err != nil {

@@ -1,4 +1,4 @@
--- schemaVersion 56
+-- schemaVersion 57
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -619,7 +619,8 @@ CREATE TABLE session_journal (
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
-	payload_codec INTEGER NOT NULL DEFAULT 0, payload_role TEXT GENERATED ALWAYS AS (json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.role')) VIRTUAL, payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN kind IN ('message','text') AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
+	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '', payload_origin TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.origin'),'')) VIRTUAL, payload_body TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.body'),'')) VIRTUAL, payload_item_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.itemId'),'')) VIRTUAL, payload_turn_id TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.turnId'),'')) VIRTUAL, payload_ts TEXT GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.ts'),'')) VIRTUAL, payload_truncated INTEGER GENERATED ALWAYS AS (COALESCE(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.truncated'),0)) VIRTUAL, payload_at REAL GENERATED ALWAYS AS (COALESCE(julianday(json_extract(CASE WHEN payload_role='user' AND json_valid(payload) THEN payload END,'$.ts')),julianday(observed_at),0)) VIRTUAL,
 	PRIMARY KEY (session_id, seq)
 );
 

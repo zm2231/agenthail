@@ -331,6 +331,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
 	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key

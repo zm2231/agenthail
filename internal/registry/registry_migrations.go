@@ -193,7 +193,7 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
-	if err := ensureJournalPromptIndexes(tx); err != nil {
+	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {

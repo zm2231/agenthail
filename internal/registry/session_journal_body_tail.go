@@ -57,7 +57,7 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 	if _, err := tx.Exec(`INSERT INTO session_journal_body_tail(ref,session_id,start,chunk) VALUES(?,?,?,?)`, input.BodyRef, input.SessionID, from, tail); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, input.SessionID, existing.Seq); err != nil {
+	if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,payload_role=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, journalRole(input.Kind, input.Payload), input.SessionID, existing.Seq); err != nil {
 		return SessionJournalEntry{}, err
 	}
 	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,retained_bytes=retained_bytes+? WHERE session_id=?`, input.Seq, input.Bytes-existing.Bytes, input.SessionID); err != nil {
