@@ -11,6 +11,8 @@ type dashboardActionRequest struct {
 	surface.TurnOptions
 	Name            string                     `json:"name"`
 	Worktree        string                     `json:"worktree"`
+	Isolation       string                     `json:"isolation"`
+	Base            string                     `json:"base"`
 	Agent           string                     `json:"agent"`
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`

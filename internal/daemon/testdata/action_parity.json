@@ -2507,6 +2507,18 @@
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
   },
+  "api/action work-clean": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
+  },
   "api/v1/actions alias": {
     "status": 200,
     "header": {
@@ -5014,5 +5026,17 @@
       ]
     },
     "body": "{\"ok\":true,\"result\":{\"sessionId\":\"to\",\"action\":\"usage\",\"evidence\":\"delivered\",\"source\":\"parity\"}}\n"
+  },
+  "api/v1/actions work-clean": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
   }
 }

@@ -499,6 +499,21 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_running ON tasks(child_session_id) WHERE state='running';
 CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_session_id);
+CREATE TABLE IF NOT EXISTS work_records (
+	worktree_path TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL,
+	branch TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	base_commit TEXT NOT NULL,
+	state TEXT NOT NULL,
+	settled_reason TEXT NOT NULL DEFAULT '',
+	cleanup TEXT NOT NULL DEFAULT '',
+	cleanup_reason TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS work_records_session ON work_records(session_id) WHERE session_id<>'';
 CREATE TABLE IF NOT EXISTS catalog_retired_version (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	version INTEGER NOT NULL

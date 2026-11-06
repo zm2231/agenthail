@@ -207,6 +207,10 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read project leads: %w", err)
 	}
+	works, err := d.Registry.SessionWork()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session worktrees: %w", err)
+	}
 	local := make([]int, 0, len(sessions))
 	for _, session := range sessions {
 		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
@@ -236,6 +240,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			observedAt = now.UTC()
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
+		if work, found := works[session.ID]; found {
+			entry.Worktree = newWorkView(work)
+		}
 		if record, found := catalogSessions[session.ID]; found {
 			entry.Freshness, entry.RegisteredAt = &record.Freshness, record.RegisteredAt
 		}

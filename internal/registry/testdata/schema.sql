@@ -1,4 +1,4 @@
--- schemaVersion 65
+-- schemaVersion 66
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -104,6 +104,9 @@ CREATE INDEX tasks_parent ON tasks(parent_session_id);
 
 -- index tasks_running
 CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
+-- index work_records_session
+CREATE UNIQUE INDEX work_records_session ON work_records(session_id) WHERE session_id<>'';
 
 -- table action_receipts
 CREATE TABLE action_receipts (
@@ -829,6 +832,22 @@ CREATE TABLE turn_ends (
 	answer_status TEXT NOT NULL DEFAULT '',
 	answer_message_id TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, started_at_ms)
+);
+
+-- table work_records
+CREATE TABLE work_records (
+	worktree_path TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL,
+	branch TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	base_commit TEXT NOT NULL,
+	state TEXT NOT NULL,
+	settled_reason TEXT NOT NULL DEFAULT '',
+	cleanup TEXT NOT NULL DEFAULT '',
+	cleanup_reason TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- trigger catalog_presentation_version_aliases_delete

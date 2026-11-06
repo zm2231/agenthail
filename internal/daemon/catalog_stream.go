@@ -668,9 +668,16 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	if registered.IsZero() {
 		registered = observedAt.UTC().Truncate(time.Second)
 	}
+	work, hasWork, err := d.Registry.WorkForSession(session.ID)
+	if err != nil {
+		return false
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config)
 		row.RegisteredAt = registered
+		if hasWork {
+			row.Worktree = newWorkView(work)
+		}
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
 		if d.settleArchiveActivity([]dashboardSession{row}, view) {

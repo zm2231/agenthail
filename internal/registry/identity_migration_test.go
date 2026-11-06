@@ -181,6 +181,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	exec(`INSERT INTO session_credentials(pending_ref,claimed_session_id,token_hash,created_at_ms,idle_expires_at_ms,max_expires_at_ms) VALUES('ref',?,'pending-hash',1,2,3)`, rekeyedBridge)
 	exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,'agent',?)`, rekeyedBridge, collidedBridge)
 	exec(`INSERT INTO tasks(parent_session_id,child_session_id,task,created_at_ms) VALUES(?,?,'work',1)`, collidedBridge, rekeyedBridge)
+	exec(`INSERT INTO work_records(worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,created_at_ms) VALUES('/repo/.worktrees/ah-x',?,'/repo','ah/x','main','abc','active',1)`, rekeyedBridge)
 	exec(`INSERT INTO session_ceilings(session_id,ceiling) VALUES(?,'{"permission":"edits"}')`, rekeyedBridge)
 	exec(`INSERT INTO session_context(session_id,fingerprint,delivered_at_ms) VALUES(?,'f',1)`, rekeyedBridge)
 	exec(`INSERT INTO limit_resumes(session_id,turn_id,refused_at_ms) VALUES(?,'refused',1)`, rekeyedBridge)

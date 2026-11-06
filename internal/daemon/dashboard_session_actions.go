@@ -15,7 +15,7 @@ import (
 
 func daemonSessionAction(action string) bool {
 	switch action {
-	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive":
+	case "session-lifecycle-stop", "session-lifecycle-status", "session-lifecycle-logs", "session-archive", "work-clean":
 		return true
 	}
 	return false
@@ -55,6 +55,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionSnooze(session, request.Until, request.Wake)
 	case "session-wake":
 		return d.doSessionWake(session.ID)
+	case "work-clean":
+		return d.doWorkClean(ctx, p, session.ID)
 	case "alias":
 		return d.doSessionAlias(session, request.Alias)
 	}
