@@ -21,6 +21,7 @@ type CatalogPresentationRow struct {
 	LastActive, RegisteredAt               time.Time
 	Subagent                               *CatalogPresentationSubagent
 	WaitingOn, BackgroundTasks, UsageLimit json.RawMessage
+	TurnStop                               json.RawMessage
 	Alias                                  sql.NullString
 	QueueCount                             int
 	Archived                               bool
@@ -121,11 +122,11 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var lastActive int64
 		var observed, registered string
 		var subagent CatalogPresentationSubagent
-		var waiting, background, limit string
+		var waiting, background, limit, stop string
 		var pinnedAt, keepAliveFailedAt, snoozedAt, snoozedUntil int64
 		var snoozeWake string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
-			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit,
+			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &observed, &row.Freshness.Generation, &row.Freshness.Stale, &row.Attention, &row.Retired, &registered,
 			&pinnedAt, &keepAliveFailedAt, &row.KeepAlive.Error, &snoozedAt, &snoozedUntil, &snoozeWake); err != nil {
 			return nil, err
@@ -141,7 +142,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		if subagent.ParentID != "" {
 			row.Subagent = &subagent
 		}
-		row.WaitingOn, row.BackgroundTasks, row.UsageLimit = presentationJSON(waiting), presentationJSON(background), presentationJSON(limit)
+		row.WaitingOn, row.BackgroundTasks, row.UsageLimit, row.TurnStop = presentationJSON(waiting), presentationJSON(background), presentationJSON(limit), presentationJSON(stop)
 		if row.Freshness.ObservedAt, err = parseTimestamp(observed); err != nil {
 			return nil, err
 		}
@@ -210,7 +211,7 @@ func catalogFingerprints(ctx context.Context, tx *sql.Tx, ids []string) (map[str
 
 const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.status,s.cwd,s.last_active_ms,s.runtime_kind,s.source,s.transport,
  CASE WHEN s.host_id!='' THEN cs.unavailable_reason ELSE '' END,s.parent_session_id,s.root_session_id,s.subagent_depth,s.agent_nickname,s.agent_role,
- CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),
+ CAST(cs.waiting_on AS TEXT),CAST(cs.background_tasks AS TEXT),CAST(cs.usage_limit AS TEXT),CAST(cs.turn_stop AS TEXT),
  a.name,cs.host_queue_count+COALESCE(q.n,0),
  sa.session_id IS NOT NULL OR COALESCE(p.archived_at_ms,0)>0,
  cs.observed_at,cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),

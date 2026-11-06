@@ -16,7 +16,7 @@ func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) 
 }
 
 func sessionSelect(status string) string {
-	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),` + sessionSubagentSelect
+	return `SELECT s.id,s.surface,s.name,s.cwd,s.pid,` + status + `,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),COALESCE(cs.waiting_on,X''),COALESCE(cs.background_tasks,X''),COALESCE(cs.usage_limit,X''),COALESCE(cs.turn_stop,X''),` + sessionSubagentSelect
 }
 
 const sessionJoins = ` LEFT JOIN session_runtime sr ON sr.session_id=s.id LEFT JOIN catalog_sessions cs ON cs.session_id=s.id`
@@ -27,10 +27,10 @@ func scanSession(scanner rowScanner) (surface.Session, error) {
 	var hasLocal int
 	var lastActiveMS int64
 	var launcher string
-	var location, waitingOn, background, usageLimit []byte
+	var location, waitingOn, background, usageLimit, turnStop []byte
 	var focusable int
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable, &waitingOn, &background, &usageLimit, &turnStop}, subagent.targets()...)...); err != nil {
 		return surface.Session{}, err
 	}
 	session.Surface = surface.SurfaceKind(kind)
@@ -52,6 +52,9 @@ func scanSession(scanner rowScanner) (surface.Session, error) {
 		return surface.Session{}, err
 	}
 	if session.UsageLimit, err = decodeCatalogUsageLimit(usageLimit); err != nil {
+		return surface.Session{}, err
+	}
+	if session.TurnStop, err = decodeCatalogTurnStop(turnStop); err != nil {
 		return surface.Session{}, err
 	}
 	return session, nil
@@ -102,6 +105,24 @@ func encodeCatalogUsageLimit(limit *surface.UsageLimit) ([]byte, error) {
 		return []byte{}, nil
 	}
 	return json.Marshal(limit)
+}
+
+func decodeCatalogTurnStop(raw []byte) (*surface.TurnStop, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var stop *surface.TurnStop
+	if err := json.Unmarshal(raw, &stop); err != nil {
+		return nil, fmt.Errorf("parse catalog turn stop: %w", err)
+	}
+	return stop, nil
+}
+
+func encodeCatalogTurnStop(stop *surface.TurnStop) ([]byte, error) {
+	if stop == nil {
+		return []byte{}, nil
+	}
+	return json.Marshal(stop)
 }
 
 func (r *Registry) Session(id string) (*surface.Session, error) {

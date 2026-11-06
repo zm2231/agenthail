@@ -17,6 +17,8 @@ type codexLiveTurnRecord struct {
 		Type   string `json:"type"`
 		Name   string `json:"name"`
 		CallID string `json:"call_id"`
+		TurnID string `json:"turn_id"`
+		Error  any    `json:"error"`
 	} `json:"payload"`
 }
 
@@ -31,6 +33,7 @@ type codexLiveTurn struct {
 	startedAt time.Time
 	lastAt    time.Time
 	pending   []codexPendingCall
+	stop      *surface.TurnStop
 }
 
 func parseCodexLiveTurnRecord(line []byte) (codexLiveTurnRecord, time.Time, bool) {
@@ -64,9 +67,11 @@ func (t *codexLiveTurn) apply(line []byte) {
 		t.lastAt = at
 	}
 	if started, ended := codexLifecycle(record); started || ended {
-		t.known, t.open, t.pending = true, started, nil
+		t.known, t.open, t.pending, t.stop = true, started, nil, nil
 		if started {
 			t.startedAt = at
+		} else if record.Payload.Error != nil {
+			t.stop = codexFailureStop(record.Payload.TurnID, at, record.Payload.Error)
 		}
 		return
 	}
@@ -146,6 +151,7 @@ type codexLiveTurnRead struct {
 	status   surface.SessionStatus
 	activity *surface.Activity
 	newest   time.Time
+	stop     *surface.TurnStop
 }
 
 // Only a thread Codex runs or has loaded is read back past codexStatusReadLimit.
@@ -190,7 +196,7 @@ func (c *Codex) liveTurn(ctx context.Context, sessionID, path string, info os.Fi
 		state.cursor.offset = offset
 	}
 	status, activity := state.turn.status(info.ModTime(), now)
-	return codexLiveTurnRead{status: status, activity: activity, newest: state.turn.lastAt}
+	return codexLiveTurnRead{status: status, activity: activity, newest: state.turn.lastAt, stop: state.turn.stop}
 }
 
 // The stored value outlives a truncated or replaced rollout.

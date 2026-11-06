@@ -40,7 +40,7 @@ func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface
 	session.BackgroundTasks = c.codexBackground(ctx, session.ID, session.Transcript, info)
 	deep := session.Status == surface.StatusBusy || c.threadLoaded(session.ID)
 	turn := c.liveTurn(ctx, session.ID, session.Transcript, info, deep, time.Now())
-	session.Activity = nil
+	session.Activity, session.TurnStop = nil, turn.stop
 	if turn.status != surface.StatusUnknown {
 		session.Status = turn.status
 		advanceBusyActivity(session, info.ModTime())

@@ -13,6 +13,8 @@ struct SessionAttention: Equatable {
         case outgoing
         /// A usage limit refused the session's last turn.
         case usageLimit
+        /// A refusal or an API error ended the session's last turn.
+        case stopped
         /// A lead a restart replaced still waits on a request; it is shown, but does not need the person.
         case replacedRequest
     }
@@ -50,6 +52,8 @@ struct SessionAttention: Equatable {
                 result[session.id] = SessionAttention(kind: .request, reason: requestReason(waiting.kind, place: session.waitingPlace ?? .elsewhere))
             } else if let limit = session.limitLabel, result[session.id] == nil {
                 result[session.id] = SessionAttention(kind: .usageLimit, reason: limit)
+            } else if let stop = session.turnStop, result[session.id] == nil, SessionDisplayKind.of(session) == .stopped {
+                result[session.id] = SessionAttention(kind: .stopped, reason: stop.detail)
             }
         }
         return result
