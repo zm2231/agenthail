@@ -68,11 +68,11 @@ extension EnvironmentValues {
     @Entry var transcriptRows = TranscriptRows()
     /// What became of each call on screen that has no result.
     @Entry var toolCallStates = ToolCallStates()
-    /// Scrolls the transcript so this point of its content, measured in `TranscriptRows.contentSpace`, sits
-    /// at the top. Set by the view that owns the scroll view. A collapse from the end calls it in the same
-    /// transaction: it scrolls to an offset rather than to a row id, because once the offset is past the
-    /// shrunken content no row is laid out and an id lands on the stack's estimated heights.
-    @Entry var revealRow: (CGFloat) -> Void = { _ in }
+    /// Scrolls the transcript so a row's top, measured in `TranscriptRows.contentSpace` and kept current by
+    /// `contentTop`, sits at the top. Set by the view that owns the scroll view. A collapse from the end calls it
+    /// in the same transaction: it scrolls to an offset rather than to a row id, because once the offset is past
+    /// the shrunken content no row is laid out and an id lands on the stack's estimated heights.
+    @Entry var revealRow: (Binding<CGFloat>) -> Void = { _ in }
 }
 
 extension TranscriptRows {
