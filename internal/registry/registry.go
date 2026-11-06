@@ -25,6 +25,8 @@ type Registry struct {
 	seen          deviceSeen
 	retryBackoff  time.Duration
 	migration     *MigrationTiming
+	journal       journalStatements
+	journalRead   journalStatements
 }
 
 func (r *Registry) SetRetryBackoff(backoff time.Duration) {
@@ -52,7 +54,7 @@ func (r *Registry) Steers(busyDelivery string) bool {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion    = 55
+	schemaVersion    = 60
 	readConnections  = 4
 	deadReviewWindow = time.Hour
 )
@@ -109,18 +111,32 @@ func open(path string, private, allowUpgrade bool) (*Registry, error) {
 		r.Close()
 		return nil, err
 	}
-	if current {
-		return r, nil
+	if !current {
+		if err := r.migrate(allowUpgrade); err != nil {
+			r.Close()
+			return nil, err
+		}
+		if _, err := r.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+			r.Close()
+			return nil, fmt.Errorf("enable registry WAL: %w", err)
+		}
 	}
-	if err := r.migrate(allowUpgrade); err != nil {
-		r.Close()
+	if err := r.prepare(); err != nil {
 		return nil, err
 	}
-	if _, err := r.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("enable registry WAL: %w", err)
-	}
 	return r, nil
+}
+
+func (r *Registry) prepare() error {
+	var err error
+	if r.journal, err = prepareJournalStatements(r.db, journalStatementSQL); err == nil {
+		r.journalRead, err = prepareJournalStatements(r.read, journalReadStatementSQL)
+	}
+	if err != nil {
+		r.Close()
+		return fmt.Errorf("prepare registry statements: %w", err)
+	}
+	return nil
 }
 
 func OpenCurrent(path string) (*Registry, error) {
@@ -145,6 +161,9 @@ func OpenCurrent(path string) (*Registry, error) {
 	if version != schemaVersion {
 		r.Close()
 		return nil, fmt.Errorf("registry is schema %d; this agenthail uses %d", version, schemaVersion)
+	}
+	if err := r.prepare(); err != nil {
+		return nil, err
 	}
 	return r, nil
 }
@@ -209,5 +228,5 @@ func (r *Registry) Close() error {
 	r.seen.mu.Unlock()
 	r.writeStamps(pending)
 	defer closeOpenLock(r.openLock)
-	return errors.Join(r.read.Close(), r.db.Close())
+	return errors.Join(r.journal.close(), r.journalRead.close(), r.read.Close(), r.db.Close())
 }

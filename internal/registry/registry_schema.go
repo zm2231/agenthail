@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 	parent_session_id TEXT NOT NULL DEFAULT '', root_session_id TEXT NOT NULL DEFAULT '',
 	subagent_depth INTEGER NOT NULL DEFAULT 0,
 	agent_nickname TEXT NOT NULL DEFAULT '', agent_role TEXT NOT NULL DEFAULT '',
-	host_id TEXT NOT NULL DEFAULT ''
+	host_id TEXT NOT NULL DEFAULT '',
+	pinned_at_ms INTEGER NOT NULL DEFAULT 0, stopped_at_ms INTEGER NOT NULL DEFAULT 0,
+	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS coordinators (
 	project_id TEXT NOT NULL,
@@ -331,6 +333,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	bytes INTEGER NOT NULL,
 	body_ref TEXT NOT NULL DEFAULT '',
 	payload_codec INTEGER NOT NULL DEFAULT 0,
+	payload_role TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -354,9 +357,18 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	body BLOB NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	written_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
+CREATE TABLE IF NOT EXISTS session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
+);
+CREATE INDEX IF NOT EXISTS session_journal_body_tail_session ON session_journal_body_tail(session_id);
 CREATE TABLE IF NOT EXISTS session_credentials (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
@@ -535,6 +547,16 @@ CREATE TABLE IF NOT EXISTS project_links (
 CREATE TABLE IF NOT EXISTS session_archive (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	archived_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_keep_alive (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	first_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	next_attempt_ms INTEGER NOT NULL DEFAULT 0,
+	healthy_since_ms INTEGER NOT NULL DEFAULT 0,
+	failed_at_ms INTEGER NOT NULL DEFAULT 0,
+	announced INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),

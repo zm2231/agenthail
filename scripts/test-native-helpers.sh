@@ -136,6 +136,7 @@ SOURCES=(
   macOS/TranscriptBlock.swift
   macOS/TranscriptAgentBlocks.swift
   macOS/TranscriptFollow.swift
+  macOS/RevealedRow.swift
   macOS/TranscriptSlots.swift
   macOS/TranscriptRowAction.swift
   macOS/TranscriptScrimSource.swift

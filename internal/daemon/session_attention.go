@@ -21,5 +21,8 @@ func rowAttention(row dashboardSession, outgoing int, incoming string) *SessionA
 	if row.Display.Kind == "limited" {
 		return &SessionAttention{Kind: "usageLimit", Reason: row.Display.Detail}
 	}
+	if row.KeepAlive != nil {
+		return &SessionAttention{Kind: AttentionKeepAliveFailed, Reason: keepAliveFailedText("This session")}
+	}
 	return nil
 }

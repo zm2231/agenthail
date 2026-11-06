@@ -737,7 +737,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let (bytes, response) = try await session.bytes(for: request)
         try await validateStream(response: response, bytes: bytes)
         await onConnected()
-        try await Self.readEvents(bytes, as: AgenthailEvent.self, onEvent: onEvent)
+        try await Self.readEvents(bytes, as: AgenthailEvent.self) { event in
+            await onEvent(event)
+            return true
+        }
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -751,7 +754,18 @@ final class AgenthailAPI: @unchecked Sendable {
         let (bytes, response) = try await session.bytes(for: request)
         try await validateStream(response: response, bytes: bytes)
         await onConnected()
-        try await Self.readEvents(bytes, as: SessionStreamEvent.self, onEvent: onEvent)
+        var rebuild = SessionStreamRebuild()
+        try await Self.readEvents(bytes, as: SessionStreamWire.self) { wire in
+            switch rebuild.apply(wire) {
+            case .row(let event):
+                await onEvent(event)
+                return true
+            case .skip:
+                return true
+            case .resync:
+                return false
+            }
+        }
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -775,7 +789,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let (bytes, response) = try await session.bytes(for: request)
         try await validateStream(response: response, bytes: bytes)
         await onConnected()
-        try await Self.readEvents(bytes, as: CatalogStreamEvent.self, onEvent: onEvent)
+        try await Self.readEvents(bytes, as: CatalogStreamEvent.self) { event in
+            await onEvent(event)
+            return true
+        }
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -834,7 +851,7 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     // Lines are split here because AsyncBytes.lines drops the blank lines that end server-sent events.
-    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onEvent: (Event) async -> Void) async throws {
+    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onEvent: (Event) async -> Bool) async throws {
         var parser = ServerSentEventParser()
         var line: [UInt8] = []
         for try await byte in bytes {
@@ -845,7 +862,7 @@ final class AgenthailAPI: @unchecked Sendable {
             if Task.isCancelled { return }
             if line.last == UInt8(ascii: "\r") { line.removeLast() }
             if let data = parser.consume(String(decoding: line, as: UTF8.self)), let event = try? JSONDecoder().decode(type, from: Data(data.utf8)) {
-                await onEvent(event)
+                guard await onEvent(event) else { return }
             }
             line.removeAll(keepingCapacity: true)
         }

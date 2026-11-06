@@ -92,7 +92,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 	s.session.TranscriptIdentity = read.TranscriptIdentity
 	s.mu.Lock()
 	for key, body := range bodies {
-		s.appendBodies[key] = body
+		s.appendBodies[key] = knownBody(body, "")
 	}
 	s.mu.Unlock()
 	if len(restarted) > 0 {
@@ -215,7 +215,7 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	for key, body := range bodies {
-		s.appendBodies[key] = body
+		s.appendBodies[key] = knownBody(body, "")
 	}
 	s.mu.Unlock()
 	if len(replaced) > 0 {

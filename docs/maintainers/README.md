@@ -17,6 +17,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Desktop parity: web dashboard vs Mac app](desktop-parity.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)
 - [Projects, scopes and archive](projects.md)
+- [Pinned sessions and the keeper that brings them back](pinned-sessions.md)
 - [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Moving a session to another host: protocol and failure model](host-move.md)
 - [Registry migrations: adding a table, column, index or data step](registry-migrations.md)

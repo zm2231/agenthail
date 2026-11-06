@@ -126,6 +126,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal", "payload_codec", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_bodies", "written_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "delivery_history", "operation", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -188,12 +191,17 @@ func migrateTx(tx *sql.Tx) error {
 		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 		{"host_id", `TEXT NOT NULL DEFAULT ''`},
+		{"pinned_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snoozed_until_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"snooze_wake", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err
 		}
 	}
-	if err := ensureJournalPromptIndexes(tx); err != nil {
+	if err := ensureJournalPromptIndexes(tx, version > 0 && version < 57); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id)`); err != nil {
@@ -412,6 +420,11 @@ func migrateTx(tx *sql.Tx) error {
 	}
 	if version < 54 {
 		if err := moveLedgerCaptureIntoTheLog(tx); err != nil {
+			return err
+		}
+	}
+	if version >= 1 && version < 59 {
+		if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=CAST(strftime('%s','now') AS INTEGER)*1000 WHERE pinned_at_ms=0 AND id IN (` + localLeadSessions + `)`); err != nil {
 			return err
 		}
 	}

@@ -145,7 +145,7 @@ Each row carries `current`, which the session's surface computes, and
 | Scope | A session is in it when |
 |---|---|
 | `running` | it is working |
-| `current`, `recent` | its row is `current` |
+| `current`, `recent` | its row is `current`, or it is pinned |
 | `all` | it is not archived |
 | `archived` | it or its project is archived |
 
@@ -176,6 +176,42 @@ that needs the user stays hidden.
 
 Archive state is per checkout, in the owning host's registry. A project entry
 is archived only when every checkout is.
+
+## Snooze and inbox sections
+
+Each row in the session view carries `inboxSection`, the one section of the
+inbox it belongs to. The first that applies wins:
+
+| Section | A session is in it when |
+|---|---|
+| `archived` | it or its project is archived |
+| `needsYou` | it has `attention` |
+| `snoozed` | its snooze still holds |
+| `running` | it is working, finishing background work, or has queued messages |
+
+Any other row has no `inboxSection`. A `done` section needs a session's
+end-of-turn record, which rows do not carry yet.
+
+A request for the person outranks a snooze, so snoozing never hides one.
+
+`session-snooze` takes `sessionId` and either `until` (an RFC 3339 time in the
+future) or `wake: "finished"`. A `until` snooze holds until that time. A
+`finished` snooze holds while the turn that was running when it was set keeps
+running; it needs a working session. A session that is archived, or whose
+project is, cannot be snoozed but can be woken. Times are kept to the
+millisecond.
+`session-wake` takes `sessionId` and clears the snooze. Both answer the new
+`snooze` and the `previous` one, so a client undoes either by sending the
+previous snooze back, or `session-wake` when there was none. From the CLI:
+`agenthail thread snooze <target> --until 2h|<time>`,
+`agenthail thread snooze <target> --until-finished` and
+`agenthail thread wake <target>`.
+
+Rows carry `snooze: {snoozedAt, until, wake}` for the last snooze set, even
+after it stopped holding; `inboxSection` says whether it still does. The view's
+`refreshAt` includes the next `until`, so a client rereads when a snooze ends.
+State lives in `sessions.snoozed_at_ms`, `snoozed_until_ms` and `snooze_wake`,
+read with the pin in one query per catalog pass.
 
 - A project id with a key applies to every checkout of this host with that key
   and is forwarded to every paired host whose mirrored sessions have it. A host

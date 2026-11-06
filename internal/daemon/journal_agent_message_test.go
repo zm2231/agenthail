@@ -8,7 +8,7 @@ import (
 
 func TestJournalPageMarksAgentMessages(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "agents", appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "agents", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 	source.append(surface.StreamEvent{ID: "prompt", ProviderKey: "timeline:prompt", Operation: "upsert", Final: true, Kind: "message", Role: "user", Text: "[from reviewer via #ops] Please rebase"})
 	source.append(surface.StreamEvent{ID: "send", ProviderKey: "timeline:send", Operation: "upsert", Final: true, Kind: "toolCall", Title: "Bash", Text: `{"command":"agenthail send @collab \"done\""}`})
 	page, err := d.readJournalPage(from.ID, 0, 20)
