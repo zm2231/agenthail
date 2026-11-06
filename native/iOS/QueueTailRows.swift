@@ -4,6 +4,7 @@ struct QueueTailRows: View {
     @ObservedObject var model: AgenthailIOSModel
     @Binding var tail: QueueTail
     let readOnly: Bool
+    var generation = 0
     @State private var retrying: QueueTail.Row?
     @State private var reading: QueueTail.Row?
 
@@ -29,6 +30,7 @@ struct QueueTailRows: View {
         }
         ForEach(tail.shown) { row in
             bubble(row)
+                .rebuilt(row.id, generation: generation)
                 .id(row.id)
                 .accessibilityIdentifier(row.id)
                 .confirmationDialog("Send this message again?", isPresented: Binding(get: { retrying?.id == row.id }, set: { if !$0 { retrying = nil } }), titleVisibility: .visible) {

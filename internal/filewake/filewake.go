@@ -19,8 +19,12 @@ import (
 // per-user budget. Past the limit a reader waits on its timer alone.
 const DefaultLimit = 256
 
-// Watcher shares one platform watcher across every reader in the process and
-// keeps one watch per file however many readers follow it.
+// Watcher shares one platform watcher across every reader of a file and keeps
+// one watch per file or directory however many readers follow it. Each
+// followed directory has a platform watcher of its own: kqueue watches the
+// entries of a watched directory itself, and its watch of a subdirectory can
+// replace the one a reader of that subdirectory asked for, which then misses
+// every new entry.
 type Watcher struct {
 	limit int
 	logf  func(string, ...any)
@@ -39,6 +43,7 @@ type watchedFile struct {
 	armed    bool
 	failed   bool
 	wakes    map[*Wake]struct{}
+	own      *fsnotify.Watcher
 }
 
 // Wake is one reader's interest in a file or a directory. C fires after a
@@ -99,12 +104,13 @@ func (w *Watcher) follow(path string, dir bool) *Wake {
 	watched := w.watched(dir)
 	file := watched[path]
 	if file == nil {
-		if len(w.files)+len(w.dirs) >= w.limit || !w.startLocked() {
+		if len(w.files)+len(w.dirs) >= w.limit || !w.availableLocked(dir) {
 			wake.ch = nil
 			return wake
 		}
 		file = &watchedFile{wakes: map[*Wake]struct{}{}, failed: w.refused[path]}
-		if w.armLocked(path, file) != nil {
+		if !w.startDirLocked(path, file, dir) || w.armLocked(path, file) != nil {
+			w.unwatchLocked(path, file)
 			// The platform refused the watch, as when its watch budget is
 			// spent; the reader polls and the slot stays free. The refusal is
 			// remembered so later readers of the path do not log it again;
@@ -130,6 +136,9 @@ func (w *Watcher) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.broken = true
+	for path, dir := range w.dirs {
+		w.unwatchLocked(path, dir)
+	}
 	w.files = map[string]*watchedFile{}
 	w.dirs = map[string]*watchedFile{}
 	if w.watcher == nil {
@@ -175,13 +184,16 @@ func (k *Wake) Release() {
 		if len(file.wakes) > 0 {
 			return
 		}
-		// A file and a directory are never one path, but a path followed both
-		// ways keeps its platform watch until neither follows it.
-		if file.armed && w.watched(!k.dir)[k.path] == nil {
-			_ = w.watcher.Remove(k.path)
-		}
+		w.unwatchLocked(k.path, file)
 		delete(watched, k.path)
 	})
+}
+
+func (w *Watcher) availableLocked(dir bool) bool {
+	if dir {
+		return !w.broken
+	}
+	return w.startLocked()
 }
 
 func (w *Watcher) startLocked() bool {
@@ -201,8 +213,39 @@ func (w *Watcher) startLocked() bool {
 	if w.add == nil {
 		w.add = watcher.Add
 	}
-	go w.run(watcher)
+	go w.run(watcher, w.notifyFile)
 	return true
+}
+
+func (w *Watcher) startDirLocked(path string, file *watchedFile, dir bool) bool {
+	if !dir {
+		return true
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		w.refuseLocked(path, file, err)
+		return false
+	}
+	file.own = watcher
+	go w.run(watcher, func(event fsnotify.Event) { w.notifyDir(path, watcher, event) })
+	return true
+}
+
+func (w *Watcher) unwatchLocked(path string, file *watchedFile) {
+	if file.own != nil {
+		_ = file.own.Close()
+		return
+	}
+	if file.armed {
+		_ = w.watcher.Remove(path)
+	}
+}
+
+func (w *Watcher) platformLocked(file *watchedFile) (add, remove func(string) error) {
+	if file.own != nil {
+		return file.own.Add, file.own.Remove
+	}
+	return w.add, w.watcher.Remove
 }
 
 // armLocked watches the file now at path, replacing a watch on a file that
@@ -216,29 +259,34 @@ func (w *Watcher) armLocked(path string, file *watchedFile) error {
 	if file.armed && file.identity != nil && os.SameFile(file.identity, info) {
 		return nil
 	}
+	add, remove := w.platformLocked(file)
 	if file.armed {
-		_ = w.watcher.Remove(path)
+		_ = remove(path)
 		file.armed = false
 	}
-	if err := w.add(path); err != nil {
-		if !file.failed {
-			file.failed = true
-			w.logf("watch %s, polling it on a timer: %s", path, err)
-		}
+	if err := add(path); err != nil {
+		w.refuseLocked(path, file, err)
 		return err
 	}
 	file.armed, file.failed, file.identity = true, false, info
 	return nil
 }
 
-func (w *Watcher) run(watcher *fsnotify.Watcher) {
+func (w *Watcher) refuseLocked(path string, file *watchedFile, err error) {
+	if !file.failed {
+		file.failed = true
+		w.logf("watch %s, polling it on a timer: %s", path, err)
+	}
+}
+
+func (w *Watcher) run(watcher *fsnotify.Watcher, notify func(fsnotify.Event)) {
 	for {
 		select {
 		case event, open := <-watcher.Events:
 			if !open {
 				return
 			}
-			w.notify(filepath.Clean(event.Name), event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename), event.Has(fsnotify.Create))
+			notify(event)
 		case err, open := <-watcher.Errors:
 			if !open {
 				return
@@ -248,25 +296,39 @@ func (w *Watcher) run(watcher *fsnotify.Watcher) {
 	}
 }
 
-func watchingFileAt(path string, file *watchedFile) bool {
-	info, err := os.Stat(path)
-	return err == nil && file.identity != nil && os.SameFile(file.identity, info)
+func gone(event fsnotify.Event) bool {
+	return event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
 }
 
-// notify wakes the readers of a changed file, and the readers of its
-// directory when the change created it.
-func (w *Watcher) notify(path string, gone, created bool) {
+func (w *Watcher) notifyFile(event fsnotify.Event) {
+	w.notify(filepath.Clean(event.Name), gone(event))
+}
+
+// notify wakes the readers of a changed file.
+func (w *Watcher) notify(path string, gone bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if file := w.files[path]; file != nil {
 		w.settleLocked(path, file, gone)
 		wakeAll(file)
 	}
-	if dir := w.dirs[path]; dir != nil {
-		w.settleLocked(path, dir, gone)
+}
+
+// The directory's watcher also reports writes to its entries; those wake nobody.
+func (w *Watcher) notifyDir(dir string, own *fsnotify.Watcher, event fsnotify.Event) {
+	path := filepath.Clean(event.Name)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	file := w.dirs[dir]
+	if file == nil || file.own != own {
+		return
 	}
-	if dir := w.dirs[filepath.Dir(path)]; created && dir != nil {
-		wakeAll(dir)
+	if path == dir {
+		w.settleLocked(path, file, gone(event))
+		return
+	}
+	if event.Has(fsnotify.Create) && filepath.Dir(path) == dir {
+		wakeAll(file)
 	}
 }
 
@@ -276,8 +338,14 @@ func (w *Watcher) notify(path string, gone, created bool) {
 func (w *Watcher) settleLocked(path string, file *watchedFile, gone bool) {
 	if gone && file.armed && !watchingFileAt(path, file) {
 		file.armed = false
-		_ = w.watcher.Remove(path)
+		_, remove := w.platformLocked(file)
+		_ = remove(path)
 	}
+}
+
+func watchingFileAt(path string, file *watchedFile) bool {
+	info, err := os.Stat(path)
+	return err == nil && file.identity != nil && os.SameFile(file.identity, info)
 }
 
 func wakeAll(file *watchedFile) {
