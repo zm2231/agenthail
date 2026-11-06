@@ -81,7 +81,9 @@ async function tab(label) {
   context.subscribe("catalog", (message) => got.push(message.kind === "event" ? message.event.data : message.kind));
   const channel = new Channel();
   const visible = { value: true };
-  const handle = context.startSharedStreams({ locks, channel, read, visible: () => visible.value, now: () => clock, random: () => 0, setTimeout: (fn, ms) => timer(fn, ms), setInterval: (fn, ms) => timer(fn, ms, ms), clearInterval: clearTimer });
+  let changed = () => {};
+  const show = async (value) => { visible.value = value; changed(); await settle(); };
+  const handle = context.startSharedStreams({ locks, channel, read, visible: () => visible.value, watchVisibility: (fn) => { changed = fn; }, now: () => clock, random: () => 0, setTimeout: (fn, ms) => timer(fn, ms), setInterval: (fn, ms) => timer(fn, ms, ms), clearInterval: clearTimer });
   const freeze = () => {
     channel.frozen = true;
     visible.value = false;
@@ -91,7 +93,7 @@ async function tab(label) {
     channel.frozen = false;
     for (const made of own) if (made.frozen) { made.frozen = false; made.live = true; made.at = Math.max(made.at, clock); }
   };
-  return { context, got, channel, visible, freeze, thaw, ...handle };
+  return { context, got, channel, visible, show, freeze, thaw, ...handle };
 }
 
 const support = {};
@@ -115,25 +117,42 @@ for (const each of [first, second, third]) assert.equal(each.got.at(-1), "seven"
 await advance(25_000);
 assert.equal(first.leading(), true, "a leader that keeps beating keeps leading");
 
-first.freeze();
-second.visible.value = false;
+await first.show(false);
+assert.equal(first.leading(), false, "a hidden tab gives up leading, so a frozen background tab holds no stream");
+assert.equal([second, third].filter((each) => each.leading()).length, 1, "a visible tab takes over at once");
+assert.equal(live("/api/v1/catalog-events").length, 1);
+await first.show(true);
+assert.equal(first.leading(), false, "returning to view queues behind the current leader");
+const handedTo = second.leading() ? second : third;
+await handedTo.show(false);
+assert.equal(first.leading() || (handedTo === second ? third : second).leading(), true, "the lock passes on again when that tab is hidden");
+await handedTo.show(true);
+await advance(1_000);
+const holders = [first, second, third].filter((each) => each.leading());
+assert.equal(holders.length, 1);
+const [current] = holders;
+const [watcher, sleeper] = [first, second, third].filter((each) => each !== current);
+
+current.freeze();
+await sleeper.show(false);
+watcher.got.length = 0;
 await advance(40_000);
-assert.equal(third.leading(), true, "a visible follower takes over from a frozen leader");
-assert.equal(second.leading(), false, "a hidden tab does not take over");
-assert.equal(first.leading(), false, "the frozen leader loses its lock");
+assert.equal(watcher.leading(), true, "a visible follower takes over from a leader that stopped beating");
+assert.equal(sleeper.leading(), false, "a hidden tab does not take over");
+assert.equal(current.leading(), false, "the silent leader loses its lock");
 assert.equal(live("/api/v1/catalog-events").length, 1, "the takeover leaves one catalog stream");
-assert(second.got.includes("reset") && third.got.includes("reset"), "a new leader makes every tab reread");
-first.thaw();
-first.visible.value = true;
+assert(watcher.got.includes("reset"), "a new leader makes every tab reread");
+current.thaw();
+current.visible.value = true;
 await advance(60_000);
-assert.equal(third.leading(), true, "a thawed tab hears the new leader and does not take the lock back");
-assert.equal(first.leading(), false);
+assert.equal(watcher.leading(), true, "a thawed tab hears the new leader and does not take the lock back");
+assert.equal(current.leading(), false);
 assert.equal(live("/api/v1/catalog-events").length, 1);
 
 const stream = live("/api/v1/catalog-events")[0];
 stream.end(409);
 await settle();
-assert(third.got.includes("gap"), "a retained-cursor gap reaches the leader's stream config");
+assert(watcher.got.includes("gap"), "a retained-cursor gap reaches the leader's stream config");
 await advance(1_000);
 assert.equal(live("/api/v1/catalog-events").length, 1, "the stream reopens after a gap");
 

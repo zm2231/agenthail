@@ -31,7 +31,7 @@ function eventsStream() {
   };
 }
 
-export function startSharedStreams({ locks = navigator.locks, channel = new BroadcastChannel(lockName), read = readStream, visible = () => document.visibilityState === "visible", now = Date.now, random = Math.random, setTimeout = globalThis.setTimeout, setInterval = globalThis.setInterval, clearInterval = globalThis.clearInterval } = {}) {
+export function startSharedStreams({ locks = navigator.locks, channel = new BroadcastChannel(lockName), read = readStream, visible = () => document.visibilityState === "visible", watchVisibility = (changed) => document.addEventListener("visibilitychange", changed), now = Date.now, random = Math.random, setTimeout = globalThis.setTimeout, setInterval = globalThis.setInterval, clearInterval = globalThis.clearInterval } = {}) {
   if (!streams.has("events")) configureStream("events", eventsStream());
   let leading = null;
   let queued = null;
@@ -116,7 +116,14 @@ export function startSharedStreams({ locks = navigator.locks, channel = new Broa
     patience = leaderSilence + random() * 5_000;
     join(true);
   }, 5_000);
-  join();
+  watchVisibility(() => {
+    if (!visible()) {
+      queued?.abort();
+      queued = null;
+      if (leading) stepDown(leading);
+    } else if (!leading && !queued) join();
+  });
+  if (visible()) join();
   return { leading: () => Boolean(leading), channel };
 }
 
