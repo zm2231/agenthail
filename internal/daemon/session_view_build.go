@@ -59,7 +59,7 @@ func (d *Daemon) cachedSessionView(ctx context.Context, request sessionViewReque
 			return build, nil
 		}
 	}
-	build, err := d.buildSessionView(ctx, request, config, now)
+	build, err := d.buildSessionView(ctx, request, config, key, now)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (d *Daemon) cachedSessionView(ctx context.Context, request sessionViewReque
 	return build, nil
 }
 
-func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewRequest, config DashboardConfig, now time.Time) (*sessionViewBuild, error) {
+func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewRequest, config DashboardConfig, key sessionViewCacheKey, now time.Time) (*sessionViewBuild, error) {
 	leads, err := d.Registry.LocalLeadSessions()
 	if err != nil {
 		return nil, err
@@ -81,11 +81,14 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	if err != nil {
 		return nil, err
 	}
+	if d.presentation.building != nil {
+		d.presentation.building()
+	}
 	read, err := d.readCatalogPresentation(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	build := &sessionViewBuild{key: d.sessionViewCacheKeyFor(request, registry.CatalogPresentationKey{HostEpoch: read.HostEpoch, Seq: read.CatalogSeq, Version: read.Version}, config), hostEpoch: read.HostEpoch, seq: read.CatalogSeq}
+	build := &sessionViewBuild{key: key, hostEpoch: read.HostEpoch, seq: read.CatalogSeq}
 	host := build.key.host
 	internal := map[string]string{}
 	rows := make([]dashboardSession, 0, len(read.Rows))

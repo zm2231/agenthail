@@ -39,7 +39,6 @@ type CatalogPresentation struct {
 	RefreshAt    time.Time
 	HostEpoch    string
 	CatalogSeq   uint64
-	Version      uint64
 	Rows         []CatalogPresentationRow
 	Limits       map[string]LimitResume
 	Fingerprints map[string]json.RawMessage
@@ -70,9 +69,6 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 		return CatalogPresentation{}, err
 	}
 	read := CatalogPresentation{HostEpoch: epoch, CatalogSeq: uint64(seq.Int64), Rows: []CatalogPresentationRow{}, Fingerprints: map[string]json.RawMessage{}}
-	if read.Version, err = presentationVersionTx(ctx, tx); err != nil {
-		return CatalogPresentation{}, err
-	}
 	if read.Rows, err = catalogPresentationRows(ctx, tx, history); err != nil {
 		return CatalogPresentation{}, err
 	}

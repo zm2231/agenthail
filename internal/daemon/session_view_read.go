@@ -18,6 +18,7 @@ type presentationClock struct {
 	hits, builds uint64
 	uncached     bool
 	clock        func() time.Time
+	building     func()
 }
 
 func (p *presentationClock) now() time.Time {
@@ -55,7 +56,11 @@ func (d *Daemon) sessionViewBuildFor(ctx context.Context, request sessionViewReq
 	if err != nil {
 		return nil, err
 	}
-	return d.buildSessionView(ctx, request, config, now)
+	catalog, err := d.Registry.ReadCatalogPresentationKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return d.buildSessionView(ctx, request, config, d.sessionViewCacheKeyFor(request, catalog, config), now)
 }
 
 func (d *Daemon) readSessionView(ctx context.Context, request sessionViewRequest) (SessionViewSnapshot, error) {
