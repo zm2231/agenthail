@@ -48,11 +48,11 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         sleep(3)
         let left = newestReply(app)
         XCTAssertGreaterThan(left, 0, "the session showed no reply before switching away")
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         app.buttons["session-computer::codex-demo"].tapWhenReady()
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
         sleep(25)
-        app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+        app.backToSessions()
         session.tapWhenReady()
         XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 5))
         var seen: [(reply: Int, at: Date)] = []
@@ -173,7 +173,7 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
             XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
             sleep(5)
             assertStill(app, "after opening the session, round \(round)")
-            app.navigationBars.buttons.element(boundBy: 0).tapWhenReady()
+            app.backToSessions()
         }
     }
 }
