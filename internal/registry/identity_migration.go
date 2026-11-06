@@ -212,6 +212,7 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		{"session_journal_state", `UPDATE session_journal_state SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"session_journal", `UPDATE session_journal SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"session_journal_bodies", `UPDATE session_journal_bodies SET session_id=?2 WHERE session_id=?1`, hasJournal},
+		{"session_journal_body_tail", `UPDATE session_journal_body_tail SET session_id=?2 WHERE session_id=?1`, hasJournal},
 		{"catalog_sessions", `UPDATE catalog_sessions SET session_id=?2,projection_fingerprint='' WHERE session_id=?1`, hasCatalog},
 		{"sessions", `UPDATE sessions SET parent_session_id=?2 WHERE parent_session_id=?1`, false},
 		{"sessions", `UPDATE sessions SET root_session_id=?2 WHERE root_session_id=?1`, false},

@@ -199,7 +199,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 				return existing, false, tx.Commit()
 			}
 			if existing.BodyRef != "" && existing.BodyRef != input.BodyRef {
-				if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, input.SessionID, existing.BodyRef); err != nil {
+				if err := deleteSessionJournalBody(tx, input.SessionID, existing.BodyRef); err != nil {
 					return SessionJournalEntry{}, false, err
 				}
 			}
@@ -261,18 +261,11 @@ func sameSessionJournalPayload(existing, input []byte) bool {
 	return reflect.DeepEqual(existingObject, inputObject)
 }
 
-func sessionJournalBody(q interface{ QueryRow(string, ...any) *sql.Row }, entry SessionJournalEntry) ([]byte, bool, error) {
+func sessionJournalBody(q bodyQuerier, entry SessionJournalEntry) ([]byte, bool, error) {
 	if entry.BodyRef == "" {
 		return nil, true, nil
 	}
-	var body []byte
-	if err := q.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, entry.SessionID, entry.BodyRef).Scan(&body); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	return body, true, nil
+	return readSessionJournalFullBody(q, entry.SessionID, entry.BodyRef)
 }
 
 func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey string) (SessionJournalEntry, bool, error) {
@@ -280,7 +273,7 @@ func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey strin
 	if err != nil || !found || entry.BodyRef == "" {
 		return entry, found, err
 	}
-	if err := r.read.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, entry.BodyRef).Scan(&entry.FullBody); err != nil && err != sql.ErrNoRows {
+	if entry.FullBody, _, err = readSessionJournalFullBody(r.read, sessionID, entry.BodyRef); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	return entry, true, nil
@@ -368,6 +361,9 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 	if !prunedBody {
 		return nil
 	}
+	if _, err := tx.Exec(`DELETE FROM session_journal_body_tail WHERE session_id=? AND ref NOT IN (SELECT body_ref FROM session_journal WHERE session_id=? AND body_ref!='')`, sessionID, sessionID); err != nil {
+		return err
+	}
 	_, err = tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref NOT IN (SELECT body_ref FROM session_journal WHERE session_id=? AND body_ref!='')`, sessionID, sessionID)
 	return err
 }
@@ -378,6 +374,9 @@ func storeSessionJournalBody(tx *sql.Tx, entry SessionJournalEntry) error {
 	}
 	if len(entry.FullBody) == 0 {
 		return fmt.Errorf("session journal body reference requires a body")
+	}
+	if _, err := tx.Exec(`DELETE FROM session_journal_body_tail WHERE session_id=? AND ref=?`, entry.SessionID, entry.BodyRef); err != nil {
+		return err
 	}
 	_, err := tx.Exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,?,?) ON CONFLICT(ref) DO UPDATE SET body=excluded.body,session_id=excluded.session_id,created_at=excluded.created_at`, entry.BodyRef, entry.SessionID, entry.FullBody, formatTimestamp(entry.ObservedAt))
 	return err
@@ -390,11 +389,15 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	if start == int(^uint(0)>>1) || end-start == int(^uint(0)>>1) {
 		return nil, 0, fmt.Errorf("invalid session journal body range")
 	}
-	var body []byte
-	var total int
-	if err := r.read.QueryRow(`SELECT length(body),substr(body,?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, start+1, end-start+1, sessionID, ref).Scan(&total, &body); err != nil {
+	full, found, err := readSessionJournalFullBody(r.read, sessionID, ref)
+	if err != nil {
 		return nil, 0, err
 	}
+	if !found {
+		return nil, 0, sql.ErrNoRows
+	}
+	total := len(full)
+	body := full[min(start, total):min(end+1, total)]
 	if start > total {
 		return nil, 0, fmt.Errorf("session journal body range is outside the retained body")
 	}
@@ -458,6 +461,9 @@ func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJour
 	}
 	previous := next
 	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=?`, sessionID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_journal_body_tail WHERE session_id=?`, sessionID); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=?`, sessionID); err != nil {

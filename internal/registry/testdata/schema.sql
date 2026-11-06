@@ -1,4 +1,4 @@
--- schemaVersion 55
+-- schemaVersion 56
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -72,6 +72,9 @@ CREATE UNIQUE INDEX session_credentials_live ON session_credentials(session_id) 
 
 -- index session_journal_bodies_session
 CREATE INDEX session_journal_bodies_session ON session_journal_bodies(session_id);
+
+-- index session_journal_body_tail_session
+CREATE INDEX session_journal_body_tail_session ON session_journal_body_tail(session_id);
 
 -- index session_journal_position
 CREATE UNIQUE INDEX session_journal_position ON session_journal(session_id, position);
@@ -626,6 +629,15 @@ CREATE TABLE session_journal_bodies (
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	body BLOB NOT NULL,
 	created_at TEXT NOT NULL
+);
+
+-- table session_journal_body_tail
+CREATE TABLE session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
 );
 
 -- table session_journal_state

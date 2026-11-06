@@ -649,7 +649,7 @@ func writeFirstTurn(t *testing.T, path string) {
 }
 
 func detachedSource(manager *sessionSourceManager, session surface.Session, adapter surface.Surface) *sessionSource {
-	return &sessionSource{manager: manager, session: session, adapter: adapter, epoch: "seed", ctx: context.Background(), appendBodies: map[string]string{}, followers: map[uint64]chan struct{}{}}
+	return &sessionSource{manager: manager, session: session, adapter: adapter, epoch: "seed", ctx: context.Background(), appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 }
 
 func TestAViewerThatReconnectsBeforeTheFirstTurnStillGetsTheFirstReply(t *testing.T) {

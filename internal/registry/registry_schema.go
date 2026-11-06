@@ -357,6 +357,14 @@ CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
+CREATE TABLE IF NOT EXISTS session_journal_body_tail (
+	ref TEXT NOT NULL,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	start INTEGER NOT NULL,
+	chunk BLOB NOT NULL,
+	PRIMARY KEY (ref, start)
+);
+CREATE INDEX IF NOT EXISTS session_journal_body_tail_session ON session_journal_body_tail(session_id);
 CREATE TABLE IF NOT EXISTS session_credentials (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
