@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -25,6 +26,7 @@ type fakeRemoteControl struct {
 	events    []map[string]any
 	posts     []map[string]any
 	onPost    func(payload map[string]any) []map[string]any
+	onServed  func(page []map[string]any)
 }
 
 func newFakeRemoteControl(t *testing.T) *fakeRemoteControl {
@@ -50,6 +52,9 @@ func (f *fakeRemoteControl) request(_ context.Context, method, url string, _ map
 			}
 		}
 		page := f.events[start:]
+		if len(page) > 0 && f.onServed != nil {
+			f.onServed(page)
+		}
 		last := ""
 		if len(page) > 0 {
 			last, _ = page[len(page)-1]["uuid"].(string)
@@ -146,11 +151,14 @@ func TestClaudeModelSwitchReportsRejectionAndSilenceDistinctly(t *testing.T) {
 		t.Fatalf("rejected result=%+v err=%v", result, err)
 	}
 
-	remote.onPost = nil
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	remote.onPost = func(map[string]any) []map[string]any {
+		cancel()
+		return nil
+	}
 	result, err = claude.Control(ctx, session, surface.ControlRequest{Action: "model", Value: "model-next"})
-	if !surface.IsDeliveryOutcomeUnknown(err) || result.Evidence != surface.EvidenceUnknown || result.RequestID == "" {
+	if !surface.IsDeliveryOutcomeUnknown(err) || !errors.Is(err, context.Canceled) || result.Evidence != surface.EvidenceUnknown || result.RequestID == "" || remote.postCount() != 2 {
 		t.Fatalf("silent result=%+v err=%v", result, err)
 	}
 }
@@ -194,10 +202,19 @@ func TestClaudeInterruptAcknowledgedWithoutTheTurnEndingIsUnknown(t *testing.T) 
 		return []map[string]any{controlResponse(payload, "success", "")}
 	}
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	acknowledged := false
+	remote.onServed = func(page []map[string]any) {
+		for _, event := range page {
+			if event["type"] == "control_response" {
+				acknowledged = true
+				cancel()
+			}
+		}
+	}
 	result, err := claude.Control(ctx, session, surface.ControlRequest{Action: "interrupt"})
-	if !surface.IsDeliveryOutcomeUnknown(err) || result.Evidence != surface.EvidenceUnknown || result.RequestID == "" {
+	if !acknowledged || !surface.IsDeliveryOutcomeUnknown(err) || !errors.Is(err, context.Canceled) || result.Evidence != surface.EvidenceUnknown || result.RequestID == "" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
@@ -287,9 +304,13 @@ func TestClaudeInterruptWithoutItsControlResponseIsNotReportedAsDone(t *testing.
 	fixture, session := busyControlSession(t)
 	remote := newFakeRemoteControl(t)
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := claude.Interrupt(ctx, session); !surface.IsDeliveryOutcomeUnknown(err) {
+	remote.onPost = func(map[string]any) []map[string]any {
+		cancel()
+		return nil
+	}
+	if err := claude.Interrupt(ctx, session); !surface.IsDeliveryOutcomeUnknown(err) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("an unanswered interrupt returned %v", err)
 	}
 	if remote.postCount() != 1 {

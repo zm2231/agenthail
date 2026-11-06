@@ -353,11 +353,16 @@ func TestClaudeGoalCommandWaitsForAnIdleSessionAndItsAnswer(t *testing.T) {
 	fixture, session := idleGoalSession(t)
 	remote := newFakeRemoteControl(t)
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := claude.GoalSet(ctx, session, "tests pass"); !surface.IsDeliveryOutcomeUnknown(err) || remote.postCount() != 1 {
+	remote.onPost = func(map[string]any) []map[string]any {
+		cancel()
+		return nil
+	}
+	if err := claude.GoalSet(ctx, session, "tests pass"); !surface.IsDeliveryOutcomeUnknown(err) || !errors.Is(err, context.Canceled) || remote.postCount() != 1 {
 		t.Fatalf("unanswered err=%v posts=%d", err, remote.postCount())
 	}
+	remote.onPost = nil
 
 	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
 	appendTranscript(t, session.Transcript, `{"type":"user","uuid":"u2","message":{"content":"working"}}`+"\n")
