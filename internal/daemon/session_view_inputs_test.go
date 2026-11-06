@@ -69,7 +69,18 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 		}
 		columns := queryStrings(t, db, fmt.Sprintf(`SELECT name FROM pragma_table_xinfo(%s) WHERE pk=0 AND hidden=0`, sqlQuote(table)))
 		stored := queryStrings(t, db, fmt.Sprintf(`SELECT '"'||replace(name,'"','""')||'"' FROM pragma_table_xinfo(%s) WHERE hidden=0`, sqlQuote(table)))
+		identical := make([]string, 0, len(columns))
+		for _, column := range columns {
+			identical = append(identical, fmt.Sprintf("%[1]q=%[1]q", column))
+		}
 		for _, rowKeyValue := range keys {
+			if len(identical) > 0 {
+				from := key()
+				mustExec(t, db, fmt.Sprintf(`UPDATE %q SET %s`, table, strings.Join(identical, ","))+where, rowKeyValue)
+				if key() != from {
+					t.Errorf("rewriting a %s row with the values it already has moves the cache key: its trigger must watch value changes, not writes", table)
+				}
+			}
 			list := strings.Join(stored, ",")
 			mustExec(t, db, fmt.Sprintf(`CREATE TEMP TABLE kept AS SELECT %s%s FROM %q`, keepKey, list, table)+where, rowKeyValue)
 			before, from := render(), key()

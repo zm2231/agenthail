@@ -222,7 +222,9 @@ CREATE TABLE IF NOT EXISTS delivery_history (
 	message TEXT NOT NULL DEFAULT '',
 	result TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
-	operation TEXT NOT NULL DEFAULT ''
+	operation TEXT NOT NULL DEFAULT '',
+	send_route TEXT NOT NULL DEFAULT '',
+	bridge TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS attention_items (

@@ -67,7 +67,7 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		return false
 	}
 	if err != nil {
-		d.finishQueueFailure(item, session, err, now)
+		d.finishQueueFailure(item, session, err, now, registry.SendTrace{})
 		return true
 	}
 	receipt := outcome.Receipt

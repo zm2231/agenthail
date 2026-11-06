@@ -164,6 +164,9 @@ grep -Fq 'dashboard: enabled' <<<"$dashboard_status"
 test "$(jq -r .enabled "$TEST_HOME/.agenthail/dashboard.json")" = "true"
 
 HOME="$TEST_HOME" "$FAKE_BIN/launchctl" bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
+# A registry at version 10 had none of the presentation triggers, and SQLite
+# will not drop a column a trigger names, so remove them before faking it.
+sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT 'DROP TRIGGER \"' || name || '\";' FROM sqlite_schema WHERE type='trigger' AND name LIKE 'catalog_presentation_version_%'" | sqlite3 "$TEST_HOME/.agenthail/registry.db"
 sqlite3 "$TEST_HOME/.agenthail/registry.db" <<'SQL'
 ALTER TABLE routes DROP COLUMN active;
 ALTER TABLE routes DROP COLUMN once_only;
