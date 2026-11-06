@@ -120,6 +120,7 @@ func parityCases() []parityCase {
 		session("session-snooze finished idle", "session-snooze", `,"wake":"finished"`),
 		session("session-snooze empty", "session-snooze", ``),
 		session("session-wake", "session-wake", ``),
+		session("work-clean", "work-clean", ``),
 		session("session-adopt", "session-adopt", ``),
 		session("session-fork", "session-fork", `,"alias":"forked"`),
 		session("native-queue", "native-queue", `,"nativeQueue":{"queueAction":"list"}`),

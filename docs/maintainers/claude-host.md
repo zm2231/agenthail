@@ -382,7 +382,7 @@ outbox for queued messages (`surface.WithMessageUUID`).
 ## Creation and resume
 
 `Claude.StartSession` opens a new conversation in the host under a uuid it
-chooses, with the model, permission mode, effort, agent, name and worktree
+chooses, with the model, permission mode, effort, agent and name
 asked for, then sends the message as the conversation's first turn: a person's
 turn under the delivery intent's uuid. It is the `claude-sdk` launcher, the
 default for the CLI, the dashboard and the apps. An open whose answer is lost
@@ -426,8 +426,7 @@ build, with the environment that host started with.
 Claude restores a resumed conversation's title from its transcript (the last
 `custom-title` record) but names the resumed process anew, with
 `nameSource: "derived"`, so the open carries that title as `name` and the
-session keeps the name it was started or renamed with. The host refuses only
-a `worktree` on a resume. The host's `held` answer holds the delivery. `refused` means Claude refused the
+session keeps the name it was started or renamed with. The host's `held` answer holds the delivery. `refused` means Claude refused the
 conversation: a queued message waits as `refused` with Claude's output as its
 last error, and a direct send fails with it. `open_failed` is a Claude that
 never got to decide, and the delivery is retried like any other unavailable

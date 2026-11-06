@@ -44,7 +44,9 @@ type daemonSurface struct {
 	transcripts    map[string]string
 	limitReads     atomic.Int32
 	startOptions   []surface.SessionStartOptions
+	startCeilings  []json.RawMessage
 	startErr       error
+	startRefused   error
 	startHook      func()
 	firstTurn      func()
 	unrecordable   bool
@@ -245,6 +247,10 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 }
 func (f *daemonSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
+	f.startCeilings = append(f.startCeilings, surface.StartCeiling(ctx))
+	if f.startRefused != nil {
+		return nil, nil, f.startRefused
+	}
 	if hook := f.startHook; hook != nil {
 		f.startHook = nil
 		hook()

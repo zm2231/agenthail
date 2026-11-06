@@ -302,6 +302,25 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}},
+		{"a task worktree begun, settled or kept", func(rng *rand.Rand) {
+			id := session(rng)
+			path := filepath.Join(cwd, ".worktrees", id)
+			switch rng.Intn(3) {
+			case 0:
+				_ = reg.BeginWork(registry.WorkRecord{WorktreePath: path, RepoRoot: cwd, Branch: "task/" + id, BaseRef: "main", BaseCommit: "base"}, f.clock)
+				if _, err := reg.ActivateWork(path, id); err != nil {
+					t.Fatal(err)
+				}
+			case 1:
+				if _, err := reg.SettleWork(id, registry.WorkSettledPerson, f.clock); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := reg.SetWorkCleanup(path, registry.WorkCleanupKept, fmt.Sprint("kept ", rng.Intn(3)), nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
 		{"a runtime completion", func(rng *rand.Rand) {
 			if err := reg.SaveRuntimeState(session(rng), surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: fmt.Sprint("turn-", rng.Intn(3))}); err != nil {
 				t.Fatal(err)
@@ -350,6 +369,13 @@ func newViewFixture(t *testing.T) *viewFixture {
 			t.Fatal(err)
 		}
 		if err := reg.BindTurnCompletion("s0", "fill"); err != nil {
+			t.Fatal(err)
+		}
+		filled := registry.WorkRecord{WorktreePath: filepath.Join(cwd, ".worktrees", "filled"), RepoRoot: cwd, Branch: "task/filled", BaseRef: "main", BaseCommit: "base"}
+		if err := reg.BeginWork(filled, f.clock); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reg.ActivateWork(filled.WorktreePath, "s5"); err != nil {
 			t.Fatal(err)
 		}
 		if err := reg.SetAlias("filled", "s0"); err != nil {

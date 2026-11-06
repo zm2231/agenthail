@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/worktree"
 )
 
 type threadCreateOutput struct {
@@ -28,7 +29,15 @@ type threadCreateOutput struct {
 	Delivery   *surface.SendResult `json:"delivery,omitempty"`
 	Alias      string              `json:"alias,omitempty"`
 	Account    *claudepick.Pick    `json:"account,omitempty"`
+	Worktree   *threadWorktree     `json:"worktree,omitempty"`
 	Error      string              `json:"error,omitempty"`
+}
+
+type threadWorktree struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	Behind int    `json:"behind,omitempty"`
 }
 
 type threadCreateRequest struct {
@@ -39,22 +48,28 @@ type threadCreateRequest struct {
 	alias    string
 	model    string
 	approval string
+	worktree bool
+	branch   string
+	base     string
 	jsonOut  bool
 }
 
 const threadNameMargin = 30 * time.Second
 
-const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread <archive|unarchive|pin|unpin> <target> [--json]
        agenthail thread snooze <target> (--until <time|duration> | --until-finished) [--json]
        agenthail thread wake <target> [--json]
        agenthail thread adopt <target> [--wait <duration>] [--stop-terminal] [--json]
+       agenthail thread clean <target> [--force-ignored] [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
---host starts the thread on a paired host; --cwd is then a path on that host.`
+--host starts the thread on a paired host; --cwd is then a path on that host.
+--worktree starts the thread in a new git worktree beside the checkout, under .worktrees/, on a new branch (--branch, or ah/<alias>) from --base or the checkout's HEAD.
+clean removes a thread's worktree and branch when nothing in them would be lost, and otherwise keeps them and says why. Reporting a task and archiving do the same. Ignored files in build and package folders (node_modules, build, dist, target and the like) never keep a worktree; --force-ignored removes it past any other ignored files.`
 
 func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {
@@ -69,6 +84,9 @@ func (a *App) cmdThread(args []string) error {
 	}
 	if len(args) > 0 && args[0] == "adopt" {
 		return a.cmdThreadAdopt(args)
+	}
+	if len(args) > 0 && args[0] == "clean" {
+		return a.cmdThreadClean(args)
 	}
 	if len(args) > 0 && args[0] != "create" {
 		return a.cmdThreadOperation(args)
@@ -131,8 +149,25 @@ func (a *App) cmdThread(args []string) error {
 		readyErr = a.registry().RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
 		return readyErr
 	})
+	var work *worktree.Plan
+	if request.worktree {
+		plan, err := worktree.Begin(ctx, a.registry(), worktree.Spec{Cwd: request.cwd, Branch: request.branch, Base: request.base, Name: request.alias})
+		if err != nil {
+			return err
+		}
+		work, request.options.Cwd = &plan, plan.Cwd
+	}
 
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
+	if work != nil {
+		if session == nil {
+			if err := worktree.Abandon(context.WithoutCancel(ctx), a.registry(), *work); err != nil {
+				fmt.Fprintf(os.Stderr, "take back worktree %s: %s\n", work.WorktreePath, err)
+			}
+		} else if activated, err := a.registry().ActivateWork(work.WorktreePath, session.ID); err != nil || !activated {
+			fmt.Fprintf(os.Stderr, "record worktree %s: activated=%t %v\n", work.WorktreePath, activated, err)
+		}
+	}
 	if session != nil && readyErr != nil {
 		return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", session.ID, readyErr))
 	}
@@ -149,6 +184,9 @@ func (a *App) cmdThread(args []string) error {
 	}
 
 	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias, Account: pick}
+	if work != nil && session != nil {
+		output.Worktree = &threadWorktree{Path: work.WorktreePath, Branch: work.Branch, Base: work.BaseRef, Behind: work.Behind}
+	}
 	if startErr != nil {
 		if session != nil {
 			intent, intentErr := a.registry().RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator}.Sender(), messageUUID, request.message)
@@ -212,8 +250,22 @@ func (a *App) cmdThread(args []string) error {
 	} else {
 		fmt.Printf("created %s in %s and started turn %s\n", target, session.Cwd, result)
 	}
+	printThreadWorktree(output.Worktree)
 	printPickedAccount(output.Account)
 	return nil
+}
+
+func printThreadWorktree(work *threadWorktree) {
+	if work == nil {
+		return
+	}
+	fmt.Printf("worktree: %s on %s from %s\n", work.Path, work.Branch, work.Base)
+	switch {
+	case work.Behind == 1:
+		fmt.Printf("%s is 1 commit behind its upstream\n", work.Base)
+	case work.Behind > 1:
+		fmt.Printf("%s is %d commits behind its upstream\n", work.Base, work.Behind)
+	}
 }
 
 func printPickedAccount(pick *claudepick.Pick) {
@@ -280,9 +332,9 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 			continue
 		}
 		switch arg {
-		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--root", "--host", "--from":
+		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--branch", "--base", "--agent", "--permission-mode", "--root", "--host", "--from":
 			i++
-		case "--json":
+		case "--json", "--worktree":
 		default:
 			positional = append(positional, arg)
 		}
@@ -318,11 +370,17 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if request.approval != "" && request.approval != "untrusted" && request.approval != "on-request" && request.approval != "never" {
 		return threadCreateRequest{}, fmt.Errorf("approval must be untrusted, on-request, or never")
 	}
+	request.worktree = hasFlag(args, "--worktree")
+	request.branch = strings.TrimSpace(flagVal(args, "--branch"))
+	request.base = strings.TrimSpace(flagVal(args, "--base"))
+	if !request.worktree && (request.branch != "" || request.base != "") {
+		return threadCreateRequest{}, fmt.Errorf("--branch and --base need --worktree")
+	}
 	turnOptions, err := parseTurnOptions(args)
 	if err != nil {
 		return request, err
 	}
-	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Worktree: flagVal(args, "--worktree"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), ConfigRoot: flagVal(args, "--root")}
+	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode"), ConfigRoot: flagVal(args, "--root")}
 	return request, nil
 }
 

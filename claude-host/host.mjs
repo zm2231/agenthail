@@ -425,16 +425,15 @@ async function open(params) {
     throw new HostError('invalid', `unknown permission mode: ${params.permissionMode}`);
   }
   if (params.effort && !EFFORTS.has(params.effort)) throw new HostError('invalid', `unknown effort: ${params.effort}`);
-  for (const name of ['model', 'agent', 'name', 'worktree']) {
+  for (const name of ['model', 'agent', 'name']) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
-  if (params.resume && params.worktree) throw new HostError('invalid', 'a resumed session keeps its worktree');
   if (params.checker !== undefined) {
     for (const name of ['run', 'token', 'prompt']) {
       if (typeof params.checker?.[name] !== 'string' || !params.checker[name].trim()) throw new HostError('invalid', `a checker names its run, token and prompt; ${name} is missing`);
     }
-    if (params.resume || params.permissionMode || params.agent || params.worktree) {
-      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode, agent or worktree');
+    if (params.resume || params.permissionMode || params.agent) {
+      throw new HostError('invalid', 'a checker starts fresh in its own sandbox, without resume, permission mode or agent');
     }
   }
   if (params.configDir !== undefined && (typeof params.configDir !== 'string' || !path.isAbsolute(params.configDir))) {
@@ -446,7 +445,6 @@ async function open(params) {
   }
   const extraArgs = {
     ...(params.name ? { name: params.name } : {}),
-    ...(params.worktree ? { worktree: params.worktree } : {}),
   };
   const existing = sessions.get(id);
   if (existing) {

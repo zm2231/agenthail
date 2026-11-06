@@ -32,6 +32,7 @@ type CatalogPresentationRow struct {
 	KeepAlive                              KeepAlive
 	Snooze                                 Snooze
 	TurnEnd                                *TurnEnd
+	Work                                   *WorkRecord
 }
 
 type CatalogPresentation struct {
@@ -76,9 +77,16 @@ func (r *Registry) readCatalogPresentation(ctx context.Context, history bool, st
 	if err != nil {
 		return CatalogPresentation{}, err
 	}
+	works, err := presentationWork(ctx, tx)
+	if err != nil {
+		return CatalogPresentation{}, err
+	}
 	for i := range read.Rows {
 		if end, ok := ends[read.Rows[i].ID]; ok {
 			read.Rows[i].TurnEnd = &end
+		}
+		if work, ok := works[read.Rows[i].ID]; ok {
+			read.Rows[i].Work = &work
 		}
 	}
 	read.History = history

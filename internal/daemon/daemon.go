@@ -122,6 +122,8 @@ type Daemon struct {
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
 	goalSweep                *goalSweeper
+	workClean                sync.Mutex
+	workWake                 chan struct{}
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
@@ -196,6 +198,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		background:        newBackgroundWork(),
 		limitResumes:      newLimitResumer(),
 		goalSweep:         newGoalSweeper(),
+		workWake:          make(chan struct{}, 1),
 		g2:                newG2Counter(time.Now()),
 	}
 	if reg != nil {
@@ -344,6 +347,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runLimitResumes(ctx)
 	go d.runKeepAlive(ctx)
 	go d.runGoalSweeps(ctx)
+	go d.runWorkCleans(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.background.start(d.runJournalSweeps)

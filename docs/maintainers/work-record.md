@@ -58,14 +58,17 @@ A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex
 
 Slice 4 (schema 64) adds `answered_at_ms`, set when the person's reply claims the ask, and `answer_status` and `answer_message_id` from its delivery receipt (`unknown` when delivery failed in a way that may still have reached the session).
 
-**`work_records`**, primary key `session_id`
+**`work_records`**, primary key `worktree_path`, one per session (`session_id`, unique once set)
+
+The row is written, in state `creating` and with no session, before `git worktree add`, so a crash between the two never leaves a worktree nobody tracks.
 
 | Column | Meaning |
 |---|---|
 | `repo_root`, `worktree_path`, `branch`, `base_ref`, `base_commit` | what was made |
-| `state` | `active`, `settled` |
-| `settled_reason` | `pr_merged`, `task_reported`, `archived`, `person` |
-| `cleanup` | `pending`, `removed`, or `kept` with `cleanup_reason` (dirty, unpushed, running) |
+| `state` | `creating`, `active` (its session started), `settled` |
+| `settled_reason` | `task_reported`, `archived`, `person`, `orphaned` (a create that never recorded its session) |
+| `cleanup` | `pending`, `removed`, or `kept` with `cleanup_reason` (`dirty`, `ignored`, `unpushed`, `running`, or `failed: ...`) |
+| `kept_paths` | up to five ignored files that kept it, as JSON |
 | `created_at`, `settled_at` | |
 
 **`session_prs`**, primary key `(session_id, repo, number)`
@@ -118,9 +121,13 @@ If the turn still ends without the call, nothing is parsed from the reply: real 
 
 ### `isolation: "worktree"` on `agenthail_create` and `agenthail thread create --worktree`
 
-Optional `branch` (default `ah/<alias or 8 hex>`) and `base` (default the spawner's `HEAD` commit, so a child sees committed parent work; the task result says when that `HEAD` was behind its upstream). The daemon finds the main checkout through `git rev-parse --git-common-dir`, adds `<main>/.worktrees/<branch slug>` (the convention host moves already use, `session_move_git.go:191`), starts the session in the same relative folder inside it, and writes `work_records`. Refused when the folder or branch exists, or the cwd is not in a repository.
+Optional `branch` (default `ah/<alias or 8 hex>`) and `base` (default the spawner's `HEAD` commit, so a child sees committed parent work; the create result's `worktree.behind` says when that `HEAD` was behind its upstream). The `session-create` action takes the same as `isolation`, `worktree` (the branch name; a non-empty `worktree` alone also asks for one, which is what the apps' worktree name sends) and `base`. `internal/worktree` finds the main checkout (from `git rev-parse --git-common-dir`, or a submodule's `core.worktree`), records the work, adds `<main>/.worktrees/<branch slug>` (the convention host moves already use) and starts the session in the same relative folder inside it, or at the worktree's top when that folder is not in the base commit. When `.worktrees/` is not already ignored, it is added to the repository's `.git/info/exclude`; the repository's `.gitignore` is never written. Refused when the folder or branch exists, the base is not a commit, or the cwd is not in a repository; a session started in a terminal cannot have one. A child's ceiling roots inside the checkout move to the same places in the worktree, so the child works only there. A start that returns no session removes the worktree and its record. The local CLI create runs the same package against the registry directly.
 
-**Settle and clean up.** A session settles when its task reports, its last linked PR merges, or it is archived. Cleanup then runs `git worktree remove` without force and deletes the branch only when it is merged into the base or contained in a remote branch. It keeps the worktree, recording why, when there are tracked or untracked changes, commits not on any remote, or a live turn. The kept reason shows in the work panel; `agenthail work clean <target>` retries. Claude's own `worktree` passthrough (`host.mjs:447`, `dashboard_action_request.go`) is removed, since this replaces it.
+**Settle and clean up.** A session settles when it reports with `agenthail_report`, when it is archived, or when the person runs `work-clean` (`agenthail thread clean <target>`). Linked PRs merging is slice 6. Cleanup runs on the host that owns the folder: a `work-clean` for another host's session is forwarded there like any session action. It removes the worktree with `git worktree remove` (no force) and deletes the branch when nothing would be lost: no tracked or untracked changes, no ignored files outside regenerable folders (ignored files under `node_modules`, `.build`, `build`, `dist`, `target`, `bin`, `obj`, `DerivedData`, `__pycache__`, `.venv`, `.gradle`, `.next` or `coverage` never keep it; any other, such as a `.env`, does, and the row lists up to five of them in `kept_paths`), and every commit the branch or the worktree's own `HEAD` reaches merged into the base or contained in a remote branch, so work committed on a detached `HEAD` or after deleting the branch is kept too. Otherwise it keeps both and records why (`dirty`, `ignored`, `unpushed`). A session mid-turn is kept as `running` and retried once a minute until its turn ends. `work-clean` on kept work retries it, and with `forceIgnored` (`--force-ignored`) removes it past ignored files; an agent's session cannot run it.
+
+**Reconcile.** The same once-a-minute sweep finds `creating` rows more than an hour old: a create that crashed between the row and its session (the CLI creates outside the daemon with any `--timeout`, so age is the only safe sign). A registered session whose folder is inside the worktree takes it; otherwise the row settles as `orphaned` and is cleaned like any other, its row dropped once removed. Claude's own `--worktree` passthrough is removed, since this replaces it.
+
+Each session row in the API carries `worktree {path, branch, base, state, settledReason, cleanup, cleanupReason, keptPaths}`. The session view reads it from `work_records` for this host's sessions, and a trigger on those columns moves the presentation version, so any write, the CLI's included, changes the view's cache key. The daemon makes every write through one helper that also republishes the session's catalog row, which is what event streams and paired hosts see. A write made outside the daemon, such as the CLI's local create, reaches them on the daemon's next discovery pass (every 30 seconds), which republishes any row whose worktree changed.
 
 ### `agenthail_pr` (MCP) and `agenthail pr` (CLI)
 

@@ -60,7 +60,8 @@ type dashboardSession struct {
 	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
 	Project           *CatalogProject            `json:"project,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
-	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
+	Worktree          *workView                  `json:"worktree,omitempty"`
+	ObservedAt       time.Time                  `json:"observedAt,omitempty"`
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`

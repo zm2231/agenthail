@@ -124,6 +124,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 		row.PinnedAt, row.KeepAlive = record.PinnedAt, keepAliveRow(record.KeepAlive)
 		row.Snooze = snoozeRow(record.Snooze)
 		row.EndTurn = endTurnRow(record.TurnEnd)
+		row.Worktree = workRow(record.Work)
 	}
 	return row, nil
 }

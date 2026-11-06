@@ -685,6 +685,9 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 		if err == nil && found && task.State == registry.TaskRunning {
 			d.publishTaskSettled(sessionID, registry.TaskCancelled, "")
 		}
+		if err == nil {
+			d.settleWork(sessionID, registry.WorkSettledArchived)
+		}
 	} else {
 		err = d.Registry.UnarchiveSession(sessionID)
 	}

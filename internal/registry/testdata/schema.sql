@@ -1,4 +1,4 @@
--- schemaVersion 65
+-- schemaVersion 66
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -104,6 +104,9 @@ CREATE INDEX tasks_parent ON tasks(parent_session_id);
 
 -- index tasks_running
 CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
+
+-- index work_records_session
+CREATE UNIQUE INDEX work_records_session ON work_records(session_id) WHERE session_id<>'';
 
 -- table action_receipts
 CREATE TABLE action_receipts (
@@ -831,6 +834,23 @@ CREATE TABLE turn_ends (
 	PRIMARY KEY (session_id, started_at_ms)
 );
 
+-- table work_records
+CREATE TABLE work_records (
+	worktree_path TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	repo_root TEXT NOT NULL,
+	branch TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	base_commit TEXT NOT NULL,
+	state TEXT NOT NULL,
+	settled_reason TEXT NOT NULL DEFAULT '',
+	cleanup TEXT NOT NULL DEFAULT '',
+	cleanup_reason TEXT NOT NULL DEFAULT '',
+	kept_paths TEXT NOT NULL DEFAULT '',
+	created_at_ms INTEGER NOT NULL,
+	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
 -- trigger catalog_presentation_version_aliases_delete
 CREATE TRIGGER catalog_presentation_version_aliases_delete AFTER DELETE ON aliases
 BEGIN
@@ -1119,6 +1139,24 @@ END;
 
 -- trigger catalog_presentation_version_turn_ends_update
 CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE ON turn_ends
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_delete
+CREATE TRIGGER catalog_presentation_version_work_records_delete AFTER DELETE ON work_records WHEN OLD.session_id<>''
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_insert
+CREATE TRIGGER catalog_presentation_version_work_records_insert AFTER INSERT ON work_records WHEN NEW.session_id<>''
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_work_records_update
+CREATE TRIGGER catalog_presentation_version_work_records_update AFTER UPDATE OF session_id,worktree_path,branch,base_ref,state,settled_reason,cleanup,cleanup_reason,kept_paths ON work_records WHEN NEW.session_id<>'' OR OLD.session_id<>''
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
