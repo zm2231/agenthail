@@ -21,6 +21,8 @@ WHEN NEW.current=1 AND NEW.retired=1
 BEGIN
 	UPDATE catalog_sessions SET retired=0 WHERE session_id=NEW.session_id;
 END;
+CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
+CREATE INDEX IF NOT EXISTS sessions_root ON sessions(root_session_id) WHERE root_session_id<>'';
 DROP TRIGGER IF EXISTS sessions_unretire;
 CREATE TRIGGER sessions_unretire AFTER UPDATE OF ended,parent_session_id ON sessions
 WHEN (OLD.ended=1 AND NEW.ended=0) OR NEW.parent_session_id IS NOT OLD.parent_session_id
@@ -31,8 +33,15 @@ DROP TRIGGER IF EXISTS catalog_sessions_unretire_family;
 CREATE TRIGGER catalog_sessions_unretire_family AFTER UPDATE OF retired ON catalog_sessions
 WHEN OLD.retired=1 AND NEW.retired=0
 BEGIN
-	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id=NEW.session_id
-		OR (root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT root_session_id FROM sessions WHERE id=NEW.session_id))));
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
+END;
+DROP TRIGGER IF EXISTS catalog_sessions_unretire_family_insert;
+CREATE TRIGGER catalog_sessions_unretire_family_insert AFTER INSERT ON catalog_sessions
+WHEN NEW.retired=0
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
 END;
 INSERT OR IGNORE INTO catalog_retired_version(id,version) VALUES(1,0);
 DROP TRIGGER IF EXISTS catalog_retired_version_row;
@@ -91,8 +100,9 @@ func sessionEnded(session surface.Session) bool {
 
 // A pass retires its own surface's rows that it still lists or keeps, never
 // one partway to removal, and any mirrored row: its host decided to keep it.
-// A subagent retires only under a retired parent, so no unretired row loses
-// part of its rollup, and un-retiring any row un-retires its whole family.
+// A subagent retires only under a retired parent or one with no row, so no
+// unretired row loses part of its rollup, and a row that comes back or
+// appears brings its whole family back.
 // Each statement retires one more level of a family.
 func retireCatalogRowsTx(tx *sql.Tx, kind surface.SurfaceKind, threshold int, now time.Time) error {
 	for {
@@ -100,7 +110,7 @@ func retireCatalogRowsTx(tx *sql.Tx, kind surface.SurfaceKind, threshold int, no
 			AND session_id IN (SELECT s.id FROM sessions s WHERE s.ended=1 AND s.last_active_ms<?
 				AND (s.host_id<>'' OR (s.surface=? AND (catalog_sessions.misses=0 OR catalog_sessions.misses>=?)))
 				AND CASE WHEN s.parent_session_id='' THEN s.source NOT IN ('subAgent','exec')
-					ELSE s.parent_session_id IN (SELECT session_id FROM catalog_sessions WHERE retired=1) END)
+					ELSE NOT EXISTS (SELECT 1 FROM catalog_sessions p WHERE p.session_id=s.parent_session_id AND p.retired=0) END)
 			AND session_id NOT IN (`+catalogNeededSessions+`)`, now.Add(-catalogRetiredRecency).UnixMilli(), string(kind), threshold)
 		if err != nil {
 			return err

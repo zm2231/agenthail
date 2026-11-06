@@ -157,3 +157,16 @@ func TestARetiredSubagentMovedUnderAnotherParentComesBack(t *testing.T) {
 		t.Fatal("a subagent moved under an unretired parent stayed retired, so that parent's rollup misses it")
 	}
 }
+
+func TestASubagentWhoseParentHasNoRowRetiresAndComesBackWhenTheParentAppears(t *testing.T) {
+	r := openTestRegistry(t)
+	recordCodexThread(t, r, codexThread("orphan", "missing", "missing", 1, true))
+	codexSweep(t, r, "orphan")
+	if !isRetired(t, r, "orphan") {
+		t.Fatal("a subagent whose parent has no row never retires")
+	}
+	recordCodexThread(t, r, codexThread("missing", "", "", 0, false))
+	if isRetired(t, r, "orphan") {
+		t.Fatal("the subagent stayed retired after its parent's row appeared, so that row's rollup misses it")
+	}
+}

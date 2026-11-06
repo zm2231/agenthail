@@ -96,8 +96,14 @@ CREATE UNIQUE INDEX session_journal_provider_key
 -- index session_moves_conversation
 CREATE INDEX session_moves_conversation ON session_moves(conversation, role, state);
 
+-- index sessions_parent
+CREATE INDEX sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
+
 -- index sessions_recent
 CREATE INDEX sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id);
+
+-- index sessions_root
+CREATE INDEX sessions_root ON sessions(root_session_id) WHERE root_session_id<>'';
 
 -- index tasks_parent
 CREATE INDEX tasks_parent ON tasks(parent_session_id);
@@ -1237,8 +1243,16 @@ END;
 CREATE TRIGGER catalog_sessions_unretire_family AFTER UPDATE OF retired ON catalog_sessions
 WHEN OLD.retired=1 AND NEW.retired=0
 BEGIN
-	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id=NEW.session_id
-		OR (root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT root_session_id FROM sessions WHERE id=NEW.session_id))));
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
+END;
+
+-- trigger catalog_sessions_unretire_family_insert
+CREATE TRIGGER catalog_sessions_unretire_family_insert AFTER INSERT ON catalog_sessions
+WHEN NEW.retired=0
+BEGIN
+	UPDATE catalog_sessions SET retired=0 WHERE retired=1 AND session_id IN (SELECT id FROM sessions WHERE parent_session_id<>'' AND parent_session_id=NEW.session_id
+		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
 END;
 
 -- trigger message_queue_catalog_delete
