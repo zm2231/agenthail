@@ -130,7 +130,7 @@ type dashboardProject struct {
 	Archived     bool                          `json:"archived"`
 	Linked       []CatalogProjectRef           `json:"linked,omitempty"`
 	// LinkHeld is why this host keeps the project apart although a link joins it into another.
-	LinkHeld string `json:"linkHeld,omitempty"`
+	LinkHeld    string              `json:"linkHeld,omitempty"`
 	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
 }
 
@@ -147,12 +147,12 @@ type dashboardProjectCoordinator struct {
 }
 
 type dashboardProjectCheckout struct {
-	Host         dashboardHost `json:"host"`
-	ProjectID    string        `json:"projectId"`
-	RootPath     string        `json:"rootPath"`
-	Added        bool          `json:"added"`
-	SessionCount int           `json:"sessionCount"`
-	Archived     bool          `json:"archived"`
+	Host         dashboardHost      `json:"host"`
+	ProjectID    string             `json:"projectId"`
+	RootPath     string             `json:"rootPath"`
+	Added        bool               `json:"added"`
+	SessionCount int                `json:"sessionCount"`
+	Archived     bool               `json:"archived"`
 	LinkedFrom   *CatalogProjectRef `json:"linkedFrom,omitempty"`
 }
 

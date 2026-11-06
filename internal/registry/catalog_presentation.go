@@ -14,22 +14,22 @@ type CatalogPresentationSubagent struct {
 }
 
 type CatalogPresentationRow struct {
-	ID, HostID                                   string
-	Name, Surface, Status, Cwd                   string
-	RuntimeKind, Source, Transport               string
-	UnavailableReason                            string
-	LastActive, RegisteredAt                     time.Time
-	Subagent                                     *CatalogPresentationSubagent
-	WaitingOn, BackgroundTasks, UsageLimit       json.RawMessage
-	Alias                                        sql.NullString
-	QueueCount                                   int
-	Archived                                     bool
-	Freshness                                    CatalogFreshness
-	Attention                                    string
-	Retired                                      bool
-	PinnedAt                                     time.Time
-	KeepAlive                                    KeepAlive
-	Snooze                                       Snooze
+	ID, HostID                             string
+	Name, Surface, Status, Cwd             string
+	RuntimeKind, Source, Transport         string
+	UnavailableReason                      string
+	LastActive, RegisteredAt               time.Time
+	Subagent                               *CatalogPresentationSubagent
+	WaitingOn, BackgroundTasks, UsageLimit json.RawMessage
+	Alias                                  sql.NullString
+	QueueCount                             int
+	Archived                               bool
+	Freshness                              CatalogFreshness
+	Attention                              string
+	Retired                                bool
+	PinnedAt                               time.Time
+	KeepAlive                              KeepAlive
+	Snooze                                 Snooze
 }
 
 type CatalogPresentation struct {

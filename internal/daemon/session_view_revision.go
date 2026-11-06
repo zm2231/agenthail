@@ -13,7 +13,7 @@ type revisionRow struct {
 	CurrentReason string
 	Attention     *SessionAttention
 	InboxSection  string
-	LimitResume  *dashboardLimitResume
+	LimitResume   *dashboardLimitResume
 	Host          *dashboardHost
 	ReplacedLead  []registry.CoordinatorTenure
 }
