@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Stages the Claude host beside the agenthail binary. The SDK's bundled Claude
-# binaries are optional dependencies and are left out: the host runs the
-# user's own claude, and the remaining dependencies are plain JavaScript, so
-# one staged tree serves every platform.
+# No optional or native dependencies, so one staged tree serves every platform.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEST="${1:?usage: stage-claude-host.sh DEST}"
+NAME="${1:?usage: stage-node-host.sh claude-host|browser-host DEST}"
+DEST="${2:?usage: stage-node-host.sh claude-host|browser-host DEST}"
 NPM="${NPM:-npm}"
+SOURCE="$ROOT/$NAME"
+test -f "$SOURCE/package.json"
 
 rm -rf "$DEST"
 mkdir -p "$DEST"
 # npm ci rejects the lock file when the prefix runs through a symlink, as
 # macOS temporary directories under /var do.
 DEST="$(cd "$DEST" && pwd -P)"
-cp "$ROOT"/claude-host/*.mjs "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
+cp "$SOURCE"/*.mjs "$SOURCE/package.json" "$SOURCE/package-lock.json" "$DEST/"
 for module in "$DEST"/*.mjs; do
 	for dependency in $({ grep -oE "(from|import\() *['\"]\./[^'\"]+['\"]" "$module" || true; } | sed -E "s/.*['\"](\.\/[^'\"]+)['\"]/\1/"); do
 		if [ ! -f "$DEST/$dependency" ]; then
@@ -26,11 +26,11 @@ done
 "$NPM" ci --omit=dev --omit=optional --ignore-scripts --no-bin-links --no-audit --no-fund --prefix "$DEST" >/dev/null
 # agenthail update extracts only directories and regular files.
 if find "$DEST" ! -type d ! -type f -print -quit | grep -q .; then
-	echo "error: the staged Claude host contains entries that are not directories or regular files" >&2
+	echo "error: the staged $NAME contains entries that are not directories or regular files" >&2
 	exit 1
 fi
 if find "$DEST/node_modules" -name '*.node' -print -quit | grep -q .; then
-	echo "error: the Claude host gained a native dependency; it can no longer ship as one tree" >&2
+	echo "error: $NAME gained a native dependency; it can no longer ship as one tree" >&2
 	exit 1
 fi
-test -f "$DEST/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
+"$NPM" ls --omit=dev --omit=optional --prefix "$DEST" >/dev/null

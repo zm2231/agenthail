@@ -441,7 +441,7 @@ for them. The model and permission mode change through the host instead.
 
 ## Packaging
 
-`scripts/stage-claude-host.sh` stages `host.mjs` with its locked dependencies
+`scripts/stage-node-host.sh claude-host` stages `host.mjs` with its locked dependencies
 beside the `agenthail` binary as `claude-host/`. The SDK's bundled Claude
 binaries are optional dependencies and are omitted; the remaining dependencies
 are plain JavaScript, so one tree serves every platform, and the script fails

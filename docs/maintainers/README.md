@@ -7,6 +7,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
 - [Daemon runtime profiles: capturing heap, allocs and goroutines](debug-profiles.md)
 - [Claude session host](claude-host.md)
+- [Browser host: Chromium on first use, supervision and status](browser-host.md)
 - [Claude goals: transcript records, statuses and clients](claude-goals.md)
 - [Codex integration decisions](../codex-protocol.md)
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)

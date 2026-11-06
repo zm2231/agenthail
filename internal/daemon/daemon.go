@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/filewake"
@@ -110,6 +111,7 @@ type Daemon struct {
 	dashboard                *dashboardServer
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
+	browserHost              *browserhost.Manager
 	build                    buildinfo.Identity
 	startup                  daemonStartup
 	identityMu               sync.RWMutex
@@ -328,6 +330,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(hostDone)
 		d.superviseClaudeHost(ctx)
 	}()
+	browserDone := make(chan struct{})
+	go func() {
+		defer close(browserDone)
+		d.superviseBrowserHost(ctx)
+	}()
 	go d.sweepUploads(ctx)
 	go d.runLimitResumes(ctx)
 	go d.runGoalSweeps(ctx)
@@ -349,6 +356,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.background.stop()
 			<-catalogDone
 			<-hostDone
+			<-browserDone
 			<-uiDone
 			d.log.Printf("stopping")
 			return nil
