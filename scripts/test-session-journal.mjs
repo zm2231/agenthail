@@ -80,6 +80,7 @@ class MockEventSource {
     const handler = this.listeners.get(name);
     if (handler) handler({data: JSON.stringify({data})});
   }
+  send(envelope) { this.listeners.get('item')({data: JSON.stringify(envelope)}); }
 }
 
 const history = () => ({capabilities: {stream: true}, journalSeq: 42, timeline: {items: []}, exchanges: []});
@@ -151,6 +152,29 @@ assert.equal(reloaded.length, 0, 'transient disconnect keeps automatic resume');
 instances[1].readyState = 2;
 instances[1].emit('error', {});
 assert.deepEqual(reloaded, ['session-b'], 'terminal stream error reloads the bounded page');
+
+const inline = 'x'.repeat(16384);
+const longRow = body => ({itemId: 'long', op: 'upsert', kind: 'text', role: 'assistant', body, truncated: true, bodyRef: 'ref-long'});
+const longItem = text => ({id: 'long', kind: 'text', role: 'assistant', text, truncated: true, bodyRef: 'ref-long'});
+const longText = () => app.history.timeline.items.find(value => value.id === 'long');
+vm.runInContext('startLiveStream()', context);
+const growing = instances.at(-1);
+growing.send({seq: 20, type: 'item', data: longRow(inline), item: longItem(inline)});
+growing.send({seq: 21, type: 'append', itemId: 'long', from: 16384, text: 'é and more', version: 3, ts: '2026-11-06T00:00:01Z'});
+growing.send({seq: 22, type: 'append', itemId: 'long', from: 16384 + 11, text: ' 🙂', version: 4, ts: '2026-11-06T00:00:02Z', final: true});
+assert.equal(longText().text, `${inline}é and more 🙂`, 'a reply past the inline body keeps growing without a reload');
+assert.equal(longText().truncated, false, 'a client holding every byte does not mark the reply cut');
+assert.equal(app.history.exchanges.at(-1).assistant, `${inline}é and more 🙂`);
+assert.equal(app.history.journalSeq, 22);
+growing.send({seq: 23, type: 'append', itemId: 'long', from: 7, text: 'wrong', version: 5, ts: '2026-11-06T00:00:03Z'});
+assert.equal(growing.closed, true, 'an append that does not continue the row closes the stream');
+const resumed = instances.at(-1);
+assert.notEqual(resumed, growing);
+assert.equal(resumed.url, '/api/session-stream?id=session-b&after=22', 'the stream reopens after the last applied row');
+assert.equal(longText().text, `${inline}é and more 🙂`, 'a diverged append changes nothing');
+resumed.send({seq: 24, type: 'item', data: longRow(inline), item: longItem(inline)});
+resumed.send({seq: 25, type: 'append', itemId: 'long', from: 16384, text: 'é and more 🙂!', version: 6, ts: '2026-11-06T00:00:04Z'});
+assert.equal(longText().text, `${inline}é and more 🙂!`, 'after reopening, the whole row seen first takes appends');
 const indicator = {};
 const usageContext = vm.createContext({$: () => indicator});
 
