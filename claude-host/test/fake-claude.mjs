@@ -320,12 +320,36 @@ function claudeTranscript(uuid, text, reply) {
   const file = claudeTranscriptFile();
   const at = new Date().toISOString();
   const base = { sessionId, cwd: process.cwd(), timestamp: at };
+  if (text === '/compact') {
+    fs.appendFileSync(file, compactRecords(file, uuid, base).map((r) => JSON.stringify(r)).join('\n') + '\n');
+    return;
+  }
   const records = [
     { ...base, type: 'user', uuid, message: { role: 'user', content: text } },
     { ...base, type: 'assistant', uuid: crypto.randomUUID(), message: { id: `msg-${uuid}`, model: model.replace(/\[.*$/, ''), role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 990, output_tokens: 5 } } },
     { ...base, type: 'system', subtype: 'turn_duration' },
   ];
   fs.appendFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+
+// compactRecords is what Claude under the Agent SDK 0.3.302 was seen to write
+// for /compact: the boundary and the summary come before the command record,
+// and all of the command's records share its promptId. Claude refused an
+// empty conversation with this error; the fake also refuses one with no reply
+// since its last boundary.
+function compactRecords(file, uuid, base) {
+  const promptId = crypto.randomUUID();
+  const caveat = { ...base, type: 'user', uuid: crypto.randomUUID(), promptId, isMeta: true, message: { role: 'user', content: '<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>' } };
+  const command = { ...base, type: 'user', uuid, parentUuid: caveat.uuid, promptId, message: { role: 'user', content: '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>' } };
+  const recorded = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  if (!recorded.slice(recorded.lastIndexOf('"subtype":"compact_boundary"') + 1).includes('"type":"assistant"')) {
+    return [caveat, command, { ...base, type: 'system', subtype: 'local_command', uuid: crypto.randomUUID(), parentUuid: uuid, content: '<local-command-stderr>Error: No messages to compact</local-command-stderr>' }];
+  }
+  const boundary = { ...base, type: 'system', subtype: 'compact_boundary', uuid: crypto.randomUUID(), parentUuid: null, content: 'Conversation compacted', compactMetadata: { trigger: 'manual', preTokens: 1000, postTokens: 100 } };
+  const summary = { ...base, type: 'user', uuid: crypto.randomUUID(), parentUuid: boundary.uuid, promptId, isCompactSummary: true, message: { role: 'user', content: 'This session is being continued from a previous conversation.' } };
+  caveat.parentUuid = summary.uuid;
+  const stdout = { ...base, type: 'user', uuid: crypto.randomUUID(), parentUuid: uuid, promptId, message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' } };
+  return [boundary, summary, caveat, command, stdout];
 }
 
 // With FAKE_CLAUDE_RECORD set it also writes the session record and serves
