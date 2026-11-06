@@ -81,6 +81,25 @@ func TestAPersonsSessionThatNeedsThemIsInNeedsYouAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestACompletionHeldForBackgroundWorkStillSaysWhatTheTurnNeeds(t *testing.T) {
+	f := newEndTurnFixture(t)
+	if _, refused := callMCP(t, f.person, "agenthail_end_turn", deployAsk); refused {
+		t.Fatal("end turn refused")
+	}
+	if err := f.r.BindTurnCompletion(f.from.ID, "turn-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.SaveRuntimeState(f.from.ID, surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.HoldCompletion(f.from.ID, "turn-1"); err != nil {
+		t.Fatal(err)
+	}
+	f.d.armCompletionNotification(f.from.ID)
+	f.d.releaseUnobservedHold(context.Background(), f.fake, &f.from)
+	f.alert(t, " needs you: Deploy the fix?")
+}
+
 func TestAWorkersNeedsYouGoesToWhoStartedItNotThePerson(t *testing.T) {
 	f := newEndTurnFixture(t)
 	f.turn(t, f.to, "turn-1", func() {
