@@ -106,8 +106,7 @@ struct SessionCommands: Commands {
     }
 
     private func showMainWindow() {
-        NSApplication.shared.activate()
-        openWindow(id: "main")
+        MainWindowShow.show(model.mainWindow) { openWindow(id: "main") }
     }
 }
 
