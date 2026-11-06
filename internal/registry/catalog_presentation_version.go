@@ -32,7 +32,7 @@ var presentationInputs = []presentationInput{
 	{table: "session_runtime", columns: "session_id,completed_turn_id", changed: true},
 	{table: "session_keep_alive", columns: "session_id,failed_at_ms,error"},
 	{table: "sessions", columns: "id,name,surface,status,cwd,last_active_ms,runtime_kind,source,transport,host_id,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,registered_at,pinned_at_ms,snoozed_at_ms,snoozed_until_ms,snooze_wake"},
-	{table: "catalog_sessions", columns: "session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,observed_at,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project"},
+	{table: "catalog_sessions", columns: "session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project"},
 }
 
 // Must cover every row catalogPresentationOutgoing and settledDeliveryFailure read.

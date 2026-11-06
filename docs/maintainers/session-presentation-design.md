@@ -13,7 +13,7 @@ The full end state below removes client policy. Retention until the named releas
 
 ## One catalog authority
 
-One visible catalog has one serving daemon, identified by `catalogHostId`, `hostEpoch`, and an opaque `viewRevision`. Its universe is catalog rows from that daemon, including mirrored peers and retired catalog rows. Raw registry-only history is outside it. Hidden subagents remain available through the existing child/detail endpoints. Stale observations stay in the universe; staleness does not mean archived, deleted, or inactive. Preserve `freshness` and `observedAt` unchanged when formatting a view.
+One visible catalog has one serving daemon, identified by `catalogHostId`, `hostEpoch`, and an opaque `viewRevision`. Its universe is catalog rows from that daemon, including mirrored peers and retired catalog rows. Raw registry-only history is outside it. Hidden subagents remain available through the existing child/detail endpoints. Stale observations stay in the universe; staleness does not mean archived, deleted, or inactive. A view row's `freshness` carries `generation` and `stale` only. Rows omit `observedAt`, since discovery refreshes it every pass and no client reads it, so a view does not change when only it moves. The catalog stream keeps its own `freshness.observedAt`.
 
 iOS selects one serving daemon's catalog, including its mirrors. Keep independent pairings and route fallback for opening a session, but remove merged catalog presentation. Independently paired, mutually unmirrored hosts do not form a combined list. Federation remains a daemon responsibility (`native/iOS/HostCatalog.swift:65` is the client merge being deleted).
 

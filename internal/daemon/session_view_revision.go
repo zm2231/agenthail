@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"time"
-
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -19,6 +17,5 @@ type revisionRow struct {
 }
 
 func newRevisionRow(record registry.CatalogPresentationRow, row dashboardSession) revisionRow {
-	record.Freshness.ObservedAt = time.Time{}
 	return revisionRow{Record: record, Display: row.Display, Current: row.Current, CurrentReason: row.CurrentReason, Attention: row.Attention, InboxSection: row.InboxSection, LimitResume: row.LimitResume, Host: row.Host, ReplacedLead: row.ReplacedLead}
 }

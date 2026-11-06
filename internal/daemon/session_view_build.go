@@ -100,8 +100,8 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		}
 		row.ID = hosts.Qualify(record.HostID, record.ID)
 		internal[row.ID] = record.ID
-		row.Freshness = &record.Freshness
-		row.ObservedAt = record.Freshness.ObservedAt
+		row.Freshness = &registry.CatalogFreshness{Generation: record.Freshness.Generation, Stale: record.Freshness.Stale}
+		row.ObservedAt = time.Time{}
 		row.Display = nil
 		row.Attention = nil
 		if row.Subagent != nil {
