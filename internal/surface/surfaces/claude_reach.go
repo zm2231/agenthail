@@ -120,9 +120,10 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 
 func (c *Claude) RefreshRoute(ctx context.Context, sess *surface.Session) {
 	read := *sess
-	if c.reachableAsIs(ctx, &read) {
-		sess.Bridge = read.Bridge
-	}
+	c.reachableAsIs(ctx, &read)
+	// reachableAsIs replaces Bridge only once it has read the live process's
+	// own record, so a dead or reassigned process leaves it as stored.
+	sess.Bridge = read.Bridge
 }
 
 // conversation reads which processes hold a conversation. Session records

@@ -86,3 +86,44 @@ func TestAPersonsMessageFailsClearlyWhenRemoteControlIsGoneAndNoSocketListens(t 
 		t.Fatalf("posts=%d, want one", posts)
 	}
 }
+
+func TestAStreamsCommandsFollowRemoteControlStartingAndStoppingWithoutATranscriptWrite(t *testing.T) {
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	transcript := fixture.Transcript(goneConversation, fixture.Home)
+	fixture.Record(goneConversation, fixture.Home, "")
+	c := NewClaude(nil, fixture.Home)
+	session := &surface.Session{ID: goneConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: fixture.PID, HasLocal: true, Transcript: transcript}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	commands := make(chan string, 8)
+	streamed := make(chan error, 1)
+	go func() {
+		streamed <- c.Stream(ctx, session, "", func(event surface.StreamEvent) {
+			if event.Kind == "commands" {
+				commands <- event.Commands.Unavailable
+			}
+		}, time.Minute)
+	}()
+	defer func() {
+		cancel()
+		<-streamed
+	}()
+	next := func(want string) {
+		t.Helper()
+		select {
+		case got := <-commands:
+			if got != want {
+				t.Fatalf("commands unavailable=%q, want %q", got, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no commands item followed, want unavailable=%q", want)
+		}
+	}
+
+	next(claudeCommandsUnavailable)
+	fixture.Record(goneConversation, fixture.Home, "session_started")
+	next("")
+	fixture.Record(goneConversation, fixture.Home, "")
+	next(claudeCommandsUnavailable)
+}
