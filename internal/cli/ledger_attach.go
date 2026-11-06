@@ -157,7 +157,7 @@ func attachSegments(args []string) [][]string {
 	return segments
 }
 
-const attachUsage = `usage: agenthail ledger attach <utterance_id> --as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation> [--to <goal|ask|clause|project>] [--clause "..."] [--and <utterance_id> --as ... ]...`
+const attachUsage = `usage: agenthail ledger attach <utterance_id> [--as <new-ask|extends|constrains|refines|reacts|delegates|decides|conversation>] [--to <goal|ask|clause|item|project>] [--clause "..."] [--and <utterance_id> ...]...`
 
 func (a *App) ledgerAttach(args []string, propose bool) error {
 	segments := attachSegments(args)
@@ -187,9 +187,6 @@ func (a *App) ledgerAttach(args []string, propose bool) error {
 		return fmt.Errorf("%s", attachUsage)
 	default:
 		req.UtteranceID = w.positional[1]
-	}
-	if req.As == "" {
-		return fmt.Errorf("--as is required")
 	}
 	ctx := context.Background()
 	if req.ProjectKey, req.SessionID, err = a.ledgerWriteContext(ctx, w); err != nil {
@@ -235,9 +232,6 @@ func (a *App) ledgerAttachEach(segments [][]string) error {
 		}
 		fragments[i] = attachFields(w)
 		fragments[i].UtteranceID = utterance
-		if fragments[i].As == "" {
-			return fmt.Errorf("fragment %d (%s) needs --as", i+1, utterance)
-		}
 	}
 	ctx := context.Background()
 	key, session, err := a.ledgerWriteContext(ctx, first)

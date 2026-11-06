@@ -38,7 +38,6 @@ func TestLedgerAttachTakesSeveralFragmentsInOneCall(t *testing.T) {
 	for _, args := range [][]string{
 		{"attach", "claude-prompt:1", "--as", "extends", "--and", "claude-prompt:2", "--as", "decides", "--project", "other"},
 		{"attach", "claude-prompt:1", "--as", "extends", "--and", "--as", "decides"},
-		{"attach", "claude-prompt:1", "--as", "extends", "--and", "claude-prompt:2"},
 	} {
 		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err == nil {
 			t.Errorf("ledger %v was accepted", args)

@@ -76,7 +76,6 @@ func TestClosingDeletingAndRestoringWork(t *testing.T) {
 	items(t, s, "schema", "index")
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkDep, ItemID: "widget-W2", DependsOn: "widget-W1"})
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1"}, "close needs --reason")
-	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "finished already"}, "close needs --reason")
 	closed := work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W1", Reason: "duplicate of widget-W9"})
 	if closed.Item.State != ledger.WorkClosed {
 		t.Fatalf("closed = %+v", closed.Item)

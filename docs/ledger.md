@@ -43,6 +43,38 @@ A message that carries several intents is attached in one call, one fragment per
 agenthail ledger attach <utterance> --as extends --to <ask> --clause "and the docs" --and <utterance> --as decides --to project --clause "use sqlite"
 ```
 
+`--to` takes any goal, ask, clause or work item, or `project`, and `attach` reads it as the anchor the relation needs. The readback names each step it took:
+
+- A work item stands for the clause it serves. Found work, which serves no clause, stands for the project.
+- A clause stands for its ask, or for its goal if it has no ask.
+- `new-ask` with `--to project`, or with no `--to`, goes on a goal named after the project. That goal is made the first time.
+- `extends` or `delegates` with `--to <goal>` uses the goal's only ask. If the goal has no ask, or more than one, `extends` starts a new ask on it, and `delegates` asks you to name one.
+- `decides` with an ask or a clause decides on its goal.
+- `refines` or `reacts` with `--to <ask>` uses the ask's only clause.
+- `conversation` keeps no `--to` or `--clause`, and says so.
+- `reacts` with none of `--adopt`, `--reject` or `--ack` records a reaction that changes nothing.
+
+`attach` refuses only an id that names nothing, and a request it cannot carry out as written, such as adopting a clause that is not a proposal.
+
+`--as` can be left out. `attach` then reads it from the other flags, and the readback says which relation it chose and why:
+
+| Given | Read as |
+| --- | --- |
+| `--session` | `delegates` |
+| `--ack` | `reacts --ack` |
+| `--adopt` or `--reject` | `reacts` |
+| `--to <question>` | `answers`; with a `--clause` only for a question on an ask, where the answer adds a clause |
+| no `--to` and no `--clause` | `conversation` |
+| `--to` but no `--clause` | `reacts`, which changes nothing |
+| `--to <clause>` or `--to <ask>` with a `--clause` | `extends`: the words become a new clause on the ask |
+| `--to <goal>`, `--to project`, found work, or no `--to`, with a `--clause` | `new-ask` |
+
+A work item counts as the clause it serves. Nothing that rewrites or drops the person's words is guessed: rewording a clause needs `--as refines`, acking a cut needs `--ack`, an answer that rewords a clause or records a decision needs `--as answers`, and constraints and decisions need their `--as`.
+
+```
+agenthail ledger attach <utterance> --to <ask> --clause "and the docs"   # intent ledger: +1 clause on <ask> (...) (no --as, read as extends: --to is an ask)
+```
+
 ### When a session is asked to attach
 
 `agenthail ledger enable` asks each session to attach every message before it replies, and the turn gate below holds it for words it left unattached. `agenthail ledger enable --attach checkpoints` asks nothing per message. Instead, the words a session has not attached yet are shown at points it reaches anyway:
@@ -140,7 +172,7 @@ agenthail ledger work handoff <item> --done "..." --remaining "..."
 
 Every `ledger work <command>` can also be written without `work`, as in td: `ledger list`, `ledger show <item>`, `ledger add` (or `create`, `new`), `ledger edit` (or `update`), `ledger start` (claim), `ledger review` (submit), `ledger close`, `ledger delete`, `ledger reopen` and the rest. `agenthail ledger help` lists them all, and so does an unknown command. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from.
 
-An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). Work nobody holds that was finished elsewhere, such as an imported issue that already shipped, is closed as done with what finished it: `agenthail ledger close <item> --reason "done: PR #12"` takes an open or blocked item with no assignee straight to `done`. Claimed work is finished through `submit` and review. `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
+An item moves through `open`, `in_progress`, `blocked`, `in_review` and `done`. Work that will not be done is closed instead, with a reason: `agenthail ledger work close <item> --reason "duplicate of <item>"` (the reason starts with `duplicate`, `wontfix` or `obsolete`). Work nobody holds that was finished elsewhere, such as an imported issue that already shipped, is closed as done with what finished it: `agenthail ledger close <item> --reason "done: PR #12"` takes an open or blocked item with no assignee straight to `done`. A reason that starts with none of these words, such as `--reason "finished in PR #12"`, is read as done, and the readback says so. Claimed work is finished through `submit` and review. `delete` hides an item from every list and `restore` brings it back; `reopen` takes a done or closed item back to open. Closing or deleting an item frees the items that wait on it, and closing work never closes the clause above it.
 
 Two kinds of notes attach to an item:
 
