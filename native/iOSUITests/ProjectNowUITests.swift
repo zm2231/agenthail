@@ -30,7 +30,7 @@ final class ProjectNowUITests: XCTestCase {
     func testAGroupLineSitsCloseToTheRowsUnderIt() {
         let app = launch("multi")
         let line = app.staticTexts["feat/export"]
-        let title = app.staticTexts["Add CSV export"]
+        let title = app.buttons["project-session-computer::csv"].staticTexts["Add CSV export"]
         XCTAssertTrue(line.waitForExistence(timeout: 5))
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
