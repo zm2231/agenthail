@@ -92,6 +92,7 @@ type Daemon struct {
 	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *catalogIdentityCache
+	repositoryKeys    repositoryKeyWatch
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
 	ledgerHub         *ledgerChangeHub
@@ -219,6 +220,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	d.catalog = newCatalogHub(reg)
 	d.catalogIdentities.changed = d.requestCatalogDiscovery
+	d.catalogIdentities.observeRoot = d.observeRepositoryKey
 	if prompts := d.claudePrompts(); prompts != nil {
 		prompts.OnPromptChange(d.claudePromptChanged)
 	}

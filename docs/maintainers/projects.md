@@ -90,7 +90,22 @@ refused, and so is a name that is both a stored channel and a project. A
 channel cannot be created or renamed to a project's name. See
 [hosts](hosts.md#relays-and-channels-across-hosts).
 
-A changed remote moves a project to its new key on the next catalog pass.
+A changed remote moves a project to its new key on the next catalog pass,
+with everything kept under the old key: its ledger, its lead and lead
+history, its links and its archive state. Each host remembers the key it
+last saw for each repository folder (`repository_keys`), and the move is one
+registry transaction. The host records the move (`project_moves`), so a
+checkout that still names the old remote resolves to the new key, and naming
+the old remote again moves the project back. Moves between repository keys
+reach paired hosts like links do, in the snapshot's `projectMoves` and the
+`project.moved` catalog event. A replica of a shared ledger that saw the move
+first hands it to the ledger's owner (`/api/v1/ledger/sync/moves`) before it
+confirms the new key there.
+
+A move is refused when both keys already keep a ledger, or both have a lead,
+because two histories cannot be merged. Nothing moves; `agenthail doctor`
+and the ledger board of either key name the history that stayed behind, and
+the refusal clears when the folder names its old remote again.
 
 ## Linked projects
 

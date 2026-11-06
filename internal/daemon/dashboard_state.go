@@ -133,6 +133,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if state.ProjectLinks, err = d.sharedProjectLinks(); err != nil {
 		return dashboardState{}, fmt.Errorf("read project links: %w", err)
 	}
+	if state.ProjectMoves, err = d.sharedProjectMoves(); err != nil {
+		return dashboardState{}, fmt.Errorf("read project moves: %w", err)
+	}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID

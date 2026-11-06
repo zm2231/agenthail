@@ -489,6 +489,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 	}
 	d.catalogIdentities.prune(time.Now())
 	d.publishUnarchivedProjects()
+	d.publishProjectMoves()
 }
 
 // publishUnarchivedProjects republishes the other rows of a project that a

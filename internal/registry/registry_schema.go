@@ -632,6 +632,22 @@ CREATE TABLE IF NOT EXISTS removed_project_ledgers (
 	project_id TEXT NOT NULL,
 	removed_at_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_moves (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_move_refusals (
+	from_key TEXT PRIMARY KEY,
+	to_key TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS repository_keys (
+	workspace_root TEXT PRIMARY KEY,
+	project_key TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ledger_state (
 	project_key TEXT PRIMARY KEY,
 	owner_host_id TEXT NOT NULL DEFAULT '',
