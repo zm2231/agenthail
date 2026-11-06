@@ -1,6 +1,6 @@
+import SwiftUI
 #if DEBUG
 import QuartzCore
-import SwiftUI
 
 @MainActor
 final class ScrollJumpProbe {
@@ -27,6 +27,13 @@ final class ScrollJumpProbe {
         height = geometry.contentSize.height
         visible = geometry.visibleRect.height
         if ticker == nil { ticker = Ticker { [weak self] in self?.tick() } }
+    }
+
+    func stop() {
+        flush()
+        ticker?.invalidate()
+        ticker = nil
+        last = nil
     }
 
     func phase(_ phase: ScrollPhase) {
@@ -100,6 +107,11 @@ private final class Ticker: NSObject {
         link?.add(to: .main, forMode: .common)
     }
 
+    func invalidate() {
+        link?.invalidate()
+        link = nil
+    }
+
     @objc private func fire() { action() }
 }
 
@@ -135,6 +147,7 @@ extension View {
         if ScrollJumpProbe.enabled {
             onScrollGeometryChange(for: ScrollGeometry.self) { $0 } action: { _, geometry in ScrollJumpProbe.shared.geometry(geometry) }
                 .onScrollPhaseChange { _, phase in ScrollJumpProbe.shared.phase(phase) }
+                .onDisappear { ScrollJumpProbe.shared.stop() }
         } else { self }
 #else
         self
