@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
-func TestAPageOfASessionNothingFollowsShowsWhatItsTranscriptGainedSince(t *testing.T) {
+func TestAPageThatWaitsShowsWhatTheTranscriptGainedWhileNothingFollowed(t *testing.T) {
 	previousGrace := sessionPageHandoffGrace
 	sessionPageHandoffGrace = 10 * time.Millisecond
 	t.Cleanup(func() { sessionPageHandoffGrace = previousGrace })
@@ -39,9 +39,9 @@ func TestAPageOfASessionNothingFollowsShowsWhatItsTranscriptGainedSince(t *testi
 	}
 	waitForNoSources(t, d)
 	appendToFile(t, path, claudeTurns(conversation, 3, 5))
-	got := readDashboardExchanges(t, handler, conversation, "")
+	got := readDashboardExchanges(t, handler, conversation, "&wait=1")
 	if len(got) != 5 || got[4].Assistant != "answer 5" {
-		t.Fatalf("page after the transcript grew with nothing following it: %+v, want answers 1-5", got)
+		t.Fatalf("a page that waits, after the transcript grew with nothing following it: %+v, want answers 1-5", got)
 	}
 }
 
