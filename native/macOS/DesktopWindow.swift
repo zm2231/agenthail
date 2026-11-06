@@ -2077,7 +2077,7 @@ struct DetailsTab: View {
                     .help(configRoot.summary + "\n" + configRoot.root)
                 }
                 if let detail = pane.detail {
-                    detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchanges.count))
+                    detailRow("Exchanges", SessionFacts.exchangeLabel(detail.exchangeCount ?? 0))
                 }
                 if let background = session.backgroundTasks {
                     detailRow("Background", ([background.summary] + (background.tasks ?? []).map(\.line) + [background.sourceNote].compactMap { $0 }).joined(separator: "\n"))

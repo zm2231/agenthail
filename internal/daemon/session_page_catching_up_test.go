@@ -63,19 +63,15 @@ func TestASeededSessionsPageAnswersFromTheJournalWhileItCatchesUp(t *testing.T) 
 	addBrowserCookie(handler, request)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	var page struct {
-		Exchanges  []pageExchange `json:"exchanges"`
-		JournalSeq uint64         `json:"journalSeq"`
-		CatchingUp bool           `json:"catchingUp"`
-	}
+	var page timelinePage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
 		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
 	}
 	if elapsed := time.Since(started); elapsed > sessionPageCatchUpWait/2 {
 		t.Fatalf("the page took %v; a seeded journal answers without waiting for catch-up", elapsed)
 	}
-	if !page.CatchingUp || len(page.Exchanges) != 2 || page.JournalSeq == 0 {
-		t.Fatalf("page while catching up: catchingUp=%v exchanges=%d journalSeq=%d", page.CatchingUp, len(page.Exchanges), page.JournalSeq)
+	if !page.CatchingUp || len(page.exchanges(t)) != 2 || page.JournalSeq == 0 {
+		t.Fatalf("page while catching up: catchingUp=%v exchanges=%d journalSeq=%d", page.CatchingUp, len(page.exchanges(t)), page.JournalSeq)
 	}
 	close(adapter.gate)
 	if got := readDashboardExchanges(t, handler, conversation, "&wait=1"); len(got) != 5 || got[4].Assistant != "answer 5" {

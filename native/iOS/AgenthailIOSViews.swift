@@ -537,7 +537,7 @@ struct SessionScreen: View {
     private var latestRowID: String? {
         guard let detail, let timeline = detail.timeline else { return nil }
         let items = items
-        guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) else { return nil }
+        guard Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchangeCount ?? 0) else { return nil }
         return activityOnly ? items.last?.id : TimelineGroup.make(items, foldAgents: !expandAgents).last?.id
     }
 
@@ -607,7 +607,7 @@ struct SessionScreen: View {
                 Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(PhonePalette.muted)
             }
             if let timeline = detail.timeline,
-               Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
+               Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchangeCount ?? 0) {
                 if (model.activityCursor ?? 0) > 0 {
                     Button {
                         followingLatest = false
@@ -652,11 +652,12 @@ struct SessionScreen: View {
                 if detail.transcriptTruncated == true {
                     Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
-                ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
+                let exchanges = detail.exchanges ?? []
+                ForEach(Array(exchanges.enumerated()), id: \.offset) { _, exchange in
                     if !exchange.user.isEmpty { IOSMessage(label: exchange.promptLabel, text: exchange.user, timestamp: exchange.timestamp) }
                     if !exchange.assistant.isEmpty { IOSMessage(label: "Assistant", text: exchange.assistant, timestamp: exchange.timestamp) }
                 }
-                if detail.exchanges.isEmpty {
+                if exchanges.isEmpty {
                     ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
                 }
             }
@@ -845,7 +846,7 @@ struct SessionScreen: View {
         .onChange(of: queueTail.shownIDs) { _, _ in
             if landed, followingLatest { scrollToLatest() }
         }
-        .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
+        .onChange(of: detail?.exchanges?.last?.assistant) { _, _ in
             if followingLatest { scrollToLatest() }
         }
     }

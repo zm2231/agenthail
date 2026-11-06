@@ -51,6 +51,10 @@ export function promptOrigin(value) {
   return value.origin || "";
 }
 
+export function pageHistory(detail) {
+  return { ...detail, exchanges: detail.exchanges || exchangesFromItems(detail.timeline?.items || []) };
+}
+
 export function exchangesFromItems(items) {
   const exchanges = [];
   let turn = "";

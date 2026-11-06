@@ -12,6 +12,7 @@ import { renderChat } from "./chat.js";
 import { loadSessionMetadata } from "./session-metadata.js";
 import { leaveProject } from "./project-pane.js";
 import { findSession } from "./session-pages.js";
+import { pageHistory } from "./stream-items.js";
 
 export async function selectSession(id, focus = false) {
   if (app.selected?.id !== id) { for (const selector of ["#turn-effort", "#turn-mode", "#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
@@ -49,7 +50,7 @@ export async function selectSession(id, focus = false) {
       `/api/session?id=${encodeURIComponent(id)}&limit=20&timeline=1`,
     );
     if (!response.ok) throw await responseError(response);
-    const detail = await response.json();
+    const detail = pageHistory(await response.json());
     if (app.selected?.id !== id) return;
     detail.transcriptWarning = detail.readError || "";
     app.history = detail;

@@ -46,10 +46,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	type page struct {
-		Exchanges []surface.Exchange      `json:"exchanges"`
-		Timeline  surface.SessionTimeline `json:"timeline"`
-	}
+	type page = timelinePage
 	for _, authenticated := range []bool{false, true} {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=2", nil)
 		if authenticated {
@@ -73,8 +70,8 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 		if body.Timeline.Source != "journal" || body.Timeline.NextBefore != 3 || len(body.Timeline.Items) != 5 || body.Timeline.Items[4].ID != "tool-1" || body.Timeline.Items[0].ID != "item-3" || body.Timeline.Items[0].Role != "user" || body.Timeline.Items[0].BodyRef != "ref-3" {
 			t.Fatalf("%+v", body)
 		}
-		if len(body.Exchanges) != 2 || body.Exchanges[0].User != "body-3" || body.Exchanges[0].Assistant != "body-4" || body.Exchanges[1].User != "body-5" || body.Exchanges[1].Assistant != "body-6" {
-			t.Fatalf("exchanges=%+v", body.Exchanges)
+		if exchanges := body.exchanges(t); len(exchanges) != 2 || exchanges[0].User != "body-3" || exchanges[0].Assistant != "body-4" || exchanges[1].User != "body-5" || exchanges[1].Assistant != "body-6" {
+			t.Fatalf("exchanges=%+v", exchanges)
 		}
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&timelineBefore=3&limit=2", nil)
@@ -83,7 +80,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 	handler.ServeHTTP(response, request)
 	var body page
 	json.Unmarshal(response.Body.Bytes(), &body)
-	if response.Code != 200 || body.Timeline.Source != "journal" || len(body.Timeline.Items) != 2 || body.Timeline.Items[0].ID != "item-1" || body.Timeline.Items[0].Role != "user" || body.Timeline.Items[0].BodyRef != "ref-1" || len(body.Exchanges) != 1 || body.Exchanges[0].User != "body-1" || strings.Contains(response.Body.String(), "private local path") {
+	if response.Code != 200 || body.Timeline.Source != "journal" || len(body.Timeline.Items) != 2 || body.Timeline.Items[0].ID != "item-1" || body.Timeline.Items[0].Role != "user" || body.Timeline.Items[0].BodyRef != "ref-1" || len(body.exchanges(t)) != 1 || body.exchanges(t)[0].User != "body-1" || strings.Contains(response.Body.String(), "private local path") {
 		t.Fatal(response.Body.String())
 	}
 }
@@ -303,17 +300,15 @@ func TestSessionPagesWalkOneExchangeAtATimeWithoutGapsOrOverlap(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("page %d: %s", pages, response.Body.String())
 		}
-		var body struct {
-			Exchanges []surface.Exchange      `json:"exchanges"`
-			Timeline  surface.SessionTimeline `json:"timeline"`
-		}
+		var body timelinePage
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.Exchanges) != 1 {
-			t.Fatalf("page %d exchanges=%+v", pages, body.Exchanges)
+		page := body.exchanges(t)
+		if len(page) != 1 {
+			t.Fatalf("page %d exchanges=%+v", pages, page)
 		}
-		exchanges = append([]surface.Exchange{body.Exchanges[0]}, exchanges...)
+		exchanges = append([]surface.Exchange{page[0]}, exchanges...)
 		var ids []string
 		for _, item := range body.Timeline.Items {
 			ids = append(ids, item.ID)
@@ -386,5 +381,38 @@ func TestOlderProviderHistoryPageStopsAtTheItemLimit(t *testing.T) {
 	next := read(older.NextBefore)
 	if len(next.Items) == 0 || next.Items[len(next.Items)-1].ID != "tool-989-39" {
 		t.Fatalf("next page did not resume at the first unread provider page: %d items", len(next.Items))
+	}
+}
+
+func TestAPageWhoseTimelineIsUnavailableStillCarriesItsExchanges(t *testing.T) {
+	_, registry, fake, _, _ := daemonFixture(t)
+	handler := dashboardRouter(newTestDaemon(t, registry, []surface.Surface{&timelineSurface{daemonSurface: fake, fail: true}}))
+	rows := []string{
+		`{"itemId":"q","version":1,"op":"upsert","kind":"text","role":"user","turnId":"t","body":"the question"}`,
+		`{"itemId":"a","version":1,"op":"upsert","kind":"text","role":"assistant","turnId":"t","body":"the answer"}`,
+		`{"itemId":"e","version":1,"op":"upsert","kind":"source-error","reason":"The transcript could not be read."}`,
+	}
+	for index, payload := range rows {
+		if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: "from", Kind: "text", ProviderKey: fmt.Sprint(index), Payload: []byte(payload)}, registrypkg.SessionJournalRetention{Count: 32, Bytes: 4096}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var body struct {
+		Exchanges     []surface.Exchange      `json:"exchanges"`
+		ExchangeCount int                     `json:"exchangeCount"`
+		Timeline      surface.SessionTimeline `json:"timeline"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
+	}
+	if body.Timeline.UnavailableReason == "" {
+		t.Fatalf("timeline=%+v, want it unavailable", body.Timeline)
+	}
+	if len(body.Exchanges) != 1 || body.Exchanges[0].User != "the question" || body.Exchanges[0].Assistant != "the answer" || body.ExchangeCount != 1 {
+		t.Fatalf("exchanges=%+v count=%d, want the conversation to read without its timeline", body.Exchanges, body.ExchangeCount)
 	}
 }
