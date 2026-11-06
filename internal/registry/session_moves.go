@@ -311,13 +311,11 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 	if err := registerSessionTx(tx, session); err != nil {
 		return nil, err
 	}
-	if !pinnedAt.IsZero() {
-		if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=?,stopped_at_ms=0 WHERE id=?`, pinnedAt.UnixMilli(), session.ID); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, session.ID); err != nil {
-			return nil, err
-		}
+	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=?,stopped_at_ms=0 WHERE id=?`, milliOrZero(pinnedAt), session.ID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_keep_alive WHERE session_id=?`, session.ID); err != nil {
+		return nil, err
 	}
 	if alias != "" {
 		var holder string

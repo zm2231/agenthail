@@ -55,6 +55,8 @@ failure and the `keepAliveFailed` attention as the owner has them; the keeper
 republishes the row when it gives up on a session or it comes back. Only the
 owner sends the failure notification.
 
-A session moved to another host keeps its pin: the move carries `pinnedAt`,
-the new host pins the session when it resumes there with a fresh keeper
-count, and the old host drops its pin and keeper state with the session.
+A session moved to another host keeps its pin, or its lack of one: the move
+carries `pinnedAt`, and when the session resumes on the new host that host
+takes it in place of any pin, stop or keeper state it had for the session,
+with a fresh keeper count. The old host drops its pin and keeper state with
+the session. A move that fails or is refused leaves the pin where it was.

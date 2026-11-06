@@ -169,6 +169,22 @@ func TestAPinnedSessionThatCannotBeBroughtBackBacksOffThenNeedsThePersonOnce(t *
 		t.Fatalf("row keepAlive=%+v attention=%+v", row.KeepAlive, row.Attention)
 	}
 
+	kept.ended["to"] = false
+	d.keepPinned(context.Background(), at)
+	select {
+	case <-d.catalogNudge:
+	default:
+	}
+	d.keepPinned(context.Background(), at.Add(keepAliveHealthy))
+	if pinned, _ := r.PinnedSessions(); len(pinned) != 1 || !pinned[0].KeepAlive.FailedAt.IsZero() {
+		t.Fatalf("ten healthy minutes left the failure: %+v", pinned)
+	}
+	select {
+	case <-d.catalogNudge:
+	default:
+		t.Fatal("a session that came back did not republish its row for paired hosts")
+	}
+
 	kept.wakeErr = nil
 	pinAction(t, d, "session-lifecycle-resume", "to")
 	kept.ended["to"] = true

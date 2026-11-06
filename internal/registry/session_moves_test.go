@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -184,6 +185,50 @@ func TestAMoveInIsPreparedOnceAbortedForGoodAndTakesTheSourcesRow(t *testing.T) 
 	}
 	if _, _, err := r.ApplyHostCatalogRow(source, HostCatalogRow{Session: surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); !errors.As(err, &SessionOwnedError{}) {
 		t.Fatalf("the source's late row took the session back: %v", err)
+	}
+}
+
+func TestAMovedInSessionTakesTheSourcesPinAndNotOneLeftHere(t *testing.T) {
+	r := openTestRegistry(t)
+	source := "h00000000000a"
+	if _, err := r.AddHost(PairedHost{ID: source, Name: "laptop", Endpoint: "https://laptop.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: moveConversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, HasLocal: true}
+	sourcePin := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	for i, pinnedAt := range []time.Time{{}, sourcePin} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.PinSession(moveConversation, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SaveKeepAlive(moveConversation, KeepAlive{Attempts: 5, FailedAt: time.Now(), Error: "gave up"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.RecordSessionStop(moveConversation, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		move := fmt.Sprint("move-", i)
+		if _, err := r.PrepareMoveIn(move, moveConversation, source, []byte(`{"a":1}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SetMoveState(move, MoveReceived, "", MovePrepared); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.TakeMovedSession(move, session, "", pinnedAt, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := r.SessionPinnedAt(moveConversation); err != nil || !got.Equal(pinnedAt) {
+			t.Fatalf("source pin %v: the moved session is pinned at %v (%v)", pinnedAt, got, err)
+		}
+		kept, err := r.PinnedSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pinnedAt.IsZero() && len(kept) != 0 || !pinnedAt.IsZero() && (len(kept) != 1 || kept[0].KeepAlive != (KeepAlive{})) {
+			t.Fatalf("source pin %v: kept %+v, want the source's pin with a fresh keeper count and no stop", pinnedAt, kept)
+		}
 	}
 }
 
