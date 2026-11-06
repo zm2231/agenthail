@@ -39,6 +39,13 @@ struct MacEventRefreshTest {
         exit(1)
     }
 
+    @MainActor
+    static func settle(_ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() && Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        return condition()
+    }
+
     static func event(_ id: UInt64, _ type: String) -> AgenthailEvent {
         AgenthailEvent(id: id, type: type, timestamp: "2026-11-03T12:00:00Z", entityId: "s1")
     }
@@ -52,27 +59,27 @@ struct MacEventRefreshTest {
         check(await model.refresh(), "the Mac reads its first snapshot")
         let base = { EventsDaemon.count("/api/v1/snapshot") }
 
-        let before = base()
-        for (index, type) in ["ledger.check.started", "ledger.gate", "session.updated", "turn.completed", "task.settled", "signin.changed"].enumerated() {
+        let history = { EventsDaemon.count("/api/v1/history") }
+
+        for (index, type) in ["ledger.check.started", "ledger.gate", "session.updated", "turn.completed", "task.settled"].enumerated() {
             model.receive(event(UInt64(10 + index), type))
+            check(model.pendingRefresh.isEmpty, "\(type) schedules no reread")
         }
-        try? await Task.sleep(for: .milliseconds(400))
-        check(base() == before, "events the snapshot does not carry read nothing: \(EventsDaemon.lock.withLock { EventsDaemon.requests.suffix(6) })")
-        check(model.lastEventID == 15, "every event still moves the cursor: \(model.lastEventID)")
+        check(model.lastEventID == 14, "every event still moves the cursor: \(model.lastEventID)")
 
-        for type in ["state.changed", "settings.updated", "host.state", "device.revoked", "stream.reset"] {
-            let read = base()
+        for type in ["state.changed", "settings.updated", "signin.changed", "host.state", "device.revoked", "stream.reset"] {
+            let (read, served) = (base(), history())
             model.receive(event(20, type))
-            try? await Task.sleep(for: .milliseconds(400))
-            check(base() == read + 1, "\(type) rereads the snapshot once")
+            check(!model.pendingRefresh.isEmpty, "\(type) schedules a reread")
+            check(await settle { base() == read + 1 && history() > served }, "\(type) rereads the snapshot")
+            check(base() == read + 1, "\(type) rereads it once")
         }
 
-        let read = base()
+        let (read, served) = (base(), history())
         let devices = EventsDaemon.count("/api/v1/devices")
         model.receive(event(30, "device.paired"))
         model.receive(event(31, "ledger.gate"))
-        try? await Task.sleep(for: .milliseconds(400))
-        check(base() == read + 1 && EventsDaemon.count("/api/v1/devices") == devices + 1, "a later event inside the wait keeps what an earlier one asked for")
+        check(await settle { base() == read + 1 && history() > served && EventsDaemon.count("/api/v1/devices") == devices + 1 }, "a later event inside the wait keeps what an earlier one asked for")
         print("ok   mac_event_refresh_test")
     }
 }

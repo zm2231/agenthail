@@ -106,7 +106,7 @@ final class AgenthailModel: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
-    private var pendingRefresh = EventRefresh()
+    private(set) var pendingRefresh = EventRefresh()
     private var statusRefreshTask: Task<Void, Never>?
     private(set) var lastEventID: UInt64 = 0
     private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)

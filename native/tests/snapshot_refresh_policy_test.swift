@@ -10,10 +10,10 @@ struct SnapshotRefreshPolicyTest {
     }
 
     static func main() {
-        for type in ["stream.reset", "state.changed", "settings.updated", "device.push.updated", "device.revoked", "host.state", "host.paired", "host.removed"] {
+        for type in ["stream.reset", "state.changed", "settings.updated", "signin.changed", "device.push.updated", "device.revoked", "host.state", "host.paired", "host.removed"] {
             check(SnapshotRefreshPolicy.refreshes(for: type), "\(type) changes what the snapshot carries")
         }
-        for type in ["session.updated", "turn.completed", "ledger.gate", "ledger.check.started", "ledger.question.answered", "task.settled", "signin.changed", "ui.changed"] {
+        for type in ["session.updated", "turn.completed", "ledger.gate", "ledger.check.started", "ledger.question.answered", "task.settled", "ui.changed"] {
             check(!SnapshotRefreshPolicy.refreshes(for: type), "\(type) arrives through its own stream or not at all")
         }
         var due = EventRefresh(for: "device.paired", auditing: false)
