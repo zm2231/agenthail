@@ -45,7 +45,10 @@ export function ensureSessionOrder() {
 }
 
 export async function load(fresh = false, selectDefault = true) {
-  if (app.loading) return;
+  if (app.loading) {
+    app.loadAgain = { fresh: fresh || Boolean(app.loadAgain?.fresh), selectDefault: selectDefault && (app.loadAgain?.selectDefault ?? true) };
+    return;
+  }
   app.loading = true;
   let loaded = false;
   const slowTimer = setTimeout(() => {
@@ -125,6 +128,9 @@ export async function load(fresh = false, selectDefault = true) {
   } finally {
     clearTimeout(slowTimer);
     app.loading = false;
-    if (loaded) ensureSessionOrder();
+    const again = app.loadAgain;
+    app.loadAgain = null;
+    if (again) load(again.fresh, again.selectDefault);
+    else if (loaded) ensureSessionOrder();
   }
 }
