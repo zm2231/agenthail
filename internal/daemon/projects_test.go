@@ -596,7 +596,7 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 	d.discoverCatalog(context.Background())
 	byID = projects()
 	renamed, found := byID["repo:github.com/example/widget-renamed"]
-	if _, stale := byID[widget.ID]; stale || !found || len(renamed.Coordinators) != 2 || renamed.Coordinators[0].Name != "widget-lead" || len(renamed.Checkouts) != 1 {
+	if _, stale := byID[widget.ID]; stale || !found || len(renamed.Coordinators) != 1 || renamed.Coordinators[0].Name != "widget-lead" || len(renamed.Checkouts) != 1 {
 		t.Fatalf("after the origin changed: projects=%+v", byID)
 	}
 	var options struct {

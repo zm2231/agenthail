@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -145,5 +147,73 @@ func TestARemoteChangeOntoAnotherLedgerKeepsBothAndSaysSo(t *testing.T) {
 	f.setRemote(t, "https://github.com/example/notes.git")
 	if refusals, err := f.r.ProjectMoveRefusals(); err != nil || len(refusals) != 0 {
 		t.Fatalf("renaming back left the refusal: %+v %v", refusals, err)
+	}
+}
+
+func TestAWriteThatResolvedTheOldKeyIsRefusedAfterTheMove(t *testing.T) {
+	f := newRemoteMoveFixture(t, false)
+	const before, after = "repo:github.com/example/notes", "repo:github.com/example/renamed-notes"
+	if err := f.store.Enable(before, ledger.AttachEachPrompt); err != nil {
+		t.Fatal(err)
+	}
+	f.setRemote(t, "https://github.com/example/renamed-notes.git")
+
+	_, _, err := f.store.RecordUtterance(ledger.Utterance{ProjectKey: before, Ref: "claude-prompt:late", Text: "resolved before the move", SpeakerID: "agenthail-person", TargetID: "worker", At: time.Now(), CapturedBy: "hook"})
+	var refusal *ledger.Refusal
+	if !errors.As(err, &refusal) || refusal.MovedTo != after {
+		t.Fatalf("a write under the moved key = %v, want a refusal naming %s", err, after)
+	}
+	if err := f.store.GrantSession(before, "worker"); !errors.As(err, &refusal) {
+		t.Fatalf("a grant under the moved key = %v, want a refusal", err)
+	}
+	if held, err := f.r.HoldsLedger(before); err != nil || held {
+		t.Fatalf("the old key holds a ledger again: %t %v", held, err)
+	}
+}
+
+func TestARemoteChangeLeavesNoLinkRecordOnTheOldKey(t *testing.T) {
+	f := newRemoteMoveFixture(t, false)
+	const before, after = "repo:github.com/example/notes", "repo:github.com/example/renamed-notes"
+	const docs, upstream = "repo:github.com/example/notes-docs", "repo:github.com/example/upstream"
+	for _, link := range [][2]string{{docs, before}, {before, upstream}} {
+		if _, err := f.r.SetProjectLink(link[0], link[1], true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.r.SetProjectLink(link[0], "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.r.PutHostCoordinator("vps", registry.CoordinatorEntry{ProjectID: before, ProjectRoot: "/srv/notes", Name: "vps-notes", Surface: "codex", ChangedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.PutHostCoordinator("vps", registry.CoordinatorEntry{ProjectID: after, ProjectRoot: "/srv/renamed", Name: "vps-renamed", Surface: "codex", ChangedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	f.setRemote(t, "https://github.com/example/renamed-notes.git")
+	if _, err := f.r.AdoptProjectLinks([]registry.ProjectLink{{Joined: before, Survivor: upstream, Linked: true, ChangedAt: time.Now().Add(-time.Hour), OriginHost: "stale"}}); err != nil {
+		t.Fatal(err)
+	}
+	links, err := f.r.ProjectLinks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.Joined == before || link.Survivor == before {
+			t.Fatalf("a link record still names the old key: %+v", link)
+		}
+	}
+	entries, err := f.r.Coordinators()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirrored := map[string]string{}
+	for _, entry := range entries {
+		if entry.HostID == "vps" {
+			mirrored[entry.ProjectID] = entry.Name
+		}
+	}
+	if mirrored[before] != "vps-notes" || mirrored[after] != "vps-renamed" {
+		t.Fatalf("the paired host's leads changed under it: %v", mirrored)
 	}
 }

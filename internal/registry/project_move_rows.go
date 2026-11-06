@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -83,8 +84,8 @@ func projectHoldings(tx *sql.Tx, id string) (projectHolding, error) {
 	}
 	h.lead = n > 0
 	if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM ledger_state WHERE project_key=?1)
-		+ (SELECT COUNT(*) FROM coordinators WHERE project_id=?1) + (SELECT COUNT(*) FROM coordinator_history WHERE project_id=?1)
-		+ (SELECT COUNT(*) FROM project_links WHERE linked=1 AND (joined=?1 OR survivor=?1)) + (SELECT COUNT(*) FROM projects WHERE id=?1 AND added=0)`, id).Scan(&n); err != nil {
+		+ (SELECT COUNT(*) FROM coordinators WHERE project_id=?1 AND host_id='') + (SELECT COUNT(*) FROM coordinator_history WHERE project_id=?1)
+		+ (SELECT COUNT(*) FROM project_links WHERE joined=?1 OR survivor=?1) + (SELECT COUNT(*) FROM projects WHERE id=?1 AND added=0)`, id).Scan(&n); err != nil {
 		return h, err
 	}
 	h.ownerless = n > 0
@@ -102,7 +103,6 @@ func moveProjectRowsTx(tx *sql.Tx, move ProjectMove, held projectHolding) error 
 		`UPDATE ledger_events SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE ledger_grants SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE coordinators SET project_id=?2 WHERE project_id=?1 AND host_id=''`,
-		`UPDATE OR REPLACE coordinators SET project_id=?2 WHERE project_id=?1 AND host_id!=''`,
 		`UPDATE coordinator_history SET project_id=?2 WHERE project_id=?1`,
 		`UPDATE coordinator_replaced SET project_id=?2 WHERE project_id=?1`,
 		`UPDATE OR IGNORE projects SET id=?2 WHERE id=?1 AND added=0`,
@@ -116,7 +116,7 @@ func moveProjectRowsTx(tx *sql.Tx, move ProjectMove, held projectHolding) error 
 }
 
 func moveProjectLinksTx(tx *sql.Tx, move ProjectMove) error {
-	rows, err := tx.Query(`SELECT joined,survivor,linked,changed_at_ms,origin_host FROM project_links WHERE linked=1 AND (joined=?1 OR survivor=?1)`, move.From)
+	rows, err := tx.Query(`SELECT joined,survivor,linked,changed_at_ms,origin_host FROM project_links WHERE joined=?1 OR survivor=?1`, move.From)
 	if err != nil {
 		return err
 	}
@@ -140,10 +140,10 @@ func moveProjectLinksTx(tx *sql.Tx, move ProjectMove) error {
 			rewritten.Survivor = move.To
 		}
 		if link.Joined == move.From {
-			if err := putProjectLinkTx(tx, ProjectLink{Joined: move.From, Survivor: link.Survivor, ChangedAt: at, OriginHost: move.OriginHost}); err != nil {
+			if _, err := tx.Exec(`DELETE FROM project_links WHERE joined=?`, move.From); err != nil {
 				return err
 			}
-			if _, taken, err := projectLinkTx(tx, move.To); err != nil || taken || !link.Linked || rewritten.Survivor == move.To {
+			if _, taken, err := projectLinkTx(tx, move.To); err != nil || taken {
 				if err != nil {
 					return err
 				}
@@ -159,6 +159,15 @@ func moveProjectLinksTx(tx *sql.Tx, move ProjectMove) error {
 		}
 	}
 	return nil
+}
+
+func movedProjectID(tx *sql.Tx, id string) (string, error) {
+	var to string
+	err := tx.QueryRow(`SELECT to_key FROM project_moves WHERE from_key=? AND to_key!=''`, id).Scan(&to)
+	if errors.Is(err, sql.ErrNoRows) {
+		return id, nil
+	}
+	return to, err
 }
 
 func refuseProjectMoveTx(tx *sql.Tx, move ProjectMove, reason string) (ProjectMoveOutcome, error) {

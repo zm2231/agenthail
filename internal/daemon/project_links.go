@@ -40,8 +40,9 @@ func loadProjectLinks(reg *registry.Registry) (projectLinkSet, error) {
 	}
 	active := map[string]string{}
 	for _, link := range links {
-		if link.Linked {
-			active[link.Joined] = link.Survivor
+		joined, survivor := set.movedID(link.Joined), set.movedID(link.Survivor)
+		if link.Linked && joined != survivor {
+			active[joined] = survivor
 		}
 	}
 	for joined, survivor := range active {
@@ -85,6 +86,13 @@ func projectIDName(id string, records []registry.ProjectRecord) string {
 	}
 	if folder, found := strings.CutPrefix(id, "implicit:"); found {
 		return catalogProjectName(filepath.Clean(folder))
+	}
+	return id
+}
+
+func (s projectLinkSet) movedID(id string) string {
+	if to, moved := s.moved[id]; moved {
+		return to
 	}
 	return id
 }
