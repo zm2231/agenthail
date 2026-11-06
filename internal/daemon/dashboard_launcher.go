@@ -71,8 +71,10 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	if pick != nil {
 		extra = map[string]any{"account": pick}
 	}
+	var readyErr error
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
-		return d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		return readyErr
 	})
 	session, sent, startErr := starter.StartSession(ctx, options)
 	if session == nil {
@@ -80,6 +82,9 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 			startErr = errors.New("session starter returned no session")
 		}
 		return actionResult{}, d.unstartedSession(request.Message, startErr)
+	}
+	if readyErr != nil {
+		return actionResult{}, createStorageFailure(session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), nil)
 	}
 	session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 	if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -181,7 +186,15 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		}
 		launchRequest.MCP = mcp
 	}
+	var readyErr error
+	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
+		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		return readyErr
+	})
 	launchResult, launchErr := launcher.Launch(ctx, launchRequest)
+	if readyErr != nil && launchResult.Session != nil {
+		return d.acceptedLaunch(request.Launcher, launchResult.Location, fmt.Sprintf("record the session before its first turn, which was not sent: %s", readyErr), untracked(alias)), nil
+	}
 	startErr := launchErr
 	if launchErr != nil && launchResult.Session == nil {
 		var acceptedErr surface.LaunchAcceptedError

@@ -121,11 +121,16 @@ func (a *App) cmdThread(args []string) error {
 	defer cancel()
 	messageUUID := uuid.NewString()
 	ctx = surface.WithMessageUUID(ctx, messageUUID)
+	var readyErr error
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
-		return a.registry().RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		readyErr = a.registry().RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		return readyErr
 	})
 
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
+	if session != nil && readyErr != nil {
+		return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", session.ID, readyErr))
+	}
 	if session != nil {
 		if err := a.registry().RegisterSession(*session); err != nil {
 			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; do not retry automatically", session.ID, err))

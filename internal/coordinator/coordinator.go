@@ -366,11 +366,19 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		messageUUID = uuid.NewString()
 	}
 	settle := s.Dispatcher.CapturePersonStart(sender, messageUUID, first, message)
-	session, sent, startErr := starter.StartSession(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), options)
+	var readyErr error
+	ready := func(started surface.Session) error {
+		readyErr = s.Registry.RecordStartingSession(started, registry.AliasReservation{}, registry.SessionOrigin{SessionID: started.ID, Via: registry.OriginCoordinator})
+		return readyErr
+	}
+	session, sent, startErr := starter.StartSession(surface.WithSessionReady(surface.WithSourceSessionID(surface.WithMessageUUID(ctx, messageUUID), sender), ready), options)
 	if session == nil {
 		settle("")
 	} else {
 		settle(session.ID)
+	}
+	if session != nil && readyErr != nil {
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded before its first turn, which was not sent: %w", session.ID, readyErr))
 	}
 	if session == nil {
 		if startErr == nil {

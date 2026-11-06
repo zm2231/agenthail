@@ -83,6 +83,23 @@ func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
 	}
 }
 
+func TestAThreadThatCannotBeRecordedBeforeItsFirstTurnIsReportedAsNotSent(t *testing.T) {
+	app, starter, cwd := cardFixture(t)
+	starter.session.RuntimeKind = ""
+	starter.ready = true
+	turned := false
+	starter.during = func() { turned = true }
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--json"})
+	})
+	if err == nil || !strings.Contains(output+err.Error(), "which was not sent") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	if turned {
+		t.Fatal("the first turn ran though the thread was not recorded")
+	}
+}
+
 func TestAHostedLeadIsToldToReadAndAnswerPromptsWithTheTools(t *testing.T) {
 	app, _, _ := cardFixture(t)
 	if _, err := app.Registry.IssueSessionCredential("lead-conversation", time.Now()); err != nil {
