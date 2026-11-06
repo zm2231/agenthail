@@ -425,7 +425,7 @@ final class SessionPane: ObservableObject, Identifiable {
             if pageReadsInFlight == 0 { streamedRows = [] }
         }
         do {
-            let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
+            let loaded = try await api.sessionDetail(id: id, includeTimeline: true, waitForCatchUp: false)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
             let shown = unpublishedDetail ?? detail
@@ -491,7 +491,7 @@ final class SessionPane: ObservableObject, Identifiable {
             var next: Int64? = cursor
             for _ in 0..<8 {
                 guard let before = next, before > 0 else { break }
-                let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: before)
+                let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: before, waitForCatchUp: false)
                 guard selectionGeneration == selection else { return }
                 guard let timeline = page.timeline, timeline.unavailableReason == nil else {
                     olderError = page.timeline?.unavailableReason ?? "Older activity is unavailable."

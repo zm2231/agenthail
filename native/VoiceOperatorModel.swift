@@ -218,7 +218,7 @@ final class VoiceOperatorModel: ObservableObject {
         guard visibleScreens != 0, activityRefresh == nil, let id = sessionID, let timelineAPI else { return }
         activityRefresh = Task { [weak self] in
             do {
-                let next = try await timelineAPI.sessionDetail(id: id, includeTimeline: true)
+                let next = try await timelineAPI.sessionDetail(id: id, includeTimeline: true, waitForCatchUp: true)
                 guard let self else { return }
                 self.activityRefresh = nil
                 guard !Task.isCancelled, !self.closed, current == self.generation else { return }

@@ -17,7 +17,7 @@ import (
 // records after start. It reports whether a larger span would give the same
 // page: the page stopped at a record its own limits chose, after the first
 // record whose state the span knows exactly.
-func readTranscriptSpan(ctx context.Context, file *os.File, path, source string, floor, start, end, completeEnd, before int64, limit int, settled func(time.Time) bool, result *surface.SessionReadResult) (bool, error) {
+func readTranscriptSpan(ctx context.Context, file *os.File, path, source string, floor, start, end, completeEnd, before int64, limit int, settled func(time.Time) bool, starts *turnStartSearch, result *surface.SessionReadResult) (bool, error) {
 	var err error
 	windowStart := start
 	data := make([]byte, end-start)
@@ -54,7 +54,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	exactFrom := start
 	if source == "codex" {
 		exactFrom = end
-		meter, err := codexTurnMeterAt(ctx, file, start)
+		meter, err := codexTurnMeterFrom(ctx, file, start, starts)
 		if err != nil {
 			return false, err
 		}
@@ -63,7 +63,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			var record map[string]any
-			if json.Unmarshal(line, &record) != nil {
+			if decodeCompactRecord(line, &record) != nil {
 				continue
 			}
 			if exactFrom == end && codexRecordStartsTurn(record) {
@@ -89,7 +89,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	var claudeEnds map[int][]claudeTurnEnd
 	var claudeInterrupts map[int]bool
 	if source == "claude" {
-		turns, err := claudeTurnStateAt(ctx, file, start)
+		turns, err := claudeTurnStateFrom(ctx, file, start, starts)
 		if err != nil {
 			return false, err
 		}
@@ -100,7 +100,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			var record map[string]any
-			if json.Unmarshal(line, &record) != nil {
+			if decodeShrunkRecord(line, &record) != nil {
 				continue
 			}
 			turnID, ended, interrupted := turns.observe(record, recordOffset, line, len(claudeTimelineItems(record)))
@@ -140,7 +140,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			return false, err
 		}
 		var record map[string]any
-		if json.Unmarshal(line, &record) != nil {
+		if decodeCompactRecord(line, &record) != nil {
 			truncatedAt = append(truncatedAt, offset)
 			continue
 		}

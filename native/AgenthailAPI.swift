@@ -163,12 +163,13 @@ final class AgenthailAPI: @unchecked Sendable {
         return sessions
     }
 
-    func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil) async throws -> SessionDetail {
+    func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil, waitForCatchUp: Bool) async throws -> SessionDetail {
         var components = URLComponents()
         components.path = "/api/v1/session"
         components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "limit", value: "20")]
         if includeTimeline { components.queryItems?.append(URLQueryItem(name: "timeline", value: "1")) }
         if let timelineBefore { components.queryItems?.append(URLQueryItem(name: "timelineBefore", value: String(timelineBefore))) }
+        if waitForCatchUp { components.queryItems?.append(URLQueryItem(name: "wait", value: "1")) }
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }

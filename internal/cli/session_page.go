@@ -56,6 +56,7 @@ func (c *daemonSessionPageClient) ReadSession(ctx context.Context, session *surf
 	query := url.Values{}
 	query.Set("id", session.ID)
 	query.Set("timeline", "1")
+	query.Set("wait", "1")
 	query.Set("limit", strconv.Itoa(request.Limit))
 	if request.Before > 0 {
 		query.Set("timelineBefore", strconv.FormatInt(request.Before, 10))
