@@ -127,7 +127,7 @@ Optional `branch` (default `ah/<alias or 8 hex>`) and `base` (default the spawne
 
 **Reconcile.** The same once-a-minute sweep finds `creating` rows more than an hour old: a create that crashed between the row and its session (the CLI creates outside the daemon with any `--timeout`, so age is the only safe sign). A registered session whose folder is inside the worktree takes it; otherwise the row settles as `orphaned` and is cleaned like any other, its row dropped once removed. Claude's own `--worktree` passthrough is removed, since this replaces it.
 
-Each session row in the API carries `worktree {path, branch, base, state, settledReason, cleanup, cleanupReason, keptPaths}`. The session view reads it from `work_records` for this host's sessions, and a trigger on those columns moves the presentation version, so any write, the CLI's included, changes the view's cache key. The daemon makes every write through one helper that also republishes the session's catalog row, which is what event streams and paired hosts see.
+Each session row in the API carries `worktree {path, branch, base, state, settledReason, cleanup, cleanupReason, keptPaths}`. The session view reads it from `work_records` for this host's sessions, and a trigger on those columns moves the presentation version, so any write, the CLI's included, changes the view's cache key. The daemon makes every write through one helper that also republishes the session's catalog row, which is what event streams and paired hosts see. A write made outside the daemon, such as the CLI's local create, reaches them on the daemon's next discovery pass (every 30 seconds), which republishes any row whose worktree changed.
 
 ### `agenthail_pr` (MCP) and `agenthail pr` (CLI)
 

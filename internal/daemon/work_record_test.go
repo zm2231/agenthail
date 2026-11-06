@@ -234,6 +234,36 @@ func TestAWorktreeTakenOrSettledRepublishesItsSessionsRow(t *testing.T) {
 	republished("settling the worktree")
 }
 
+func TestAWorktreeRecordedOutsideTheDaemonReachesStreamsOnTheNextDiscoveryPass(t *testing.T) {
+	d, reg, _, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	_, before, err := reg.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "wt")
+	if err := reg.BeginWork(registry.WorkRecord{WorktreePath: path, RepoRoot: filepath.Dir(path), Branch: "ah/wt", BaseRef: "main", BaseCommit: "base"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if activated, err := reg.ActivateWork(path, "from"); err != nil || !activated {
+		t.Fatalf("activate %t %v", activated, err)
+	}
+	d.discoverCatalog(context.Background())
+	window, err := reg.CatalogEventsAfter(before, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range window.Events {
+		var payload struct {
+			Session dashboardSession `json:"session"`
+		}
+		if event.Type == "session.upserted" && json.Unmarshal(event.Payload, &payload) == nil && payload.Session.ID == "from" && payload.Session.Worktree != nil && payload.Session.Worktree.Path == path {
+			return
+		}
+	}
+	t.Fatalf("no catalog event carried the worktree: %d events", len(window.Events))
+}
+
 func TestACreateThatCrashedIsReconciledFromItsRecord(t *testing.T) {
 	checkout := pushedCheckout(t)
 	d, reg, _, _, _ := daemonFixture(t)
