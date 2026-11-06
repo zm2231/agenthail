@@ -46,6 +46,8 @@ type daemonSurface struct {
 	startOptions   []surface.SessionStartOptions
 	startErr       error
 	startHook      func()
+	firstTurn      func()
+	unrecordable   bool
 	caps           surface.Capabilities
 	streamEvents   []surface.StreamEvent
 	streamErr      error
@@ -241,7 +243,7 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
-func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+func (f *daemonSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
 	if hook := f.startHook; hook != nil {
 		f.startHook = nil
@@ -249,6 +251,16 @@ func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionS
 	}
 	session := &surface.Session{ID: "started", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
 	f.sessions[session.ID] = *session
+	ready := *session
+	if f.unrecordable {
+		ready.RuntimeKind = ""
+	}
+	if err := surface.SessionReady(ctx, ready); err != nil {
+		return session, nil, err
+	}
+	if f.firstTurn != nil {
+		f.firstTurn()
+	}
 	if f.startErr != nil {
 		return session, nil, f.startErr
 	}

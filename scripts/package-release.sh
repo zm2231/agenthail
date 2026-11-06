@@ -73,7 +73,8 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 	cp install.sh "$STAGE/"
 	cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
 fi
-"$ROOT/scripts/stage-claude-host.sh" "$STAGE/claude-host"
+"$ROOT/scripts/stage-node-host.sh" claude-host "$STAGE/claude-host"
+"$ROOT/scripts/stage-node-host.sh" browser-host "$STAGE/browser-host"
 "$ROOT/scripts/fetch-node.sh" "$GOOS_VALUE" "$GOARCH_VALUE" "$STAGE"
 if [ "$GOOS_VALUE" = "darwin" ]; then
 	codesign --verify --strict --verbose=2 "$STAGE/runtime/node/bin/node"

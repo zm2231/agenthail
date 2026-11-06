@@ -74,6 +74,8 @@ A lead or operator change, made by the daemon, by another process writing the re
 
 `tools/list` returns every tool. A call the caller's capabilities do not cover is refused with `capability_missing`, so a session that gains or loses a role needs no new tool list.
 
+Each tool's name and description come from `agenttools.Tools`, which `registerMCPTools` walks in order, binding each to its handler; a tool without a handler stops the daemon at start. The tools most sessions call, `agenthail_send`, `agenthail_create`, `agenthail_wait` and `agenthail_result`, carry `_meta["anthropic/alwaysLoad"]: true`, so Claude lists them in every turn instead of behind tool search; every other tool stays deferred. `internal/agenttools/budget.json` pins the bytes of the whole tool list, of the always-loaded tools, and of the CLI and tool forms of the session card. `TestTheToolListAgentsSeeStaysAtItsPinnedSize` and `TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI` fail on any change in size, so a change that grows what agents read raises the numbers in the same diff.
+
 ## Read scope
 
 A session reads:

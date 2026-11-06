@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/poll"
@@ -91,6 +92,9 @@ func (a *App) daemonRun() error {
 	hostVersion := a.Version + "+" + a.Revision
 	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
 		return surfaces.ClaudeHostLaunch(home, hostVersion)
+	}})
+	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
+		return browserhost.InstalledLaunch(hostVersion)
 	}})
 	return d.RunWithSignal()
 }
