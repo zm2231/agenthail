@@ -6,7 +6,7 @@ struct ContextRingGauge: View {
     var body: some View {
         let tint = switch context.level {
         case .normal: DesktopPalette.text2
-        case .high: DesktopPalette.attention
+        case .high: DesktopPalette.text
         case .full: DesktopPalette.failed
         }
         ZStack {

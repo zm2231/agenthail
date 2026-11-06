@@ -27,7 +27,14 @@ enum DesktopPalette {
     static let accent = DesktopStyle.accent(.fill)
     static let accentText = DesktopStyle.accent(.text)
     static let onAccent = DesktopStyle.accent(.onAccent)
-    static let selection = DesktopStyle.accent(.selection)
+    static let selectionWash: PaletteTokens.Pair = (0x9A9A9E, 0x7E7F83)
+    static let selection = Color(nsColor: NSColor(name: nil) { appearance in
+        color(isDark(appearance) ? selectionWash.dark : selectionWash.light).withAlphaComponent(CGFloat(BackdropSpec.selectionStrength))
+    })
+
+    static func selectionWashRGB(in appearance: NSAppearance) -> AccentContrast.RGB {
+        AccentContrast.RGB(hex: isDark(appearance) ? selectionWash.dark : selectionWash.light)
+    }
 
     static func accentRGB(_ colors: TextColors, in appearance: NSAppearance) -> AccentContrast.RGB {
         colors.accentChoice.map(AccentContrast.RGB.init(hex:)) ?? AccentContrast.rgb(.controlAccentColor, in: appearance)
@@ -49,12 +56,12 @@ enum DesktopPalette {
     }
 
     static let attention = DesktopStyle.role(.needsYou)
-    static let attentionBackground = dynamic(light: 0xFFF5E0, dark: 0x2E2414)
+    static let attentionBackground = dynamic(PaletteTokens.attention)
     static let attentionLine = dynamic(light: 0xF2D9A6, dark: 0x5C4415)
     static let working = DesktopStyle.role(.working)
     static let done = DesktopStyle.role(.done)
     static let failed = DesktopStyle.role(.error)
-    static let failedBackground = dynamic(light: 0xFDEDEC, dark: 0x2E1A19)
+    static let failedBackground = dynamic(PaletteTokens.failed)
     static let failedLine = dynamic(light: 0xF5C9C5, dark: 0x5A2B28)
 
     static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> DesktopStyle {
@@ -137,7 +144,9 @@ enum ColumnFit {
 }
 
 enum DesktopRadius {
+    static let badge: CGFloat = 4
     static let control: CGFloat = 6
-    static let card: CGFloat = 10
-    static let sheet: CGFloat = 14
+    static let row: CGFloat = 8
+    static let card: CGFloat = 12
+    static let sheet: CGFloat = 16
 }

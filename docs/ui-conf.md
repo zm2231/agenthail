@@ -38,7 +38,7 @@ A line Agenthail can't use, such as an unknown key or a value of the wrong kind,
 |---|---|---|
 | `version` | `1` | File format version. |
 | `theme` | `system` | `system`, `dark`, `light`. |
-| `theme.accent` | `system` | Accent for links, focus and working state: `system` or `#rrggbb`. |
+| `theme.accent` | `system` | Accent for links, buttons and focus: `system` or `#rrggbb`. |
 | `background` | `art: field` | What fills the window. See [Backgrounds](#backgrounds). |
 | `background.fit` | `cover` | How an image fills the window: `cover`, `contain`, `center`, `tile`. |
 | `background.position` | `center` | Which part of an image stays in view: `center`, `top`, `bottom`, `left`, `right`. |

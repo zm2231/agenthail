@@ -29,14 +29,15 @@ struct SelectionMarkTest {
         let pane = (0x17, 0x18, 0x1A)
         let normal = render(increased: false)
         let inside = normal(64, 20)
-        precondition(inside.0 > pane.0 + 20, "a selected row is washed with the accent, got \(inside)")
+        precondition(inside.0 > pane.0 + 15, "a selected row is washed lighter than the pane, got \(inside)")
+        precondition(max(inside.0, inside.1, inside.2) - min(inside.0, inside.1, inside.2) <= 4, "with an orange accent chosen, the wash stays neutral grey, got \(inside)")
 
         let increased = render(increased: true)
         let plain = increased(64, 20)
         precondition(abs(plain.0 - pane.0) <= 2 && abs(plain.1 - pane.1) <= 2 && abs(plain.2 - pane.2) <= 2,
                      "under Increase Contrast a selected row leaves its text on the pane, got \(plain)")
         let edge = increased(123, 20)
-        precondition(edge.0 > 0xC0 && edge.2 < 0x80, "and outlines it in the accent, got \(edge)")
+        precondition(min(edge.0, edge.1, edge.2) > 0xC0, "and outlines it in body text, not the accent, got \(edge)")
         print("ok")
     }
 

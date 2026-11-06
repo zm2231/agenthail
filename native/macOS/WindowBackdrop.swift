@@ -198,7 +198,7 @@ final class WindowBackdrop: ObservableObject {
             solidPanes: solid,
             readability: !solid && (config.readability || workspace.accessibilityDisplayShouldIncreaseContrast),
             selection: workspace.accessibilityDisplayShouldIncreaseContrast ? nil : BackdropSpec.Selection(
-                color: Self.rgb(DesktopPalette.accentRGB(colors, in: appearance)),
+                color: Self.rgb(DesktopPalette.selectionWashRGB(in: appearance)),
                 roles: DesktopGlass.selectedRowRoles(config, dark: dark, increased: false).map(Self.rgb))
         )
     }

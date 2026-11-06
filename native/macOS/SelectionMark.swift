@@ -76,10 +76,10 @@ private struct SelectionLook<Mark: InsettableShape>: View {
                 shape.fill(DesktopPalette.selection)
             }
         case .outline where outline:
-            shape.strokeBorder(DesktopPalette.accent, lineWidth: 1.5)
+            shape.strokeBorder(DesktopPalette.text, lineWidth: 1.5)
                 .overlay(alignment: .leading) {
                     if bar {
-                        Capsule().fill(DesktopPalette.accent).frame(width: 3).padding(.vertical, DesktopSpace.xs)
+                        Capsule().fill(DesktopPalette.text).frame(width: 3).padding(.vertical, DesktopSpace.xs)
                     }
                 }
         default:
@@ -90,7 +90,7 @@ private struct SelectionLook<Mark: InsettableShape>: View {
 
 extension View {
     func selectionMark(_ selected: Bool, bar: Bool = false) -> some View {
-        modifier(SelectionMark(selected: selected, shape: RoundedRectangle(cornerRadius: DesktopRadius.control), bar: bar, radius: DesktopRadius.control))
+        modifier(SelectionMark(selected: selected, shape: RoundedRectangle(cornerRadius: DesktopRadius.row), bar: bar, radius: DesktopRadius.row))
     }
 
     func selectionMark<Mark: InsettableShape>(_ selected: Bool, in shape: Mark) -> some View {

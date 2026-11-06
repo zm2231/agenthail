@@ -95,7 +95,7 @@ private struct PhoneUsageAccountRow: View {
                 HStack(spacing: 8) {
                     Button(reference.preferred ? "Preferred" : "Prefer") { prefer(reference.preferred ? .off : .on) }
                         .buttonStyle(.bordered)
-                        .tint(reference.preferred ? PhonePalette.working : nil)
+                        .tint(reference.preferred ? PhonePalette.accent : nil)
                         .accessibilityValue(reference.preferred ? "on" : "off")
                         .accessibilityHint("Changes only this account")
                         .accessibilityIdentifier("proxy-prefer-toggle")

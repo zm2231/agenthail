@@ -19,7 +19,7 @@ struct SidebarSessionRow: View, @MainActor Equatable {
                 .padding(.vertical, DesktopSpace.xs)
                 .padding(.horizontal, DesktopSpace.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DesktopPalette.attentionBackground.when(state.needsYou && !state.selected), in: RoundedRectangle(cornerRadius: DesktopRadius.control))
+                .background(DesktopPalette.attentionBackground.when(state.needsYou && !state.selected), in: RoundedRectangle(cornerRadius: DesktopRadius.row))
                 .selectionMark(state.selected, bar: true)
                 .contentShape(Rectangle())
         }
