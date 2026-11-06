@@ -61,7 +61,7 @@ var Keys = []Key{
 	{Name: "version", Default: "1", Doc: "File format version.", kind: kindVersion},
 
 	choice("theme", "system", "Light or dark appearance.", "system", "dark", "light"),
-	color("theme.accent", "system", "Accent for links, focus and working state: the system accent or a colour.", "system"),
+	color("theme.accent", "system", "Accent for links, buttons and focus: the system accent or a colour.", "system"),
 
 	{Name: "background", Default: DefaultBackground, Doc: "What fills the window: none, desktop, art: <name>, image: <path>, gradient: <preset>, gradient: <angle>deg, <colour> <pos>%, ..., or mesh: <cols>x<rows>, <colour>, ...", kind: kindBackground},
 	choice("background.fit", "cover", "How an image fills the window.", "cover", "contain", "center", "tile"),
