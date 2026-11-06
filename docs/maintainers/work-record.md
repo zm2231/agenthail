@@ -128,9 +128,11 @@ session  optional; default yourself
 
 ## Clients
 
-- **Composer card** (Mac, iOS, web): the headline, then the asks through the existing `QuestionPager` and `question-pager.js` with the suggested option marked, then one Send that posts `turn-answer`. A single single-select ask on the phone sends on one tap.
-- **Rows**: the headline as the row subtitle; `ask` joins the Needs you band; a `needs: "nothing"` idle session shows Done with Archive.
-- **Work panel** (session details): branch, worktree path, kept-cleanup reason, each PR with its state and check summary.
+This work owns the data, the API fields and the actions (`session-pin`, `session-unpin`, `turn-answer`, `pr`), and the end-of-turn card's content. The sidebar rows, the details and work panel layout and the window frame belong to the client redesign, which binds to these fields as they land and reviews the card's look.
+
+- **Composer card** (Mac, iOS, web): the headline, then the asks through the existing `QuestionPager` and `question-pager.js` with the suggested option marked, then one Send that posts `turn-answer`. A single single-select ask on the phone sends on one tap. It uses the redesign's tokens and row grammar.
+- **Row fields**: `endTurn.headline` for the row subtitle, `ask` attention for the Needs you band, a derived done state for a `needs: "nothing"` idle session, and `pinnedAt`. Placement and controls are the redesign's.
+- **Work fields**: branch, worktree path, kept-cleanup reason, each PR with its state, review and check summary, `work.files` and `work.commits`. The panel is the redesign's.
 - **Push**: needs you and done text from the headline; ask buttons through the request path above.
 
 ## Slices
@@ -143,12 +145,12 @@ Each slice is one PR, builds on a working product, and lands with the budget tes
 | 1 | Pinned sessions stay up: `pinned_at`, `session-pin`/`session-unpin` (CLI `agenthail pin`/`unpin`), keeper | a pinned session that exits is resumed once, and after a daemon restart; the resume sends no input (no host turn, no `turn/start`); archived or person-stopped sessions are never resumed; a mirrored row from a paired host is skipped; a failing resume follows 30s, 1m, 2m, 4m, 8m, then `keepAliveFailed` attention exactly once; a project's first lead starts pinned, a replacement lead inherits the old one's pin, and unpin always works |
 | 2 | `agenthail_end_turn`, `turn_ends`, `ask` attention, push text | MCP call stores the row; each refusal case; a needs-you turn puts the row in the Needs you band and the push says "needs you: headline"; a worker's needs-you reaches its spawner or lead, not the person |
 | 3 | Nudge and fallback | claude-host test with a fake query: a turn without the call is blocked once, not twice, not while background tasks run; Codex Stop hook tested against a scratch app-server; parser table tests built from real reply endings |
-| 4 | One reply and the card | `turn-answer` queues exactly one numbered message, idempotent on retry, and clears the attention; notification buttons answer an ask; card in web, Mac and iOS |
+| 4 | One reply and the card | `turn-answer` queues exactly one numbered message, idempotent on retry, and clears the attention; notification buttons answer an ask; the card's content in `QuestionPager` in web, Mac and iOS |
 | 5 | Worktree isolation, `work_records`, cleanup | temporary repository: create makes branch and worktree and starts there; settle removes a clean merged worktree; dirty or unpushed is kept with its reason; Claude passthrough removed |
 | 6 | PR link, `session_prs` | explicit link and unlink through CLI and MCP; `gh pr create` cases link, guarded cases do not; branch link; without `gh` or a sign-in, link refuses with the reason |
 | 7 | PR watch and settle | fake GitHub reads: a failing check wakes once per head; a new head re-arms; conflict wakes once; merged settles the session and removes its worktree without a wake |
 | 8 | Files and commits | recorded transcripts of Claude and Codex edits and commits produce the expected `work_files` and `work_commits` rows; a commit is marked pushed once a remote branch has it |
-| 9 | Work panel | panel shows branch, worktree, PRs with checks, files, commits and kept reason in web, Mac and iOS |
+| 9 | Work data on the API | the session view carries branch, worktree, PRs with checks, files, commits and kept reason; the panel itself is the client redesign's |
 
 ## Decisions
 
