@@ -90,6 +90,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
+	if err := dropPresentationTriggers(tx); err != nil {
+		return err
+	}
 	if err := setAsideReleasedProjectsTable(tx); err != nil {
 		return err
 	}
@@ -353,9 +356,6 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(catalogRetiredSchema); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(catalogPresentationVersionSchema()); err != nil {
-		return err
-	}
 	if _, err := tx.Exec(hostQueueDirtySchema); err != nil {
 		return err
 	}
@@ -454,6 +454,9 @@ func migrateTx(tx *sql.Tx) error {
 		if _, err := tx.Exec(`UPDATE sessions SET ended=1 WHERE status='offline'`); err != nil {
 			return err
 		}
+	}
+	if err := createPresentationTriggers(tx); err != nil {
+		return err
 	}
 	if version == schemaVersion {
 		return nil
