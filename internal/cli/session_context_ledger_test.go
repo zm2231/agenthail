@@ -111,6 +111,6 @@ func TestTerminalPromptAddsNoLedgerContextWhenOnlyCaptured(t *testing.T) {
 		t.Fatalf("want 1 capture call, got %d", len(calls()))
 	}
 	if output != nil && strings.Contains(output["hookSpecificOutput"].(map[string]any)["additionalContext"].(string), "intent ledger") {
-		t.Fatalf("a lead whose words are only captured was asked to attach: %v", output)
+		t.Fatalf("a session whose words are only captured was asked to attach: %v", output)
 	}
 }
