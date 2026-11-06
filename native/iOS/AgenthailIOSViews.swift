@@ -508,6 +508,8 @@ struct SessionScreen: View {
     @State private var edge = TranscriptEdge()
     @State private var queueTail = QueueTail()
     @State private var landed = false
+    @State private var opening = OpeningRebuild()
+    @State private var rowsGeneration = 0
     @State private var overflows = false
     @State private var jumps = 0
     @State private var userScrolling = false
@@ -549,6 +551,16 @@ struct SessionScreen: View {
         } else {
             position.scrollTo(edge: .bottom)
         }
+    }
+
+    private func rebuildOpeningRows() {
+        guard followingLatest, !userScrolling else { return }
+        rowsGeneration += 1
+    }
+
+    private func openingRowAppeared(_ id: String) {
+        opening.rowAppeared(id)
+        opening.fire(latest: latestRowID, rebuildOpeningRows)
     }
 
     private func settleAtLatest() async {
@@ -617,12 +629,14 @@ struct SessionScreen: View {
                 }
                 if activityOnly {
                     let leading = items.first?.id
-                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).probesScrollJump($0.id).id($0.id) }
+                    ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).rebuilt($0.id, generation: rowsGeneration).tracksOlderPlace($0.id, leading: $0.id == leading, in: olderPlace).probesScrollJump($0.id).onAppear { [id = $0.id] in if id == items.last?.id { openingRowAppeared(id) } }.id($0.id) }
                 } else {
                     let groups = TimelineGroup.make(items, foldAgents: !expandAgents)
                     ForEach(groups) { group in
                         CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }
-                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id).id(group.id)
+                            .rebuilt(group.id, generation: rowsGeneration)
+                            .tracksOlderPlace(group.id, leading: group.id == groups.first?.id, in: olderPlace).probesScrollJump(group.id)
+                            .onAppear { if group.id == groups.last?.id { openingRowAppeared(group.id) } }.id(group.id)
                     }
                 }
                 if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -654,7 +668,7 @@ struct SessionScreen: View {
             LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Group {
                     transcriptRows
-                    if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly) }
+                    if let detail { QueueTailRows(model: model, tail: $queueTail, readOnly: detail.readOnly, generation: rowsGeneration) }
                 }.transcriptScrimRow()
             }
             .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
@@ -809,6 +823,7 @@ struct SessionScreen: View {
             olderPlace.release()
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
+            opening.open(following: followingLatest)
             edge.atLatest = !startsAtOldest
             landed = false
             await model.loadSession(session.id)
@@ -818,6 +833,8 @@ struct SessionScreen: View {
                 scrollToLatest()
             }
             landed = true
+            opening.land()
+            opening.fire(latest: latestRowID, rebuildOpeningRows)
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
             if followingLatest { scrollToLatest() }
