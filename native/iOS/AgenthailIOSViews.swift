@@ -679,6 +679,7 @@ struct SessionScreen: View {
             .environment(\.transcriptRows, TranscriptRows(memory: model.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: items, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.expandAgentMessages, expandAgents)
+            .environment(\.cachedAttachment) { [model, id = session.id] in model.cachedAttachment(for: $0, sessionID: id) }
             .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
@@ -823,7 +824,7 @@ struct SessionScreen: View {
             olderPlace.release()
             let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
             followingLatest = !startsAtOldest
-            opening.open(following: followingLatest)
+            let open = opening.open(following: followingLatest)
             edge.atLatest = !startsAtOldest
             landed = false
             await model.loadSession(session.id)
@@ -833,7 +834,7 @@ struct SessionScreen: View {
                 scrollToLatest()
             }
             landed = true
-            opening.land()
+            opening.land(open)
             opening.fire(latest: latestRowID, rebuildOpeningRows)
         }
         .onChange(of: detail?.timeline?.items) { _, _ in
@@ -1365,12 +1366,14 @@ struct CopyCallID: View {
 struct AttachmentRow: View {
     let item: TimelineItem
     let loader: (() async -> Data?)?
-    @State private var data: Data?
+    @State private var loaded: Data?
     @State private var attempted = false
     @State private var retryCount = 0
     @Environment(\.transcriptRows) private var rows
+    @Environment(\.cachedAttachment) private var cached
 
     private var failedKey: String { "attachment-failed-" + item.id }
+    private var data: Data? { loaded ?? cached(item) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1387,7 +1390,7 @@ struct AttachmentRow: View {
         .task(id: "\(item.id)-\(retryCount)") {
             guard let loader, data == nil, retryCount > 0 || rows.isOpen(failedKey) != true else { return }
             attempted = true
-            data = await loader()
+            loaded = await loader()
             if !Task.isCancelled { rows.set(failedKey, open: data == nil) }
         }
     }

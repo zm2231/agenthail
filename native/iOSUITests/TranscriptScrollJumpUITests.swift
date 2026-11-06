@@ -53,12 +53,16 @@ final class TranscriptScrollJumpUITests: XCTestCase {
         XCTAssertLessThanOrEqual(worst, 80, "LazyVStack's one re-estimate of unmeasured rows missed by more than 80 pt: \(probe.label)")
     }
 
-    private static func parse(_ label: String) -> (jumps: Int, worst: Int) {
-        let values = Dictionary(uniqueKeysWithValues: label.split(separator: " ").compactMap { pair -> (String, Int)? in
-            let parts = pair.split(separator: "=")
-            guard parts.count == 2, let value = Int(parts[1]) else { return nil }
-            return (String(parts[0]), value)
-        })
-        return (values["jumps"] ?? .max, values["worst"] ?? .max)
+    static func parse(_ label: String) -> (jumps: Int, worst: Int) {
+        guard let match = label.wholeMatch(of: /jumps=(\d+) worst=(\d+)/), let jumps = Int(match.1), let worst = Int(match.2) else { return (.max, .max) }
+        return (jumps, worst)
+    }
+
+    func testTheProbeLabelParsesOnlyItsExactForm() {
+        XCTAssertEqual(Self.parse("jumps=1 worst=57").jumps, 1)
+        XCTAssertEqual(Self.parse("jumps=1 worst=57").worst, 57)
+        for bad in ["jumps=-1 worst=-1", "jumps=0", "jumps=0 worst=3 extra=1", "worst=3 jumps=0", "", "jumps=0 worst=3.5"] {
+            XCTAssertEqual(Self.parse(bad).jumps, .max, bad)
+        }
     }
 }
