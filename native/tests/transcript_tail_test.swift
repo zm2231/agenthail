@@ -53,7 +53,14 @@ struct TranscriptTailTest {
         removing.update(withoutBoundary, in: "a", rows: [:], visible: visible, following: false)
         expect(removing.split(withoutBoundary, in: "a") == boundary, "the boundary moves to the row that took its place")
         let withoutBoth = withoutBoundary.filter { $0 != withoutBoundary[boundary - 1] && $0 != withoutBoundary[boundary] }
-        expect(removing.split(withoutBoth, in: "a") == TranscriptTail.opening(count: withoutBoth.count), "with both rows gone the boundary opens by the rule")
+        expect(removing.split(withoutBoth, in: "a") == boundary - 1, "removing the first eager row and the lazy row before it in one update keeps the rows above lazy")
+        let tailOnly = withoutBoundary.filter { !withoutBoundary[..<boundary].contains($0) }
+        expect(removing.split(tailOnly, in: "a") == 0, "with every lazy row gone the surviving eager rows stay eager")
+
+        var short = TranscriptTail()
+        short.update(["s0", "s1"], in: "a", rows: [:], visible: visible, following: true)
+        let grownShort = ["s0", "s1"] + (2..<10).map { "s\($0)" }
+        expect(short.split(grownShort, in: "a") == 0, "a short transcript that grows keeps its rows eager until they scroll away")
 
         var empty = TranscriptTail()
         empty.update([], in: "a", rows: [:], visible: visible, following: true)

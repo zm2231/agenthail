@@ -6,8 +6,8 @@ struct TranscriptTail: Equatable {
     static let slack = 4
 
     private var transcript: String?
+    private var lazy: Set<String> = []
     private var first: String?
-    private var lastLazy: String?
 
     static func opening(count: Int) -> Int {
         max(count - rows, 0)
@@ -15,8 +15,8 @@ struct TranscriptTail: Equatable {
 
     func split(_ ids: [String], in transcript: String) -> Int {
         guard transcript == self.transcript else { return Self.opening(count: ids.count) }
+        if let last = ids.lastIndex(where: lazy.contains) { return last + 1 }
         if let first, let index = ids.lastIndex(of: first) { return index }
-        if let lastLazy, let index = ids.lastIndex(of: lastLazy) { return index + 1 }
         return Self.opening(count: ids.count)
     }
 
@@ -27,8 +27,8 @@ struct TranscriptTail: Equatable {
             while start < target, let row = rows[ids[start]], row.maxY < visible.minY { start += 1 }
         }
         self.transcript = transcript
+        lazy = Set(ids[..<start])
         first = start < ids.count ? ids[start] : nil
-        lastLazy = start > 0 ? ids[start - 1] : nil
     }
 }
 
