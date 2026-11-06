@@ -48,6 +48,7 @@ func TestUpgradeKeepsObservedRuntimeAndDropsLauncherPlaceholders(t *testing.T) {
 	if err := old.RegisterSession(surface.Session{ID: "launched", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Runtime: &surface.Runtime{Launcher: "cmux"}}); err != nil {
 		t.Fatal(err)
 	}
+	asBeforePresentationTriggers(t, old)
 	for _, statement := range []string{`ALTER TABLE session_runtime DROP COLUMN turn_observed`, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1)} {
 		if _, err := old.db.Exec(statement); err != nil {
 			old.Close()
