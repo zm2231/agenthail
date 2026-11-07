@@ -147,19 +147,17 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 
     // The geometry action can skip a stream's last change; false asks again once the scroll rests.
     private func checkEnd() -> Bool {
-        guard following, let geometry = layout.geometry else { return true }
-        guard resting else { return false }
-        // The action decides a pending offset move a turn later; one the action skipped is still unhandled at the retry.
-        let unhandled = layout.seen.map { $0.contentSize == geometry.contentSize && $0.contentOffset != geometry.contentOffset } ?? false
-        if unhandled, layout.deferredOffset != geometry.contentOffset {
-            layout.deferredOffset = geometry.contentOffset
+        guard let geometry = layout.geometry else { return true }
+        switch TranscriptEndCheck.decide(following: following, resting: resting, geometry: geometry, seen: layout.seen, deferred: layout.checkDeferred) {
+        case .retry:
+            if resting { layout.checkDeferred = true }
             return false
-        }
-        layout.deferredOffset = nil
-        if TranscriptEnd(geometry).distance > 2 {
+        case .scroll:
             settle { $0.scrollTo(edge: .bottom) }
+            return true
+        case .done:
+            return true
         }
-        return true
     }
 
     // Geometry callbacks run mid-layout, so scrolling waits for the next turn and is dropped if the transcript changed meanwhile.
@@ -178,7 +176,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 private final class Layout {
     var geometry: ScrollGeometry?
     var seen: ScrollGeometry?
-    var deferredOffset: CGPoint?
+    var checkDeferred = false
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
@@ -188,6 +186,7 @@ private final class Layout {
     // Not pushed back by later changes, so a steady stream is still checked.
     func scheduleCheck(_ run: @escaping @MainActor () -> Bool) {
         guard check == nil else { return }
+        checkDeferred = false
         check = Task { @MainActor in
             repeat {
                 do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
@@ -199,7 +198,7 @@ private final class Layout {
     func cancelCheck() {
         check?.cancel()
         check = nil
-        deferredOffset = nil
+        checkDeferred = false
     }
 
     var heldFromEnd: CGFloat? {
