@@ -10,14 +10,18 @@ final class Measured {
 struct Columns: View {
     @ObservedObject var pane: SessionPane
     let measured: Measured
+    var widest = false
 
     var body: some View {
-        let sidebar = pane.sidebarDocks ? DesktopColumns.sidebar : (min: 0, ideal: 0, max: 0)
+        let docked = widest ? (min: DesktopColumns.sidebar.max, ideal: DesktopColumns.sidebar.max, max: DesktopColumns.sidebar.max) : DesktopColumns.sidebar
+        let sidebar = pane.sidebarDocks ? docked : (min: 0, ideal: 0, max: 0)
         NavigationSplitView {
             Color.red
                 .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             Color.gray
+                .frame(minWidth: 200)
+                .conversationColumn(sidebarDocks: pane.sidebarDocks)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.detail = $0 }
                 .navigationSplitViewColumnWidth(min: DesktopColumns.detail.min, ideal: DesktopColumns.detail.ideal)
                 .inspector(isPresented: .constant(pane.inspectorDocks && pane.inspectorVisible)) {
@@ -108,6 +112,27 @@ struct WindowColumnsTest {
         check(measured.detail.minX >= -0.5 && measured.detail.maxX <= floor + 0.5, "the conversation fills the narrowest window, got \(measured.detail)")
         let wide = resize(1200)
         check(wide == 1200 && live.inspectorDocks && live.sidebarDocks, "widening to 1200 pt docks both columns again")
+
+        let wideSidebar = SessionPane(model: AgenthailModel(connecting: false), restoresSelection: false)
+        let wideHosting = NSHostingView(rootView: Columns(pane: wideSidebar, measured: Measured(), widest: true))
+        wideHosting.sizingOptions = [.minSize]
+        let wideWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        wideWindow.contentView = wideHosting
+        wideHosting.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        func drag(_ width: CGFloat) -> CGFloat {
+            let deadline = Date().addingTimeInterval(3)
+            repeat {
+                wideWindow.setContentSize(NSSize(width: max(width, wideWindow.contentMinSize.width), height: 700))
+                wideHosting.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+            } while wideWindow.contentLayoutRect.width != width && Date() < deadline
+            return wideWindow.contentLayoutRect.width
+        }
+        let past = drag(ColumnFit.sidebarDocks - 1)
+        check(!wideSidebar.sidebarDocks, "a sidebar at its widest still collapses when the window narrows, got width \(past)")
+        let wideFloor = drag(200)
+        check(wideFloor == DesktopColumns.detail.min, "the window then stops at the conversation's minimum, got \(wideFloor)")
 
         UserDefaults.standard.set(false, forKey: SessionPane.inspectorDocksKey)
         UserDefaults.standard.set(false, forKey: SessionPane.sidebarDocksKey)
