@@ -78,6 +78,7 @@ let package = Package(
                 "EventRetryBackoff.swift",
                 "ObservationWait.swift",
                 "ObservedScope.swift",
+                "SessionCells.swift",
                 "ConnectionGrace.swift",
                 "CatalogBatch.swift",
                 "CatalogInbox.swift",

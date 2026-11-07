@@ -44,7 +44,7 @@ struct NewSessionView: View {
             if model.isConnected { await draft.loadOptions() }
         }
         .task(id: "\(draft.hosts.generation)/\(draft.form.agent)/\(draft.hosts.options != nil)/\(model.isConnected)") { await draft.loadModels() }
-        .onChange(of: model.snapshot?.daemon) { draft.daemonChanged() }
+        .onChange(of: model.daemon) { draft.daemonChanged() }
         .onChange(of: draft.form.agent) { draft.error = nil }
     }
 

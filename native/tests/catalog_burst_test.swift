@@ -1,4 +1,5 @@
 @testable import AgenthailHelpers
+import Combine
 import Foundation
 import Observation
 
@@ -59,7 +60,41 @@ struct CatalogBurstTest {
         counterCountsEveryChange()
         everyScopeChangeReachesItsReaders()
         readerChangesReachTheViewsThatReadThem()
+        aBackgroundUpsertReachesOnlyTheViewsThatShowIt()
         print("catalog burst tests passed")
+    }
+
+    @MainActor
+    static func aBackgroundUpsertReachesOnlyTheViewsThatShowIt() {
+        let model = AgenthailModel(connecting: false)
+        model.adoptRefreshed(listing([session("shown", "idle"), session("background", "idle")], seq: 1))
+        model.mainPane.select("shown")
+        settle()
+        check(model.mainPane.displayedSession?.id == "shown", "the pane shows the selected session")
+
+        let root = ChangeCounter {
+            _ = model.isConnected
+            _ = model.hasSnapshot
+            _ = model.paletteVisible
+            _ = model.mainPane.displayedSession
+        }
+        let shownCell = ChangeCounter { _ = model.session("shown") }
+        var panePublishes = 0
+        let pane = model.mainPane.objectWillChange.sink { panePublishes += 1 }
+        defer { pane.cancel() }
+
+        model.applyCatalogEvents([upserted(2, "background", "busy")])
+        check(model.session("background")?.status == "busy", "the background session's row took its upsert")
+        check(root.count == 0, "a background session's upsert reached the window root \(root.count) times")
+        check(shownCell.count == 0, "a background session's upsert reached the shown session's views \(shownCell.count) times")
+        check(panePublishes == 0, "a background session's upsert made the pane publish \(panePublishes) times")
+
+        model.applyCatalogEvents([upserted(3, "shown", "busy")])
+        check(root.count >= 1 && shownCell.count >= 1, "an upsert of the shown session reaches the views that show it: root \(root.count), cell \(shownCell.count)")
+
+        let arriving = ChangeCounter { _ = model.session("arriving") }
+        model.applyCatalogEvents([upserted(4, "arriving", "idle")])
+        check(arriving.count >= 1 && model.session("arriving") != nil, "a session that arrives reaches the views waiting for it: \(arriving.count)")
     }
 
     static func removed(_ seq: UInt64, _ id: String) -> CatalogStreamEvent {

@@ -42,7 +42,7 @@ struct ProjectPane: View {
     @State private var showingEarlier = false
 
     var body: some View {
-        let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions), localName: model.snapshot?.daemon.host?.name)
+        let contents = ProjectContents.build(project, sessions: model.inDaemonOrder(model.knownSessions), localName: model.daemon?.host?.name)
         ScrollView {
             VStack(alignment: .leading, spacing: DesktopSpace.l) {
                 header(contents)
@@ -112,7 +112,7 @@ struct ProjectPane: View {
                 Text("@" + lead.name).font(.system(size: DesktopType.title, weight: .semibold)).foregroundStyle(DesktopPalette.text)
                 if let session = contents.leadSession {
                     TimelineView(.everyMinute) { context in
-                        Text([SessionRefinement.surfaceLabel(session.surface), session.remoteHostName ?? model.snapshot?.daemon.host?.name, SessionRowTime.status(session, now: context.date)].compactMap { $0 }.joined(separator: " · "))
+                        Text([SessionRefinement.surfaceLabel(session.surface), session.remoteHostName ?? model.daemon?.host?.name, SessionRowTime.status(session, now: context.date)].compactMap { $0 }.joined(separator: " · "))
                             .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
                             .accessibilityIdentifier("project-lead-status")
                     }
@@ -158,7 +158,7 @@ struct ProjectPane: View {
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             ForEach(project.checkouts, id: \.self) { checkout in
                 HStack(alignment: .firstTextBaseline, spacing: DesktopSpace.m) {
-                    Text(checkout.host.state == "local" ? model.snapshot?.daemon.host?.name ?? checkout.host.name : checkout.host.name)
+                    Text(checkout.host.state == "local" ? model.daemon?.host?.name ?? checkout.host.name : checkout.host.name)
                         .font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
                         .frame(width: 110, alignment: .leading)
                         .lineLimit(1)
@@ -174,7 +174,7 @@ struct ProjectPane: View {
     private func rows(_ sessions: [SessionState]) -> some View {
         ForEach(sessions) { session in
             Button { pane.select(session.id) } label: {
-                SessionRowView(session: session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.sessionAttention[session.id] != nil, saysWaiting: true)
+                SessionRowView(session: session, title: model.title(of: session), needsYou: model.sessionAttention[session.id] != nil, saysWaiting: true)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

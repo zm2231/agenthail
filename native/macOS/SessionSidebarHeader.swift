@@ -3,11 +3,15 @@ import SwiftUI
 /// A fixed-size row here widens the split view column past its maximum and clips it in narrow windows.
 struct SessionSidebarHeader: View {
     @Bindable var model: AgenthailModel
+    let pane: SessionPane
     let counts: [SessionFilter: Int]
-    let help: (SessionFilter) -> String
+    let filterHelp: [SessionFilter: String]
     let newSessionHelp: String
     let findShortcut: KeyboardShortcut?
-    let addProject: () -> Void
+
+    private func help(_ filter: SessionFilter) -> String { filterHelp[filter] ?? "" }
+
+    private func addProject() { pane.projectSheet = .add(host: nil, folder: "") }
     @FocusState private var searchFocused: Bool
 
     var body: some View {

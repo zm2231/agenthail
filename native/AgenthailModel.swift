@@ -8,6 +8,7 @@ import os
 final class AgenthailModel {
     var snapshot: DashboardSnapshot? {
         didSet {
+            adoptParts()
             rederive()
             trackFinishedSessions(from: oldValue)
             pruneStore()
@@ -123,14 +124,41 @@ final class AgenthailModel {
         return cache
     }()
 
-    var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
+    private(set) var hasSnapshot = false
+    private(set) var daemon: DaemonState?
+    private(set) var attention: [AttentionState] = []
+    private(set) var queue: [QueueState] = []
+    private(set) var history: [HistoryState] = []
+    private(set) var deliveryProblems: [DeliveryProblem] = []
+    private(set) var leadReplacements: [LeadReplacement] = []
+    private(set) var projects: [ProjectState] = []
+    private(set) var codexRecentHours = 5
+    private(set) var busyDelivery = FollowUpAction.queue
+
+    private func adoptParts() {
+        hasSnapshot = snapshot != nil
+        daemon = snapshot?.daemon
+        attention = snapshot?.attention ?? []
+        queue = snapshot?.queue ?? []
+        history = snapshot?.history ?? []
+        deliveryProblems = snapshot?.deliveryProblems ?? []
+        leadReplacements = snapshot?.leadReplacements ?? []
+        projects = snapshot?.projects ?? []
+        codexRecentHours = snapshot?.codexRecentHours ?? 5
+        busyDelivery = FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue
+    }
+
+    var isConnected: Bool { connectionError == nil && daemon?.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     private(set) var knownSessions: [SessionState] = []
-    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
-    var leadReplacements: [LeadReplacement] { snapshot?.leadReplacements ?? [] }
+    let cells = SessionCells()
+    private(set) var workingCount = 0
+
+    func session(_ id: String?) -> SessionState? { cells.session(id) }
+    func title(of session: SessionState) -> String { cells.title(of: session) }
 
     func sessionName(_ id: String) -> String {
-        knownSessions.first { $0.id == id }?.displayName ?? id
+        cells.session(id)?.displayName ?? id
     }
     private(set) var sessionAttention: [String: SessionAttention] = [:]
     private(set) var sessionTree = SessionTree.empty
@@ -142,6 +170,8 @@ final class AgenthailModel {
         let listed = reader.joined(snapshot?.sessions ?? [])
         let listedIDs = Set(listed.map(\.id))
         knownSessions = listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
+        cells.adopt(knownSessions)
+        workingCount = knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count
         sessionAttention = SessionAttention.build(sessions: knownSessions, attention: snapshot?.attention ?? [], deliveryProblems: deliveryProblems)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
@@ -933,7 +963,6 @@ final class AgenthailModel {
         projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
     }
 
-    var projects: [ProjectState] { snapshot?.projects ?? [] }
 
     func addProject(path: String, title: String? = nil, host: String? = nil) async -> ProjectChange {
         await projectChange {
@@ -1009,7 +1038,6 @@ final class AgenthailModel {
         return nil
     }
 
-    var busyDelivery: FollowUpAction { FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue }
 
     func setBusyDelivery(_ mode: FollowUpAction) {
         guard let snapshot, mode != busyDelivery else { return }

@@ -83,7 +83,7 @@ struct TitleBarStrip: View {
                     if tabs.count > fits {
                         Menu {
                             ForEach(tabs) { tab in
-                                Button(SessionTabView.title(model.knownSessions.first { $0.id == tab.id }, id: tab.id, label: interface.config.tabLabel)) { pane.activateTab(tab.id) }
+                                Button(SessionTabView.title(model.session(tab.id), id: tab.id, label: interface.config.tabLabel)) { pane.activateTab(tab.id) }
                             }
                         } label: {
                             Text("\(tabs.count - fits) more")
@@ -189,9 +189,9 @@ struct SessionTabView: View {
     }
 
     var body: some View {
-        let session = model.knownSessions.first { $0.id == tab.id }
+        let session = model.session(tab.id)
         let active = pane.tabs.active == tab.id
-        let needsYou = model.sessionTree.attention[tab.id] != nil
+        let needsYou = model.sessionAttention[tab.id] != nil
         let composing = tab.id == SessionTabs.newSession
         HStack(spacing: 6) {
             if composing {

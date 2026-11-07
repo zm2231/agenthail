@@ -1010,9 +1010,13 @@ enum SessionFamilies {
     }
 
     static func title(_ session: SessionState, in sessions: [SessionState]) -> String {
+        title(session) { id in sessions.first { $0.id == id } }
+    }
+
+    static func title(_ session: SessionState, lookup: (String) -> SessionState?) -> String {
         guard let parentID = session.subagent?.parentId else { return session.title }
-        guard let parent = sessions.first(where: { $0.id == parentID }) else { return label(session) }
-        return "\(title(parent, in: sessions)) > \(label(session))"
+        guard let parent = lookup(parentID) else { return label(session) }
+        return "\(title(parent, lookup: lookup)) > \(label(session))"
     }
 }
 

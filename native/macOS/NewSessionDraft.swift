@@ -19,7 +19,7 @@ final class NewSessionDraft: ObservableObject {
     init(model: AgenthailModel, selected: SessionState?) {
         self.model = model
         origin = selected
-        let hosts = CreationHostPicker(daemon: model.snapshot?.daemon, selectedSession: selected)
+        let hosts = CreationHostPicker(daemon: model.daemon, selectedSession: selected)
         self.hosts = hosts
         form = SessionLaunchForm(host: hosts.hostQuery)
     }
@@ -70,7 +70,7 @@ final class NewSessionDraft: ObservableObject {
     }
 
     func daemonChanged() {
-        hosts.update(daemon: model.snapshot?.daemon)
+        hosts.update(daemon: model.daemon)
         if form.host != hosts.hostQuery { form.switchHost(to: hosts.hostQuery, folder: "") }
     }
 

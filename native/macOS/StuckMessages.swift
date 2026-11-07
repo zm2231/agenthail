@@ -20,7 +20,7 @@ struct QueueItemRow: View {
 
     var body: some View {
         let target = model.knownSessions.first { $0.id == item.sessionId }
-        let lines = QueueFacts.detail(item, target: target, attention: model.snapshot?.attention ?? [])
+        let lines = QueueFacts.detail(item, target: target, attention: model.attention)
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.target)
@@ -53,7 +53,7 @@ struct AttentionBanner: View {
     let attention: AttentionState
 
     var body: some View {
-        let item = model.snapshot?.queue.first { $0.id == attention.queueId }
+        let item = model.queue.first { $0.id == attention.queueId }
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(DesktopPalette.attention)

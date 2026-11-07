@@ -96,7 +96,7 @@ private struct AddProjectForm: View {
     @State private var error: String?
     @Environment(\.dismiss) private var dismiss
 
-    private var hosts: [CreationHost] { CreationHostPicker(daemon: model.snapshot?.daemon, selectedSession: nil).hosts }
+    private var hosts: [CreationHost] { CreationHostPicker(daemon: model.daemon, selectedSession: nil).hosts }
     private var path: String { folder.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {

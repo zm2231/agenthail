@@ -10,7 +10,7 @@ struct ConnectionControls: View {
         if model.reconnecting { return "Reconnecting…" }
         if model.daemonSlow { return "Agenthail is slow to respond" }
         if model.loading && model.connectionError == nil { return "Loading sessions…" }
-        guard model.snapshot != nil, let loadedAt = model.snapshotLoadedAt else { return "Agenthail isn't running" }
+        guard model.hasSnapshot, let loadedAt = model.snapshotLoadedAt else { return "Agenthail isn't running" }
         return "Offline · as of \(relativeAge(loadedAt.formatted(.iso8601)))"
     }
 

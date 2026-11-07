@@ -84,6 +84,7 @@
 		4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */; };
 		47F4661F55A577BE2203BCA3 /* TranscriptLiveEdgeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B0815C156FA841DACA9408 /* TranscriptLiveEdgeUITests.swift */; };
 		48BA7C313A4D114D16DA93BC /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */; };
+		48BCB068AC7866F2D4ACBA51 /* SessionCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA55004DD6484E48F22E3163 /* SessionCells.swift */; };
 		4C0F2F9EAC98F89D3C208D13 /* PhoneAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11B7C38090C621DB01A02F6 /* PhoneAppearanceTests.swift */; };
 		4C8037C5B5708AA5E364CD0F /* ViewOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86BE99C4B243E0063C974AAB /* ViewOrder.swift */; };
 		4DC82E4C2D6E0E89DCE4ED84 /* VoiceOperator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */; };
@@ -486,6 +487,7 @@
 		B53189F2F3F442A260900B88 /* TranscriptScrimMask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrimMask.swift; sourceTree = "<group>"; };
 		B8516330BAD617EC489F9B21 /* TurnNoticePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnNoticePreference.swift; sourceTree = "<group>"; };
 		B98F84471DE35A40B4F7B9ED /* InboxRowHitAreaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxRowHitAreaUITests.swift; sourceTree = "<group>"; };
+		BA55004DD6484E48F22E3163 /* SessionCells.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCells.swift; sourceTree = "<group>"; };
 		BC5D8FABFB3FBB000AB19E56 /* OrderHoldTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderHoldTracking.swift; sourceTree = "<group>"; };
 		BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScanner.swift; sourceTree = "<group>"; };
 		BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperator.swift; sourceTree = "<group>"; };
@@ -794,6 +796,7 @@
 				C23917663303D1F0107FDCCA /* ScopeReader.swift */,
 				AB597912B0447C43772021FB /* ScrimField.swift */,
 				8DC0A603226718538ACAAB89 /* SessionAttention.swift */,
+				BA55004DD6484E48F22E3163 /* SessionCells.swift */,
 				1844979BB8DD4D3D070B71EA /* SessionDetailState.swift */,
 				D65997FC6F2FDC05350DC086 /* SessionDisplayKind.swift */,
 				34684739278D1CFFBC4D807F /* SessionEndTurn.swift */,
@@ -1147,6 +1150,7 @@
 				CFFD6832EC333BCAA5012623 /* SendQueue.swift in Sources */,
 				F4C454FAABA041F520CFE257 /* SessionAttention.swift in Sources */,
 				F14C7562E0F31FB88DEA0961 /* SessionCapture.swift in Sources */,
+				48BCB068AC7866F2D4ACBA51 /* SessionCells.swift in Sources */,
 				07F8982FFE8731CB9677BBA1 /* SessionControls.swift in Sources */,
 				4E9AF5C076B702CBD5DABDE9 /* SessionCreation.swift in Sources */,
 				B9C8F96E65376C2BC0ACD091 /* SessionDetailState.swift in Sources */,
