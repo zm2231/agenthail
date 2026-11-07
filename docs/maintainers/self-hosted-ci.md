@@ -41,7 +41,7 @@ The self-hosted `ios` job checks this setting first and fails with a message nam
 
 `scripts/ci-self-hosted.sh prepare` gives `verify` and `native` a scratch `HOME` and `CFFIXED_USER_HOME` inside the job temp directory, and keeps the Go and npm caches per runner. `TMPDIR` and `GOTMPDIR` point to a new directory directly under the user's own temp directory in `/var/folders`, the same place hosted runners and users' Macs use, so tests see that `/var` resolves to `/private/var`. Its name is four characters, because tests create Unix sockets in it and macOS limits a socket path to 104 bytes. A marker file per runner records the directory. If a runner was killed before cleanup, the next `prepare` stops the processes still running from the old directory and deletes it. The iOS jobs keep the real `HOME` because the simulator service uses it. Each runner uses its own simulator, named `Agenthail CI <runner name>`, and its own DerivedData next to its workspace. The `ios` test run passes `-collect-test-diagnostics never`: after the tests pass, collecting simulator diagnostics can wait 600 seconds and time out, which adds ten minutes to the job.
 
-`verify` runs `scripts/ci-self-hosted.sh trim-go-cache` after Go is set up. When the runner's Go build cache is over 8 GB, it clears the cache with `go clean -cache`, because a busy runner fills the cache faster than Go's own five-day trim empties it. The script refuses a `RUNNER_TOOL_CACHE` that is relative or contains `.` or `..`, and the trim only acts when the cache path resolves to exactly the runner's tool cache plus `agenthail-cache/go-build`. `scripts/test-ci-self-hosted.sh` checks that guard.
+`verify` runs `scripts/ci-self-hosted.sh trim-go-cache` after Go is set up. When the runner's Go build cache is over 3 GB, it clears the cache with `go clean -cache`, because a busy runner fills the cache faster than Go's own five-day trim empties it. A cold `verify` run writes about 1.1 GB to the cache, so 3 GB keeps a few branches' builds warm, and the three runners' caches stay under about 12 GB together, counting the job that runs after the trim. The script refuses a `RUNNER_TOOL_CACHE` that is relative or contains `.` or `..`, and the trim only acts when the cache path resolves to exactly the runner's tool cache plus `agenthail-cache/go-build`. `scripts/test-ci-self-hosted.sh` checks that guard.
 
 `scripts/ci-self-hosted.sh cleanup` runs after every self-hosted job, including failed and cancelled ones. It stops processes started from the job's workspace or temp directories, erases the job's simulator, resets the workspace, and deletes the scratch `HOME`, the job's temp directory and its marker.
 
@@ -62,7 +62,7 @@ The script refuses to start with less than 60 GB free. It flushes the guest disk
 `ci/vm/supervisor.sh` runs as one LaunchAgent and manages up to `AGENTHAIL_CI_VM_SLOTS` VMs (default 2). It keeps no VM running while nothing is queued:
 
 1. Every 20 seconds it lists queued jobs labelled `agenthail-vm` and starts one worker per queued job that no booting or waiting VM already covers.
-2. A worker refuses to clone when less than 25 GB is free, clones the newest image (an APFS clone, so it takes no time or space up front), sets its CPU and memory (`AGENTHAIL_CI_VM_CPU`, `AGENTHAIL_CI_VM_MEMORY_MB`), boots it with the host's hook directory (`AGENTHAIL_CI_HOOKS_DIR`, default `~/actions-runner-agenthail-hooks`) shared read-only, mints a GitHub App installation token on the host and generates a just-in-time runner configuration for one job.
+2. A worker refuses to clone when less than 15 GB is free, clones the newest image (an APFS clone, so it takes no time or space up front), sets its CPU and memory (`AGENTHAIL_CI_VM_CPU`, `AGENTHAIL_CI_VM_MEMORY_MB`), boots it with the host's hook directory (`AGENTHAIL_CI_HOOKS_DIR`, default `~/actions-runner-agenthail-hooks`) shared read-only, mints a GitHub App installation token on the host and generates a just-in-time runner configuration for one job.
 3. Only that configuration and the host hook's sha256 enter the guest. The guest starts the runner only if its `.env` sets the hook and the hook it resolves through the share has that sha256; a missing or different hook exits without starting the runner, and so does a missing hook on the host, before the VM boots. Both count toward the circuit breaker below. The runner exits after one job.
 4. The worker then stops and deletes the VM and removes the runner registration, whether the job passed or failed. A VM whose runner gets no job within 5 minutes is discarded the same way.
 5. The supervisor kills any VM older than 50 minutes (the longest job timeout plus 5 minutes). On start and on exit it stops every worker and deletes every `agenthail-ci-slot-*` VM, so restarting the LaunchAgent leaves nothing behind. Every 10 minutes it also deletes offline, idle runner registrations older than 50 minutes, which VMs stopped mid-job leave behind once GitHub has finished those jobs. A newer registration may belong to a VM that is still starting its runner.
@@ -71,6 +71,31 @@ The script refuses to start with less than 60 GB free. It flushes the guest disk
 Runner output and the runner's diagnostic log for each slot are kept in `~/Library/Logs/agenthail-ci-vm/`.
 
 The supervisor needs `AGENTHAIL_CI_APP_ID`, the GitHub App's id, and `AGENTHAIL_CI_APP_KEY_COMMAND`, a command that prints the App's private key, for example one that reads it from the login keychain or a secret manager. It runs that command each time it mints a token; the key is never written to disk or passed to the guest.
+
+### Disk space
+
+A clone takes no space up front, so the 15 GB floor is room for what may still be written after the clone starts: this VM's growth, the other VM's, and the jobs on the host runners. A running VM has been seen to use about 3 GB of the host's disk, and a cold Go build cache about 1.1 GB. When a worker finishes, the supervisor logs the free space at its clone and the lowest free space while the VM ran. If that lowest value falls under about 5 GB, raise the floor.
+
+While queued jobs are refused for space, the supervisor opens one issue, `macOS VM runners are out of disk space`, and adds a comment at most every 30 minutes with the free space. The time of the last report is kept in `~/Library/Caches/agenthail-ci-vm/disk-issue-noted`, so a restart does not report again early. Its token asks for `issues: write`, so the GitHub App needs that permission. The issue number is kept in `~/Library/Caches/agenthail-ci-vm/disk-issue`. When a VM next starts, the supervisor comments with the free space and closes the issue.
+
+With no job running and the runners' Go build caches at their 3 GB limit, the host should have at least 25 GB free. That covers the 15 GB floor, about 3 GB for the first VM before the second clones, and about 2 GB of workspace and temp files for each of the three host runners' jobs. The second VM's growth comes after its clone, so it comes out of the floor. Other VMs and files on the host count against this figure like anything else on the disk.
+
+### Updating the supervisor
+
+The LaunchAgent runs its own copy of `supervisor.sh`, the second entry of its `ProgramArguments`, so a change merged here takes effect only after that copy is replaced and the LaunchAgent restarted. Restart it only while no slot is running a job. On the host, from an up-to-date clone of this repository:
+
+```sh
+plist="$(grep -l supervisor.sh ~/Library/LaunchAgents/*.plist)"
+label="$(/usr/libexec/PlistBuddy -c 'Print :Label' "$plist")"
+copy="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$plist")"
+if find ~/Library/Caches/agenthail-ci-vm -name 'slot-*.phase' -exec grep -lx busy {} + | grep -q .; then
+  echo "a slot is running a job; try again when it finishes"
+else
+  cp ci/vm/supervisor.sh "$copy" && launchctl kickstart -k "gui/$(id -u)/$label"
+fi
+```
+
+`kickstart -k` stops the running supervisor, which stops its workers and deletes every `agenthail-ci-slot-*` VM, then starts the new copy. Jobs still queued on GitHub stay queued; the new supervisor starts VMs for them on its first poll, as soon as it starts. A VM that was booting or waiting for a job is deleted, and the job it would have taken stays queued for the next VM. A VM running a job is deleted too, and GitHub fails that job when its runner disappears, which is why the commands check for a busy slot first. A slot can still take a job in the seconds between the check and the restart; if one does, re-run that job.
 
 ### Host setup
 
