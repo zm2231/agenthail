@@ -146,6 +146,7 @@ SOURCES=(
   macOS/TranscriptSlots.swift
   macOS/TranscriptRowAction.swift
   macOS/TranscriptScrimSource.swift
+  macOS/TranscriptTrace.swift
   macOS/VoiceController.swift
   macOS/AncestorFrames.swift
   macOS/BackdropLayerView.swift

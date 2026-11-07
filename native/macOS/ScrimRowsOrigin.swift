@@ -33,6 +33,7 @@ final class ScrimRowsOriginView: NSView {
 
     @objc private func scrolled() {
         rows?.position()
+        if let clip { TranscriptTrace.shared.record(.scroll, clip.bounds.minY, Double(clip.documentView?.frame.height ?? 0), clip.bounds.height) }
     }
 
     var topLeft: NSPoint { NSPoint(x: 0, y: isFlipped ? 0 : bounds.height) }

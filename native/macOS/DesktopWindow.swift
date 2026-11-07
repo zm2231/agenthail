@@ -718,6 +718,7 @@ struct ConversationPane: View {
                                     .backdropSurface(DesktopPalette.window)
                             }
                             ComposerView(model: model, pane: pane, session: session)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { TranscriptTrace.shared.composer(height: $0) }
                         }
                     }
                 }

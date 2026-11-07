@@ -36,6 +36,9 @@ struct SessionCommands: Commands {
                     .keyboardShortcut("w")
             }
         }
+        CommandGroup(after: .help) {
+            Button("Save Transcript Trace") { TranscriptTrace.saveAndReveal() }
+        }
         CommandMenu("Session") {
             Button("Go to Session…") {
                 showMainWindow()

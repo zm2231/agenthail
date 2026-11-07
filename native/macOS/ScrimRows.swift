@@ -42,9 +42,11 @@ final class ScrimRows: TranscriptScrimSink {
     }
 
     func flush() {
-        let scrim = waiting
+        guard let scrim = waiting else { return }
         waiting = nil
-        scrim?.flush()
+        scrim.flush()
+        let reach = TranscriptScrimMask.reach
+        TranscriptTrace.shared.panels(covers: scrim.mask.layers.count, rows: scrim.rowLayers.map { $0.insetBy(dx: reach, dy: reach) })
     }
 
     func move(to origin: CGPoint) {
