@@ -24,6 +24,7 @@ report() {
 	local result="$1" open="$2" artifact="${3-https://example.test/artifact}" assignee="${4-}"
 	: >"$work/calls"
 	PATH="$work/bin:$PATH" CALLS="$work/calls" OPEN="$open" ARTIFACT_URL="$artifact" ISSUE_ASSIGNEE="$assignee" GH_REPO=owner/repo \
+		ISSUE_LABEL="${LABEL-}" ISSUE_DETAILS="${DETAILS-}" \
 		GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=owner/repo GITHUB_RUN_ID=42 \
 		"$ROOT/scripts/ci-failure-issue.sh" "$result" "$title" "nightly iPhone UI test run" >/dev/null
 	sed 1d "$work/calls"
@@ -53,5 +54,11 @@ calls="$(report success "$matching")"
 
 calls="$(report success '[]')"
 [ -z "$calls" ] || fail "a passing run with no open issue does nothing: $calls"
+
+calls="$(LABEL=nightly-ios-live DETAILS='Test Case LiveHostUITests failed' report failure '[]')"
+[[ "$calls" == "label create nightly-ios-live --force"*$'\n'"issue create "*"Test Case LiveHostUITests failed"*" --label nightly-ios-live" ]] || fail "a labelled failure creates the label and names the failing test: $calls"
+
+calls="$(LABEL=nightly-ios-live DETAILS='Test Case LiveHostUITests failed' report failure "$matching")"
+[[ "$calls" == "issue comment 7 --body "*"Test Case LiveHostUITests failed"* ]] || fail "a repeated failure adds its details to the open issue: $calls"
 
 echo "ci-failure-issue tests passed"

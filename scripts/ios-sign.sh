@@ -141,6 +141,7 @@ PLIST
     test "$(plutil -extract CFBundleIdentifier raw -o - "$service/Info.plist")" = "$IOS_BUNDLE_ID.NotificationService"
     test "$(plutil -extract AgenthailKeychainGroup raw -o - "$app/Info.plist")" = "$shared"
     test "$(plutil -extract AgenthailKeychainGroup raw -o - "$service/Info.plist")" = "$shared"
+    "$(dirname "$0")/ios-release-plist-check.sh" "$app"
     codesign --verify --deep --strict "$app"
     codesign -d --entitlements :- "$app" > "$RUNNER_TEMP/ios-entitlements.plist" 2>/dev/null
     codesign -d --entitlements :- "$service" > "$RUNNER_TEMP/ios-service-entitlements.plist" 2>/dev/null

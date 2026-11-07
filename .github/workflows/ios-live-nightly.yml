@@ -1,0 +1,111 @@
+name: iOS live nightly
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-live-nightly
+  cancel-in-progress: false
+
+jobs:
+  ios-live:
+    if: github.repository == 'zm2231/agenthail' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    timeout-minutes: 60
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-url }}
+      details: ${{ steps.details.outputs.details }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check crash reporter dialogs are off
+        run: |
+          if [ "$(defaults read com.apple.CrashReporter DialogType 2>/dev/null)" != none ]; then
+            echo "::error::Crash reporter dialogs are not turned off for this runner's user. See Crash reporter dialogs in docs/maintainers/self-hosted-ci.md."
+            exit 1
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the agenthail binary and the live harness
+        env:
+          GOCACHE: ${{ runner.tool_cache }}/agenthail-cache/go-build
+          GOMODCACHE: ${{ runner.tool_cache }}/agenthail-cache/go-mod
+        run: |
+          go build -o "$RUNNER_TEMP/live-bin/agenthail" ./cmd/agenthail
+          go build -o "$RUNNER_TEMP/live-bin/ios-live-harness" ./cmd/ios-live-harness
+      - name: Boot simulator and reset its keychain
+        env:
+          AGENTHAIL_SIMULATOR_NAME: Agenthail CI ${{ runner.name }}
+        run: |
+          udid="$(scripts/ios-simulator.sh iphone)"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          echo "DERIVED=$(getconf DARWIN_USER_CACHE_DIR)agenthail-ios-live-derived" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid" 2>/dev/null || true
+          xcrun simctl bootstatus "$udid" -b
+          scripts/ios-ci-keychain-reset.sh "$udid"
+      - name: Build for simulator tests
+        run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
+      - name: Live host tests
+        env:
+          AGENTHAIL_SIMULATOR_NAME: Agenthail CI ${{ runner.name }}
+        run: |
+          rm -rf "$RUNNER_TEMP/ios-live.xcresult"
+          TMPDIR="$(getconf DARWIN_USER_TEMP_DIR)"
+          export TMPDIR
+          only=()
+          while IFS= read -r arg; do [ "$arg" = -only-testing:AgenthailIOSTests ] || only+=("$arg"); done < <(scripts/ios-ui-tests.sh args live)
+          set -o pipefail
+          "$RUNNER_TEMP/live-bin/ios-live-harness" -agenthail "$RUNNER_TEMP/live-bin/agenthail" -hosts 2 -- \
+            scripts/ios-simulator.sh iphone run xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${only[@]}" \
+            -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-live.xcresult" 2>&1 | tee "$RUNNER_TEMP/ios-live.log"
+      - name: Failure details
+        id: details
+        if: failure()
+        run: |
+          {
+            echo 'details<<LIVE_DETAILS_END'
+            grep -E 'ios-live-harness: |error: |Test Case .* failed' "$RUNNER_TEMP/ios-live.log" 2>/dev/null | cut -c1-300 | head -40 || true
+            echo 'LIVE_DETAILS_END'
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload test results
+        id: upload
+        if: always() && job.status != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-live-nightly-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-live.xcresult
+            ${{ runner.temp }}/ios-live.log
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Clean up self-hosted job
+        if: always()
+        run: scripts/ci-self-hosted.sh cleanup
+
+  report:
+    needs: ios-live
+    if: always() && needs.ios-live.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Open, update or close the live nightly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_URL: ${{ needs.ios-live.outputs.artifact }}
+          ISSUE_ASSIGNEE: ${{ github.repository_owner }}
+          ISSUE_LABEL: nightly-ios-live
+          ISSUE_DETAILS: ${{ needs.ios-live.outputs.details }}
+          RESULT: ${{ needs.ios-live.result }}
+        run: scripts/ci-failure-issue.sh "$RESULT" "Nightly iOS live tests are failing" "nightly iOS live test run"
