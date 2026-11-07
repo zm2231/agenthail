@@ -183,7 +183,7 @@ final class SessionPane: ObservableObject, Identifiable {
             }
     }
 
-    var selectedSession: SessionState? { model.knownSessions.first { $0.id == selectedSessionID } }
+    var selectedSession: SessionState? { model.session(selectedSessionID) }
     var displayedSession: SessionState? { shownProjectID == nil ? selectedSession ?? removedSession : nil }
 
     func showProject(_ id: String) {
@@ -349,9 +349,11 @@ final class SessionPane: ObservableObject, Identifiable {
             tabs.open(selected, keep: true)
         }
         let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let dropped = tabs.reconcile(resolve: model.resolveSessionID) { id in
+        var next = tabs
+        let dropped = next.reconcile(resolve: model.resolveSessionID) { id in
             id == SessionTabs.newSession || byID[id].map { $0.archived != true } == true
         }
+        if next != tabs { tabs = next }
         if let archived = dropped.lazy.compactMap({ byID[self.model.resolveSessionID($0)] }).first(where: { $0.archived == true }) {
             archivedTab = archived
         }

@@ -422,7 +422,7 @@ final class NotificationRoute: ObservableObject {
 }
 
 private struct MenuBarLabel: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject private var route = NotificationRoute.shared
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @Environment(\.openWindow) private var openWindow
@@ -519,7 +519,7 @@ private struct SessionMenuSection: Identifiable {
 }
 
 private struct AgenthailMenuContent: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let voice: VoiceController
     @Environment(\.openWindow) private var openWindow
 
@@ -568,7 +568,7 @@ private struct AgenthailMenuContent: View {
 
 private struct AgenthailMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model: AgenthailModel
+    @State private var model: AgenthailModel
     @StateObject private var voice: VoiceController
 
     init() {
@@ -579,7 +579,7 @@ private struct AgenthailMenuBarApp: App {
             WindowSnapshot.answer(request, model: model, voice: voice, api: api)
         }
         model.onSnapshotClosed = { WindowSnapshot.cancel($0) }
-        _model = StateObject(wrappedValue: model)
+        _model = State(initialValue: model)
         _voice = StateObject(wrappedValue: voice)
     }
 

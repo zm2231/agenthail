@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct StatusTail: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var usage: UsageMonitor
     let items: [String]
@@ -26,9 +26,9 @@ struct StatusTail: View {
         return StatusItemsState(
             items: shown,
             short: density == .icons,
-            working: shown.contains("working") ? model.knownSessions.filter { $0.archived != true && SessionDisplayKind.of($0) == .working }.count : 0,
+            working: shown.contains("working") ? model.workingCount : 0,
             needsYou: shown.contains("needs-you") ? model.sessionTree.needsYou.count : 0,
-            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.snapshot?.daemon.hosts ?? []) : "",
+            hosts: shown.contains("hosts") ? StatusItemsState.hosts(model.daemon?.hosts ?? []) : "",
             terminalFocusable: shown.contains("terminal") && pane.displayedSession?.runtime?.focusable == true
         )
     }

@@ -4,7 +4,7 @@ import Textual
 import UniformTypeIdentifiers
 
 struct DesktopWindow: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     private let snapshot: SnapshotProbe?
 
@@ -22,7 +22,7 @@ struct DesktopWindow: View {
         .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
-        .environmentObject(model)
+        .environment(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
@@ -79,7 +79,7 @@ struct DesktopWindow: View {
             .navigationSplitViewColumnWidth(min: sidebar.min, ideal: sidebar.ideal, max: sidebar.max)
         } detail: {
             ConversationPane(model: model, pane: pane, gaps: contentGaps, holdsWindowButtons: !pane.sidebarDocks, showsSidebarToggle: !pane.sidebarDocks)
-                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
+                .opacity(model.isConnected || !model.hasSnapshot ? 1 : 0.6)
                 .hidesSplitDividers()
                 .belowWindowChrome()
                 .ignoresSafeArea(.container, edges: .top)
@@ -123,7 +123,7 @@ struct DesktopWindow: View {
 }
 
 private struct WindowChromeLayout<Content: View>: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @ViewBuilder let content: Content
@@ -152,7 +152,7 @@ private struct WindowChromeLayout<Content: View>: View {
 }
 
 struct SessionSidebar: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var holdsWindowButtons = false
     @Environment(\.openWindow) private var openWindow
@@ -171,11 +171,13 @@ struct SessionSidebar: View {
             }
             SessionSidebarHeader(
                 model: model,
+                pane: pane,
                 counts: model.filterCounts,
-                help: { shortcuts.help("\(SessionFacts.filterSummary($0, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", $0.command) },
+                filterHelp: Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { filter in
+                    (filter, shortcuts.help("\(SessionFacts.filterSummary(filter, codexRecentHours: model.codexRecentHours)).", filter.command))
+                }),
                 newSessionHelp: shortcuts.help("New session", .newSession),
-                findShortcut: shortcuts.keyboardShortcut(.findSession),
-                addProject: { pane.projectSheet = .add(host: nil, folder: "") }
+                findShortcut: shortcuts.keyboardShortcut(.findSession)
             )
             SessionRefinementBar(model: model)
                 .scrimText()
@@ -189,7 +191,7 @@ struct SessionSidebar: View {
                         VStack(alignment: .leading, spacing: 2) {
                             SidebarCaption("Needs you")
                             ForEach(tree.needsYou) { session in
-                                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: tree.attention[session.id], showsReason: true)
+                                sessionButton(session, title: model.title(of: session), attention: tree.attention[session.id], showsReason: true)
                             }
                         }
                     }
@@ -287,7 +289,7 @@ extension SessionSidebar {
         VStack(alignment: .leading, spacing: 2) {
             SidebarCaption("Sessions")
             ForEach(local) { session in
-                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
+                sessionButton(session, title: model.title(of: session), attention: attention[session.id])
             }
             if local.isEmpty {
                 Text(model.reader.searchPending(query) ? "Searching" : "No matching sessions.")
@@ -658,7 +660,7 @@ struct StatusIndicator: View {
 
 
 struct ConversationPane: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     var gaps: Edge.Set = []
@@ -679,7 +681,7 @@ struct ConversationPane: View {
             TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
+                    ConversationHeader(session: session, title: model.title(of: session), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
                         NSApplication.shared.activate()
                         openWindow(id: "voice")
@@ -1101,7 +1103,7 @@ struct TranscriptView: View {
 }
 
 struct AttachmentImageView: View {
-    @EnvironmentObject private var model: AgenthailModel
+    @Environment(AgenthailModel.self) private var model
     @EnvironmentObject private var pane: SessionPane
     let attachment: SessionAttachment
     @State private var image: NSImage?
@@ -1343,7 +1345,7 @@ struct AssistantReply: View {
 }
 
 struct ComposerView: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let pane: SessionPane
     let session: SessionState
     @State private var focused = false
@@ -1376,7 +1378,7 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            let attention = QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)
+            let attention = QueueFacts.attention(model.attention, for: session.id)
             if !attention.isEmpty {
                 BoundedDock {
                     VStack(spacing: 0) {
@@ -1810,7 +1812,7 @@ struct ComposerView: View {
 
 struct DeliveryProblemBanner: View {
     let problem: DeliveryProblem
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1851,7 +1853,7 @@ struct DeliveryProblemBanner: View {
 }
 
 struct QueueDock: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let items: [QueueState]
     let target: SessionState
     let canSteer: Bool
@@ -1883,7 +1885,7 @@ struct QueueDock: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
+                        Text(QueueFacts.summary(item, target: target, attention: model.attention, age: relativeAge(item.queuedAt)))
                             .font(.system(size: DesktopType.caption))
                             .foregroundStyle(DesktopPalette.text2)
                             .lineLimit(1)
@@ -1953,7 +1955,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 struct SessionInspector: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @State private var tab: InspectorTab = .details
 
@@ -2034,7 +2036,7 @@ extension ContextState {
 }
 
 struct DetailsTab: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var showTokens = false
@@ -2195,25 +2197,25 @@ struct DetailsTab: View {
 }
 
 struct DeliveryTab: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let session: SessionState
 
     var body: some View {
-        let queued = QueueFacts.undelivered(model.snapshot?.queue ?? [], for: session.id)
-        let history = model.snapshot?.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id } ?? []
+        let queued = QueueFacts.undelivered(model.queue, for: session.id)
+        let history = model.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id }
         let problems = model.deliveryProblems(for: session.id)
         VStack(alignment: .leading, spacing: DesktopSpace.s) {
             if !problems.isEmpty {
                 SidebarCaption("Not delivered").padding(.horizontal, -8)
                 ForEach(problems) { problem in
-                    deliveryCard(title: problem.sessionId == session.id ? "To this session" : "To \(model.snapshot?.sessions.first { $0.id == problem.sessionId }?.title ?? "another session")", status: problem.reasonText, text: PeerEnvelope(problem.message).body, problem: true)
+                    deliveryCard(title: problem.sessionId == session.id ? "To this session" : "To \(model.session(problem.sessionId)?.title ?? "another session")", status: problem.reasonText, text: PeerEnvelope(problem.message).body, problem: true)
                 }
             }
             if !queued.isEmpty {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     VStack(alignment: .leading, spacing: DesktopSpace.xs) {
-                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)), problem: item.status == "dead")
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.attention, age: relativeAge(item.queuedAt)), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
                     }

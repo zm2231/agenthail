@@ -2,6 +2,8 @@
 import AppKit
 import SwiftUI
 
+let fixtureHelp = Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { ($0, $0.rawValue) })
+
 @MainActor
 final class Measured {
     var header: CGRect = .zero
@@ -17,7 +19,7 @@ struct Window: View {
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                SessionSidebarHeader(model: model, counts: counts, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil, addProject: {})
+                SessionSidebarHeader(model: model, pane: model.mainPane, counts: counts, filterHelp: fixtureHelp, newSessionHelp: "New session", findShortcut: nil)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.header = $0 }
                 List { Text("Fixture session") }
             }
@@ -44,7 +46,7 @@ struct SidebarLayoutTest {
 
         for width in [DesktopColumns.sidebar.min, 264, DesktopColumns.sidebar.ideal, DesktopColumns.sidebar.max] {
             let measured = Measured()
-            let column = SessionSidebarHeader(model: model, counts: many, help: { $0.rawValue }, newSessionHelp: "New session", findShortcut: nil, addProject: {})
+            let column = SessionSidebarHeader(model: model, pane: model.mainPane, counts: many, filterHelp: fixtureHelp, newSessionHelp: "New session", findShortcut: nil)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { measured.header = $0 }
                 .frame(width: width)
             let hosting = NSHostingView(rootView: column)

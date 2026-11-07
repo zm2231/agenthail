@@ -20,7 +20,7 @@ struct SidebarRowActions {
     let model: AgenthailModel
     let pane: SessionPane
 
-    private var current: SessionState { model.knownSessions.first { $0.id == shown.id } ?? shown }
+    private var current: SessionState { model.session(shown.id) ?? shown }
 
     func select(keep: Bool) { pane.select(shown.id, keep: keep) }
     func keepTab() { pane.keepTab(shown.id) }

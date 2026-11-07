@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SigninSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @State private var browser = ""
     @State private var profile = ""
     @State private var label = ""

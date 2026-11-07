@@ -3,7 +3,7 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct DesktopSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         TabView {
@@ -32,7 +32,7 @@ struct DesktopSettings: View {
 }
 
 struct SettingsError: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         if let error = model.operationError {
@@ -45,7 +45,7 @@ struct SettingsError: View {
 }
 
 struct GeneralSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var personName = ""
@@ -57,7 +57,7 @@ struct GeneralSettings: View {
                     Text(connectionLabel)
                         .foregroundStyle(model.isConnected ? DesktopPalette.done : DesktopPalette.failed)
                 }
-                if let pid = model.snapshot?.daemon.pid {
+                if let pid = model.daemon?.pid {
                     LabeledContent("Process", value: String(pid))
                 }
                 if let build = model.daemonBuild {
@@ -114,17 +114,17 @@ struct GeneralSettings: View {
                     Text("Steer the running turn").tag(FollowUpAction.steer)
                 }
                 .pickerStyle(.radioGroup)
-                .disabled(model.snapshot == nil)
+                .disabled(!model.hasSnapshot)
                 Text("\(shortcuts.label(.sendAlternate).map { "\($0) always does" } ?? "Send the other way does") the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section {
-                let hours = model.snapshot?.codexRecentHours ?? 5
+                let hours = model.codexRecentHours
                 Picker("Codex recent window", selection: Binding(get: { hours }, set: { model.setCodexRecentHours($0) })) {
                     ForEach(CodexRecentWindow.choices(including: hours), id: \.self) { Text(CodexRecentWindow.label($0)).tag($0) }
                 }
-                .disabled(model.snapshot == nil)
+                .disabled(!model.hasSnapshot)
             } header: {
                 Text("Current work")
             } footer: {
@@ -201,7 +201,7 @@ struct GeneralSettings: View {
 }
 
 struct DevicesSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -248,7 +248,7 @@ struct DevicesSettings: View {
                     }
                 }
             }
-            if let daemon = model.snapshot?.daemon {
+            if let daemon = model.daemon {
                 HostsSection(daemon: daemon)
             }
             SettingsError(model: model)
@@ -341,7 +341,7 @@ enum QRCodeImage {
 }
 
 struct NotificationSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -385,7 +385,7 @@ struct NotificationSettings: View {
 }
 
 struct DeliverySettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @State private var relayFrom = ""
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
@@ -399,13 +399,13 @@ struct DeliverySettings: View {
 
     var body: some View {
         Form {
-            Section("Waiting to go out · \(model.snapshot?.queue.count ?? 0)") {
-                if (model.snapshot?.queue ?? []).isEmpty {
+            Section("Waiting to go out · \(model.queue.count)") {
+                if model.queue.isEmpty {
                     Text("Nothing is waiting to be delivered.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.snapshot?.queue ?? []) { QueueItemRow(model: model, item: $0) }
+                ForEach(model.queue) { QueueItemRow(model: model, item: $0) }
             }
-            RecentOutcomesSection(history: model.snapshot?.history ?? [])
+            RecentOutcomesSection(history: model.history)
             Section {
                 if (model.snapshot?.relays ?? []).isEmpty {
                     Text("No automatic handoffs yet.").foregroundStyle(DesktopPalette.text2)
@@ -509,7 +509,7 @@ struct DeliverySettings: View {
 }
 
 struct ActivitySettings: View {
-    @ObservedObject var model: AgenthailModel
+    @Bindable var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -526,7 +526,7 @@ struct ActivitySettings: View {
                     .onChange(of: model.auditKind) { Task { await model.loadAudit(reset: true) } }
                 }
             }
-            Section("Recent activity · \(SettingsCounts.history(model.snapshot?.history.count ?? 0))") {
+            Section("Recent activity · \(SettingsCounts.history(model.history.count))") {
                 if model.audit.isEmpty {
                     Text("No activity matches these filters.").foregroundStyle(DesktopPalette.text2)
                 }

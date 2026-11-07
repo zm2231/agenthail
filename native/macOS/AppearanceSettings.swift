@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AppearanceSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var interface: InterfaceStore
     @StateObject private var thumbnails = BackgroundThumbnails()
     @Environment(\.colorScheme) private var colorScheme

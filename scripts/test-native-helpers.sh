@@ -37,6 +37,9 @@ SOURCES=(
   ComposerCompletion.swift
   DuplicateApplicationPolicy.swift
   EventRetryBackoff.swift
+  ObservationWait.swift
+  ObservedScope.swift
+  SessionCells.swift
   ConnectionGrace.swift
   CatalogBatch.swift
   CatalogInbox.swift

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionWindow: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @StateObject private var pane: SessionPane
     let sessionID: String
 
@@ -23,7 +23,7 @@ struct SessionWindow: View {
             }
             .windowBackdrop(model.interface)
             .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
-            .environmentObject(model)
+            .environment(model)
             .navigationTitle(pane.displayedSession?.title ?? "Session")
             .focusedSceneObject(pane)
             .onAppear {

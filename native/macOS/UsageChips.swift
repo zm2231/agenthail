@@ -2,7 +2,7 @@ import SwiftUI
 
 struct UsageChips: View {
     @ObservedObject var usage: UsageMonitor
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let bars: Bool
     @State private var showing = false

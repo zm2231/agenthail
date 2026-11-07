@@ -100,15 +100,14 @@ extension AgenthailModel {
         (try? await reader.mentions(query)) ?? []
     }
 
-    func makeReader() -> ScopeReader {
-        ScopeReader(ScopeReader.Source(
+    func makeReader() -> ObservedScope {
+        ObservedScope(ScopeReader.Source(
             api: { [weak self] in self?.api },
             current: { [weak self] in self?.snapshot?.sessions ?? [] },
             active: { true },
             reachable: { [weak self] in self?.snapshot != nil && self?.connectionError == nil },
             changed: { [weak self] in
                 guard let self else { return }
-                objectWillChange.send()
                 rederive()
                 scheduleListReread()
             }

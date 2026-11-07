@@ -64,7 +64,7 @@ struct PromptSearchPanel: View {
         var id: String { rawValue }
     }
 
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let sessionID: String
     let use: (String) -> Void
     @State private var query = ""

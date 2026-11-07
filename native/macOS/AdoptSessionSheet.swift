@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AdoptSessionSheet: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @StateObject private var controller: SessionAdoptController
     @Environment(\.dismiss) private var dismiss
 
