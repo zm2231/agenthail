@@ -38,7 +38,7 @@ func (d *Daemon) applyProxyPrefer(ctx context.Context, config proxyacct.Config, 
 	host := d.localHost().Name
 	done := []string{}
 	for i, step := range steps {
-		stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), proxyKeyedTimeout)
+		stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), proxyKeyedTimeout())
 		err := step.run(stepCtx)
 		cancel()
 		if err != nil {
