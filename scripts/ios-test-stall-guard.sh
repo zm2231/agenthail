@@ -8,6 +8,13 @@ dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 mkfifo "$dir/out"
 
+# Bash reaps background jobs as they exit, so a recorded PID may already
+# belong to another process; signal it only while it is still our child.
+stop_child() {
+	[ "$(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ')" = "$$" ] || return 0
+	kill "$1" 2>/dev/null || true
+}
+
 "$@" >"$dir/out" 2>&1 &
 pid=$!
 
@@ -22,7 +29,7 @@ pattern="^Test Case '-\[([^]]+)\]' (passed|failed) \(([0-9]+)(\.[0-9]+)? seconds
 			slow="$slow ${BASH_REMATCH[1]} (${BASH_REMATCH[3]} s);"
 			if [ "$count" -ge "$max" ]; then
 				printf '%s' "$slow" >"$dir/tripped"
-				kill "$pid" 2>/dev/null || true
+				stop_child "$pid"
 				exit 0
 			fi
 		fi
@@ -39,7 +46,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 	kill -0 "$reader" 2>/dev/null || break
 	sleep 0.5
 done
-kill "$reader" 2>/dev/null || true
+stop_child "$reader"
 wait "$reader" 2>/dev/null || true
 
 if [ -f "$dir/tripped" ]; then
