@@ -30,6 +30,8 @@ Any other label changes nothing. Adding `full-ci` to a pull request from a fork 
 | Push to `main` | `smoke`, `main` |
 | `iOS nightly`, every night and on `workflow_dispatch` | `smoke`, `main`, `nightly` |
 
+Tests in the `live` tier pair the app with real daemons, so they run only under `cmd/ios-live-harness` in `iOS live nightly`, never in the runs above. See [iPhone live harness](ios-live-harness.md).
+
 `scripts/ios-ui-tests.sh tiers` decides the tiers from the event, the changed files and the labels; the paths that widen a pull request to `main` are in its `wide` pattern. `scripts/ios-ui-tests.sh check` fails when a UI test is in no tier, in two, or a listed test no longer exists, so a new test cannot silently never run. `ios`, `iOS nightly` and `verify` run the check, and `scripts/test-ios-ui-tests.sh` checks the script.
 
 A failed `ios` run on a push to `main` opens the issue `iOS tests on main are failing`, assigned to the repository owner, or comments on it if it is open; the next passing push closes it. A cancelled run, such as one a later push replaced, reports nothing. `iOS nightly` does the same with `Nightly iOS tests are failing`, and also reports a run that stopped or was cancelled. Both use `scripts/ci-failure-issue.sh`, which `scripts/test-ci-failure-issue.sh` checks.

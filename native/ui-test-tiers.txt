@@ -1,6 +1,7 @@
 # Every iOS UI test, once, with the tier that runs it. scripts/ios-ui-tests.sh check fails on a test missing here.
 # smoke: every pull request that changes the iOS app. main: also every push to main, and pull requests that
 # change transcript or test-harness paths. nightly: also every night. The ui-all label runs every tier.
+# live: only under cmd/ios-live-harness, in the iOS live nightly run, never in the tiers above.
 
 smoke ComposerCompletionUITests/testSuggestionsCompleteCommandsAndFilesAboveTheKeyboard
 smoke ComposerSendUITests/testARefusedSendShowsWhyWithRetryAndKeepsTheText
@@ -73,3 +74,4 @@ nightly TranscriptScrollJumpUITests/testScrollingUpWhileTheAgentStreamsMovesOnly
 nightly UsageMetersUITests/testAProxyAccountsPreferenceIsChangedOnlyAfterItsPlan
 nightly VoiceOperatorUITests/testJumpToLatestReachesTheBottomWithoutMovingTheControls
 nightly VoiceSceneUITests/testFailedVoicePollsDoNotReevaluateTheAppScene
+live LiveHostUITests/testPairingWithALiveHostListsItsConversations

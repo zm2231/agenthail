@@ -227,6 +227,9 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         rebuild()
         connectSendQueue()
         restoreComposerState()
+#if DEBUG
+        for hostID in LiveTestHosts.loopbackHostIDs() { clearHost(hostID) }
+#endif
         Task { await retireLegacyPairing() }
         if autoConnect { connect() }
     }

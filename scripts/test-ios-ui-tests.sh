@@ -61,6 +61,13 @@ printf 'smoke AUITests/testOne\nnightly AUITests/testTwo\n' >"$work/tiers.txt"
 [ "$(run args smoke)" = "$(printf '%s\n' -only-testing:AgenthailIOSTests -only-testing:AgenthailIOSUITests/AUITests/testOne)" ] || fail "smoke args"
 [ "$(run args smoke main nightly | wc -l | tr -d ' ')" = 3 ] || fail "every tier runs every test and the unit tests"
 
+printf 'smoke AUITests/testOne\nlive AUITests/testTwo\n' >"$work/tiers.txt"
+run check >/dev/null || fail "a live test passes the check"
+[ "$(run args smoke main nightly | wc -l | tr -d ' ')" = 2 ] || fail "the ordinary tiers never run a live test, which needs the live harness"
+[ "$(run args live | tail -1)" = -only-testing:AgenthailIOSUITests/AUITests/testTwo ] || fail "live args"
+printf 'ui-all\n' >"$work/labels"
+[[ " $(run tiers pull_request /dev/null "$work/labels") " != *" live "* ]] || fail "ui-all does not add the live tier"
+
 : >"$work/labels"
 printf 'docs/readme.md\n' >"$work/changed"
 [ "$(run tiers pull_request "$work/changed" "$work/labels")" = smoke ] || fail "an unrelated change runs smoke"
