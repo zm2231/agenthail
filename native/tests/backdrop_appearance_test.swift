@@ -45,6 +45,7 @@ struct BackdropAppearanceTest {
         wait { hue(backdrop.layers) == "blue" }
         check(hue(backdrop.layers) == "blue", "a dark window draws the dark background, got \(hue(backdrop.layers))")
         check(!backdrop.solid && backdrop.tints[.chrome] ?? 1 < 1, "a dark window keeps translucent glass")
+        check(Set([.sidebar, .content, .chrome].map { backdrop.tints[$0] }).count == 1, "every pane takes the one glass tint, got \(backdrop.tints)")
 
         window.appearance = NSAppearance(named: .aqua)
         backdrop.windowChanged(window)

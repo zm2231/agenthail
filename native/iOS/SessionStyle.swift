@@ -2,7 +2,7 @@ import SwiftUI
 import Textual
 
 enum SessionStyle {
-    static let accentHex: PaletteTokens.Pair = (0xB8330F, 0xFF5E29)
+    static let accentHex: PaletteTokens.Pair = (0x005FC6, 0x4C9DFF)
     static let readingWidth: CGFloat = 600
     static let surface = Color(uiColor: .secondarySystemBackground)
 

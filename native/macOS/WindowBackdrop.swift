@@ -80,11 +80,8 @@ final class WindowBackdrop: ObservableObject {
         if composerOpacity != floating { composerOpacity = floating }
         let feather = CGFloat(config.scrimFeather)
         if self.feather != feather { self.feather = feather }
-        let tints: [PaneRole: CGFloat] = [
-            .sidebar: solid ? 1 : CGFloat(config.sidebarOpacity),
-            .content: solid ? 1 : CGFloat(config.contentOpacity),
-            .chrome: solid ? 1 : CGFloat(config.chromeOpacity),
-        ]
+        let tint = solid ? 1 : CGFloat(config.paneOpacity)
+        let tints: [PaneRole: CGFloat] = [.sidebar: tint, .content: tint, .chrome: tint]
         if self.tints != tints { self.tints = tints }
         if !wanted || layers.map({ $0.layers.polarity != polarity }) == true { layers = nil; rendered = nil }
         schedule()
@@ -198,7 +195,7 @@ final class WindowBackdrop: ObservableObject {
             solidPanes: solid,
             readability: !solid && (config.readability || workspace.accessibilityDisplayShouldIncreaseContrast),
             selection: workspace.accessibilityDisplayShouldIncreaseContrast ? nil : BackdropSpec.Selection(
-                color: Self.rgb(DesktopPalette.accentRGB(colors, in: appearance)),
+                color: Self.rgb(DesktopPalette.selectionWashRGB(in: appearance)),
                 roles: DesktopGlass.selectedRowRoles(config, dark: dark, increased: false).map(Self.rgb))
         )
     }

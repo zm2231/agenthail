@@ -49,7 +49,7 @@ extension UsageProblemTone {
     var desktopStyle: DesktopStyle {
         switch self {
         case .failed: DesktopPalette.failed
-        case .warning: DesktopPalette.attention
+        case .warning: DesktopPalette.text
         case .quiet: DesktopPalette.text2
         }
     }

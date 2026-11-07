@@ -99,6 +99,7 @@ struct SessionScopeChips: View {
             }
             .padding(.vertical, 2)
         }
+        .scrollClipDisabled()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sessions to show")
     }
@@ -146,7 +147,7 @@ struct VoiceToolbarButton: View {
             presented = true
         } label: {
             Image(systemName: live ? "phone.fill" : "waveform")
-                .foregroundStyle(live ? AnyShapeStyle(PhonePalette.done) : AnyShapeStyle(Color.primary))
+                .foregroundStyle(live ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(Color.primary))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }

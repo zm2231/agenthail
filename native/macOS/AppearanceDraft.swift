@@ -11,7 +11,7 @@ struct AppearanceDraft: Equatable {
     static let keys = [
         "theme", "theme.accent",
         "background", "background.fit", "background.position", "background.dim", "background.opacity", "background.session-opacity",
-        "glass", "glass.blur", "glass.tint", "glass.opacity", "glass.sidebar.opacity", "glass.composer.opacity", "glass.readability",
+        "glass", "glass.blur", "glass.tint", "glass.opacity", "glass.composer.opacity", "glass.readability",
         "texture", "texture.strength",
     ]
 

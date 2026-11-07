@@ -263,6 +263,7 @@ struct SessionSidebar: View {
                 }
                 .padding(.horizontal, DesktopSpace.s)
                 .padding(.bottom, DesktopSpace.l)
+                .overlayScrollers()
             }
             .scrollScrim()
             .holdsOrder(model)
@@ -680,6 +681,7 @@ struct ConversationPane: View {
         } else if let session = pane.displayedSession {
             TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
                 .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
+                .topFade(below: chromeTop == 0 ? ConversationHeader.height : ConversationHeader.underTabsHeight)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: model.title(of: session), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
@@ -977,6 +979,7 @@ struct TranscriptView: View {
             }
             }
             .frame(maxWidth: DesktopColumns.reading)
+            .transcriptScrimColumn()
             .padding(.horizontal, DesktopColumns.gutter)
             .padding(.top, DesktopSpace.l)
             .padding(.bottom, Self.bottomPadding)

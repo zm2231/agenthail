@@ -62,7 +62,7 @@ extension UsageProblemTone {
     var phoneStyle: RoleStyle {
         switch self {
         case .failed: PhonePalette.failed
-        case .warning: PhonePalette.attention
+        case .warning: RoleStyle(.body)
         case .quiet: PhonePalette.muted
         }
     }

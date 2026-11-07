@@ -137,7 +137,7 @@ struct NewSessionSheet: View {
                     }
                 }
                 if let error = model.creationError { Section { Text(error).foregroundStyle(PhonePalette.failed) } }
-                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(PhonePalette.attention) } }
+                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(RoleStyle(.body)) } }
             }
             .disabled(model.creatingSession)
             .navigationTitle("New session")

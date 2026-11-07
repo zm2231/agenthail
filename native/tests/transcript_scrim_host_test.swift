@@ -62,7 +62,7 @@ struct TranscriptScrimHostTest {
         detachedScrim.reportEnd(120)
         check(detachedScrim.mask.layers.isEmpty, "rows reported off-window wait for the host")
         container.addSubview(detached)
-        check(detachedScrim.mask.layers.count == 2, "a host joining a window rebuilds the panels it was waiting on, got \(detachedScrim.mask.layers.count) layers")
+        check(detachedScrim.mask.layers.count == 4, "a host joining a window rebuilds the panels and side rails it was waiting on, got \(detachedScrim.mask.layers.count) layers")
 
         if failures > 0 { fatalError("\(failures) failures") }
         print("ok")

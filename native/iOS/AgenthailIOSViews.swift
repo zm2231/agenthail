@@ -1460,7 +1460,7 @@ struct SessionSummary: View {
         let kind = SessionDisplayKind.of(session, now: now)
         return Label(SessionDisplayKind.label(session, now: now, waitingPlace: detail.waitingPlace, limit: detail.limitLabel), systemImage: kind.symbol)
             .font(.subheadline)
-            .foregroundStyle(kind == .working ? AnyShapeStyle(PhonePalette.accentText) : AnyShapeStyle(PhonePalette.muted))
+            .foregroundStyle(kind == .working ? AnyShapeStyle(PhonePalette.working) : AnyShapeStyle(PhonePalette.muted))
     }
 	@ViewBuilder private var context: some View {
 		if let context = detail.context {
@@ -1471,7 +1471,7 @@ struct SessionSummary: View {
 					Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
 				}
 			}
-			.foregroundStyle(context.level == .full ? PhonePalette.failed : context.level == .high ? PhonePalette.attention : PhonePalette.muted)
+			.foregroundStyle(context.level == .full ? PhonePalette.failed : context.level == .high ? RoleStyle(.body) : PhonePalette.muted)
 			.accessibilityLabel(context.spokenLabel)
         }
     }
@@ -1576,7 +1576,7 @@ struct SessionInspector: View {
                                 HStack {
                                     Text(SessionFamilies.label(child)).lineLimit(1)
                                     Spacer(minLength: 0)
-                                    if SessionDisplayKind.of(child) == .working { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText) }
+                                    if SessionDisplayKind.of(child) == .working { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.working) }
                                 }
                             }
                             .accessibilityIdentifier("subagent-" + child.id)
@@ -1592,7 +1592,7 @@ struct SessionInspector: View {
                                     Text(link.title).font(.body.weight(.medium)).lineLimit(2)
                                     Spacer(minLength: 0)
                                     if link.working == true {
-                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.accentText)
+                                        Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(PhonePalette.working)
                                     } else if let value = link.lastActive, let date = TimestampParser.date(value) {
                                         Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(PhonePalette.muted)
                                     }
@@ -1921,7 +1921,7 @@ struct SettingsView: View {
                                     Text(detail).font(.footnote).foregroundStyle(PhonePalette.muted)
                                 }
                                 if let notice = peer.notice, !notice.isEmpty {
-                                    Text(notice).font(.footnote).foregroundStyle(PhonePalette.attention).lineLimit(3)
+                                    Text(notice).font(.footnote).foregroundStyle(RoleStyle(.body)).lineLimit(3)
                                 }
                             }
                         }

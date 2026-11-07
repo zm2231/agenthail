@@ -18,12 +18,18 @@ struct GlassRowBackground: View {
                     CardSlice(image: image, layer: cards.frame)
                 } else {
                     Rectangle().fill(.ultraThinMaterial)
-                    PhonePalette.ground.opacity(appearance?.config.sidebarOpacity ?? 1)
+                    PhonePalette.ground.opacity(appearance?.config.paneOpacity ?? 1)
                 }
             } else {
                 PhonePalette.ground.opacity(0.35)
             }
-            if selected { Color.accentColor.opacity(0.16) }
+            if selected {
+                PhonePalette.ground.opacity(0.6)
+                HStack {
+                    Rectangle().fill(Color.accentColor).frame(width: 3)
+                    Spacer(minLength: 0)
+                }
+            }
         }
     }
 }

@@ -1,12 +1,6 @@
 import SwiftUI
 
 extension View {
-    func solidFloating<S: Shape>(in shape: S) -> some View {
-        background(PhonePalette.ground, in: shape)
-            .overlay(shape.stroke(PhonePalette.hairline))
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
-    }
-
     func solidTabBar() -> some View {
         modifier(SolidTabBar())
     }

@@ -199,7 +199,7 @@ final class PhoneAppearance: ObservableObject {
         pending.insert(key)
         let target = file(key)
         let shown = spec(key)
-        let style = BackdropSpec.PaneStyle(minimum: key.solid ? 1 : Float(config.contentOpacity), strength: shown.strength)
+        let style = BackdropSpec.PaneStyle(minimum: key.solid ? 1 : Float(config.paneOpacity), strength: shown.strength)
         let config = config
         Task {
             let result = await Task.detached(priority: .userInitiated) { BackdropRenderer.layers(shown, panes: [.content: style]) }.value
@@ -275,9 +275,9 @@ final class PhoneAppearance: ObservableObject {
         var texts: [CGRect] = []
         switch key.surface {
         case .pane, .transcript:
-            panes = [BackdropSpec.Pane(id: "session", rect: full, radius: 0, minimum: Float(config.contentOpacity), strength: strength)]
+            panes = [BackdropSpec.Pane(id: "session", rect: full, radius: 0, minimum: Float(config.paneOpacity), strength: strength)]
         case .cards:
-            panes = [BackdropSpec.Pane(id: "cards", rect: full, radius: 0, minimum: Float(config.sidebarOpacity), strength: strength)]
+            panes = [BackdropSpec.Pane(id: "cards", rect: full, radius: 0, minimum: Float(config.paneOpacity), strength: strength)]
         case .list:
             texts = [CGRect(x: 0, y: 0, width: key.size.width, height: min(160, key.size.height))]
         }

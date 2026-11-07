@@ -240,6 +240,7 @@ func (a *App) cmdDoctor(args []string) error {
 	if r := a.registry(); r != nil {
 		notCarried, notCarriedErr = r.ProjectMoveRefusals()
 	}
+	uiProblems, uiErr := a.uiConfProblems()
 	if hasFlag(args, "--json") {
 		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0 && ledgerFailures == 0 && syncFailures == 0 && pushFailures == 0 && heldLinks == 0 && len(notCarried) == 0 && notCarriedErr == nil && len(hostProblems) == 0, "projectLinks": projectNotes, "projectHistoryNotCarried": notCarried, "hostPairing": hostProblems, "push": push, "ledgerSync": syncHealth, "person": map[string]any{"name": personName, "set": personSet}, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems, "build": build}, "claudeConfigDirs": claudeRoots, "claudeHooks": claudeHookStates, "claudeCrossSessionInbound": claudeInbound, "claudeRemoteControlAtStartup": remoteControl, "codexHooks": codexHooks, "claudeConfigRoots": claudeConfigRoots, "signin": signins, "ledgerPromptHookProblems": hookProblems}
 		if hookErr != nil {
@@ -255,6 +256,10 @@ func (a *App) cmdDoctor(args []string) error {
 			report["hostPairingError"] = hostsErr.Error()
 		}
 		report["connection"] = connection
+		report["uiConf"] = map[string]any{"problems": uiProblems}
+		if uiErr != nil {
+			report["uiConfError"] = uiErr.Error()
+		}
 		if projectsErr != nil {
 			report["projectLinksError"] = projectsErr.Error()
 		}
@@ -349,6 +354,12 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if notCarriedErr != nil {
 			fmt.Printf("project history: unknown (%s)\n", notCarriedErr)
+		}
+		if uiErr != nil {
+			fmt.Printf("ui.conf: unknown (%s)\n", uiErr)
+		}
+		for _, problem := range uiProblems {
+			fmt.Printf("%s (line skipped)\n", problem)
 		}
 		switch codexHooks {
 		case surfaces.CodexHooksMissing:

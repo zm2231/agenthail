@@ -115,13 +115,11 @@ struct UIConfig: Codable, Equatable {
     var glass: Bool { text("glass", "on") == "on" }
     var glassBlur: Double { number("glass.blur", 30) }
     var glassTint: String { text("glass.tint", "ground") }
-    var contentOpacity: Double { number("glass.opacity", 0.18) }
-    var sidebarOpacity: Double { number("glass.sidebar.opacity", 0.45) }
-    var chromeOpacity: Double { number("glass.chrome.opacity", 0) }
+    var paneOpacity: Double { number("glass.opacity", 0.3) }
     var composerOpacity: Double { number("glass.composer.opacity", 0.5) }
     var readability: Bool { text("glass.readability", "auto") == "auto" }
     var border: Double { number("glass.border", 0.08) }
-    var gutter: Double { number("glass.gutter", 12) }
+    var gutter: Double { number("glass.gutter", 0) }
 
     var texture: String { text("texture", "none") }
     var textureStrength: Double { number("texture.strength", 0.2) }

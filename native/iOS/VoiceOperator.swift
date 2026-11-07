@@ -62,8 +62,8 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.working || model.dialing { ProgressView() }
                 }.padding(.vertical, 12)
                 if let error = model.error { Text(error).foregroundStyle(PhonePalette.failed).textSelection(.enabled) }
-                if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(PhonePalette.attention) }
-                if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(PhonePalette.attention).textSelection(.enabled) }
+                if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(PhonePalette.failed) }
+                if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(PhonePalette.muted).textSelection(.enabled) }
                 if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
                 if let state = model.state, !state.transcripts.isEmpty {
                     ForEach(state.transcripts) { item in
@@ -83,11 +83,11 @@ struct AgenthailVoiceOperatorSheet: View {
                     }.padding(.vertical, 16)
                 }
                 if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(PhonePalette.muted) }
-                if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(PhonePalette.attention) }
+                if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(PhonePalette.failed) }
                 if let detail = model.detail {
                     DisclosureGroup(isExpanded: $showActivity) {
                         VStack(alignment: .leading, spacing: 12) {
-                            if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(PhonePalette.attention) }
+                            if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(PhonePalette.muted) }
                             if let timeline = detail.timeline {
                                 if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(PhonePalette.muted) }
                                 ForEach(TimelineGroup.make(timeline.items)) { group in

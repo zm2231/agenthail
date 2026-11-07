@@ -232,7 +232,7 @@ struct SessionTabView: View {
         .padding(.horizontal, 10)
         .frame(height: 28)
         .background {
-            if active { Color.clear.floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: DesktopRadius.card)) }
+            if active { RoundedRectangle(cornerRadius: DesktopRadius.row).fill(DesktopPalette.window.opacity(0.6)) }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { pane.keepTab(tab.id) }

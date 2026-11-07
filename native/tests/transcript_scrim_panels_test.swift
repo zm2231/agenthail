@@ -39,17 +39,33 @@ struct TranscriptScrimPanelsTest {
         check(panels.contains(CGRect(x: 0, y: -far, width: 680, height: far + 100)), "everything above the first row is covered, rows laid out while scrolling up land under it")
         check(panels.contains(CGRect(x: 0, y: 100, width: 680, height: 126)), "a turn's rows share one full-width panel across the gaps inside it, got \(panels)")
         check(panels.contains(CGRect(x: 0, y: 246, width: 680, height: 114)), "the next turn opens its own panel, which runs down to the content end, got \(panels)")
-        check(panels.count == 3, "only the gap above a new turn stays open, got \(panels)")
+        check(panels.count == 5, "only the gap above a new turn stays open, beside the two side rails, got \(panels)")
 
         let untagged = cores(TranscriptScrimMask(rows: [ask.rect, reply.rect, tool.rect, next.rect], shape: .panels))
-        check(untagged.count == 2, "rows without a turn never open a gap, got \(untagged)")
+        check(untagged.count == 4, "rows without a turn never open a gap, got \(untagged)")
 
         let late = cores(TranscriptScrimMask(turns: [reply, Row(rect: CGRect(x: 0, y: 400, width: 300, height: 20), turn: "u2")], shape: .panels))
         check(late.contains(CGRect(x: 0, y: 142, width: 300, height: 278)), "a space wider than any laid-out gap is covered as rows not reported yet, even across turns")
         let unturned = Row(rect: CGRect(x: 0, y: 232, width: 300, height: 10))
         let carried = cores(TranscriptScrimMask(turns: [reply, unturned, next], shape: .panels))
-        check(carried.count == 3, "a row without a turn joins the turn above it, so the next turn still opens a gap, got \(carried)")
-        check(TranscriptScrimMask(turns: [reply], shape: .panels, end: 160).layers.count == 2, "an end inside the last row adds nothing below it")
+        check(carried.count == 5, "a row without a turn joins the turn above it, so the next turn still opens a gap, got \(carried)")
+        check(TranscriptScrimMask(turns: [reply], shape: .panels, end: 160).layers.count == 4, "an end inside the last row adds nothing below it")
+
+        let first = Row(rect: CGRect(x: 0, y: 100, width: 680, height: 40), turn: "u1")
+        let second = Row(rect: CGRect(x: 0, y: 170, width: 680, height: 20), turn: "u2")
+        let split = TranscriptScrimMask(turns: [first, second], shape: .panels)
+        let covered = { (x: CGFloat) in split.layers.contains { $0.contains(CGPoint(x: x, y: 155)) } }
+        check(!covered(340), "the gap between turns stays open across the transcript")
+        let floor = split.floor ?? .null
+        check(floor.contains(CGPoint(x: 340, y: 155)) && floor.minX >= -reach && floor.maxX <= 680 + reach, "a floor under the panels spans the column, so an open gap still dims the art behind it, got \(floor)")
+        check(floor.maxY == 190 + reach && TranscriptScrimMask.gapCover > 0 && TranscriptScrimMask.gapCover < 1, "the floor ends with the panels and covers less than they do, so the gap still shows as a step")
+        check(TranscriptScrimMask(rows: [ask.rect], shape: .band).floor == nil, "the band shape has no floor")
+        check(covered(-reach) && covered(680 + reach), "the gap ends at the transcript's edges instead of running into the margins")
+        let stale = Row(rect: CGRect(x: 0, y: 300, width: 1058, height: 40), turn: "u3")
+        let narrowed = TranscriptScrimMask(turns: [first, second, stale], shape: .panels, column: 0...680)
+        let narrowCovered = { (x: CGFloat) in narrowed.layers.contains { $0.contains(CGPoint(x: x, y: 155)) } }
+        check(narrowed.layers.allSatisfy { $0.maxX <= 680 + 2 * reach }, "a reported column sets the panels' sides, so an off-screen row from a wider layout does not widen them, got \(narrowed.layers)")
+        check(!narrowCovered(340) && narrowCovered(680 + reach), "with a column the gap still ends at its edge")
         check(TranscriptScrimMask(rows: [], shape: .panels, end: 500).layers.isEmpty, "with no rows nothing is covered, so a switch does not darken the pane")
         check(TranscriptScrimMask.layer(row: CGRect(x: 0, y: 10, width: 100, height: 0)) == nil, "an empty row has no layer")
 
@@ -67,14 +83,18 @@ struct TranscriptScrimPanelsTest {
         check(sink.flushes.count == 1, "row reports in one pass ask for one cover rebuild, got \(sink.flushes.count)")
         check(sink.covers.isEmpty, "covers wait for the flush")
         scrim.flush()
-        check(sink.covers.count == 2, "the flush builds one panel for a turn's rows, got \(sink.covers)")
+        check(sink.covers.count == 4, "the flush builds one panel for a turn's rows and the side rails, got \(sink.covers)")
         sink.rows[ObjectIdentifier(b)] = nil
         scrim.retag(ObjectIdentifier(b), turn: "u2")
         scrim.flush()
-        check(sink.covers.count == 3, "a row moved to another turn opens a gap above it, got \(sink.covers)")
+        check(sink.covers.count == 5, "a row moved to another turn opens a gap above it, got \(sink.covers)")
         check(sink.rows[ObjectIdentifier(b)] == nil, "a turn change alone does not re-place the row's layer")
         scrim.update(ObjectIdentifier(a), nil)
         check(sink.rows[ObjectIdentifier(a)] == nil && scrim.rowLayers == [tool.rect.insetBy(dx: -reach, dy: -reach)], "a row that disappears drops its layer")
+        scrim.flush()
+        scrim.reportColumn(0...300)
+        scrim.flush()
+        check(sink.covers.allSatisfy { $0.maxX <= 300 + 2 * reach }, "a column report rebuilds the panels inside it, got \(sink.covers)")
 
         if failures > 0 { fatalError("\(failures) failures") }
         print("ok")

@@ -17,6 +17,26 @@ extension View {
     func transcriptScrimContent() -> some View {
         modifier(TranscriptScrimContent())
     }
+
+    func transcriptScrimColumn() -> some View {
+        modifier(TranscriptScrimColumn())
+    }
+}
+
+private struct TranscriptScrimColumn: ViewModifier {
+    @Environment(\.transcriptScrim) private var scrim
+
+    func body(content: Content) -> some View {
+        content.background {
+            if let scrim, scrim.shape != .band {
+                Color.clear
+                    .onGeometryChange(for: ClosedRange<CGFloat>.self) { proxy in
+                        let frame = proxy.frame(in: .named(TranscriptRows.contentSpace))
+                        return frame.minX...frame.maxX
+                    } action: { scrim.reportColumn($0) }
+            }
+        }
+    }
 }
 
 private final class TranscriptScrimRowKey {}

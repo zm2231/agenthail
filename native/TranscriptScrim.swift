@@ -16,6 +16,7 @@ final class TranscriptScrim {
     private(set) var origin: CGPoint?
     private var keyed: [ObjectIdentifier: TranscriptScrimMask.Row] = [:]
     private var end: CGFloat?
+    private var column: ClosedRange<CGFloat>?
     private var pending = false
 
     init(shape: TranscriptScrimMask.Shape = .band) {
@@ -56,6 +57,13 @@ final class TranscriptScrim {
         schedule()
     }
 
+    // Off-screen lazy rows keep the frames of an older width, so the column sets the panels' sides.
+    func reportColumn(_ column: ClosedRange<CGFloat>) {
+        guard shape != .band, column != self.column else { return }
+        self.column = column
+        schedule()
+    }
+
     func flush() {
         guard pending else { return }
         pending = false
@@ -76,7 +84,7 @@ final class TranscriptScrim {
     }
 
     private func rebuild(_ rows: [TranscriptScrimMask.Row]) {
-        let next = TranscriptScrimMask(turns: rows, shape: shape, end: end)
+        let next = TranscriptScrimMask(turns: rows, shape: shape, end: end, column: column)
         guard next != mask else { return }
         mask = next
         sink?.place(mask, origin: origin)

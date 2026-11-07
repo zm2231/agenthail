@@ -28,16 +28,12 @@ private struct FloatingGlassBody<Content: View, S: InsettableShape>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        if !backdrop.active || reduceTransparency || backdrop.solid {
-            content.background(fallback, in: shape)
-        } else if #available(macOS 26, *) {
-            content
-                .background(DesktopPalette.window.opacity(backdrop.composerOpacity), in: shape)
-                .glassEffect(.regular, in: shape)
+        let glass = backdrop.active && !reduceTransparency && !backdrop.solid
+        let tinted = content.background(glass ? DesktopPalette.window.opacity(backdrop.composerOpacity) : fallback, in: shape)
+        if #available(macOS 26, *) {
+            tinted.glassEffect(glass ? .regular : .identity, in: shape)
         } else {
-            content
-                .background(DesktopPalette.window.opacity(backdrop.composerOpacity), in: shape)
-                .background(.ultraThinMaterial, in: shape)
+            tinted.background { if glass { shape.fill(.ultraThinMaterial) } }
         }
     }
 }
