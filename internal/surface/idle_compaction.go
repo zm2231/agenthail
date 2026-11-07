@@ -17,6 +17,13 @@ type IdleCompactionState struct {
 	CompactedSince bool
 }
 
+// IdleCompactionRead is a state read up to Offset of the record, which the
+// next read continues from instead of reading the record again.
+type IdleCompactionRead struct {
+	State  IdleCompactionState
+	Offset int64
+}
+
 type IdleCompactionReader interface {
-	IdleCompactionState(ctx context.Context, sess *Session) (IdleCompactionState, error)
+	IdleCompactionState(ctx context.Context, sess *Session, from IdleCompactionRead) (IdleCompactionRead, error)
 }

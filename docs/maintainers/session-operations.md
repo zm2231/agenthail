@@ -274,6 +274,13 @@ background task running, the root at a usage limit, no compact for the
 session, and a queued or in-flight item. The holds live in the daemon's memory
 and start empty when it restarts.
 
+Each transcript changed in the last hour is read on every pass, held or not,
+so the reads are incremental: `Claude.IdleCompactionState` continues from the
+offset the previous pass reached and folds in only the records appended since,
+so a pass reads what was written in the minute before it. It reads the last 4
+MiB afresh on the first pass, after the file shrank, or when more than that
+was appended.
+
 For a `claude-bg` job, Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
 
 Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. The conversation has one row whatever its processes: the process that opened it first is attached to the row, sends to the session reach it, and a later process is addressed by its PID. When a process moves to another conversation (`/branch`, `/clear`, `/resume`), registering it under the new conversation detaches it from the old row; nothing else moves. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.

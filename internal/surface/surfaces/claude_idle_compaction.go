@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -28,41 +29,62 @@ type claudeIdleRecord struct {
 	} `json:"message"`
 }
 
-// IdleCompactionState reads the end of the transcript; a request older than
-// that end is not found, which leaves LastRequestAt zero.
-func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session) (surface.IdleCompactionState, error) {
+// IdleCompactionState continues from a read when the transcript has grown by
+// at most the tail it would read afresh, and otherwise reads that tail; a
+// request older than the tail is not found, which leaves LastRequestAt zero.
+func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session, from surface.IdleCompactionRead) (surface.IdleCompactionRead, error) {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
 	}
-	lines, _, err := readRecentJSONLLines(ctx, path, 0, claudeIdleCompactionTailBytes, maxClaudeTranscriptRecordBytes)
+	info, err := os.Stat(path)
 	if err != nil {
-		return surface.IdleCompactionState{}, err
+		return surface.IdleCompactionRead{}, err
 	}
-	var state surface.IdleCompactionState
+	if from.Offset > 0 && from.Offset <= info.Size() && info.Size()-from.Offset <= claudeIdleCompactionTailBytes {
+		read := from
+		offset, err := scanAppendedJSONL(ctx, path, from.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			observeIdleRecord(&read.State, line)
+			return nil
+		})
+		if err != nil {
+			return surface.IdleCompactionRead{}, err
+		}
+		read.Offset = offset
+		return read, nil
+	}
+	lines, end, err := readRecentJSONLLines(ctx, path, 0, claudeIdleCompactionTailBytes, maxClaudeTranscriptRecordBytes)
+	if err != nil {
+		return surface.IdleCompactionRead{}, err
+	}
+	read := surface.IdleCompactionRead{Offset: end}
 	for _, line := range lines {
-		var record claudeIdleRecord
-		if json.Unmarshal(line, &record) != nil || record.IsSidechain {
-			continue
-		}
-		switch {
-		case record.Type == "assistant" && record.Message.Model != "" && record.Message.Model != claudeSyntheticModel:
-			at, err := time.Parse(time.RFC3339Nano, record.Timestamp)
-			if err != nil {
-				continue
-			}
-			usage := record.Message.Usage
-			state.LastRequestAt = at
-			state.ContextTokens = usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
-			state.CompactedSince = false
-			// A cache read refreshes the entry it reads for that entry's own
-			// TTL, so the cache in effect is the one the last write chose.
-			if usage.CacheCreationTokens > 0 {
-				state.OneHourCache = usage.CacheCreation.OneHour > 0
-			}
-		case record.Type == "system" && record.Subtype == "compact_boundary" && !state.LastRequestAt.IsZero():
-			state.CompactedSince = true
-		}
+		observeIdleRecord(&read.State, line)
 	}
-	return state, nil
+	return read, nil
+}
+
+func observeIdleRecord(state *surface.IdleCompactionState, line []byte) {
+	var record claudeIdleRecord
+	if json.Unmarshal(line, &record) != nil || record.IsSidechain {
+		return
+	}
+	switch {
+	case record.Type == "assistant" && record.Message.Model != "" && record.Message.Model != claudeSyntheticModel:
+		at, err := time.Parse(time.RFC3339Nano, record.Timestamp)
+		if err != nil {
+			return
+		}
+		usage := record.Message.Usage
+		state.LastRequestAt = at
+		state.ContextTokens = usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+		state.CompactedSince = false
+		// A cache read refreshes the entry it reads for that entry's own
+		// TTL, so the cache in effect is the one the last write chose.
+		if usage.CacheCreationTokens > 0 {
+			state.OneHourCache = usage.CacheCreation.OneHour > 0
+		}
+	case record.Type == "system" && record.Subtype == "compact_boundary" && !state.LastRequestAt.IsZero():
+		state.CompactedSince = true
+	}
 }

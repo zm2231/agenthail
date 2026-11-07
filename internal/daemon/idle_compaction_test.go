@@ -3,10 +3,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -21,8 +23,8 @@ type idleSurface struct {
 	states map[string]surface.IdleCompactionState
 }
 
-func (s *idleSurface) IdleCompactionState(_ context.Context, sess *surface.Session) (surface.IdleCompactionState, error) {
-	return s.states[sess.ID], nil
+func (s *idleSurface) IdleCompactionState(_ context.Context, sess *surface.Session, _ surface.IdleCompactionRead) (surface.IdleCompactionRead, error) {
+	return surface.IdleCompactionRead{State: s.states[sess.ID], Offset: 1}, nil
 }
 
 func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
@@ -140,5 +142,55 @@ func TestAnIdleLargeSessionIsCompactedOnceBeforeItsCacheExpires(t *testing.T) {
 	}
 	if !maps.Equal(held, wantHeld) {
 		t.Errorf("held = %v, want %v", held, wantHeld)
+	}
+}
+
+func TestEachHeldIdleCompactionIsReportedOnceWhenMoreAreHeldThanTheListKeeps(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", root)
+	r, err := registry.Open(registrytest.Path(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	now := time.Now()
+	fake := &idleSurface{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Compact: true}}, states: map[string]surface.IdleCompactionState{}}
+	for i := range idleCompactionHoldsKept + 1 {
+		id := fmt.Sprintf("busy-%02d", i)
+		transcript := filepath.Join(root, "projects", "work", id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusBusy, Transcript: transcript}
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		fake.sessions[id] = session
+		fake.states[id] = surface.IdleCompactionState{LastRequestAt: now.Add(-55 * time.Minute).Add(time.Duration(i) * time.Millisecond), OneHourCache: true, ContextTokens: 250_000}
+	}
+	d := newTestDaemon(t, r, []surface.Surface{fake})
+	router := dashboardRouter(d)
+	holds := func() []IdleCompactionHold {
+		t.Helper()
+		response := serveDashboardRequest(router, http.MethodGet, "/api/v1/claude/compact-settings", "")
+		var body struct {
+			Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("compact settings = %d %s", response.Code, response.Body)
+		}
+		return body.Holds
+	}
+	read := map[string]idleTranscript{}
+	d.compactIdle(context.Background(), now, read)
+	first := holds()
+	d.compactIdle(context.Background(), now.Add(time.Minute), read)
+	if second := holds(); len(first) != idleCompactionHoldsKept || !slices.EqualFunc(first, second, func(a, b IdleCompactionHold) bool { return a.SessionID == b.SessionID && a.At.Equal(b.At) }) {
+		t.Fatalf("holds after the first pass: %d, after the second they changed: %v", len(first), second)
 	}
 }

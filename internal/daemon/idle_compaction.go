@@ -22,7 +22,7 @@ const (
 type idleTranscript struct {
 	size    int64
 	modTime time.Time
-	state   surface.IdleCompactionState
+	read    surface.IdleCompactionRead
 }
 
 func (d *Daemon) runIdleCompaction(ctx context.Context) {
@@ -62,7 +62,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 		}
 	}
 	settings := map[string]surface.IdleCompaction{}
-	seen := map[string]bool{}
+	seen, listed := map[string]bool{}, map[string]bool{}
 	for i := range sessions {
 		if ctx.Err() != nil {
 			return
@@ -72,6 +72,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			continue
 		}
 		seen[session.Transcript] = true
+		listed[session.ID] = true
 		if session.Ended {
 			continue
 		}
@@ -98,14 +99,15 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 		}
 		known, ok := read[session.Transcript]
 		if !ok || known.size != info.Size() || !known.modTime.Equal(info.ModTime()) {
-			state, err := reader.IdleCompactionState(ctx, session)
+			next, err := reader.IdleCompactionState(ctx, session, known.read)
 			if err != nil {
+				delete(read, session.Transcript)
 				continue
 			}
-			known = idleTranscript{size: info.Size(), modTime: info.ModTime(), state: state}
+			known = idleTranscript{size: info.Size(), modTime: info.ModTime(), read: next}
 			read[session.Transcript] = known
 		}
-		state := known.state
+		state := known.read.State
 		idle := now.Sub(state.LastRequestAt)
 		if state.LastRequestAt.IsZero() || idle < idleCompactionAfter || idle >= idleCompactionBefore || !state.OneHourCache || state.CompactedSince || state.ContextTokens < rootSettings.MinContextTokens {
 			continue
@@ -135,6 +137,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			delete(read, path)
 		}
 	}
+	d.idleHolds.forgetExcept(listed)
 }
 
 func claudeTranscriptRoot(transcript string) string {

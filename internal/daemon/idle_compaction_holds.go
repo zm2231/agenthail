@@ -20,8 +20,9 @@ type IdleCompactionHold struct {
 }
 
 type idleCompactionHolds struct {
-	mu     sync.Mutex
-	recent []IdleCompactionHold
+	mu        sync.Mutex
+	announced map[string]time.Time
+	recent    []IdleCompactionHold
 }
 
 func idleCompactionHold(session *surface.Session, settings surface.IdleCompaction, refused, canCompact bool) string {
@@ -45,16 +46,28 @@ func idleCompactionHold(session *surface.Session, settings surface.IdleCompactio
 func (h *idleCompactionHolds) record(hold IdleCompactionHold, announce func(IdleCompactionHold)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if slices.ContainsFunc(h.recent, func(held IdleCompactionHold) bool {
-		return held.SessionID == hold.SessionID && held.RequestAt.Equal(hold.RequestAt)
-	}) {
+	if at, ok := h.announced[hold.SessionID]; ok && at.Equal(hold.RequestAt) {
 		return
 	}
+	if h.announced == nil {
+		h.announced = map[string]time.Time{}
+	}
+	h.announced[hold.SessionID] = hold.RequestAt
 	h.recent = append(h.recent, hold)
 	if len(h.recent) > idleCompactionHoldsKept {
 		h.recent = slices.Delete(h.recent, 0, len(h.recent)-idleCompactionHoldsKept)
 	}
 	announce(hold)
+}
+
+func (h *idleCompactionHolds) forgetExcept(listed map[string]bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id := range h.announced {
+		if !listed[id] {
+			delete(h.announced, id)
+		}
+	}
 }
 
 func (h *idleCompactionHolds) list() []IdleCompactionHold {
