@@ -1,0 +1,70 @@
+name: iPad nightly
+
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipad-nightly
+  cancel-in-progress: false
+
+jobs:
+  ipad:
+    if: github.repository == 'zm2231/agenthail'
+    runs-on: [self-hosted, macOS, ARM64, agenthail]
+    timeout-minutes: 90
+    env:
+      DERIVED: ${{ github.workspace }}/../ipad-derived
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Boot simulator
+        env:
+          AGENTHAIL_SIMULATOR_NAME: Agenthail CI iPad ${{ runner.name }}
+        run: |
+          udid="$(scripts/ios-simulator.sh ipad)"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+      - name: Wait for simulator boot
+        run: xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+      - name: Build for simulator tests
+        run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
+      - name: iPad UI tests
+        run: |
+          rm -rf "$RUNNER_TEMP/ipad-tests.xcresult"
+          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -only-testing:AgenthailIOSUITests -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ipad-tests.xcresult"
+      - name: Upload iPad test results
+        id: upload
+        if: always() && job.status != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipad-tests-xcresult-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ipad-tests.xcresult
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Clean up self-hosted job
+        if: always()
+        run: scripts/ci-self-hosted.sh cleanup
+
+  report:
+    needs: ipad
+    if: always() && needs.ipad.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Open, update or close the nightly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_URL: ${{ needs.ipad.outputs.artifact }}
+          RESULT: ${{ needs.ipad.result }}
+        run: scripts/ci-nightly-issue.sh "$RESULT"

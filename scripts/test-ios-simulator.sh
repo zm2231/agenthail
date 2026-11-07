@@ -12,13 +12,23 @@ mkdir -p "$WORK/bin"
 cat >"$WORK/bin/xcrun" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2 ${3:-}" in
-  "simctl list devices") echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}' ;;
+  "simctl list devices")
+    if [ -n "${STATE:-}" ]; then cat "$STATE"; sleep 0.5
+    elif [ -n "${DEVICES:-}" ]; then echo "$DEVICES"
+    else echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}'; fi ;;
+  "simctl list runtimes") echo '{"runtimes":[{"isAvailable":true,"identifier":"iOS-26"}]}' ;;
+  "simctl list devicetypes") echo "${DEVICE_TYPES:?}" ;;
+  "simctl create"*)
+    printf '%s\n' "$4" >>"$CREATED"
+    [ -z "${STATE:-}" ] || printf '{"devices":{"ios":[{"name":"%s","udid":"UDID-NEW"}]}}\n' "$3" >"$STATE"
+    echo "UDID-NEW" ;;
   "simctl boot"*|"simctl bootstatus"*) ;;
   *) echo "unexpected xcrun $*" >&2; exit 1 ;;
 esac
 EOF
 cat >"$WORK/bin/lockf" <<'EOF'
 #!/usr/bin/env bash
+[ "$2" != /tmp/agenthail-simulator-create.lock ] || exec /usr/bin/lockf "$@"
 shift 2
 printf '%s\n' "$@" >"$LOCKED"
 EOF
@@ -95,6 +105,31 @@ run 2 sh -c "xcodebuild test -scheme AgenthailIOS"
 
 run 0 xcrun simctl install booted App.app
 [ "$(tr '\n' ' ' <<<"$locked")" = "xcrun simctl install booted App.app " ] || fail "a non-xcodebuild command was changed: $locked"
+
+created() {
+  rm -f "$WORK/created"
+  CREATED="$WORK/created" DEVICE_TYPES="$2" AGENTHAIL_SIMULATOR_NAME="Agenthail Missing" "$ROOT/scripts/ios-simulator.sh" "$1" >/dev/null
+  cat "$WORK/created"
+}
+types='{"devicetypes":[{"name":"iPad Pro 13-inch (M5)","identifier":"ipad-13"},{"name":"iPad Pro 11-inch (M5)","identifier":"ipad-11"},{"name":"iPhone 17","identifier":"iphone-17"},{"name":"iPhone 18","identifier":"iphone-18"}]}'
+[ "$(created ipad "$types")" = ipad-11 ] || fail "a missing iPad is not an 11-inch iPad Pro"
+[ "$(created ipad '{"devicetypes":[{"name":"iPhone 17","identifier":"iphone-17"},{"name":"iPad Air 13-inch (M4)","identifier":"ipad-air"}]}')" = ipad-air ] || fail "a missing iPad without an 11-inch iPad Pro type is not the first iPad"
+[ "$(created iphone "$types")" = iphone-17 ] || fail "a missing iPhone is not the first iPhone type"
+
+rm -f "$WORK/created"
+existing='{"devices":{"ios":[{"name":"Agenthail iPad","udid":"UDID-IPAD-13","deviceTypeIdentifier":"ipad-13"}]}}'
+udid="$(CREATED="$WORK/created" DEVICES="$existing" DEVICE_TYPES="$types" "$ROOT/scripts/ios-simulator.sh" ipad)"
+{ [ "$udid" = UDID-IPAD-13 ] && [ ! -e "$WORK/created" ]; } || fail "an existing Agenthail iPad of another size was not reused as the one device: $udid"
+
+rm -f "$WORK/created"
+echo '{"devices":{"ios":[]}}' >"$WORK/state"
+for n in 1 2; do
+  CREATED="$WORK/created" STATE="$WORK/state" DEVICE_TYPES="$types" AGENTHAIL_SIMULATOR_NAME="Agenthail Race" \
+    "$ROOT/scripts/ios-simulator.sh" ipad >"$WORK/race-$n" &
+done
+wait
+{ [ "$(wc -l <"$WORK/created")" -eq 1 ] && [ "$(cat "$WORK/race-1")" = UDID-NEW ] && [ "$(cat "$WORK/race-2")" = UDID-NEW ]; } ||
+  fail "two first runs did not share one new simulator: $(wc -l <"$WORK/created") created"
 
 if [ "$failures" -gt 0 ]; then
   exit 1
