@@ -75,3 +75,30 @@ The harness mints a pairing link in the host's registry rather than through `/ap
 ## Tests
 
 `go test ./cmd/ios-live-harness` starts helper processes that stay inside a host's scope, and others that reach a loopback port, a Unix socket and a file outside it. It checks the watcher flags exactly the second set. It runs in both `verify` jobs, so the `lsof` reader is checked on macOS and the `/proc` reader on Linux.
+
+## The app's side
+
+A Debug build launched with `--live-test-loopback` accepts a pairing link whose endpoint is `http://127.0.0.1:<port>`, and on launch forgets any computer it paired through such a link. Without the argument, and in every Release build, a pairing link must be `https` on a `*.ts.net` name. `PairingLinkLoopbackTests` checks both.
+
+The Debug app's `Info.plist` gets `NSAllowsLocalNetworking` from a build phase, so the app can reach the loopback endpoint. `scripts/ios-release-plist-check.sh` fails a Release app that has any App Transport Security key; `ios-release` and `scripts/ios-sign.sh verify` run it.
+
+## Live UI tests
+
+Live tests are in the `live` tier of `native/ui-test-tiers.txt`, which no pull request, push or `ui-all` run includes. They act on hosts only through the control port. `LiveHostUITests` pairs with `Live A` through the pairing form and checks its two ended conversations are listed under All.
+
+To run them on a Mac:
+
+```
+go build -o "$T/agenthail" ./cmd/agenthail
+go build -o "$T/ios-live-harness" ./cmd/ios-live-harness
+"$T/ios-live-harness" -agenthail "$T/agenthail" -hosts 2 -- \
+  scripts/ios-simulator.sh iphone run xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS \
+    -destination "platform=iOS Simulator,name=Agenthail iPhone" -derivedDataPath ~/Library/Developer/Xcode/DerivedData/<name> \
+    -only-testing:AgenthailIOSUITests/LiveHostUITests
+```
+
+## Nightly run
+
+`iOS live nightly` runs every night on the self-hosted Mac, and on `workflow_dispatch`, from `main` only. It builds both binaries, resets the keychain of the runner's own simulator, `Agenthail CI <runner name>`, and runs the `live` tier under the harness. `scripts/ios-ci-keychain-reset.sh` refuses unless it runs in a self-hosted GitHub Actions job and the simulator is that runner's own, so it never resets a simulator a person uses.
+
+A failed run opens the issue `Nightly iOS live tests are failing`, labelled `nightly-ios-live` and assigned to the repository owner, or comments on it if it is open. The report names the failing test, quotes the harness's lines and links the run and its results; the next passing run closes the issue.

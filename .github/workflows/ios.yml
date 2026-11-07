@@ -170,7 +170,9 @@ jobs:
           scripts/test-xcodegen-project.sh
       - name: iOS release device build
         if: env.SIGNED != 'true'
-        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
+        run: |
+          xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO
+          scripts/ios-release-plist-check.sh "$RUNNER_TEMP/derived/Build/Products/Release-iphoneos/Agenthail.app"
       - name: Import iOS signing assets
         if: env.SIGNED == 'true'
         env:

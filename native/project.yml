@@ -24,6 +24,17 @@ targets:
       - package: WebRTC
       - package: Textual
       - target: AgenthailIOSNotificationService
+    postBuildScripts:
+      - name: Allow loopback connections in Debug
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        outputFiles:
+          - $(DERIVED_FILE_DIR)/debug-local-networking.stamp
+        script: |
+          if [ "$CONFIGURATION" = Debug ]; then
+            plutil -replace NSAppTransportSecurity -json '{"NSAllowsLocalNetworking":true}' "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          fi
+          touch "$DERIVED_FILE_DIR/debug-local-networking.stamp"
     sources:
       - path: AgenthailModels.swift
       - path: TurnSettings.swift

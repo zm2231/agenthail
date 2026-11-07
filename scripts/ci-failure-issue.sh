@@ -20,8 +20,12 @@ if [ -n "${ARTIFACT_URL:-}" ]; then
 else
 	body+=$'\n\n'"No test results were saved: the run stopped before the tests wrote them. The run's log has the cause."
 fi
+if [ -n "${ISSUE_DETAILS:-}" ]; then
+	body+=$'\n\n```\n'"$ISSUE_DETAILS"$'\n```'
+fi
 if [ -n "$number" ]; then
 	gh issue comment "$number" --body "$body"
 else
-	gh issue create --title "$title" --body "$body" ${ISSUE_ASSIGNEE:+--assignee "$ISSUE_ASSIGNEE"}
+	[ -z "${ISSUE_LABEL:-}" ] || gh label create "$ISSUE_LABEL" --force --description "Opened by a scheduled CI run" >/dev/null
+	gh issue create --title "$title" --body "$body" ${ISSUE_ASSIGNEE:+--assignee "$ISSUE_ASSIGNEE"} ${ISSUE_LABEL:+--label "$ISSUE_LABEL"}
 fi
