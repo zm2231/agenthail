@@ -136,7 +136,19 @@ struct NewSessionSheet: View {
                         }
                     }
                 }
-                if let error = model.creationError { Section { Text(error).foregroundStyle(PhonePalette.failed) } }
+                if let error = model.creationError {
+                    Section {
+                        Text(error).foregroundStyle(PhonePalette.failed)
+                        if model.creationCanStartAgain {
+                            Button("Start again") {
+                                model.startCreationAgain()
+                                start()
+                            }
+                        }
+                    } footer: {
+                        if model.creationCanStartAgain { Text("Start again starts a new session even if the first one is running.") }
+                    }
+                }
                 if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(RoleStyle(.body)) } }
             }
             .disabled(model.creatingSession)
@@ -148,9 +160,7 @@ struct NewSessionSheet: View {
                     ToolbarItem(placement: .principal) { hostButton }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher, host: hosts.hostQuery) { dismiss() }
-                    } } label: {
+                    Button { start() } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
                     }.disabled(model.creatingSession || model.creationWarning != nil || !hosts.canStart || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -192,6 +202,11 @@ struct NewSessionSheet: View {
     }
     private var selectedModelOption: ModelOption? {
         models.first { $0.id == selectedModel } ?? (selectedModel.isEmpty ? models.first { $0.default == true } : nil)
+    }
+    private func start() {
+        Task {
+            if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher, host: hosts.hostQuery) { dismiss() }
+        }
     }
     private func launchers(for surface: String, options: SessionCreationOptions) -> [LauncherOption] {
         options.launchers?.filter { $0.agents.contains(surface) } ?? []

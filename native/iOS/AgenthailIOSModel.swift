@@ -161,6 +161,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     @Published var creatingSession = false
     @Published var creationError: String?
     @Published var creationWarning: String?
+    @Published private(set) var creationCanStartAgain = false
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
     @Published private(set) var fetchedSubagents = SubagentPageCache()
@@ -848,10 +849,14 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
         return try await api.creationModels(surface: surface, host: target.remote)
     }
     func prepareNewSessionForm() {
-        creationError = nil
         creationWarning = nil
+        startCreationAgain()
+    }
+    func startCreationAgain() {
+        creationError = nil
         creationRequestIdentity = nil
         creationRequestKey = nil
+        creationCanStartAgain = false
     }
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) async -> Bool {
         guard !creatingSession, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -861,7 +866,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             creationError = AgenthailAPIError.userMessage(error)
             return false
         }
-        creatingSession = true; creationError = nil; creationWarning = nil
+        creatingSession = true; creationError = nil; creationWarning = nil; creationCanStartAgain = false
         defer { creatingSession = false }
         let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
                                                turnSettings: surface == "codex" ? turnSettings : .init(),
@@ -874,11 +879,12 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, host: target.remote, idempotencyKey: creationRequestKey, failureReceipts: true)
             if receipt.outcomeUnknown && receipt.id == nil {
                 creationError = SessionCreationReceipt.unknownOutcomeMessage
+                creationCanStartAgain = true
                 return false
             }
             if receipt.ok != true && !receipt.outcomeUnknown && receipt.accepted != true {
                 creationError = receipt.error?.message ?? "The session didn't start."
-                if receipt.id == nil { creationRequestIdentity = nil; creationRequestKey = nil }
+                if receipt.id == nil { creationRequestIdentity = nil; creationRequestKey = nil } else { creationCanStartAgain = true }
                 return false
             }
             if receipt.status == "submitted" && receipt.id == nil {
@@ -896,6 +902,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
             return true
         } catch AgenthailAPIError.outcomeUnknown {
             creationError = SessionCreationReceipt.unknownOutcomeMessage
+            creationCanStartAgain = true
             return false
         } catch {
             if case AgenthailAPIError.unavailable(let detail) = error, detail == "Terminal sessions do not support advanced launch settings." {
