@@ -373,6 +373,15 @@ func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coo
 		}
 		cleared++
 	}
+	for _, current := range existing {
+		if current.HostID != "" || current.SessionID == "" || sessionID == "" || current.SessionID == sessionID {
+			continue
+		}
+		if err := d.Registry.MoveRelayRoutes(current.SessionID, sessionID); err != nil {
+			return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", fmt.Sprintf("@%s now coordinates the project, but the relays of %s stay on it: %s", stored.Name, d.resolveDisplay(current.SessionID), err))
+		}
+		d.publishEvent("state.changed", sessionID, map[string]string{"source": "relay"})
+	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
 	return actionOK(map[string]any{"ok": true, "coordinator": stored, "replaced": existing}), nil
 }
