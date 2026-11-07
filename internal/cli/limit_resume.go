@@ -34,7 +34,7 @@ func (a *App) cmdLimitResume(args []string) error {
 		}
 		return nil
 	case (positional[0] == "resume" || positional[0] == "cancel") && len(positional) == 2:
-		ctx, cancel, err := commandContext(args)
+		ctx, cancel, err := a.timedContext(args, controlCommandTimeout)
 		if err != nil {
 			return err
 		}

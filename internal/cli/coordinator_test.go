@@ -502,7 +502,7 @@ func TestLeadOnAPairedHostIsReachedThroughThatHost(t *testing.T) {
 func lazyRegistry(app *App) {
 	r := app.Registry
 	app.Registry = nil
-	app.OpenRegistry = func() (*registry.Registry, error) { return r, nil }
+	app.OpenRegistry = func(context.Context) (*registry.Registry, error) { return r, nil }
 }
 
 func mustEvalSymlinks(t *testing.T, path string) string {

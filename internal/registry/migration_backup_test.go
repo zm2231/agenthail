@@ -188,7 +188,7 @@ func TestAFailedPageCopyReportsItsError(t *testing.T) {
 	if err := holder.db.QueryRow(`PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
 		t.Fatalf("journal_mode=%q err=%v", mode, err)
 	}
-	conn, err := holder.db.Conn(context.Background())
+	conn, err := holder.db.raw.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func registryAtSchemaCopy(t *testing.T, from, to string, schema int) {
 func TestADevelopmentBuildCreatesButDoesNotUpgradeTheDefaultRegistry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	r, err := OpenDefault(false)
+	r, err := OpenDefault(context.Background(), false)
 	if err != nil {
 		t.Fatalf("a development build could not create a registry in a scratch HOME: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestADevelopmentBuildCreatesButDoesNotUpgradeTheDefaultRegistry(t *testing.
 	os.Remove(path + "-wal")
 	os.Remove(path + "-shm")
 
-	_, err = OpenDefault(false)
+	_, err = OpenDefault(context.Background(), false)
 	var refused *DevUpgradeError
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "scratch HOME") || !strings.Contains(err.Error(), "AGENTHAIL_ALLOW_DEV_MIGRATION=1") {
 		t.Fatalf("err=%v, want the development build refusal", err)
@@ -380,7 +380,7 @@ func TestADevelopmentBuildCreatesButDoesNotUpgradeTheDefaultRegistry(t *testing.
 	if backups := migrationBackups(path); len(backups) != 0 {
 		t.Fatalf("a refused upgrade left backups %v", backups)
 	}
-	r, err = OpenDefault(true)
+	r, err = OpenDefault(context.Background(), true)
 	if err != nil {
 		t.Fatalf("an allowed upgrade: %v", err)
 	}

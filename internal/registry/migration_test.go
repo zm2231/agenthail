@@ -91,8 +91,8 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
 	t.Helper()
 	fresh := openTestRegistry(t)
-	assertSameColumns(t, schemaColumns(t, fresh.db), schemaColumns(t, migrated.db))
-	want, got := schemaIndexes(t, fresh.db), schemaIndexes(t, migrated.db)
+	assertSameColumns(t, schemaColumns(t, fresh.db.raw), schemaColumns(t, migrated.db.raw))
+	want, got := schemaIndexes(t, fresh.db.raw), schemaIndexes(t, migrated.db.raw)
 	for name, definition := range want {
 		if got[name] != definition {
 			t.Errorf("index %s migrated=%q fresh=%q", name, got[name], definition)
@@ -114,7 +114,7 @@ func TestSchemaDeclaresEveryColumn(t *testing.T) {
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
-	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db), schemaColumns(t, db))
+	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db.raw), schemaColumns(t, db))
 }
 
 func assertSameColumns(t *testing.T, want, got map[string]map[string]string) {
