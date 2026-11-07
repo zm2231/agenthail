@@ -243,6 +243,31 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testSwitchingSessionsDuringAReadStillReadsTheNewSessionsStatus() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(unlisted: true)
+        let model = makeModel()
+        await model.refresh()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        SessionRefreshProtocol.state.holdDetail()
+        model.applySessionStreamEvent(try Self.finishedRow())
+        try await waitUntil(timeout: 2) { SessionRefreshProtocol.state.detailHeld }
+
+        model.selectedSessionID = "computer::other"
+        await model.refreshSession("computer::other")
+        XCTAssertEqual(model.selectedDetail?.session.status, "busy")
+        SessionRefreshProtocol.state.set(detailStatus: "idle")
+        model.applySessionStreamEvent(try Self.finishedRow(session: "other"))
+        let reads = SessionRefreshProtocol.state.detailFetches
+        SessionRefreshProtocol.state.releaseDetail()
+
+        try await waitUntil(timeout: 2) { model.selectedDetail?.session.status == "idle" }
+        XCTAssertEqual(model.selectedDetail?.session.id, "computer::other")
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, reads + 1, "one follow-up read, for the session now open")
+    }
+
+    @MainActor
     func testAListedSessionTakesItsStatusFromTheSnapshotNotAnExtraRead() async throws {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -265,8 +290,8 @@ final class SessionRefreshTests: XCTestCase {
         XCTAssertEqual(detail.shown(over: nil, host: nil).status, "idle")
     }
 
-    private static func finishedRow() throws -> SessionStreamEvent {
-        try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":12,"type":"item","data":{"itemId":"finished","version":1,"kind":"message","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:00Z","body":"Done.","truncated":false}}"#.utf8))
+    private static func finishedRow(session: String = "demo") throws -> SessionStreamEvent {
+        try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"\#(session)","seq":12,"type":"item","data":{"itemId":"finished","version":1,"kind":"message","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:00Z","body":"Done.","truncated":false}}"#.utf8))
     }
 
     @MainActor
@@ -540,7 +565,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             fetches += 1
             let status = detail
             let journalSeq = seq
-            if holdingDetail {
+            if holdingDetail, !detailWaiting {
                 detailWaiting = true
                 while holdingDetail { condition.wait() }
                 detailWaiting = false
@@ -583,7 +608,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
     static func snapshot(status: String, canStream: Bool, fields: String, unlisted: Bool = false) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
         var sessions = object["sessions"] as! [[String: Any]]
-        if unlisted { sessions.removeAll { $0["id"] as? String == "demo" } }
+        if unlisted { sessions.removeAll() }
         if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) {
             sessions[index]["status"] = status
             let overrides = try! JSONSerialization.jsonObject(with: Data(fields.utf8)) as! [String: Any]

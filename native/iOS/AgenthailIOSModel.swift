@@ -192,7 +192,7 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     private var stateRequests: UInt64 = 0
     private var selectedSessionStateSeq: UInt64 = 0
     private var unlistedStateRead: Task<Void, Never>?
-    private var unlistedStateDirty = false
+    private var unlistedStatePending: String?
     private var sessionStreamUnsupported = false
     private var unsupportedRefreshTask: Task<Void, Never>?
     private var sessionReload: (id: String, task: Task<Void, Never>)?
@@ -2336,16 +2336,16 @@ final class AgenthailIOSModel: ObservableObject, HostConnectionDelegate {
     // A session missing from the snapshot gets no status from it, so its own stream prompts a read.
     private func readUnlistedState(_ id: String) {
         guard unlistedStateRead == nil else {
-            unlistedStateDirty = true
+            unlistedStatePending = id
             return
         }
         unlistedStateRead = Task { [weak self] in
             await self?.readSelectedState(id)
             guard let self else { return }
             self.unlistedStateRead = nil
-            if self.unlistedStateDirty {
-                self.unlistedStateDirty = false
-                self.readUnlistedState(id)
+            if let next = self.unlistedStatePending {
+                self.unlistedStatePending = nil
+                self.readUnlistedState(next)
             }
         }
     }
