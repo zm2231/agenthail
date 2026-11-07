@@ -410,3 +410,29 @@ func TestAHeldSendNamesOnlyThisHostsSessionAsItsSender(t *testing.T) {
 		}
 	}
 }
+
+func TestARelayReadBeforeItsRouteMovedIsNotDeliveredToTheOldDestination(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "source", "old-lead", "new-lead")
+	if _, err := r.AddRoute("source", "old-lead", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("source", "", surface.CompletionBatch{Cursor: "after-one", Events: []surface.Completion{{ID: "one", Text: "result"}}}); err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := r.ListRoutes()
+	events, err := r.PendingRelayEvents(stale[0])
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%v err=%v", events, err)
+	}
+	if err := r.MoveRelayRoutes("old-lead", "new-lead"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ConsumeRelay(stale[0], events[0], "payload", "queue", ""); err == nil || r.QueueCount("old-lead") != 0 {
+		t.Fatalf("a relay read before the move went to the old lead: err=%v", err)
+	}
+	moved, _ := r.ListRoutes()
+	if _, err := r.ConsumeRelay(moved[0], events[0], "payload", "queue", ""); err != nil || r.QueueCount("new-lead") != 1 {
+		t.Fatalf("the moved route did not deliver: err=%v", err)
+	}
+}
