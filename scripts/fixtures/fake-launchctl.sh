@@ -35,7 +35,8 @@ case "${1:-}" in
 		plist="${3:?missing plist path}"
 		program="$(plutil -extract ProgramArguments.0 raw -o - "$plist")"
 		mkdir -p "$HOME/.agenthail"
-		"$program" daemon-run >>"$HOME/.agenthail/fake-launchd.log" 2>&1 &
+		# launchd starts the job after bootstrap has returned.
+		(sleep 1 && exec "$program" daemon-run) >>"$HOME/.agenthail/fake-launchd.log" 2>&1 &
 		echo "$!" >"$HOME/.fake-agenthail-launchd-last-pid"
 		echo "$plist" >"$LOADED_PLIST"
 		touch "$STATE"
