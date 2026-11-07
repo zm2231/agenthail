@@ -44,16 +44,50 @@ type apiEvent struct {
 }
 
 type eventHub struct {
-	mu          sync.Mutex
-	nextID      uint64
-	history     []apiEvent
-	subscribers map[uint64]chan apiEvent
-	nextSubID   uint64
-	store       *registry.Registry
+	mu        sync.Mutex
+	nextID    uint64
+	history   []apiEvent
+	followers map[uint64]chan struct{}
+	nextSubID uint64
+	store     *registry.Registry
+}
+
+// eventFollower follows the hub's history from its own cursor. Wake receives
+// a signal after a publish, and the follower then reads what it has not seen,
+// so a burst it is slow to take waits in the history instead of ending it.
+type eventFollower struct {
+	Wake   <-chan struct{}
+	Cancel func()
+	hub    *eventHub
+	cursor uint64
+}
+
+// read returns the events after the follower's cursor and advances it past
+// them. gap reports that the history no longer holds every event after the
+// cursor; the follower then continues from the newest event.
+func (f *eventFollower) read() (events []apiEvent, gap bool) {
+	h := f.hub
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.expired(f.cursor) {
+		f.cursor = h.nextID
+		return nil, true
+	}
+	for _, event := range h.history {
+		if event.ID > f.cursor {
+			events = append(events, event)
+		}
+	}
+	f.cursor = h.nextID
+	return events, false
+}
+
+func (h *eventHub) expired(cursor uint64) bool {
+	return len(h.history) > 0 && cursor < h.history[0].ID-1
 }
 
 func newEventHub(store *registry.Registry) *eventHub {
-	hub := &eventHub{subscribers: map[uint64]chan apiEvent{}, store: store}
+	hub := &eventHub{followers: map[uint64]chan struct{}{}, store: store}
 	if store == nil {
 		return hub
 	}
@@ -91,21 +125,22 @@ func (h *eventHub) publish(eventType, entityID string, value any) (apiEvent, err
 	if len(h.history) > eventHistoryLimit {
 		h.history = append([]apiEvent(nil), h.history[len(h.history)-eventHistoryLimit:]...)
 	}
-	for id, subscriber := range h.subscribers {
+	for _, wake := range h.followers {
 		select {
-		case subscriber <- event:
+		case wake <- struct{}{}:
 		default:
-			delete(h.subscribers, id)
-			close(subscriber)
 		}
 	}
 	return event, nil
 }
 
-func (h *eventHub) subscribe(after uint64) ([]apiEvent, <-chan apiEvent, bool, func()) {
+// subscribe returns the retained events after after and a follower whose
+// cursor starts at the newest of them. reset reports that after is older than
+// the history holds, so the backlog is empty and the caller must reread.
+func (h *eventHub) subscribe(after uint64) (backlog []apiEvent, follower *eventFollower, reset bool) {
 	h.mu.Lock()
-	reset := after > 0 && len(h.history) > 0 && after < h.history[0].ID-1
-	backlog := make([]apiEvent, 0, len(h.history))
+	defer h.mu.Unlock()
+	reset = after > 0 && h.expired(after)
 	if !reset {
 		for _, event := range h.history {
 			if event.ID > after {
@@ -115,18 +150,18 @@ func (h *eventHub) subscribe(after uint64) ([]apiEvent, <-chan apiEvent, bool, f
 	}
 	h.nextSubID++
 	id := h.nextSubID
-	stream := make(chan apiEvent, 64)
-	h.subscribers[id] = stream
-	h.mu.Unlock()
-	cancel := func() {
+	wake := make(chan struct{}, 1)
+	h.followers[id] = wake
+	follower = &eventFollower{Wake: wake, hub: h, cursor: h.nextID}
+	follower.Cancel = func() {
 		h.mu.Lock()
-		if existing, ok := h.subscribers[id]; ok {
-			delete(h.subscribers, id)
+		if existing, ok := h.followers[id]; ok {
+			delete(h.followers, id)
 			close(existing)
 		}
 		h.mu.Unlock()
 	}
-	return backlog, stream, reset, cancel
+	return backlog, follower, reset
 }
 
 func (h *eventHub) cursor() uint64 {

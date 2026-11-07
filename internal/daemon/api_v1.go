@@ -204,11 +204,11 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, _ := sse.Cursor(r)
-	backlog, events, reset, cancel := d.events.subscribe(after)
-	defer cancel()
+	backlog, follower, reset := d.events.subscribe(after)
+	defer follower.Cancel()
 	sse.Open(w)
 	if reset {
-		writeSSEEvent(w, apiEvent{Type: "stream.reset", Timestamp: time.Now().UTC(), Data: json.RawMessage(`{"reason":"cursor_expired"}`)})
+		writeStreamReset(w)
 	} else {
 		for _, event := range backlog {
 			writeSSEEvent(w, event)
@@ -216,14 +216,24 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, flusher, events, func(event apiEvent, open bool) bool {
+	sse.Follow(r.Context(), w, flusher, follower.Wake, func(_ struct{}, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
-		writeSSEEvent(w, event)
+		events, gap := follower.read()
+		if gap {
+			writeStreamReset(w)
+		}
+		for _, event := range events {
+			writeSSEEvent(w, event)
+		}
 		flusher.Flush()
 		return true
 	}, authorized)
+}
+
+func writeStreamReset(w http.ResponseWriter) {
+	writeSSEEvent(w, apiEvent{Type: "stream.reset", Timestamp: time.Now().UTC(), Data: json.RawMessage(`{"reason":"cursor_expired"}`)})
 }
 
 func (d *Daemon) apiEventStreamAuthorized(r *http.Request) bool {

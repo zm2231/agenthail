@@ -61,8 +61,7 @@ func nextSnapshotClosed(t *testing.T, stream <-chan apiEvent) string {
 func TestUISnapshotRelaysTheFirstAppImageToTheCaller(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
-	defer cancel()
+	stream := followEvents(t, d.events)
 
 	image := append(append([]byte(nil), pngSignature...), []byte("pixels")...)
 	done := make(chan snapshotCall, 1)
@@ -113,8 +112,7 @@ func TestUISnapshotExplainsWhenNoAppAnswers(t *testing.T) {
 	uiSnapshotTimeout = 50 * time.Millisecond
 	defer func() { uiSnapshotTimeout = saved }()
 
-	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
-	defer cancel()
+	stream := followEvents(t, d.events)
 
 	call := snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{}`))
 	if call.code != http.StatusGatewayTimeout || !strings.Contains(string(call.body), "snapshot_unanswered") || !strings.Contains(string(call.body), "Mac app") {
@@ -154,8 +152,7 @@ func TestUISnapshotRefusesBadSizesAndOversizedImages(t *testing.T) {
 func TestUISnapshotPassesTheAppsFailureToTheCaller(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
-	defer cancel()
+	stream := followEvents(t, d.events)
 
 	done := make(chan snapshotCall, 1)
 	go func() { done <- snapshotPost(handler, "/api/v1/ui/snapshot", "application/json", []byte(`{}`)) }()
@@ -192,8 +189,7 @@ func TestUISnapshotWaitsForAChangeMadeOutsideTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.noteUIRevision(before.Rev)
-	_, stream, _, cancel := d.events.subscribe(d.events.cursor())
-	defer cancel()
+	stream := followEvents(t, d.events)
 
 	changed, _, err := store.Write("version = 1\ntheme = dark\n", "agent", "Dark")
 	if err != nil {
