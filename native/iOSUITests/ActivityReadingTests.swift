@@ -30,23 +30,16 @@ final class ActivityReadingTests: XCTestCase {
         XCTAssertTrue(app.buttons["record-4"].waitForExistence(timeout: 5), "every event lists a result as its own record")
     }
 
-    func testReplyThatEndsATurnShowsHowLongItTook() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-reading"]
-        app.launch()
-        XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
-        let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Finished 1:55'")).firstMatch
-        XCTAssertTrue(footer.waitForExistence(timeout: 10), "the reply that ends the turn shows how long it took")
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Turn Duration'")).firstMatch.exists, "the duration is not also listed as an event")
-        capture("Reply with its turn footer", app)
-    }
-
-    func testFileChipAndEditLineOpenTheDiff() {
+    func testTheTurnFooterShowsAndFileChipAndEditLineOpenTheDiff() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-reading"]
         app.launch()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Finished 1:55'")).firstMatch
+        XCTAssertTrue(footer.waitForExistence(timeout: 10), "the reply that ends the turn shows how long it took")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Turn Duration'")).firstMatch.exists, "the duration is not also listed as an event")
+        capture("Reply with its turn footer", app)
         let chip = app.buttons["file-chip-Reconnect.swift"]
         XCTAssertTrue(chip.waitForExistence(timeout: 10), "the run that edited a file shows it as a chip")
         chip.scrollIntoMiddle(of: timeline)

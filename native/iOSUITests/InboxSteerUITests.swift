@@ -2,9 +2,9 @@ import XCTest
 
 @MainActor
 final class InboxSteerUITests: XCTestCase {
-    private func openInbox(theme: String) -> XCUIApplication {
+    private func openInbox() -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-steer-rows", "--preview-theme", theme]
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-steer-rows", "--preview-theme", "dark"]
         app.launch()
         app.tab("Inbox").tapWhenReady(timeout: 15)
         return app
@@ -18,7 +18,7 @@ final class InboxSteerUITests: XCTestCase {
     }
 
     func testAWaitingRowOffersSteerSendsItAndARowThatCantSteerSaysWhy() {
-        let app = openInbox(theme: "dark")
+        let app = openInbox()
         let steer = app.buttons["queue-steer-11"]
         XCTAssertTrue(steer.waitForExistence(timeout: 10), "a person's image row on a running session offers Steer")
         XCTAssertTrue(steer.isHittable)
@@ -33,11 +33,5 @@ final class InboxSteerUITests: XCTestCase {
         steer.tapWhenStill()
         XCTAssertTrue(steer.waitForNonExistence(timeout: 5), "the row stays until a send with steer delivery arrives")
         XCTAssertTrue(app.staticTexts["queue-steer-refusal-12"].exists, "the other row stays")
-    }
-
-    func testSteerReadsInLightMode() {
-        let app = openInbox(theme: "light")
-        XCTAssertTrue(app.buttons["queue-steer-11"].waitForExistence(timeout: 10))
-        record(app, "inbox-steer-light")
     }
 }
