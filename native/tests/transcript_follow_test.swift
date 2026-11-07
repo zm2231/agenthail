@@ -519,6 +519,9 @@ struct TranscriptFollowTest {
                 expect(!feed.following, "with \(size) scrolling up stops following")
                 move(scroll, to: end)
                 expect(feed.following, "with \(size) the exact end follows again, \(Int(gap(scroll))) points short")
+                move(scroll, to: end - TranscriptFollow<String>.bottomSlack + 1)
+                expect(feed.following, "with \(size) a layout move inside the slack keeps following")
+                expectBottom(scroll, "with \(size) a followed transcript moved inside the slack returns to the end")
                 move(scroll, to: end - TranscriptFollow<String>.bottomSlack - 1)
                 expect(!feed.following, "with \(size) a place just past the slack does not follow")
             }
