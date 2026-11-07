@@ -226,6 +226,50 @@ final class SessionRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testAnOpenSessionMissingFromTheSnapshotReadsItsStatusWhenItsStreamMoves() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        SessionRefreshProtocol.state.set(unlisted: true)
+        let model = makeModel()
+        await model.refresh()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        XCTAssertNil(model.snapshot?.sessions.first { $0.id == "computer::demo" })
+        XCTAssertEqual(model.selectedDetail?.session.status, "busy")
+
+        SessionRefreshProtocol.state.set(detailStatus: "idle")
+        model.applySessionStreamEvent(try Self.finishedRow())
+        try await waitUntil(timeout: 2) { model.selectedDetail?.session.status == "idle" }
+        XCTAssertNotNil(model.selectedDetail?.timeline?.items.first { $0.id == "finished" }, "the read keeps the streamed row")
+    }
+
+    @MainActor
+    func testAListedSessionTakesItsStatusFromTheSnapshotNotAnExtraRead() async throws {
+        SessionRefreshProtocol.state.reset(streamUnsupported: false)
+        let model = makeModel()
+        await model.refresh()
+        model.selectedSessionID = "computer::demo"
+        await model.refreshSession("computer::demo")
+        let reads = SessionRefreshProtocol.state.detailFetches
+        model.applySessionStreamEvent(try Self.finishedRow())
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(SessionRefreshProtocol.state.detailFetches, reads)
+    }
+
+    func testAnUnlistedRowShowsTheOpenDetailsStatusAndKeepsItsOwnFields() throws {
+        let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionRefreshProtocol.detail(status: "idle").utf8))
+        var cached = detail.sessionState(open: true)
+        cached.status = "busy"
+        let shown = detail.shown(over: cached, host: nil)
+        XCTAssertEqual(shown.status, "idle")
+        XCTAssertTrue(shown.open)
+        XCTAssertEqual(detail.shown(over: nil, host: nil).status, "idle")
+    }
+
+    private static func finishedRow() throws -> SessionStreamEvent {
+        try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":12,"type":"item","data":{"itemId":"finished","version":1,"kind":"message","op":"upsert","role":"assistant","title":"assistant","ts":"2026-10-03T12:00:00Z","body":"Done.","truncated":false}}"#.utf8))
+    }
+
+    @MainActor
     func testSnapshotStateReachesOpenSessionLoadedBeforeIt() async {
         SessionRefreshProtocol.state.reset(streamUnsupported: false)
         let model = makeModel()
@@ -463,13 +507,15 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
             condition.withLock {
                 fetches = 0; unsupported = streamUnsupported; detail = "busy"; snapshot = "busy"
                 holdingSnapshot = false; holdingDetail = false; snapshotWaiting = false; detailWaiting = false; passing = 0; seq = nil
-                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []
+                canStream = true; streams = 0; fields = "{}"; streamPaths = []; metadataPaths = []; unlisted = false
                 condition.broadcast()
             }
         }
         func set(detailStatus: String) { condition.withLock { detail = detailStatus } }
         func set(snapshotStatus: String) { condition.withLock { snapshot = snapshotStatus } }
         func set(snapshotFields: String) { condition.withLock { fields = snapshotFields } }
+        private var unlisted = false
+        func set(unlisted value: Bool) { condition.withLock { unlisted = value } }
         private var passing = 0
         private var canStream = true
         private var streams = 0
@@ -504,7 +550,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
 
         func snapshotResponse() -> String {
             condition.lock(); defer { condition.unlock() }
-            let status = snapshot, overrides = fields
+            let status = snapshot, overrides = fields, leftOut = unlisted
             if passing > 0 {
                 passing -= 1
             } else if holdingSnapshot {
@@ -512,7 +558,7 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
                 while holdingSnapshot { condition.wait() }
                 snapshotWaiting = false
             }
-            return SessionRefreshProtocol.snapshot(status: status, canStream: canStream, fields: overrides)
+            return SessionRefreshProtocol.snapshot(status: status, canStream: canStream, fields: overrides, unlisted: leftOut)
         }
     }
 
@@ -534,9 +580,10 @@ private final class SessionRefreshProtocol: URLProtocol, @unchecked Sendable {
         return PreviewOrder.withView(String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self))
     }
 
-    static func snapshot(status: String, canStream: Bool, fields: String) -> String {
+    static func snapshot(status: String, canStream: Bool, fields: String, unlisted: Bool = false) -> String {
         var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
         var sessions = object["sessions"] as! [[String: Any]]
+        if unlisted { sessions.removeAll { $0["id"] as? String == "demo" } }
         if let index = sessions.firstIndex(where: { $0["id"] as? String == "demo" }) {
             sessions[index]["status"] = status
             let overrides = try! JSONSerialization.jsonObject(with: Data(fields.utf8)) as! [String: Any]

@@ -193,10 +193,9 @@ struct SessionRouteView: View {
 
     private var session: SessionState? {
         if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
-        if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
-        if let value = model.fetchedSubagents.session(sessionID) { return value }
-        guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
-        return detail.sessionState(open: false, host: model.snapshot?.daemon.pairedHost(owning: sessionID))
+        let cached = model.searchResults.first(where: { $0.id == sessionID })?.session ?? model.fetchedSubagents.session(sessionID)
+        guard let detail = model.selectedDetail, detail.session.id == sessionID else { return cached }
+        return detail.shown(over: cached, host: model.snapshot?.daemon.pairedHost(owning: sessionID))
     }
     var body: some View {
         Group {
