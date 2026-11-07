@@ -20,7 +20,7 @@ import (
 // Agenthail artifacts. Foreign or ambiguous endpoints are preserved.
 func Reconcile(home, socketDir string) error {
 	if socketDir == "" {
-		socketDir = defaultSocketDir
+		socketDir = SocketDir()
 	}
 	root := RuntimeRoot(home)
 	entries, err := filepath.Glob(filepath.Join(root, "*", "*.json"))

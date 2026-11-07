@@ -447,7 +447,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	entry.paths = map[string]os.FileInfo{}
 	socketDir := m.socketDir
 	if socketDir == "" {
-		socketDir = "/tmp/cc-socks"
+		socketDir = claudepeer.SocketDir()
 	}
 	recordPath := filepath.Join(surface.ClaudeConfigDir(m.home), "sessions", fmt.Sprintf("%d.json", command.Process.Pid))
 	for _, path := range []string{filepath.Join(socketDir, fmt.Sprintf("%d.sock", command.Process.Pid)), controlPath, manifestPath, recordPath} {

@@ -137,15 +137,44 @@ func validateRelaySocket(socketDir, path string) error {
 	return validateTargetSocket(socketDir, path)
 }
 
+// SocketDirEnv names one directory that replaces every default Claude socket
+// directory, so a daemon kept apart from a person's Claude sessions never
+// reads or dials their sockets.
+const SocketDirEnv = "AGENTHAIL_CLAUDE_SOCKET_DIR"
+
+const defaultSocketDir = "/tmp/cc-socks"
+
+func SocketDir() string {
+	if dir := socketDirOverride(); dir != "" {
+		return dir
+	}
+	return defaultSocketDir
+}
+
+func socketDirOverride() string {
+	dir := strings.TrimSpace(os.Getenv(SocketDirEnv))
+	if dir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return dir
+}
+
 // ClaudeSocketDirs returns the directories Claude Code binds peer sockets in:
 // /tmp/cc-socks, and on Linux $XDG_RUNTIME_DIR/cc-socks or the default
 // /run/user/<uid>/cc-socks, matching Claude Code's own default namespaces.
+// SocketDirEnv replaces all of them.
 func ClaudeSocketDirs() []string {
+	if dir := socketDirOverride(); dir != "" {
+		return []string{dir}
+	}
 	return claudeSocketDirsFor(runtime.GOOS, os.Getenv("XDG_RUNTIME_DIR"), os.Getuid())
 }
 
 func claudeSocketDirsFor(goos, runtimeDir string, uid int) []string {
-	dirs := []string{DefaultSocketDir}
+	dirs := []string{defaultSocketDir}
 	if goos != "linux" {
 		return dirs
 	}
@@ -160,7 +189,7 @@ func claudeSocketDirsFor(goos, runtimeDir string, uid int) []string {
 
 func validateTargetSocket(dir, target string) error {
 	if dir == "" {
-		dir = defaultSocketDir
+		dir = SocketDir()
 	}
 	cleanDir, _ := filepath.Abs(dir)
 	cleanTarget, _ := filepath.Abs(target)
