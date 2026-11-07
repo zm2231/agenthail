@@ -49,11 +49,14 @@ func newLimitFixture(t *testing.T, ids ...string) *limitFixture {
 	return f
 }
 
-func (f *daemonSurface) UsageLimitTranscript(session *surface.Session) string {
-	if session.Transcript != "" {
-		return session.Transcript
+func (f *daemonSurface) UsageLimitTranscripts() func(*surface.Session) string {
+	f.listings.Add(1)
+	return func(session *surface.Session) string {
+		if session.Transcript != "" {
+			return session.Transcript
+		}
+		return f.transcripts[session.ID]
 	}
-	return f.transcripts[session.ID]
 }
 
 func (f *daemonSurface) ReadUsageLimit(_ context.Context, session *surface.Session, _ string) (surface.UsageLimitEvidence, error) {
@@ -565,5 +568,20 @@ func TestTheNextPresencePassRepairsAStopPublishedBeforeACancel(t *testing.T) {
 	f.d.publishCatalogPresence()
 	if stop := latest(); stop == nil || stop.State != registry.LimitResumeCanceled {
 		t.Fatalf("the presence pass left the stale stop: %+v", stop)
+	}
+}
+
+func TestALimitSweepListsTranscriptsOnceForAllItsSessions(t *testing.T) {
+	f := newLimitFixture(t, "first", "second", "third")
+	at := time.Now().Add(-time.Minute)
+	for _, id := range []string{"first", "second", "third"} {
+		f.observe(id, at, &surface.TurnObservation{Status: surface.StatusIdle, SettledAt: at})
+	}
+	f.pass(time.Now())
+	if reads := f.fake.limitReads.Load(); reads != 3 {
+		t.Fatalf("read %d sessions' limits, want all 3", reads)
+	}
+	if listings := f.fake.listings.Load(); listings != 1 {
+		t.Fatalf("listed transcripts %d times in one sweep", listings)
 	}
 }
