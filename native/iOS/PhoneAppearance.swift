@@ -307,6 +307,12 @@ final class PhoneAppearance: ObservableObject {
         )
     }
 
+    func solidPaneColor(dark: Bool, target: Float) -> Color {
+        guard active else { return Color(uiColor: .systemBackground) }
+        let tint = spec(Key(surface: .transcript, size: .zero, scale: 1, dark: dark, solid: true, target: target)).reachablePaneTint
+        return Color(.sRGB, red: Double(tint.0), green: Double(tint.1), blue: Double(tint.2))
+    }
+
     private func wallpaperSpec(dark: Bool) -> BackdropSpec.Wallpaper? {
         func rgb(_ c: UIConfig.RGBColor) -> BackdropRGB { BackdropRGB(Float(c.red), Float(c.green), Float(c.blue)) }
         switch config.background(dark: dark) {
@@ -402,13 +408,16 @@ private struct PhoneBackdropBody<Content: View>: View {
         let rendered = appearance.active ? appearance.rendered[key(surface)] : nil
         let layered = appearance.active && surface == .transcript ? appearance.layered[key(surface)] : nil
         let cards = appearance.active && surface == .list ? CardBackdrop(image: appearance.rendered[key(.cards)], frame: frame) : nil
+        let shown = key(surface)
+        let ground = surface == .transcript && shown.solid ? appearance.solidPaneColor(dark: shown.dark, target: shown.target)
+            : Color(uiColor: surface == .list && !appearance.active ? .systemGroupedBackground : .systemBackground)
         content
             .environment(\.cardBackdrop, cards)
             .environment(\.backdropKey, key(surface))
             .environment(\.transcriptScrim, surface == .transcript ? scrim : nil)
             .scrollContentBackground(appearance.active ? .hidden : .automatic)
             .background {
-                BackdropLayer(image: rendered?.image, grouped: surface == .list && !appearance.active, frame: $frame) {
+                BackdropLayer(image: rendered?.image, ground: ground, frame: $frame) {
                     if let layered { TranscriptBackdropLayer(layers: layered, scrim: scrim).transition(.opacity) }
                 }
             }
@@ -421,7 +430,7 @@ private struct PhoneBackdropBody<Content: View>: View {
 
 private struct BackdropLayer<Layered: View>: View {
     let image: CGImage?
-    let grouped: Bool
+    let ground: Color
     @Binding var frame: CGRect
     @ViewBuilder let layered: Layered
 
@@ -429,7 +438,7 @@ private struct BackdropLayer<Layered: View>: View {
         GeometryReader { proxy in
             let size = proxy.size
             ZStack {
-                Color(uiColor: grouped ? .systemGroupedBackground : .systemBackground)
+                ground
                 if let image {
                     Image(decorative: image, scale: CGFloat(image.width) / max(size.width, 1))
                         .resizable()

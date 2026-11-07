@@ -43,9 +43,8 @@ extension BackdropRenderer {
         }
         guard let open = analysis(sharp) else { return nil }
 
-        let roles = spec.roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }
-        let boundary = ScrimField.boundary(roles: roles, polarity: spec.polarity, target: spec.target)
-        let paneTint = ScrimField.reachable((spec.paneTint.x, spec.paneTint.y, spec.paneTint.z), polarity: spec.polarity, boundary: boundary)
+        let boundary = spec.textBoundary
+        let paneTint = spec.reachablePaneTint
         var scrimMode = spec.scrimTint
         if case .color(let r, let g, let b) = scrimMode {
             let moved = ScrimField.reachable((r, g, b), polarity: spec.polarity, boundary: boundary)

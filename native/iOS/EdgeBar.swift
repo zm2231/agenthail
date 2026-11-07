@@ -15,7 +15,9 @@ private struct EdgeBar<Bar: View>: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
             content
-                .safeAreaBar(edge: edge, spacing: spacing) { bar }
+                .safeAreaBar(edge: edge, spacing: spacing) {
+                    if edge == .top { bar.solidTopBarGround() } else { bar }
+                }
                 .scrollEdgeEffectStyle(edge == .top ? .hard : .soft, for: edge == .top ? .top : .bottom)
         } else {
             content.safeAreaInset(edge: edge, spacing: spacing) {
