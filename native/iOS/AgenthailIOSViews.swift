@@ -1324,13 +1324,13 @@ struct IOSTimelineRow: View {
                     }
                     .padding(.leading, ToolLineLabel.indent)
                 } else if item.truncated { ShortenedNote().padding(.leading, ToolLineLabel.indent) }
-				let retainedBody = rows.current(loadedBody) ?? rows.body(item.id)
+				let retainedBody = rows.current(loadedBody) ?? rows.body(TranscriptRowID.item(item.id))
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
 					Button("Load retained body") {
 						Task {
 							guard let body = await bodyLoader(item) else { return }
 							loadedBody = rows.choice(body)
-							rows.set(item.id, body: body)
+							rows.set(TranscriptRowID.item(item.id), body: body)
 						}
 					}.font(.caption)
 				} else if let retainedBody {

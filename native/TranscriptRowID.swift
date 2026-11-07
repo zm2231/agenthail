@@ -6,5 +6,6 @@ enum TranscriptRowID {
     static func fold(_ first: String) -> String { "f:" + first }
     static func queue(_ listID: String) -> String { "q:" + listID }
     static func failedAttachment(_ item: String) -> String { "a:" + item }
+    static func output(_ result: String) -> String { "o:" + result }
     static func file(_ owner: String, path: String) -> String { "file:\(owner.utf8.count):" + owner + path }
 }

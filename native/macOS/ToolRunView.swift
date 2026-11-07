@@ -290,7 +290,7 @@ struct ToolOutputBlock: View {
         let failed = ToolRunSummary.isFailure(result)
         let preview = ToolRunSummary.outputPreview(result.text)
         let lines = result.text.split(separator: "\n", omittingEmptySubsequences: false)
-        let shown = rows.current(shownLines) ?? rows.count("output-" + result.id) ?? 0
+        let shown = rows.current(shownLines) ?? rows.count(TranscriptRowID.output(result.id)) ?? 0
         VStack(alignment: .leading, spacing: DesktopSpace.xs) {
             HStack(spacing: 10) {
                 Text(failed ? "Error output" : "Output")
@@ -350,7 +350,7 @@ struct ToolOutputBlock: View {
 
     private func set(_ count: Int) {
         shownLines = rows.choice(count)
-        rows.set("output-" + result.id, count: count)
+        rows.set(TranscriptRowID.output(result.id), count: count)
     }
 }
 
