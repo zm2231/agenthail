@@ -385,6 +385,9 @@ func TestABurstOfCapturesReachesTheOwnerWithOneMoreSyncAtMost(t *testing.T) {
 	for i := 1; i <= 20; i++ {
 		captureOf(t, mac, "lead", fmt.Sprintf("p-%d", i), fmt.Sprintf("words %d", i))
 	}
+	if pending := len(host.ledgerWake); pending != 1 {
+		t.Fatalf("20 captures during one sync round left %d wakes pending; they should leave one", pending)
+	}
 	release()
 	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	// A round started by a wake queued behind every earlier one finds them all
