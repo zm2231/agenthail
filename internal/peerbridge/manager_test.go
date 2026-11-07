@@ -948,3 +948,65 @@ func TestChildCleanupKeepsEverySocketWhileItsOwnerIsAlive(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureSaysWhyTheManagerWasNotReached(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "ah-manager-unreached-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	if err := os.MkdirAll(filepath.Dir(managerPath(home)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	err = Ensure(context.Background(), home, "source")
+	if !surface.IsDeliveryUnavailable(err) || !strings.Contains(err.Error(), "requires the daemon") {
+		t.Fatalf("no manager: %v", err)
+	}
+	listener, err := net.Listen("unix", managerPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	spent, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err = Ensure(spent, home, "source")
+	if !surface.IsDeliveryUnavailable(err) || !strings.Contains(err.Error(), "ran out of time before it reached the Claude peer manager") || strings.Contains(err.Error(), "requires the daemon") {
+		t.Fatalf("send out of time with the manager listening: %v", err)
+	}
+}
+
+func TestEnsureDoesNotBlameTheDaemonWhenTheManagerQueueIsFull(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "ah-manager-full-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	if err := os.MkdirAll(filepath.Dir(managerPath(home)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(listener)
+	if err := syscall.Bind(listener, &syscall.SockaddrUnix{Name: managerPath(home)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(listener, 1); err != nil {
+		t.Fatal(err)
+	}
+	for queued := 0; ; queued++ {
+		if queued == 256 {
+			t.Fatal("the listener never filled its queue")
+		}
+		conn, dialErr := net.Dial("unix", managerPath(home))
+		if dialErr != nil {
+			break
+		}
+		defer conn.Close()
+	}
+	err = Ensure(context.Background(), home, "source")
+	if !surface.IsDeliveryUnavailable(err) || !strings.Contains(err.Error(), "not accepting connections as fast as they arrive") {
+		t.Fatalf("full manager queue: %v", err)
+	}
+}
