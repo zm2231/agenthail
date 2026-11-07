@@ -29,6 +29,13 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 2. Install `jq` and `xcodegen` with Homebrew.
 3. Configure the runner with `PATH` including `/opt/homebrew/bin`, then `./svc.sh install && ./svc.sh start`.
 4. Copy `scripts/ci-runner-job-started.sh` to `~/actions-runner-agenthail-hooks/job-started.sh` and add `ACTIONS_RUNNER_HOOK_JOB_STARTED=<that path>` to the runner's `.env`. Restart the runner service.
+5. Turn off crash reporter dialogs for the runner's user: `defaults write com.apple.CrashReporter DialogType none`. See [Crash reporter dialogs](#crash-reporter-dialogs).
+
+## Crash reporter dialogs
+
+When an app crashes, macOS can show a crash dialog, and the crash reporter waits for it to be closed. Nobody closes it on a runner. At the end of every UI test the test runner waits for the crash reporter, about 300 seconds each time, so a test that takes seconds takes five minutes and the `ios` job runs into its timeout. Setting the user's `com.apple.CrashReporter` `DialogType` to `none` turns the dialogs off.
+
+The self-hosted `ios` job checks this setting first and fails with a message naming the fix unless it reads `none`. The test step runs through `scripts/ios-test-stall-guard.sh`, which stops the tests and names this cause once three tests have each taken more than 200 seconds. `scripts/test-ios-test-stall-guard.sh` checks the guard against a stub test command.
 
 ## Job isolation
 
