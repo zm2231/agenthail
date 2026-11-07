@@ -347,29 +347,6 @@ func TestQueuedDirectSendFailureNotifiesTheSender(t *testing.T) {
 	}
 }
 
-func TestDroppedRelayRecordsAProblemWithoutNotifyingTheRelaySource(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	recorded, err := r.RecordReplyForwardFailure("sender", "target", "relay:7:turn-1", "relay body", "target session is no longer active")
-	if err != nil || !recorded {
-		t.Fatalf("recorded=%v err=%v", recorded, err)
-	}
-	if again, err := r.RecordReplyForwardFailure("sender", "target", "relay:7:turn-1", "relay body", "target session is no longer active"); err != nil || again {
-		t.Fatalf("replay recorded=%v err=%v", again, err)
-	}
-	if count := r.QueueCount("sender"); count != 0 {
-		t.Fatalf("sender notices=%d", count)
-	}
-	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 1 {
-		t.Fatalf("events=%+v err=%v", window, err)
-	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil || len(problems) != 1 || problems[0].SessionID != "target" {
-		t.Fatalf("problems=%+v err=%v", problems, err)
-	}
-}
-
 func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)

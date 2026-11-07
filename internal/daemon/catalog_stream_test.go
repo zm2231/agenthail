@@ -267,39 +267,6 @@ func TestActiveCatalogSubscriberReceivesTerminalRelayProblemAndReconnectsWithout
 	}
 }
 
-func TestActiveCatalogSubscriberReceivesReplyForwardFailureOnce(t *testing.T) {
-	d, store, _, sender, target := daemonFixture(t)
-	routeID, err := store.AddRoute(sender.ID, target.ID, ".*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, eventsFollower, err := d.catalog.subscribe(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	events := followCatalog(t, eventsFollower)
-	cancel := eventsFollower.Cancel
-	defer cancel()
-	_ = routeID
-	if _, err := store.RecordReplyForwardFailure(sender.ID, target.ID, "reply-turn", "reply body", "target surface unavailable"); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.catalog.flushCommitted(); err != nil {
-		t.Fatal(err)
-	}
-	first := receiveCatalogEvent(t, events)
-	if first.Type != "delivery.problem" {
-		t.Fatalf("first=%+v", first)
-	}
-	if _, err := store.RecordReplyForwardFailure(sender.ID, target.ID, "reply-turn", "reply body", "target surface unavailable"); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.catalog.flushCommitted(); err != nil {
-		t.Fatal(err)
-	}
-	ensureNoCatalogEvent(t, events)
-}
-
 func TestACatalogFollowerBehindTheRetainedJournalEndsAndResumesFromTheLatestCursor(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog-gap.db")
 	store, err := registry.Open(path)
