@@ -3,10 +3,16 @@ import CoreGraphics
 struct TranscriptSlot: Identifiable, Equatable {
     let block: TranscriptBlock
     let gap: CGFloat
+    let turn: String
     var id: String { block.id }
 
     static func slots(_ blocks: [TranscriptBlock]) -> [TranscriptSlot] {
-        blocks.indices.map { TranscriptSlot(block: blocks[$0], gap: TranscriptBlock.gap(above: blocks[$0].kind, after: $0 > 0 ? blocks[$0 - 1].kind : nil)) }
+        var turn = blocks.first?.id ?? ""
+        return blocks.indices.map { index in
+            let block = blocks[index]
+            if block.kind.isMessageIn { turn = block.id }
+            return TranscriptSlot(block: block, gap: TranscriptBlock.gap(above: block.kind, after: index > 0 ? blocks[index - 1].kind : nil), turn: turn)
+        }
     }
 }
 

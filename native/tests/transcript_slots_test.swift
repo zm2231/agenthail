@@ -25,6 +25,10 @@ struct TranscriptSlotsTest {
         let older = TranscriptSlot.slots([TranscriptBlock(id: "u", kind: .user("q", files: []))] + blocks(["a"]))
         expect(older[1].gap == TranscriptBlock.gap(above: .assistant("a"), after: .user("q", files: [])), "a row's gap follows the row above it")
         expect(older[0].gap == 0, "the first row has no gap")
+
+        let peer = TranscriptBlock(id: "p", kind: .agentFold(AgentFoldEntry(label: "1 message", senders: "builder", members: [])))
+        let turns = TranscriptSlot.slots(blocks(["a"]) + [TranscriptBlock(id: "u", kind: .user("q", files: []))] + blocks(["b", "c"]) + [peer] + blocks(["d"]))
+        expect(turns.map(\.turn) == ["b0", "u", "u", "u", "p", "p"], "each row belongs to the turn its latest incoming message opened, got \(turns.map(\.turn))")
     }
 
     static func expect(_ condition: Bool, _ message: String) {

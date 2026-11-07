@@ -893,7 +893,7 @@ struct TranscriptView: View {
     }
 
     private func blockRow(_ slot: TranscriptSlot, canResend: Bool) -> some View {
-        TranscriptBlockView(block: slot.block, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
+        TranscriptBlockView(block: slot.block, turn: slot.turn, onEdit: TranscriptRowAction(canResend ? { resend($0) } : nil))
             .equatable()
             .padding(.top, slot.gap)
     }
@@ -946,6 +946,7 @@ struct TranscriptView: View {
                         if send.failure != nil { pane.model.discardSend(send, in: session.id) }
                         resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { pane.model.retrySend(send, in: session.id) })
+                    .transcriptScrimRow(turn: send.id.description)
                     .padding(.top, TranscriptBlock.gap(above: .user(send.text, files: []), after: index > 0 ? .user(sends[index - 1].text, files: []) : blocks.last?.kind))
                 }
                 if session.isWaitingOnBackground, let background = session.backgroundTasks {
