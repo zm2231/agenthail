@@ -219,7 +219,9 @@ jobs:
         run: scripts/test-fetch-node.sh
       - name: Race tests
         # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: |
+          export TMPDIR="$(mktemp -d /dev/shm/agenthail-test.XXXXXX)"
+          go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
 
   linux-archives:
     runs-on: ubuntu-latest
@@ -332,3 +334,40 @@ jobs:
           scripts/test-mac-window-layout.sh "$RUNNER_TEMP/layout-pkg/Agenthail-component.pkg/Payload/Applications/Agenthail.app"
       - name: Verify install, upgrade, and uninstall
         run: scripts/test-pkg-install.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+
+  race-tmpfs-measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/agenthail-build/playwright
+          key: agenthail-playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('browser-host/package-lock.json') }}
+      - name: Setup
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm ci --prefix browser-host --omit=optional --ignore-scripts --no-audit --no-fund
+          scripts/fetch-node.sh
+          go test -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -run XXX ./... >/dev/null
+          df -h /dev/shm "$RUNNER_TEMP"; nproc
+      - name: Disk then tmpfs
+        run: |
+          flags=(-race "-gcflags=modernc.org/...=-d=checkptr=0 -race=false" -count=1 -timeout 25m)
+          for round in 1 2; do
+            for where in disk shm; do
+              if [ "$where" = shm ]; then dir="$(mktemp -d /dev/shm/m.XXXXXX)"; else dir="$(mktemp -d "$RUNNER_TEMP/m.XXXXXX")"; fi
+              start=$(date +%s)
+              TMPDIR="$dir" go test ./... "${flags[@]}" > "$RUNNER_TEMP/$where-$round.log" 2>&1 || echo "FAILED $where $round"
+              echo "round $round $where wall=$(( $(date +%s) - start ))s"
+              grep -E '^ok .*(internal/daemon|surfaces|internal/registry|internal/cli)\s' "$RUNNER_TEMP/$where-$round.log"
+              rm -rf "$dir"
+            done
+          done
