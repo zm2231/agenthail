@@ -89,8 +89,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                         settle { $0.scrollTo(edge: .bottom) }
                     } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        if !following || old.contentOffset != new.contentOffset { layout.readerGap = TranscriptEnd(new).distance }
-                        following = Self.atBottom(new)
+                        let atEnd = Self.atBottom(new)
+                        if atEnd, !following || old.contentOffset != new.contentOffset { layout.readerGap = TranscriptEnd(new).distance }
+                        following = atEnd
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
@@ -113,6 +114,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 position.scrollTo(y: top.wrappedValue)
             }
             .onDisappear { layout.cancelCheck() }
+            .onChange(of: following) { _, now in
+                if !now { layout.readerGap = 0 }
+            }
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.releaseHold()
