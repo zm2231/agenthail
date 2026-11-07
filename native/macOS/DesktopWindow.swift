@@ -1008,7 +1008,8 @@ struct TranscriptView: View {
             return true
         } action: { _, _ in }
         .onChange(of: TailInputs(session: session.id, newest: ids.last, count: ids.count), initial: true) {
-            tailLayout.tail.update(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible, following: following)
+            tailLayout.newest = ids.last
+            tailLayout.tail.update(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible, following: following) { selectionHold.held(over: $0) }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
@@ -1110,7 +1111,7 @@ struct TranscriptView: View {
     }
 
     private func jumpToLatest() {
-        scrollToLatest($position, following: $following)
+        scrollToLatest($position, following: $following, latest: tailLayout.newest)
     }
 }
 
