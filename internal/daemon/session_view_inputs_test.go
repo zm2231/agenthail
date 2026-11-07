@@ -4,9 +4,15 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const (
@@ -36,30 +42,84 @@ var notSessionViewInputs = map[string]string{
 
 func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T) {
 	f := newViewFixture(t)
-	db, err := sql.Open("sqlite", f.reg.Path()+"?_pragma=busy_timeout(15000)")
+	f.populate(rand.New(rand.NewSource(20261107)), 300, func(int, string) {})
+	f.fill()
+	db := openSweepDB(t, f.reg.Path())
+	tables := queryStrings(t, db, `SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	for _, table := range tables {
+		if _, listed := notSessionViewInputs[table]; !listed && len(queryStrings(t, db, fmt.Sprintf(`SELECT 1 FROM %q LIMIT 1`, table))) == 0 {
+			t.Errorf("%s has no rows in the view fixture: add a write that fills it, or list it in notSessionViewInputs with why no session view reads it", table)
+		}
+	}
+	// Each shard sweeps its share of the rows on its own copy of the one
+	// fixture, since the fixture's ids and times differ from run to run.
+	var busy, logged, moved int
+	if err := db.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logged, &moved); err != nil || busy != 0 {
+		t.Fatalf("checkpoint the fixture's registry before copying it: busy=%d err=%v", busy, err)
+	}
+	stored, err := os.ReadFile(f.reg.Path())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	baseline := sessionViewSweepRender(t, f, true)
+	for shard := range sessionViewSweepShards {
+		path := filepath.Join(t.TempDir(), "registry.db")
+		if err := os.WriteFile(path, stored, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Run(fmt.Sprint("shard ", shard), func(t *testing.T) {
+			t.Parallel()
+			reg, err := registry.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { reg.Close() })
+			copied := &viewFixture{d: newTestDaemon(t, reg, f.d.Surfaces), reg: reg, ctx: f.ctx, clock: f.clock}
+			copied.d.presentation.clock = func() time.Time { return copied.clock }
+			copied.d.presentation.epoch = f.d.presentation.epoch
+			copied.d.setHostIdentity(f.d.hostIdentity())
+			if sessionViewSweepRender(t, copied, true) != baseline {
+				t.Fatal("a copy of the fixture's registry renders different session views than the fixture")
+			}
+			sweepSessionViewShard(t, copied, shard, tables)
+		})
+	}
+}
+
+// sessionViewSweepShards is how many copies of the fixture the sweep runs on
+// at once; each takes every shard-th row.
+const sessionViewSweepShards = 4
+
+var sessionViewSweepRequests = []sessionViewRequest{{Scope: "all", Limit: 200, Members: true}, {Scope: "current", Limit: 200, Members: true}, {Scope: "archived", Limit: 200, Members: true}}
+
+func sessionViewSweepRender(t *testing.T, f *viewFixture, uncached bool) string {
+	var out strings.Builder
+	for _, request := range sessionViewSweepRequests {
+		encoded, _ := f.read(t, request, uncached)
+		out.WriteString(encoded)
+	}
+	return out.String()
+}
+
+func openSweepDB(t *testing.T, path string) *sql.DB {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(1)
-	tables := queryStrings(t, db, `SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	return db
+}
+
+func sweepSessionViewShard(t *testing.T, f *viewFixture, shard int, tables []string) {
+	db := openSweepDB(t, f.reg.Path())
 	// This connection leaves foreign keys off, so deleting a parent here keeps
 	// children the registry's cascade would remove; their own deletes are swept.
 	cascades := map[string]bool{}
 	for _, parent := range queryStrings(t, db, `SELECT DISTINCT f."table" FROM sqlite_schema m, pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f.on_delete='CASCADE'`) {
 		cascades[parent] = true
 	}
-	f.populate(rand.New(rand.NewSource(20261107)), 300, func(int, string) {})
-	f.fill()
-	requests := []sessionViewRequest{{Scope: "all", Limit: 200, Members: true}, {Scope: "current", Limit: 200, Members: true}, {Scope: "archived", Limit: 200, Members: true}}
-	read := func(uncached bool) string {
-		var out strings.Builder
-		for _, request := range requests {
-			encoded, _ := f.read(t, request, uncached)
-			out.WriteString(encoded)
-		}
-		return out.String()
-	}
+	read := func(uncached bool) string { return sessionViewSweepRender(t, f, uncached) }
 	render := func() string { return read(true) }
 	served := func(change string, stored string) {
 		if read(false) != stored {
@@ -70,29 +130,56 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 		key, err := f.reg.ReadCatalogPresentationKey(f.ctx)
 		return fmt.Sprint(key, err)
 	}
-	checked := 0
+	checked, unit := 0, -1
 	// A restore appends to catalog_events like any write, so the log position
-	// and the revision that hashes it move on; the rest must come back.
+	// and the revision that hashes it move on, and so do the counters that
+	// version the stored data. Anything else a trigger moved, such as a row a
+	// changed parent unretired, is written back as the sweep began with it, so
+	// every step starts from the same stored data and the same view.
 	logPosition := regexp.MustCompile(`"revision":"[0-9a-f]+"|"catalogSeq":[0-9]+`)
-	baseline, restored := "", "filling the fixture"
-	unchanged := func(before string) {
-		served(restored, before)
-		before = logPosition.ReplaceAllString(before, "")
-		if baseline == "" {
-			baseline = before
-		} else if before != baseline {
-			t.Errorf("after %s, the stored data no longer gives the view it gave before: restore the state a trigger moved", restored)
-			baseline = before
+	masked := func(view string) string { return logPosition.ReplaceAllString(view, "") }
+	columnsOf, quotedRow := map[string]string{}, map[string]string{}
+	state := func() map[string][]string {
+		out := map[string][]string{}
+		for _, table := range tables {
+			if movesOnEveryWrite[table] {
+				continue
+			}
+			if columnsOf[table] == "" {
+				names := queryStrings(t, db, fmt.Sprintf(`SELECT '"'||replace(name,'"','""')||'"' FROM pragma_table_xinfo(%s) WHERE hidden=0`, sqlQuote(table)))
+				columnsOf[table] = strings.Join(names, ",")
+				quotedRow[table] = "quote(" + strings.Join(names, ")||','||quote(") + ")"
+			}
+			rows := queryStrings(t, db, fmt.Sprintf(`SELECT %s FROM %q`, quotedRow[table], table))
+			slices.Sort(rows)
+			out[table] = rows
+		}
+		return out
+	}
+	baseline, settled, restored := masked(render()), state(), "filling the fixture"
+	unchanged := func() {
+		for table, rows := range state() {
+			if slices.Equal(rows, settled[table]) {
+				continue
+			}
+			mustExec(t, db, fmt.Sprintf(`DELETE FROM %q`, table))
+			for _, row := range settled[table] {
+				mustExec(t, db, fmt.Sprintf(`INSERT INTO %q(%s) VALUES(%s)`, table, columnsOf[table], row))
+			}
+		}
+		for table, rows := range state() {
+			if !slices.Equal(rows, settled[table]) {
+				t.Fatalf("after %s, %s could not be written back as the sweep began with it", restored, table)
+			}
+		}
+		if masked(read(false)) != baseline {
+			t.Errorf("after %s, a session view served through the caches differs from one built from the stored data", restored)
 		}
 	}
 	for _, table := range tables {
 		rowKey, keepKey, restoreColumns, restoreValues := sessionViewRowKey(t, db, table)
 		where := ` WHERE ` + rowKey + `=?`
-		keys := queryStrings(t, db, fmt.Sprintf(`SELECT %[2]s FROM %[1]q WHERE %[2]s IN (SELECT %[2]s FROM %[1]q ORDER BY %[2]s LIMIT 5) OR %[2]s IN (SELECT %[2]s FROM %[1]q ORDER BY %[2]s DESC LIMIT 5) ORDER BY %[2]s`, table, rowKey))
-		if len(keys) == 0 {
-			if _, listed := notSessionViewInputs[table]; !listed {
-				t.Errorf("%s has no rows in the view fixture: add a write that fills it, or list it in notSessionViewInputs with why no session view reads it", table)
-			}
+		if len(queryStrings(t, db, fmt.Sprintf(`SELECT 1 FROM %q LIMIT 1`, table))) == 0 {
 			continue
 		}
 		// A key is swept where a write can rewrite it: not the rowid that
@@ -109,7 +196,12 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 			values = append(values, fmt.Sprintf("%q", column))
 		}
 		quoted := strings.Join(values, ",")
+		keys, perturbed := sweepRows(t, db, table, rowKey, columns, strings.Join(stored, ","))
 		for _, rowKeyValue := range keys {
+			unit++
+			if unit%sessionViewSweepShards != shard {
+				continue
+			}
 			if len(identical) > 0 {
 				from := key()
 				mustExec(t, db, fmt.Sprintf(`UPDATE %q SET %s`, table, strings.Join(identical, ","))+where, rowKeyValue)
@@ -119,8 +211,8 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 			}
 			list := strings.Join(stored, ",")
 			mustExec(t, db, fmt.Sprintf(`CREATE TEMP TABLE kept AS SELECT %s%s FROM %q`, keepKey, list, table)+where, rowKeyValue)
-			before, from := render(), key()
-			unchanged(before)
+			from := key()
+			unchanged()
 			mustExec(t, db, fmt.Sprintf(`DELETE FROM %q`, table)+where, rowKeyValue)
 			after, to := render(), key()
 			if !versionCounters[table] && !cascades[table] {
@@ -130,13 +222,13 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 			mustExec(t, db, `DROP TABLE temp.kept`)
 			restored = "deleting and restoring a " + table + " row"
 			checked++
-			if after != before && to == from {
+			if masked(after) != baseline && to == from {
 				t.Errorf("deleting a %s row changes a session view but not its cache key", table)
 			}
-			for _, column := range columns {
+			for _, column := range perturbed[rowKeyValue] {
 				mustExec(t, db, fmt.Sprintf(`CREATE TEMP TABLE kept AS SELECT %s FROM %q`, quoted, table)+where, rowKeyValue)
-				before, from := render(), key()
-				unchanged(before)
+				from := key()
+				unchanged()
 				if _, err := db.Exec(fmt.Sprintf(`UPDATE %q SET %[2]q=`+perturbedValue, table, column)+movedWith[table+"."+column]+where, rowKeyValue); err != nil {
 					mustExec(t, db, `DROP TABLE temp.kept`)
 					continue
@@ -147,7 +239,7 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 				restored = "changing and restoring " + table + "." + column
 				mustExec(t, db, `DROP TABLE temp.kept`)
 				checked++
-				if after != before && to == from {
+				if masked(after) != baseline && to == from {
 					t.Errorf("changing %s.%s changes a session view but not its cache key", table, column)
 				}
 			}
@@ -156,11 +248,68 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 	t.Logf("checked %d values", checked)
 }
 
+// sweepValues is how many distinct values a column may have for the sweep to
+// take one row holding each; a column with more is changed at its least and
+// greatest value and at an empty one.
+const sweepValues = 4
+
+// sweepRows picks, for each column, the rows to change it on. A row holding one
+// of a few-valued column's values has every column changed, since what such a
+// row holds decides what else shows, as a parent does for a subagent's
+// nickname. Among rows holding the same value it prefers by shape, the
+// few-valued columns' values and which of the others are empty, so the pick
+// does not depend on the order the fixture's writes inserted rows in.
+func sweepRows(t *testing.T, db *sql.DB, table, rowKey string, columns []string, content string) ([]string, map[string][]string) {
+	t.Helper()
+	few := map[string]bool{}
+	var shape []string
+	for _, column := range columns {
+		var distinct int
+		if err := db.QueryRow(fmt.Sprintf(`SELECT COUNT(DISTINCT %q) FROM %q`, column, table)).Scan(&distinct); err != nil {
+			t.Fatal(err)
+		}
+		few[column] = distinct <= sweepValues
+		if few[column] {
+			shape = append(shape, fmt.Sprintf(`%q`, column))
+		} else {
+			shape = append(shape, fmt.Sprintf(`(%[1]q IS NULL OR %[1]q IN ('',0,x''))`, column))
+		}
+	}
+	order := strings.Join(append(shape, content), ",")
+	perturbed := map[string][]string{}
+	change := func(query string, changed []string) {
+		for _, key := range queryStrings(t, db, query) {
+			for _, column := range changed {
+				if !slices.Contains(perturbed[key], column) {
+					perturbed[key] = append(perturbed[key], column)
+				}
+			}
+		}
+	}
+	for _, column := range columns {
+		if few[column] {
+			change(fmt.Sprintf(`SELECT k FROM (SELECT %[3]s AS k,ROW_NUMBER() OVER (PARTITION BY %[2]q ORDER BY %[4]s) AS n FROM %[1]q) WHERE n=1`, table, column, rowKey, order), columns)
+			continue
+		}
+		for _, end := range []string{fmt.Sprintf(`%q,`, column), fmt.Sprintf(`%q DESC,`, column)} {
+			change(fmt.Sprintf(`SELECT %s FROM %q ORDER BY %s%s LIMIT 1`, rowKey, table, end, order), []string{column})
+		}
+		change(fmt.Sprintf(`SELECT %[3]s FROM %[1]q WHERE %[2]q IS NULL OR %[2]q IN ('',0,x'') ORDER BY %[4]s LIMIT 1`, table, column, rowKey, order), []string{column})
+	}
+	keys := queryStrings(t, db, fmt.Sprintf(`SELECT %s FROM %q ORDER BY %s`, rowKey, table, order))
+	first := keys[0]
+	return slices.DeleteFunc(keys, func(key string) bool { _, picked := perturbed[key]; return !picked && key != first }), perturbed
+}
+
 // movedWith names the columns every writer changes together with a column, so
 // the sweep does not build a state no write produces.
 var movedWith = map[string]string{
 	"catalog_sessions.projection_fingerprint": ",projection_generation=projection_generation+1",
 }
+
+// movesOnEveryWrite are the catalog's event log and the counters that version
+// the stored data, which a restore moves on like any other write.
+var movesOnEveryWrite = map[string]bool{"catalog_events": true, "catalog_presentation_version": true, "catalog_retired_version": true}
 
 // versionCounters are single-row counters that are only ever incremented; a
 // cache keyed on one cannot be served once its row is gone, and no write

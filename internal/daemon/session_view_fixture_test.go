@@ -411,6 +411,16 @@ func newViewFixture(t *testing.T) *viewFixture {
 		if _, err := reg.LinkPR(registry.SessionPR{SessionID: "s3", Repo: "github.com/acme/app", Number: 9, URL: "https://github.com/acme/app/pull/9", Source: registry.PRSourceBranch, Title: "filled"}, false, f.clock); err != nil {
 			t.Fatal(err)
 		}
+		// Two pull requests on one session put their order on view, and reads
+		// failing up to the limit put the failure count on view.
+		if _, err := reg.LinkPR(registry.SessionPR{SessionID: "s3", Repo: "github.com/acme/app", Number: 10, URL: "https://github.com/acme/app/pull/10", Source: registry.PRSourceAgent, Title: "second"}, false, f.clock.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		for range registry.PRReadFailureLimit {
+			if recorded, err := reg.RecordPRReadFailure("s3", "github.com/acme/app", 9, 0); err != nil || !recorded {
+				t.Fatalf("failed read of pull request 9 not recorded: %v", err)
+			}
+		}
 		if err := reg.SetAlias("filled", "s0"); err != nil {
 			t.Fatal(err)
 		}
