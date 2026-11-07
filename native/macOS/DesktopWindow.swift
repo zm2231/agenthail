@@ -994,6 +994,7 @@ struct TranscriptView: View {
             .frame(maxWidth: .infinity)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
             .background { TranscriptSelectionAnchor(hold: selectionHold) }
+            .background { TranscriptClipAnchor().frame(width: 0, height: 0) }
             .transcriptScrimContent()
             .transcriptScrimOrigin()
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
@@ -1012,7 +1013,7 @@ struct TranscriptView: View {
             tailLayout.tail.update(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible, following: following) { selectionHold.held(over: $0) }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
-        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, position: $position, following: $following)
+        .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, held: { selectionHold.held(over: [.infinite]) }, position: $position, following: $following)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height < geometry.containerSize.height * 1.5
         } action: { _, value in
