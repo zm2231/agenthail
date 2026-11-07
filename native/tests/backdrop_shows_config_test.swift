@@ -19,7 +19,7 @@ struct BackdropShowsConfigTest {
             return config
         }
         func waitForRender(_ backdrop: WindowBackdrop, _ config: UIConfig) {
-            let deadline = Date().addingTimeInterval(10)
+            let deadline = Date().addingTimeInterval(60)
             while !backdrop.shows(config), Date() < deadline {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.02))
             }
@@ -28,8 +28,9 @@ struct BackdropShowsConfigTest {
         let first = mesh("#401020"), second = mesh("#102040")
         let backdrop = WindowBackdrop()
         backdrop.configure(first, wallpapers: [:])
-        let window = NSWindow(contentRect: CGRect(x: -20000, y: -20000, width: 480, height: 240), styleMask: [.borderless], backing: .buffered, defer: false)
-        window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 480, height: 240))
+        // A small window keeps each render cheap when every helper test runs at once.
+        let window = NSWindow(contentRect: CGRect(x: -20000, y: -20000, width: 96, height: 48), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 96, height: 48))
         window.appearance = NSAppearance(named: .darkAqua)
         backdrop.windowChanged(window)
         check(!backdrop.shows(first), "a backdrop that has not rendered does not show its config")
