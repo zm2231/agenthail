@@ -106,7 +106,8 @@ fi
 # loads the previous service waits for that daemon as an install does.
 await_daemon() {
 	local wrapper="$1"
-	for _ in $(seq 1 900); do
+	local deadline=$((SECONDS + 180))
+	while [ "$SECONDS" -lt "$deadline" ]; do
 		case "$("$wrapper" daemon status 2>/dev/null || true)" in
 			*"daemon: running"*) return 0 ;;
 		esac
