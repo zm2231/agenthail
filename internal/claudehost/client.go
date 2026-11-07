@@ -349,6 +349,13 @@ func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) 
 			return session, nil
 		}
 	}
+	if IsCode(err, "held") {
+		// The Claude the refusal named has exited since, and its host has
+		// forgotten the conversation, so the current host may open it now.
+		var reopened Session
+		err = c.call(ctx, "open", request, &reopened)
+		return reopened, err
+	}
 	return out, err
 }
 
@@ -520,10 +527,11 @@ func (c Client) sessionCall(ctx context.Context, method string, params, out any)
 
 // onRetiring runs call on every retiring host at once and returns the answer
 // of the one that has the session, so a host that does not answer holds up
-// only a session it may run. When none has it, the answer is notOpen, the
-// current host's; a held answer is asked again, since the Claude it named may
-// have exited and its host forgotten the session after the current host gave
-// it.
+// only a session it may run. A retiring host that answers held does not run
+// the session either: it holds an orphan of an earlier host. When none has
+// it, the answer is notOpen, the current host's; a held answer is asked
+// again, since the Claude it named may have exited and its host forgotten the
+// session after the current host gave it.
 func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context.Context, Client) (json.RawMessage, error)) (json.RawMessage, error) {
 	retiring := c.Retiring()
 	ctx, cancel := context.WithCancel(ctx)
@@ -541,7 +549,7 @@ func (c Client) onRetiring(ctx context.Context, notOpen error, call func(context
 	}
 	for range retiring {
 		answer := <-answers
-		if IsCode(answer.err, "not_open") || errors.Is(answer.err, ErrNotRunning) {
+		if IsCode(answer.err, "not_open") || IsCode(answer.err, "held") || errors.Is(answer.err, ErrNotRunning) {
 			continue
 		}
 		return answer.result, answer.err
