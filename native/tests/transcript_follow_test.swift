@@ -72,7 +72,11 @@ struct Transcript: View {
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
-        .onChange(of: following) { feed.following = following }
+        .onChange(of: following) {
+            feed.following = following
+            seenGeometry.append(String(format: "%.3f following %@", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), following ? "on" : "off"))
+            if seenGeometry.count > 12 { seenGeometry.removeFirst() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
             scrollToLatest($position, following: $following)
         }
@@ -522,8 +526,10 @@ struct TranscriptFollowTest {
                 move(scroll, to: end - TranscriptFollow<String>.bottomSlack + 1)
                 expect(feed.following, "with \(size) a layout move inside the slack keeps following")
                 expectBottom(scroll, "with \(size) a followed transcript moved inside the slack returns to the end")
+                // SwiftUI undoes a clip move made before it finishes its own scroll.
+                spin(0.3)
                 move(scroll, to: end - TranscriptFollow<String>.bottomSlack - 1)
-                expect(!feed.following, "with \(size) a place just past the slack does not follow")
+                expect(!feed.following, "with \(size) a place just past the slack does not follow, \(Int(gap(scroll))) points short; \(geometry(scroll))")
             }
         }
         feed.header = 44
