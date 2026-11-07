@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -24,7 +25,7 @@ func BenchmarkStreamingReplyAppends(b *testing.B) {
 			if err := r.RegisterSession(session); err != nil {
 				b.Fatal(err)
 			}
-			source := &sessionSource{manager: newTestSourceManager(b, r), session: session, epoch: "bench", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "bench", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 			chunk := strings.Repeat("w", delta)
 			events := reply / delta
 			for turn := 0; b.Loop(); turn++ {
@@ -51,7 +52,7 @@ func BenchmarkStreamingReplyWire(b *testing.B) {
 			if err := r.RegisterSession(session); err != nil {
 				b.Fatal(err)
 			}
-			source := &sessionSource{manager: newTestSourceManager(b, r), session: session, epoch: "wire", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "wire", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
 			d := &Daemon{Registry: r}
 			chunk := strings.Repeat("w", delta)
 			events := reply / delta

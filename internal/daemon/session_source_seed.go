@@ -208,7 +208,9 @@ func (s *sessionSource) loadSeed() error {
 	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
 		return err
 	}
-	s.appendSeedItems(read.Items)
+	if err := s.appendSeedItems(read.Items); err != nil {
+		return err
+	}
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
 		return err
 	}

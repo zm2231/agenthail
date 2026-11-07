@@ -11,8 +11,14 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
+// appendSeedItems stops when the source stops, not at the read deadline: a
+// catch-up appends oldest first, so the next start finds the rows it reached
+// and goes on from there.
+func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) error {
 	for _, item := range items {
+		if err := s.ctx.Err(); err != nil {
+			return err
+		}
 		if item.ID == "" {
 			continue
 		}
@@ -22,6 +28,7 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 		}
 		s.append(event)
 	}
+	return nil
 }
 
 func seedEvent(kind surface.SurfaceKind, item surface.TimelineItem) surface.StreamEvent {

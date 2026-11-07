@@ -78,6 +78,9 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
 	restarted, err := s.manager.registry.RestartSessionJournal(s.session.ID, entries, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}, derivation, max(0, read.NextBefore))
 	if err != nil {
 		return err
@@ -208,6 +211,9 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 		}
 		entries = append(entries, entry)
 		entries = append(entries, following[item.ID]...)
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
 	}
 	replaced, err := s.manager.registry.ReplaceSessionJournal(s.session.ID, entries, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}, transcriptJournalDerivation)
 	if err != nil {
