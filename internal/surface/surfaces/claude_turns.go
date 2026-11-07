@@ -82,7 +82,7 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		}
 		t.closing = surface.ClaudeClosingTurn{}
 	}
-	if claudeRecordStartsTurn(record) {
+	if claudeRecordStartsTurn(record) && !(claudeRecordIsStopHookFeedback(record) && t.answeredWithoutEnd(t.current)) {
 		if t.answeredWithoutEnd(t.current) {
 			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount), "")
 		}
@@ -321,7 +321,9 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 }
 
 func newClaudeTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(claudeLineMayStartTurn, claudeRecordStartsTurn)
+	return newTurnStartSearch(claudeLineMayStartTurn, func(record map[string]any) bool {
+		return claudeRecordStartsTurn(record) && !claudeRecordIsStopHookFeedback(record)
+	})
 }
 
 func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*claudeTurnTracker, error) {

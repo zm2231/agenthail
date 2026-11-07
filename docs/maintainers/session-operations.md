@@ -83,7 +83,8 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   Claude's last reply in a turn is empty it writes no block, and the turn
   ends at the main thread's `stop_hook_summary` if the Stop hooks let Claude
   stop; a blocking Stop hook leaves its feedback in `hookErrors` and the turn
-  goes on. A turn Claude replied in that is still open when the next prompt
+  goes on, its "Stop hook feedback" record staying inside that turn rather
+  than starting another. A turn Claude replied in that is still open when the next prompt
   starts ends at that prompt, with its usage and compactions.
 - Codex compactions: a `compacted` record is one compaction. `preTokens` is the
   size of the request before it and `postTokens` the next `token_count` that is

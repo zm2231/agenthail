@@ -59,14 +59,15 @@ type claudeRecord struct {
 	} `json:"commandRun"`
 	Subtype               string `json:"subtype"`
 	IsSidechain           bool   `json:"isSidechain"`
+	IsMeta                bool   `json:"isMeta"`
 	PreventedContinuation bool   `json:"preventedContinuation"`
 	HookErrors            []any  `json:"hookErrors"`
 	Content               string `json:"content"`
-	Timestamp         string `json:"timestamp"`
-	IsAPIErrorMessage bool   `json:"isApiErrorMessage"`
-	Error             string `json:"error"`
-	APIError          string `json:"apiError"`
-	QuotaLimits       struct {
+	Timestamp             string `json:"timestamp"`
+	IsAPIErrorMessage     bool   `json:"isApiErrorMessage"`
+	Error                 string `json:"error"`
+	APIError              string `json:"apiError"`
+	QuotaLimits           struct {
 		ResetsAt float64 `json:"resetsAt"`
 	} `json:"quotaLimits"`
 	APIErrorParams struct {
@@ -250,6 +251,9 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		}
 		startedAt, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
 		if n := len(turns); n > 0 && !turns[n-1].Done && !turns[n-1].Interrupted && turns[n-1].MessageID != "" {
+			if record.IsMeta && isClaudeStopHookFeedback(strings.TrimSpace(text)) {
+				return turns
+			}
 			endClaudeTurn(&turns[n-1], turns[n-1].LastAt)
 		}
 		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text), StartedAt: startedAt})

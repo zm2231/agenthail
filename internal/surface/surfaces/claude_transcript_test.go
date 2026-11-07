@@ -496,7 +496,9 @@ func TestClaudeObserveDerivesTurnStateFromTranscript(t *testing.T) {
 {"type":"user","uuid":"u1","message":{"content":"work"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"text","text":"checking"},{"type":"tool_use","id":"tool1","name":"Bash","input":{}}]}}
 {"type":"user","uuid":"tool-result","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}
-{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":["fix the type errors before stopping"],"preventedContinuation":false}`,
+{"type":"user","uuid":"feedback","isMeta":true,"message":{"content":"Stop hook feedback:\nfix the type errors before stopping"}}
+{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":["fix the type errors before stopping"],"preventedContinuation":false}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"text","text":"fixing"},{"type":"tool_use","id":"tool2","name":"Bash","input":{}}]}}`,
 			session: surface.Session{PID: live, Status: surface.StatusBusy},
 			check: func(t *testing.T, o *surface.TurnObservation) {
 				if o.Status != surface.StatusBusy || o.CompletedTurnID != "" {

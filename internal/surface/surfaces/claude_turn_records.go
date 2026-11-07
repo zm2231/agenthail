@@ -60,6 +60,16 @@ func claudeStopHooksEndTurn(subtype string, sidechain, prevented bool, hookError
 	return subtype == "stop_hook_summary" && !sidechain && (prevented || hookErrors == 0)
 }
 
+func claudeRecordIsStopHookFeedback(record map[string]any) bool {
+	meta, _ := record["isMeta"].(bool)
+	message, _ := record["message"].(map[string]any)
+	return meta && str(record, "type") == "user" && isClaudeStopHookFeedback(transcriptText(message["content"]))
+}
+
+func isClaudeStopHookFeedback(text string) bool {
+	return strings.HasPrefix(text, "Stop hook feedback:")
+}
+
 func claudeRecordStopsAfterHooks(record map[string]any) bool {
 	if str(record, "type") != "system" {
 		return false
