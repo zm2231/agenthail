@@ -73,6 +73,7 @@ final class BackdropLayerView: NSView {
             transition.type = .fade
             transition.duration = 0.2
             box.add(transition, forKey: "crossfade")
+            TranscriptTrace.shared.record(.crossfade)
         }
         if self.anchor !== anchor {
             self.anchor?.remove(self)
@@ -177,6 +178,7 @@ final class BackdropLayerView: NSView {
         }
         let rows = ownsRows ? anchor?.rows.flatMap { $0.active ? $0 : nil } : nil
         let mask = anchor?.mask
+        if ownsRows { TranscriptTrace.shared.scrim(hidden: mask == nil && rows == nil, mask: mask != nil, rows: rows != nil) }
         guard mask != nil || rows != nil else {
             scrim.mask = nil
             scrim.isHidden = true
