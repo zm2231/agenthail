@@ -11,11 +11,16 @@ import (
 	"github.com/zm2231/agenthail/internal/proxyacct/cliproxyapi"
 )
 
-const (
-	proxyUsageTTL       = time.Minute
+const proxyUsageTTL = time.Minute
+
+var (
 	proxyRequestTimeout = 10 * time.Second
-	proxyKeyedTimeout   = proxyacct.KeyReadLimit + proxyRequestTimeout
+	proxyKeyReadLimit   = proxyacct.KeyReadLimit
 )
+
+func proxyKeyedTimeout() time.Duration {
+	return proxyKeyReadLimit + proxyRequestTimeout
+}
 
 type proxyUsageCache struct {
 	mu      sync.Mutex
@@ -93,7 +98,7 @@ func (c *proxyUsageCache) read(ctx context.Context, config proxyacct.Config, now
 		entry.accounts, entry.err = nil, entry.client.Health(health)
 		cancel()
 		if entry.err == nil {
-			keyed, cancel := context.WithTimeout(base, proxyKeyedTimeout)
+			keyed, cancel := context.WithTimeout(base, proxyKeyedTimeout())
 			entry.accounts, entry.err = entry.client.Accounts(keyed)
 			cancel()
 		}

@@ -8,10 +8,11 @@ import (
 )
 
 type Store struct {
-	db      *sql.DB
-	read    *sql.DB
-	cache   *boardCache
-	changed atomic.Pointer[func(string)]
+	db       *sql.DB
+	read     *sql.DB
+	cache    *boardCache
+	changed  atomic.Pointer[func(string)]
+	recorded atomic.Pointer[func(string)]
 }
 
 func NewStore(db, read *sql.DB) *Store {
@@ -28,6 +29,7 @@ func (s *Store) AppendEvent(event Event) (Event, error) {
 	inserted, err := insertEvent(s.db, `INSERT`, event)
 	if err == nil {
 		s.notify(event.ProjectKey)
+		s.notifyRecorded(event.ProjectKey)
 	}
 	return inserted, err
 }

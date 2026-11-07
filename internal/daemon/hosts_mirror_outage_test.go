@@ -10,19 +10,24 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func assertRowsAvailableFor(t *testing.T, local *federationNode, hostID string, span time.Duration) {
+// assertRowsAvailableUntil checks the host's rows on every pass until done
+// reports true, so the outage it spans is the one done waits for.
+func assertRowsAvailableUntil(t *testing.T, local *federationNode, hostID, what string, done func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(span)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		for _, row := range sessionsOf(local.snapshot(t), hostID) {
 			if row.UnavailableReason != "" || row.Host.State != hostStateConnected {
 				t.Fatalf("a host outage inside the grace marked %s %s: %q", row.ID, row.Host.State, row.UnavailableReason)
 			}
 		}
-		if !time.Now().Before(deadline) {
+		if done() {
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -45,20 +50,22 @@ func awaitMirroredName(t *testing.T, local, remote *federationNode, hostID, name
 }
 
 func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
-	local, remote, record := pairedFederationWithGrace(t, time.Hour)
+	local, remote, record := pairedFederationWith(t, func(f *federation) {
+		f.downGrace, f.retryMin = time.Hour, 50*time.Millisecond
+	})
+	refused := remote.gate.proxyRefusals.Load()
 	remote.gate.proxyDown.Store(true)
 	remote.server.CloseClientConnections()
-	assertRowsAvailableFor(t, local, record.ID, 3*time.Second)
+	assertRowsAvailableUntil(t, local, record.ID, "three failed reconnects", func() bool { return remote.gate.proxyRefusals.Load()-refused >= 3 })
 	streams := remote.gate.streams.Load()
 	remote.gate.proxyDown.Store(false)
 	awaitNewStream(t, remote, streams)
 	awaitMirroredName(t, local, remote, record.ID, "after the first drop")
 	streams = remote.gate.streams.Load()
 	remote.server.CloseClientConnections()
-	assertRowsAvailableFor(t, local, record.ID, 2*time.Second)
-	awaitNewStream(t, remote, streams)
+	assertRowsAvailableUntil(t, local, record.ID, "the mirror to reconnect", func() bool { return remote.gate.streams.Load() > streams })
 	awaitMirroredName(t, local, remote, record.ID, "after the second drop")
-	assertRowsAvailableFor(t, local, record.ID, 0)
+	assertRowsAvailableUntil(t, local, record.ID, "a last look", func() bool { return true })
 }
 
 func awaitNewStream(t *testing.T, remote *federationNode, after int64) {
@@ -69,7 +76,7 @@ func awaitNewStream(t *testing.T, remote *federationNode, after int64) {
 }
 
 func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
-	local, remote, record := pairedFederationWithGrace(t, time.Hour)
+	local, remote, record := pairedFederationWith(t, func(f *federation) { f.downGrace = time.Hour })
 	devices, err := remote.reg.ListDevices(false)
 	if err != nil || len(devices) != 1 {
 		t.Fatalf("devices=%+v err=%v", devices, err)
@@ -85,7 +92,7 @@ func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
 }
 
 func TestALocalRegistryErrorNeverMarksTheHostDown(t *testing.T) {
-	local, _, record := pairedFederationWithGrace(t, 0)
+	local, _, record := pairedFederationWith(t, func(f *federation) { f.downGrace = 0 })
 	host, _ := local.daemon.pairedHost(record.ID)
 	var outage hostOutage
 	local.daemon.hostFailed(host, &outage, localMirror(errors.New("database is locked")))

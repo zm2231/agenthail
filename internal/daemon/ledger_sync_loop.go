@@ -83,8 +83,20 @@ func (d *Daemon) wakeLedgerSync(host *pairedHost) {
 	}
 }
 
+// A burst of records wakes the owner's sync loop once more at most: the wake
+// channel holds one pending wake.
+func (d *Daemon) wakeLedgerOwner(key string) {
+	owner, err := d.ledger.RemoteOwner(key)
+	if err != nil || owner == "" {
+		return
+	}
+	if host, found := d.pairedHost(owner); found {
+		d.wakeLedgerSync(host)
+	}
+}
+
 func (d *Daemon) runHostLedgerSync(ctx context.Context, host *pairedHost) {
-	ticker := time.NewTicker(ledgerSyncInterval)
+	ticker := time.NewTicker(d.federation.ledgerSyncEvery)
 	defer ticker.Stop()
 	for {
 		if state, _ := host.status(); state == hostStateConnected {

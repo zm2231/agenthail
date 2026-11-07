@@ -158,8 +158,10 @@ type actionGate struct {
 	drops     atomic.Int32
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
-	older     atomic.Bool
-	streams   atomic.Int64
+	// proxyRefusals counts the requests refused while proxyDown is set.
+	proxyRefusals atomic.Int32
+	older         atomic.Bool
+	streams       atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
 	rootlessPrepare atomic.Bool
 	// legacyMetadata, when set, is the session metadata body a host from
@@ -182,7 +184,12 @@ type actionGate struct {
 	digestRequests atomic.Int32
 	// refusePullsAfterWrite refuses every ledger pull once this host is sent a ledger write.
 	refusePullsAfterWrite atomic.Bool
-	pullsRefused          atomic.Bool
+	// ledgerPulls counts the ledger pulls this host is sent; every ledger
+	// sync round ends in one.
+	ledgerPulls    atomic.Int32
+	ledgerPullHold atomic.Pointer[snapshotHold]
+	replayHold     atomic.Pointer[snapshotHold]
+	pullsRefused   atomic.Bool
 }
 
 const (
@@ -249,6 +256,7 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	t.Helper()
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.gate.proxyDown.Load() {
+			n.gate.proxyRefusals.Add(1)
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
 		}
@@ -263,6 +271,17 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			<-hold.release
 		}
 		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if r.URL.Path == "/api/v1/ledger/sync/events" {
+			n.gate.ledgerPulls.Add(1)
+			if hold := n.gate.ledgerPullHold.Load(); hold != nil {
+				hold.waiting.Add(1)
+				<-hold.release
+			}
+		}
+		if hold := n.gate.replayHold.Load(); hold != nil && r.URL.Path == "/api/v1/ledger/sync/replay" {
 			hold.waiting.Add(1)
 			<-hold.release
 		}
@@ -479,16 +498,19 @@ func sessionsOf(state dashboardState, hostID string) []dashboardSession {
 
 func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
-	return pairedFederationWithGrace(t, 200*time.Millisecond)
+	return pairedFederationWith(t, func(*federation) {})
 }
 
-func pairedFederationWithGrace(t *testing.T, grace time.Duration) (*federationNode, *federationNode, registry.PairedHost) {
+// pairedFederationWith lets configure set the local host's federation before
+// it pairs, and so before its per-host loops start.
+func pairedFederationWith(t *testing.T, configure func(*federation)) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	remote := newFederationNode(t, "remote-a", "remote-b")
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
-	local.daemon.federation.downGrace = grace
+	local.daemon.federation.downGrace = 200 * time.Millisecond
+	configure(local.daemon.federation)
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
 	testkit.Eventually(t, "remote sessions mirrored", 10*time.Second, func() bool {

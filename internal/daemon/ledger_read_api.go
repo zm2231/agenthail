@@ -211,4 +211,4 @@ func (d *Daemon) ledgerChanged(key string) {
 	d.ledgerChanges().changed(key)
 }
 
-const ledgerChangeWait = time.Second
+var ledgerChangeWait = time.Second

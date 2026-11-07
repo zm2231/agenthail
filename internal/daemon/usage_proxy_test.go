@@ -137,12 +137,13 @@ func TestARefusedKeySaysHowToFixIt(t *testing.T) {
 }
 
 func TestASlowKeyCommandGetsItsWholeTimeToRead(t *testing.T) {
-	if testing.Short() {
-		t.Skip("waits nine seconds for the health check and nine for the key")
-	}
-	slow := `sleep 9; printf '%s\n' "$0"`
+	request, keyRead := proxyRequestTimeout, proxyKeyReadLimit
+	proxyRequestTimeout, proxyKeyReadLimit = 2*time.Second, 2*time.Second
+	t.Cleanup(func() { proxyRequestTimeout, proxyKeyReadLimit = request, keyRead })
+	slow := `sleep 1.5; printf '%s\n' "$0"`
 	f := newProxyUsageFixture(t, `,"management":{"command":["/bin/sh","-c","`+strings.ReplaceAll(slow, `"`, `\"`)+`","`+proxyaccttest.Key+`"]}`)
-	f.proxy.SlowHealth.Store(int64(9 * time.Second))
+	f.proxy.SlowHealth.Store(int64(1500 * time.Millisecond))
+	f.proxy.SlowRead.Store(int64(1500 * time.Millisecond))
 	body, raw := f.usage(t)
 	group := body.Sets[2]
 	if group.ProxyProblem != "" || len(group.Accounts) != 2 || strings.Contains(raw, proxyaccttest.Key) {

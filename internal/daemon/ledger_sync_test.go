@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -355,4 +356,67 @@ func TestAKeylessLedgerWithOnlyAnOwnerIsNotLinkedAway(t *testing.T) {
 	if refused.Code != http.StatusConflict || apiErrorCode(t, refused) != "project_history" {
 		t.Fatalf("linking away a project whose ledger has an owner: %d %s", refused.Code, refused.Body)
 	}
+}
+
+func TestABurstOfCapturesReachesTheOwnerWithOneMoreSyncAtMost(t *testing.T) {
+	mac, owner, record := widgetOnTwoHostsWith(t, func(f *federation) { f.ledgerSyncEvery = time.Hour })
+	var assigned ledgerOwnerResponse
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, &assigned)
+	if assigned.Owner != record.ID {
+		t.Fatalf("owner = %+v", assigned)
+	}
+	host, found := mac.daemon.pairedHost(record.ID)
+	if !found {
+		t.Fatal("the mac lost its paired host")
+	}
+	replays := &snapshotHold{release: make(chan struct{})}
+	owner.gate.replayHold.Store(replays)
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			owner.gate.replayHold.Store(nil)
+			close(replays.release)
+		})
+	}
+	t.Cleanup(release)
+	captureOf(t, mac, "lead", "p-0", "the first words")
+	testkit.Eventually(t, "the first capture's sync to reach the owner", 10*time.Second, func() bool { return replays.waiting.Load() == 1 })
+	before := owner.gate.ledgerPulls.Load()
+	for i := 1; i <= 20; i++ {
+		captureOf(t, mac, "lead", fmt.Sprintf("p-%d", i), fmt.Sprintf("words %d", i))
+	}
+	if pending := len(host.ledgerWake); pending != 1 {
+		t.Fatalf("20 captures during one sync round left %d wakes pending; they should leave one", pending)
+	}
+	release()
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
+	// A round started by a wake queued behind every earlier one finds them all
+	// done when it blocks on its pull.
+	pulls := &snapshotHold{release: make(chan struct{})}
+	owner.gate.ledgerPullHold.Store(pulls)
+	t.Cleanup(func() {
+		owner.gate.ledgerPullHold.Store(nil)
+		close(pulls.release)
+	})
+	mac.daemon.wakeLedgerSync(host)
+	testkit.Eventually(t, "a last sync round to reach the owner", 10*time.Second, func() bool { return pulls.waiting.Load() == 1 })
+	if rounds := owner.gate.ledgerPulls.Load() - before - 1; rounds > 2 {
+		t.Fatalf("21 captures made %d sync rounds after the first; a burst should add one at most besides the round it held", rounds)
+	}
+}
+
+func TestWordsCapturedWhileTheOwnerIsDownReachItWhenItIsBack(t *testing.T) {
+	mac, owner, record := widgetOnTwoHostsWith(t, func(f *federation) {
+		f.ledgerSyncEvery, f.retryMin = time.Hour, 50*time.Millisecond
+	})
+	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
+	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
+	owner.gate.proxyDown.Store(true)
+	owner.server.CloseClientConnections()
+	testkit.Eventually(t, "the mac to show the owner down", 20*time.Second, func() bool { return !mac.daemon.hostConnected(record.ID) })
+	offline := capturePrompt(t, mac, "lead", "p-1", "while the owner is away")
+	owner.gate.proxyDown.Store(false)
+	testkit.Eventually(t, "the words to reach the owner once it is back", 20*time.Second, func() bool {
+		return countEvents(t, owner.reg, ledger.EventUtterance, offline) == 1
+	})
 }

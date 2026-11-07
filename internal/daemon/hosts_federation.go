@@ -53,6 +53,10 @@ type federation struct {
 	wg        sync.WaitGroup
 	running   bool
 	downGrace time.Duration
+	// ledgerSyncEvery bounds how long a change on a project's owner waits to
+	// reach this host, which pulls it.
+	ledgerSyncEvery time.Duration
+	retryMin        time.Duration
 }
 
 type pairedHost struct {
@@ -80,7 +84,7 @@ type pairedHost struct {
 }
 
 func newFederation() *federation {
-	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace}
+	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace, ledgerSyncEvery: ledgerSyncInterval, retryMin: hostRetryMin}
 }
 
 func (h *pairedHost) status() (string, string) {
@@ -398,10 +402,13 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 	if changed {
 		d.publishEvent("host.state", host.record.ID, map[string]any{"host": host.ref(), "detail": detail})
 	}
+	if changed && state == hostStateConnected {
+		d.wakeLedgerSync(host)
+	}
 }
 
 func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
-	delay := hostRetryMin
+	delay := d.federation.retryMin
 	var outage hostOutage
 	for ctx.Err() == nil {
 		connected, err := d.mirrorHostOnce(ctx, host, &outage)
@@ -409,7 +416,7 @@ func (d *Daemon) runHostMirror(ctx context.Context, host *pairedHost) {
 			return
 		}
 		if connected {
-			delay = hostRetryMin
+			delay = d.federation.retryMin
 		}
 		if err != nil {
 			d.hostFailed(host, &outage, err)

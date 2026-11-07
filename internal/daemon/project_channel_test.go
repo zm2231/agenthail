@@ -38,7 +38,12 @@ func moveSession(t *testing.T, node *federationNode, id, cwd string, lastActive 
 
 func widgetOnTwoHosts(t *testing.T) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
-	local, remote, record := pairedFederation(t)
+	return widgetOnTwoHostsWith(t, func(*federation) {})
+}
+
+func widgetOnTwoHostsWith(t *testing.T, configure func(*federation)) (*federationNode, *federationNode, registry.PairedHost) {
+	t.Helper()
+	local, remote, record := pairedFederationWith(t, configure)
 	localRepo := widgetRepo(t, "https://github.com/example/widget.git")
 	remoteRepo := widgetRepo(t, "https://github.com/example/widget.git")
 	moveSession(t, local, "local-a", localRepo, time.Now())

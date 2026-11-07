@@ -155,7 +155,16 @@ func TestTheLedgerETagIsTheSameAfterARebuildAndChangesWithTheContent(t *testing.
 	}
 }
 
+// shortLedgerChangeWait shortens the stream's coalescing window for one test;
+// call it before the daemon first opens its ledger.
+func shortLedgerChangeWait(t *testing.T) {
+	wait := ledgerChangeWait
+	ledgerChangeWait = 100 * time.Millisecond
+	t.Cleanup(func() { ledgerChangeWait = wait })
+}
+
 func TestTheLedgerStreamSendsAFewVersionsForAReplayOfThousandsOfEvents(t *testing.T) {
+	shortLedgerChangeWait(t)
 	d, r, handler := ledgerDaemon(t)
 	p := addLedgerProject(t, r, "proj-stream", "stream-key")
 	store := d.ledgerStore()
@@ -293,6 +302,7 @@ func openLedgerStream(t *testing.T, handler http.Handler) func(within time.Durat
 }
 
 func TestTheLedgerStreamKeepsAReaderThatFallsBehindOnManyProjects(t *testing.T) {
+	shortLedgerChangeWait(t)
 	d, r, handler := ledgerDaemon(t)
 	store := d.ledgerStore()
 	const projects = 100
