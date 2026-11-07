@@ -19,7 +19,7 @@ final class LoadOlderUITests: XCTestCase {
         jump.tap()
         sleep(1)
         shot(app, "jumped")
-        sleep(6)
+        sleep(4)
         shot(app, "after-jump")
         XCTAssertFalse(jump.exists, "the older page pulled the reader away from the latest activity after Jump to latest")
         XCTAssertFalse(message("Recent message 1.", in: app).isHittable, "the reader was returned to the held row after Jump to latest")
@@ -34,7 +34,7 @@ final class LoadOlderUITests: XCTestCase {
         shot(app, "before")
         older.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(message("Earlier message 40.", in: app).waitForExistence(timeout: 10), "the older page did not load")
-        sleep(2)
+        XCTAssertTrue(anchor.waitUntilStill(), "the row the reader was on kept moving")
         shot(app, "after")
         XCTAssertTrue(anchor.exists && anchor.isHittable, "the row the reader was on left the screen after loading older activity")
         XCTAssertLessThan(abs(anchor.frame.minY - before), 8, "the row the reader was on moved from \(before) to \(anchor.frame.minY)")
@@ -55,7 +55,7 @@ final class LoadOlderUITests: XCTestCase {
         let header = app.staticTexts["Working"]
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         for _ in 0..<24 where !(older.exists && older.frame.minY > header.frame.maxY + 8) { timeline.swipeDown(velocity: .slow) }
-        sleep(1)
+        XCTAssertTrue(older.waitUntilStill(), "Load older activity kept moving")
         XCTAssertTrue(older.exists && older.frame.minY > header.frame.maxY + 8, "Load older activity is not on screen below the header")
         return older
     }

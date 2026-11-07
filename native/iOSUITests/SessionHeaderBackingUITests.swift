@@ -20,13 +20,13 @@ final class SessionHeaderBackingUITests: XCTestCase {
         ]
         XCTAssertLessThan(menu.maxY, working.frame.minY)
 
-        sleep(2)
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after opening")
         let before = try pixels(XCUIScreen.main.screenshot().image, in: band)
         let row = app.staticTexts["What the checks show"]
         XCTAssertTrue(row.exists)
         let rowY = row.frame.minY
         timeline.swipeDown(velocity: .slow)
-        sleep(2)
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after the swipe")
         XCTAssertGreaterThan(abs(row.frame.minY - rowY), 40, "the transcript did not scroll")
         let after = try pixels(XCUIScreen.main.screenshot().image, in: band)
 

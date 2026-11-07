@@ -10,7 +10,7 @@ final class ComposerLargeTextUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 10))
         let send = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Send'")).firstMatch
         XCTAssertTrue(send.waitForExistence(timeout: 10))
-        sleep(2)
+        XCTAssertTrue(input.waitUntilStill() && send.waitUntilStill(), "the composer kept moving")
         let screen = app.windows.firstMatch.frame
         let composerTop = input.frame.minY - 8
         XCTAssertLessThan((screen.maxY - composerTop) / screen.height, 0.4, "the composer takes too much of the screen")

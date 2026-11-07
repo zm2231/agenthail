@@ -417,7 +417,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         if SessionPreview.delaysOlderPage, !olderDelayed, request.url?.path == "/api/v1/session",
            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "timelineBefore" && $0.value != "0" }) == true {
             olderDelayed = true
-            DispatchQueue.global().asyncAfter(deadline: .now() + 4) { [self] in startLoading() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [self] in startLoading() }
             return
         }
         if request.url?.path == "/api/v1/session", ProcessInfo.processInfo.arguments.contains("--preview-reopen-slow"), !reopenDelayed {

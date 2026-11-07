@@ -13,6 +13,18 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         return app
     }
 
+    private func waitForReplies(_ app: XCUIApplication, timeout: TimeInterval = 10) -> Int {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = newestReply(app)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            let next = newestReply(app)
+            if next > 0, next == last { return next }
+            last = next
+        }
+        return last
+    }
+
     @discardableResult
     private func record(_ app: XCUIApplication, _ name: String) -> UIImage {
         let screenshot = app.screenshot()
@@ -62,8 +74,7 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         let session = app.buttons[sessionID]
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
-        sleep(3)
-        let left = newestReply(app)
+        let left = waitForReplies(app)
         XCTAssertGreaterThan(left, 0, "the session showed no reply before switching away")
         app.backToSessions()
         app.buttons["session-computer::codex-demo"].tapWhenReady()
@@ -90,8 +101,7 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         app.buttons[sessionID].tapWhenReady(timeout: 15)
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
-        sleep(2)
-        let latest = newestReply(app)
+        let latest = waitForReplies(app)
         XCTAssertGreaterThan(latest, 0, "the session opened without a reply on screen")
         let middle = timeline.frame.insetBy(dx: 0, dy: timeline.frame.height * 0.25)
         var midScreenTool: String?
@@ -128,9 +138,9 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         if !captured { app.buttons[sessionID].tapWhenReady(timeout: 15) }
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))
-        sleep(3)
+        XCTAssertGreaterThan(waitForReplies(app), 0, "the session opened without a reply on screen")
         for _ in 0..<12 { timeline.swipeDown(velocity: .fast) }
-        sleep(2)
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after the swipes")
         let viewport = timeline.frame
         let rows = CGRect(x: viewport.minX + 16, y: viewport.minY + 200, width: viewport.width - 32, height: viewport.height * 0.4)
         XCTAssertTrue(ScreenshotInk.shows(record(app, "before-jump"), in: rows), "the transcript was blank before the jump")
@@ -140,28 +150,6 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         while Date() < end {
             XCTAssertTrue(ScreenshotInk.shows(record(app, "jump-\(frame)"), in: rows), "the transcript was blank \(frame) frames after Jump to latest")
             frame += 1
-        }
-    }
-
-    private func assertStill(_ app: XCUIApplication, _ context: String) {
-        let jump = app.buttons["Jump to latest"]
-        let first = jump.exists
-        for _ in 0..<8 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-            XCTAssertEqual(jump.exists, first, "Jump to latest kept appearing and disappearing \(context)")
-        }
-    }
-
-    func testOpeningJustShortOfTheEndLeavesTheTranscriptStill() {
-        continueAfterFailure = false
-        for space in stride(from: 40, through: 280, by: 30) {
-            let app = XCUIApplication()
-            app.launchArguments = ["--preview-session", "--preview-stream", "--preview-theme", "dark", "--preview-trailing-space", "\(space)"]
-            app.launch()
-            XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
-            sleep(4)
-            assertStill(app, "after opening \(space) points short of the end")
-            app.terminate()
         }
     }
 
@@ -190,8 +178,9 @@ final class TranscriptLiveEdgeUITests: XCTestCase {
         for round in 1...3 {
             app.buttons[sessionID].tapWhenReady(timeout: 15)
             XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
-            sleep(5)
-            assertStill(app, "after opening the session, round \(round)")
+            XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10), "the session did not load, round \(round)")
+            app.waitForSteadyJump()
+            app.assertJumpHoldsStill("after opening the session, round \(round)")
             app.backToSessions()
         }
     }
