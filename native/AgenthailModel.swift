@@ -77,16 +77,10 @@ final class AgenthailModel {
         }
     }
     @ObservationIgnored private(set) lazy var reader = makeReader()
-    // The reader is not observed; views see its changes through this revision.
-    var readerRevision = 0
-    var pages: ScopePages {
-        _ = readerRevision
-        return reader.pages
-    }
+    var pages: ScopePages { reader.pages }
     private(set) var currentView: ScopePage.View? {
         didSet {
             guard oldValue != currentView else { return }
-            readerRevision &+= 1
             rederive()
             scheduleListReread()
         }
@@ -161,7 +155,6 @@ final class AgenthailModel {
             orderHold.hold(list: listView, current: currentView, rows: Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
         } else {
             orderHold.release()
-            readerRevision &+= 1
             rederive()
         }
     }

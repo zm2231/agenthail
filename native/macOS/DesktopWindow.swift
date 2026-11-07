@@ -251,7 +251,7 @@ struct SessionSidebar: View {
                             .padding(.vertical, DesktopSpace.s)
                             .task(id: model.pages.listings[model.listRequest!]?.rows.count ?? -1) { await model.listMore() }
                     }
-                    if let error = model.observedReader.pageError, model.listRequest != nil {
+                    if let error = model.reader.pageError, model.listRequest != nil {
                         Text(error)
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
@@ -290,7 +290,7 @@ extension SessionSidebar {
                 sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
             }
             if local.isEmpty {
-                Text(model.observedReader.searchPending(query) ? "Searching" : "No matching sessions.")
+                Text(model.reader.searchPending(query) ? "Searching" : "No matching sessions.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 14)

@@ -7,17 +7,12 @@ extension AgenthailModel {
         return ScopeRequest(scope: sessionFilter.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
     }
 
-    var observedReader: ScopeReader {
-        _ = readerRevision
-        return reader
-    }
-
-    var listView: ScopePage.View? { listRequest.map { observedReader.views[$0] } ?? currentView }
+    var listView: ScopePage.View? { listRequest.map { reader.views[$0] } ?? currentView }
 
     var listHasMore: Bool { listRequest.map { pages.hasMore($0) } ?? false }
 
     var filterCounts: [SessionFilter: Int] {
-        let view = sessionRefinement.isActive ? listRequest.flatMap { observedReader.views[$0] } : currentView
+        let view = sessionRefinement.isActive ? listRequest.flatMap { reader.views[$0] } : currentView
         guard let view else { return [:] }
         return Dictionary(uniqueKeysWithValues: SessionFilter.allCases.compactMap { filter in view.counts[filter.viewScope].map { (filter, $0.families) } })
     }
@@ -25,8 +20,7 @@ extension AgenthailModel {
     /// Each known session's place in the daemon's order: Current first, then the loaded listings.
     var daemonOrder: [String: Int] {
         var order: [String: Int] = [:]
-        let scope = observedReader
-        let views = [currentView] + scope.requests.sorted().map { scope.views[$0] }
+        let views = [currentView] + reader.requests.sorted().map { reader.views[$0] }
         for member in views.compactMap({ $0 }).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
             order[member.id] = order.count
         }
@@ -46,7 +40,7 @@ extension AgenthailModel {
     }
 
     var refinementSurfaces: [String] {
-        let view = listRequest.flatMap { observedReader.views[$0] } ?? currentView
+        let view = listRequest.flatMap { reader.views[$0] } ?? currentView
         let listed = view?.surfaces.map(\.surface) ?? []
         return Array(Set(listed + (snapshot?.surfaces ?? []).map(\.name))).sorted()
     }
@@ -106,15 +100,14 @@ extension AgenthailModel {
         (try? await reader.mentions(query)) ?? []
     }
 
-    func makeReader() -> ScopeReader {
-        ScopeReader(ScopeReader.Source(
+    func makeReader() -> ObservedScope {
+        ObservedScope(ScopeReader.Source(
             api: { [weak self] in self?.api },
             current: { [weak self] in self?.snapshot?.sessions ?? [] },
             active: { true },
             reachable: { [weak self] in self?.snapshot != nil && self?.connectionError == nil },
             changed: { [weak self] in
                 guard let self else { return }
-                readerRevision &+= 1
                 rederive()
                 scheduleListReread()
             }

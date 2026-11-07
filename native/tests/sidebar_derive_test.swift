@@ -1,5 +1,11 @@
 @testable import AgenthailHelpers
 import Foundation
+import Observation
+
+@MainActor
+final class Notified {
+    var hit = false
+}
 
 @main
 struct SidebarDeriveTest {
@@ -55,8 +61,11 @@ struct SidebarDeriveTest {
         check(shown(model) == ["proj-b/b", "proj-a/a"], "a held list keeps its order: \(shown(model))")
         model.snapshot?.sessions.removeAll { $0.id == "b" }
         check(shown(model) == ["proj-b/b", "proj-a/a"], "a held list keeps a removed row in place")
+        let release = Notified()
+        withObservationTracking { _ = model.sessionTree } onChange: { MainActor.assumeIsolated { release.hit = true } }
         model.holdOrder(false)
         check(shown(model) == ["proj-a/a"], "releasing the hold shows the new order and drops the removed row: \(shown(model))")
+        check(release.hit, "releasing the hold reaches views that read the sidebar")
 
         let question = AttentionState(id: 1, sessionId: "a-child", target: "a-child", queueId: 0, reason: "Waiting on you", requestedAction: "answer", createdAt: "2026-10-23T08:00:00Z")
         model.snapshot = listing([session("a", status: "idle"), session("a-child", status: "busy", parent: "a"), session("c", status: "busy")], attention: [question])

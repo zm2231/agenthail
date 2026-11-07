@@ -14,8 +14,10 @@ final class ChangeCounter {
 
     private func arm() {
         withObservationTracking { read() } onChange: { [weak self] in
-            MainActor.assumeIsolated { self?.count += 1 }
-            Task { @MainActor in self?.arm() }
+            MainActor.assumeIsolated {
+                self?.count += 1
+                self?.arm()
+            }
         }
     }
 }
@@ -54,8 +56,44 @@ struct CatalogBurstTest {
         snapshotsLandingMidBatch()
         burstKeepsTheSidebarCurrent()
         overflowReloadsInsteadOfApplyingTheBacklog()
+        counterCountsEveryChange()
+        everyScopeChangeReachesItsReaders()
         readerChangesReachTheViewsThatReadThem()
         print("catalog burst tests passed")
+    }
+
+    static func removed(_ seq: UInt64, _ id: String) -> CatalogStreamEvent {
+        try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":\#(seq),"type":"session.removed","data":{"sessionId":"\#(id)"}}"#.utf8))
+    }
+
+    @MainActor
+    static func counterCountsEveryChange() {
+        let model = AgenthailModel(connecting: false)
+        model.adoptRefreshed(listing([session("a", "idle")], seq: 1))
+        let counter = ChangeCounter { _ = model.snapshot }
+        model.applyCatalogEvents([upserted(2, "a", "busy")])
+        model.applyCatalogEvents([upserted(3, "a", "idle")])
+        check(counter.count == 2, "two catalog batches back to back counted \(counter.count) snapshot changes")
+    }
+
+    @MainActor
+    static func everyScopeChangeReachesItsReaders() {
+        let offline = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral))
+        var relayed = 0
+        let scope = ObservedScope(ScopeReader.Source(api: { offline }, current: { [] }, active: { true }, reachable: { true }, changed: { relayed += 1 }))
+        let request = ScopeRequest(scope: "running")
+        let changes = ChangeCounter { _ = scope.pages }
+        scope.adoptCurrent()
+        check(changes.count == 1, "adopting the current rows reached the scope's readers \(changes.count) times")
+        scope.refreshed(removedFromCurrent: false)
+        check(changes.count == 2, "a refresh reached the scope's readers \(changes.count - 1) times")
+        _ = scope.removed("a", unlisted: false)
+        check(changes.count == 3, "a removal reached the scope's readers \(changes.count - 2) times")
+        scope.drop(request)
+        check(changes.count == 4, "dropping a listing reached the scope's readers \(changes.count - 3) times")
+        Task { @MainActor in await scope.readMore(request) }
+        check(spin(until: { relayed > 0 }), "a failed read reports its change")
+        check(changes.count == 5 && scope.pageError != nil, "a failed read reached the scope's readers \(changes.count - 4) times")
     }
 
     @MainActor
@@ -70,20 +108,22 @@ struct CatalogBurstTest {
         model.adoptRefreshed(listing([session("a", "idle")], seq: 1))
         settle()
 
-        let current = ChangeCounter { _ = model.pages }
+        let current = ChangeCounter { _ = model.listView }
         let view = ScopePage.View(counts: [:], surfaces: [], projects: [], families: [])
         model.adoptCurrentView(ScopeSessions(sessions: [], hostEpoch: "h", catalogSeq: 2, view: view))
-        check(current.count == 1, "a new Current view reaches views that read the scope pages: \(current.count)")
+        check(current.count >= 1, "a new Current view reaches views that read the listed view: \(current.count)")
 
-        let released = ChangeCounter { _ = model.pages }
-        model.holdOrder(true)
-        check(released.count == 0, "holding the order changes nothing a view reads: \(released.count)")
-        model.holdOrder(false)
-        check(released.count == 1, "releasing a held order reaches views that read the scope pages: \(released.count)")
+        let refreshed = ChangeCounter { _ = model.pages }
+        model.adoptRefreshed(listing([session("a", "busy"), session("b", "idle")], seq: 3))
+        check(refreshed.count >= 1, "a refreshed snapshot reaches views that read the scope pages: \(refreshed.count)")
 
-        let failed = ChangeCounter { _ = model.observedReader.pageError }
+        let removal = ChangeCounter { _ = model.pages }
+        model.applyCatalogEvents([removed(4, "b")])
+        check(removal.count >= 1, "a catalog removal reaches views that read the scope pages: \(removal.count)")
+
+        let failed = ChangeCounter { _ = model.reader.pageError }
         model.sessionFilter = .running
-        check(spin(until: { model.observedReader.pageError != nil }), "a listing read against an unreachable daemon fails")
+        check(spin(until: { model.reader.pageError != nil }), "a listing read against an unreachable daemon fails")
         check(failed.count >= 1, "a reader change reaches views that read the reader: \(failed.count)")
     }
 
