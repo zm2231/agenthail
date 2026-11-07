@@ -15,10 +15,12 @@ type inventory struct {
 	seen      map[string]bool
 	ports     map[string]int
 	listening map[string]bool
+	programs  map[int]bool
+	missing   []string
 }
 
 func newInventory(out io.Writer) *inventory {
-	return &inventory{out: out, seen: map[string]bool{}, ports: map[string]int{}, listening: map[string]bool{}}
+	return &inventory{out: out, seen: map[string]bool{}, ports: map[string]int{}, listening: map[string]bool{}, programs: map[int]bool{}}
 }
 
 func (inv *inventory) sample(scopes []scope) {
@@ -32,6 +34,9 @@ func (inv *inventory) note(s scope, e endpoint) {
 	if e.kind == "tcp" && e.listening && e.local.Port() == uint16(s.port) {
 		inv.listening[s.name] = true
 	}
+	if e.kind == "exe" {
+		inv.programs[e.pid] = true
+	}
 	key := s.name + ": " + describe(s, e)
 	if inv.seen[key] {
 		return
@@ -44,7 +49,7 @@ func (inv *inventory) problems() []string {
 	if inv.samples == 0 {
 		return []string{"the watcher took no samples of the host processes"}
 	}
-	var out []string
+	out := append([]string(nil), inv.missing...)
 	for name, port := range inv.ports {
 		if !inv.listening[name] {
 			out = append(out, fmt.Sprintf("the watcher never saw %s's own listener on port %d", name, port))

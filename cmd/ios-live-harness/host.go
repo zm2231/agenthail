@@ -43,6 +43,8 @@ type host struct {
 	binary  string
 	logPath string
 
+	conversations []conversation
+
 	mu   sync.Mutex
 	cmd  *exec.Cmd
 	done chan struct{}
@@ -158,6 +160,11 @@ func (h *host) seedConversation(reg *registry.Registry, i int, prompt string) er
 	if err := os.MkdirAll(cwd, 0o700); err != nil {
 		return err
 	}
+	if i == 1 {
+		if err := h.seedRepository(cwd); err != nil {
+			return err
+		}
+	}
 	dir := filepath.Join(h.home, ".claude", "projects", claudeProjectDirUnsafe.ReplaceAllString(cwd, "-"))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -182,6 +189,7 @@ func (h *host) seedConversation(reg *registry.Registry, i int, prompt string) er
 	if err := os.WriteFile(transcript, lines, 0o600); err != nil {
 		return err
 	}
+	h.conversations = append(h.conversations, conversation{id: id, cwd: cwd, transcript: transcript})
 	session := surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: prompt, Cwd: cwd,
 		Status: surface.StatusIdle, Ended: true, Transcript: transcript, LastActive: at.Add(time.Second)}
 	fingerprint, err := json.Marshal(session)

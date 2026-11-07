@@ -239,6 +239,26 @@ func (w *watcher) blind() []string {
 	return w.inventory.problems()
 }
 
+func (w *watcher) waitForProgram(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		w.mu.Lock()
+		seen := w.inventory.programs[pid]
+		w.mu.Unlock()
+		if seen {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func (w *watcher) missed(problem string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inventory.missing = append(w.inventory.missing, problem)
+}
+
 func (w *watcher) summary() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
