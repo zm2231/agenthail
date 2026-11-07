@@ -255,5 +255,8 @@ func scrollToLatest(_ position: Binding<ScrollPosition>, following: Binding<Bool
     }
     // A lazy stack can leave rows it never laid out unbuilt after an edge scroll; scrolling to the row first builds them.
     position.wrappedValue.scrollTo(id: latest, anchor: .bottom)
-    DispatchQueue.main.async { position.wrappedValue.scrollTo(edge: .bottom) }
+    DispatchQueue.main.async {
+        guard position.wrappedValue.viewID(type: String.self) == latest else { return }
+        position.wrappedValue.scrollTo(edge: .bottom)
+    }
 }
