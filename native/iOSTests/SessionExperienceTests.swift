@@ -59,6 +59,14 @@ final class SessionExperienceTests: XCTestCase {
     }
 
     @MainActor
+    func testACustomModelIDCanBeUsedOnlyWhenItIsNewAndNotBlank() {
+        XCTAssertTrue(SearchableModelSelectionSheet.canUseCustom("provider/x", pending: "opus"))
+        XCTAssertFalse(SearchableModelSelectionSheet.canUseCustom(" provider/x ", pending: "provider/x"), "the chosen ID stays chosen, even once the catalog lists it")
+        XCTAssertFalse(SearchableModelSelectionSheet.canUseCustom("   ", pending: nil))
+        XCTAssertTrue(SearchableModelSelectionSheet.canUseCustom("provider/x", pending: nil))
+    }
+
+    @MainActor
     func testModelSearchMatchesIDNameAndDescription() {
         let options = [
             ModelOption(id: "gpt-web-pro", displayName: "ChatGPT Web — Pro", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil),

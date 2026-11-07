@@ -41,6 +41,11 @@ struct SearchableModelSelectionSheet: View {
 
     private var supportsCustomID: Bool { options.contains { $0.allowsCustom == true } }
 
+    static func canUseCustom(_ field: String, pending: String?) -> Bool {
+        let value = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !value.isEmpty && value != pending
+    }
+
     private var customChosen: Bool {
         guard let pendingSelection, !options.contains(where: { $0.id == pendingSelection }) else { return false }
         return customID.trimmingCharacters(in: .whitespacesAndNewlines) == pendingSelection
@@ -100,7 +105,7 @@ struct SearchableModelSelectionSheet: View {
                             pendingSelection = value
                             customFocused = false
                         }
-                        .disabled(customID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || customChosen)
+                        .disabled(!Self.canUseCustom(customID, pending: pendingSelection))
                     }
                 }
                 Section {
