@@ -46,14 +46,18 @@ func TestTheGuardRefusesTheGuardedAddressAndNoOther(t *testing.T) {
 func TestAGuardedRunFailsWhenADialReachesTheRealAddress(t *testing.T) {
 	standard := FreeLoopbackAddress()
 	listen := standard
-	code := RunAwayFromLiveDashboard(func() int {
+	var report strings.Builder
+	code := runAwayFromLiveDashboard(func() int {
 		if listen == standard {
 			t.Error("the default still names the real address during the run")
 		}
 		_, _ = (&http.Client{}).Get("http://" + standard + "/")
 		return 0
-	}, standard, &listen)
+	}, standard, &listen, &report)
 	if code == 0 {
 		t.Fatal("a run that dialed the real address passed")
+	}
+	if !strings.Contains(report.String(), "1 dial(s) reached "+standard) {
+		t.Fatalf("report = %q, want it to name the dialed address", report.String())
 	}
 }
