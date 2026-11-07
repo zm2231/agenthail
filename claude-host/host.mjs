@@ -216,7 +216,15 @@ class Session {
   }
 
   turnStarted() {
+    const owedTask = this.taskTurnOwed();
     this.owed.clear();
+    if (owedTask) this.emitTasks();
+  }
+
+  // emitTasks tells subscribers the session's background work changed: its
+  // live tasks, or the turn owed for one that ended.
+  emitTasks() {
+    emit(this.id, 'tasks', { tasks: this.describeTasks(), taskTurnOwed: this.taskTurnOwed() });
   }
 
   setState(state) {
@@ -985,12 +993,16 @@ async function run(s, exit) {
         s.tasks = tasks;
         for (const id of [...s.taskSince.keys()]) if (!live.has(id)) s.taskSince.delete(id);
         for (const id of live) if (!s.taskSince.has(id)) s.taskSince.set(id, new Date().toISOString());
-        emit(s.id, 'tasks', { tasks: s.describeTasks() });
+        s.emitTasks();
         s.retireIfDone();
       } else if (message.type === 'system' && message.subtype === 'task_notification') {
         // An ambient task is not activity, so its end owes no turn. Its
         // notification carries no flag; the live set said so while it ran.
-        if (!s.ambient.delete(message.task_id) && s.state === 'idle') s.owe(`task:${message.task_id}`);
+        if (!s.ambient.delete(message.task_id) && s.state === 'idle') {
+          const owedTask = s.taskTurnOwed();
+          s.owe(`task:${message.task_id}`);
+          if (!owedTask) s.emitTasks();
+        }
       } else if (message.type === 'result' && !s.stateEvents && s.inbox.length === 0) {
         s.guessesIdle = true;
         s.turnStarted();

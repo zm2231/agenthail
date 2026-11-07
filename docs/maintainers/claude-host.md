@@ -325,9 +325,10 @@ tool is not ambient. `source` is `host`.
 A task that has ended still keeps `running` until Claude starts the turn that
 reports it. Between the task leaving the live set and that turn, Claude is idle
 with no task listed, so the host lists the session with `taskTurnOwed: true`
-while it owes that turn (see above). The daemon counts it as running, so a
-task's settlement, a completion notice and a relay wait for the reporting turn
-rather than settling on the turn before it.
+while it owes that turn (see above), and sends a `tasks` event, carrying
+`taskTurnOwed`, when the turn becomes owed and when it starts. The daemon
+counts it as running, so a task's settlement, a completion notice and a relay
+wait for the reporting turn rather than settling on the turn before it.
 
 For a terminal session, the daemon reads the tasks from the transcript, counting
 only those started since the live process's `startedAt`. The call's result

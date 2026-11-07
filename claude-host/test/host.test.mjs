@@ -1087,8 +1087,11 @@ async function listsTheOwedTaskTurn(env) {
   await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.subtype === 'task_notification', 5000);
   const ended = await listed();
   assert.deepEqual([ended.state, ended.tasks, ended.taskTurnOwed], ['idle', [], true]);
+  await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.taskTurnOwed === true, 5000);
   fs.writeFileSync(release, '');
-  await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.type === 'result' && e.message.result.startsWith('notified:'), 5000);
+  const paid = await c.event((e) => e.sessionId === id && e.kind === 'tasks' && e.taskTurnOwed === false, 5000);
+  const notified = await c.event((e) => e.sessionId === id && e.kind === 'sdk' && e.message.type === 'result' && e.message.result.startsWith('notified:'), 5000);
+  assert.ok(paid.seq < notified.seq, 'subscribers hear the owed turn start with the turn');
   assert.equal((await listed()).taskTurnOwed, false, 'the turn that reports the task pays it');
   c.close();
 }
