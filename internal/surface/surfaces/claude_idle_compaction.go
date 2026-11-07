@@ -1,8 +1,10 @@
 package surfaces
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"time"
 
@@ -29,35 +31,45 @@ type claudeIdleRecord struct {
 	} `json:"message"`
 }
 
-// IdleCompactionState continues from a read when the transcript has grown by
-// at most the tail it would read afresh, and otherwise reads that tail; a
-// request older than the tail is not found, which leaves LastRequestAt zero.
+// IdleCompactionState continues a read of the same file when it has grown by
+// at most the tail it would read afresh, reading only up to the size it has
+// when opened, and otherwise reads that tail; a request older than the tail
+// is not found, which leaves LastRequestAt zero.
 func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session, from surface.IdleCompactionRead) (surface.IdleCompactionRead, error) {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
 	}
-	info, err := os.Stat(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return surface.IdleCompactionRead{}, err
 	}
-	if from.Offset > 0 && from.Offset <= info.Size() && info.Size()-from.Offset <= claudeIdleCompactionTailBytes {
-		read := from
-		offset, err := scanAppendedJSONL(ctx, path, from.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-			observeIdleRecord(&read.State, line)
-			return nil
-		})
-		if err != nil {
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return surface.IdleCompactionRead{}, err
+	}
+	identity := transcriptFileIdentity(info)
+	if identity != "" && from.File == identity && from.Offset > 0 && from.Offset <= info.Size() && info.Size()-from.Offset <= claudeIdleCompactionTailBytes {
+		appended := make([]byte, info.Size()-from.Offset)
+		if _, err := file.ReadAt(appended, from.Offset); err != nil && err != io.EOF {
 			return surface.IdleCompactionRead{}, err
 		}
-		read.Offset = offset
-		return read, nil
+		read := from
+		complete := bytes.LastIndexByte(appended, '\n') + 1
+		for line := range bytes.SplitSeq(appended[:complete], []byte("\n")) {
+			if len(line) > 0 {
+				observeIdleRecord(&read.State, line)
+			}
+		}
+		read.Offset += int64(complete)
+		return read, ctx.Err()
 	}
 	lines, end, err := readRecentJSONLLines(ctx, path, 0, claudeIdleCompactionTailBytes, maxClaudeTranscriptRecordBytes)
 	if err != nil {
 		return surface.IdleCompactionRead{}, err
 	}
-	read := surface.IdleCompactionRead{Offset: end}
+	read := surface.IdleCompactionRead{Offset: end, File: identity}
 	for _, line := range lines {
 		observeIdleRecord(&read.State, line)
 	}

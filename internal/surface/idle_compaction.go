@@ -17,11 +17,13 @@ type IdleCompactionState struct {
 	CompactedSince bool
 }
 
-// IdleCompactionRead is a state read up to Offset of the record, which the
-// next read continues from instead of reading the record again.
+// IdleCompactionRead is a state read up to Offset of the record in the file
+// File names, which the next read of that same file continues from instead
+// of reading the record again.
 type IdleCompactionRead struct {
 	State  IdleCompactionState
 	Offset int64
+	File   string
 }
 
 type IdleCompactionReader interface {
