@@ -54,6 +54,13 @@ func TestTheHostWatcherAsksForACatalogPassWhenTheTurnAFinishedTaskOwesStarts(t *
 		}
 		return false
 	})
+	// A nudge for the task proves the watcher has the host's earlier events,
+	// so a nudge after the release can come only from what the release did.
+	select {
+	case <-d.catalogNudge:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the watcher reported none of the task's events")
+	}
 	for quiet := false; !quiet; {
 		select {
 		case <-d.catalogNudge:
