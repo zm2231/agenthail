@@ -11,7 +11,7 @@ import (
 )
 
 func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *pairedHost, query url.Values) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
@@ -31,6 +31,7 @@ func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *p
 	}
 	defer response.Body.Close()
 	sse.SetHeaders(w.Header())
+	sse.ExtendWrite(w)
 	w.WriteHeader(http.StatusOK)
 	reader := sse.NewReader(response.Body)
 	for {
@@ -46,9 +47,9 @@ func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *p
 				event.Data = string(qualified)
 			}
 		}
-		if err := sse.WriteEvent(w, event); err != nil {
+		sse.ExtendWrite(w)
+		if err := sse.WriteEvent(w, event); err != nil || sse.Flush(w) != nil {
 			return
 		}
-		flusher.Flush()
 	}
 }

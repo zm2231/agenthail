@@ -364,7 +364,7 @@ func TestASessionStreamThatStopsReadingDuringABurstStillReceivesEveryRow(t *test
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		d.writeSessionStream(writer, request, writer, from.ID, 0, window, subscription.Wake)
+		d.writeSessionStream(writer, request, from.ID, 0, window, subscription.Wake)
 	}()
 	const burst = 160
 	for i := range burst {

@@ -38,12 +38,18 @@ func SetHeaders(header http.Header) {
 // replay would otherwise wait for the first keepalive.
 func Open(w http.ResponseWriter) {
 	SetHeaders(w.Header())
-	extendWrite(w)
+	ExtendWrite(w)
 	fmt.Fprint(w, ": connected\n\n")
 }
 
-func extendWrite(w http.ResponseWriter) {
+func ExtendWrite(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(writeWait))
+}
+
+// Flush sends what the stream has written and reports a client that is gone
+// or did not take it before the write deadline.
+func Flush(w http.ResponseWriter) error {
+	return http.NewResponseController(w).Flush()
 }
 
 func Follow[T any](ctx context.Context, w http.ResponseWriter, wake <-chan T, onWake func(value T, open bool) bool, authorized func() bool) {
@@ -54,7 +60,7 @@ func Follow[T any](ctx context.Context, w http.ResponseWriter, wake <-chan T, on
 		case <-ctx.Done():
 			return
 		case value, open := <-wake:
-			extendWrite(w)
+			ExtendWrite(w)
 			if !onWake(value, open) {
 				return
 			}
@@ -62,11 +68,8 @@ func Follow[T any](ctx context.Context, w http.ResponseWriter, wake <-chan T, on
 			if !authorized() {
 				return
 			}
-			extendWrite(w)
-			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-				return
-			}
-			if http.NewResponseController(w).Flush() != nil {
+			ExtendWrite(w)
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil || Flush(w) != nil {
 				return
 			}
 		}

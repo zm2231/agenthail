@@ -227,7 +227,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, event := range events {
 			writeSSEEvent(w, event)
 		}
-		return http.NewResponseController(w).Flush() == nil
+		return sse.Flush(w) == nil
 	}, authorized)
 }
 

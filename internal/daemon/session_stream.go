@@ -30,7 +30,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")
 		return
@@ -70,10 +70,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The session stream cursor is no longer retained."}, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
 	}
-	d.writeSessionStream(w, r, flusher, sessionID, after, window, subscription.Wake)
+	d.writeSessionStream(w, r, sessionID, after, window, subscription.Wake)
 }
 
-func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, wake <-chan struct{}) {
+func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, sessionID string, after uint64, window registry.SessionJournalWindow, wake <-chan struct{}) {
 	sse.Open(w)
 	stream := newSessionStreamWriter(w, sessionID, d.journalItemReader(sessionID), func(ref string, head, from int) (registry.SessionJournalBodyView, bool, error) {
 		return d.Registry.SessionJournalBodyView(sessionID, ref, head, from)
@@ -97,8 +97,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 		more, _ := readSessionJournalAfter(d.Registry, sessionID, &watermark, func(entry registry.SessionJournalEntry) bool {
 			return d.apiEventStreamAuthorized(r) && stream.write(entry) == nil
 		})
-		flusher.Flush()
-		return more
+		return sse.Flush(w) == nil && more
 	}
 	if !follow() {
 		return

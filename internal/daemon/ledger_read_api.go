@@ -197,8 +197,7 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 		for _, change := range hub.take(id) {
 			writeLedgerChange(w, change)
 		}
-		flusher.Flush()
-		return true
+		return sse.Flush(w) == nil
 	}, authorized)
 }
 
