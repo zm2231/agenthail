@@ -145,6 +145,8 @@ final class WindowBackdrop: ObservableObject {
 
     var current: Bool { !active || (rendered != nil && spec() == rendered) }
 
+    func shows(_ config: UIConfig) -> Bool { self.config == config && current }
+
     private func paneStyles() -> [BackdropRole: BackdropSpec.PaneStyle] {
         [
             .sidebar: BackdropSpec.PaneStyle(minimum: Float(tints[.sidebar] ?? 0), strength: Float(config.backgroundOpacity)),
