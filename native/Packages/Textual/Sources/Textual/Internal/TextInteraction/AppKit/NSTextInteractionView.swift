@@ -18,6 +18,7 @@
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
+    @objc var hasSelectedText: Bool { model.selectedRange.map { !$0.isCollapsed } ?? false }
 
     private var dragStart: TextPosition?
     private var selectionAnchor: TextPosition?
