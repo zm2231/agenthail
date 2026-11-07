@@ -73,16 +73,10 @@ func effortLabel(level string) string {
 }
 
 func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, value string) error {
-	settings, err := c.TurnSettings(ctx, sess)
-	if err != nil {
-		return err
-	}
 	if key == surface.TurnSettingModel {
 		if err := surface.ValidModelName(value); err != nil {
 			return err
 		}
-	} else if err := surface.ValidTurnSetting(settings, key, value); err != nil {
-		return err
 	}
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
@@ -99,6 +93,15 @@ func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, 
 			return err
 		}
 		return surface.DeliveryUnavailable(err)
+	}
+	var settings []surface.TurnSetting
+	if key != surface.TurnSettingModel {
+		if settings, err = c.TurnSettings(ctx, sess); err != nil {
+			return err
+		}
+		if err := surface.ValidTurnSetting(settings, key, value); err != nil {
+			return err
+		}
 	}
 	params := map[string]any{"threadId": sess.ID}
 	switch key {

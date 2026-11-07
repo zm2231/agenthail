@@ -297,17 +297,15 @@ func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
 }
 
 func TestCodexModelChangeWriterConflictIsTerminal(t *testing.T) {
-	fake := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
-		if params["model"] != nil {
-			return writerConflict(method, params)
-		}
-		return nil
-	})
+	fake := startManagedCodex(t, writerConflict)
 	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
 	_, err := isolatedManagedRuntime(t).Model(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "gpt-5.6-sol")
 	requireOwnershipConflict(t, err)
-	if resumes := fake.Calls("thread/resume"); len(resumes) != 1 || resumes[0]["model"] != "gpt-5.6-sol" {
-		t.Fatalf("want one loading resume carrying the model, got %v", resumes)
+	if resumes := fake.Calls("thread/resume"); len(resumes) != 1 {
+		t.Fatalf("want one loading resume, got %v", resumes)
+	}
+	if updates := fake.Calls("thread/settings/update"); len(updates) != 0 {
+		t.Fatalf("a thread another writer holds had its settings changed: %v", updates)
 	}
 }
 

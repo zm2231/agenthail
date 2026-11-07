@@ -2507,6 +2507,18 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
   },
+  "api/action turn-setting": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session has no turn settings\"}}\n"
+  },
   "api/action unknown action": {
     "status": 400,
     "header": {
@@ -5062,6 +5074,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"source session not found\"}}\n"
+  },
+  "api/v1/actions turn-setting": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"this session has no turn settings\"}}\n"
   },
   "api/v1/actions unknown action": {
     "status": 400,
