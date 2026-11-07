@@ -5,9 +5,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -57,7 +59,17 @@ func helper(mode string) {
 		held = append(held, child)
 	}
 	os.Stdout.WriteString("ready\n")
-	select {}
+	// A bare select{} is a deadlock to the runtime once no goroutine can
+	// wake it, which on macOS kills the helper; a signal channel is not.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM)
+	<-stop
+	for _, h := range held {
+		if child, ok := h.(*exec.Cmd); ok {
+			child.Process.Kill()
+			child.Wait()
+		}
+	}
 }
 
 func must(err error) {
@@ -94,7 +106,17 @@ func startHelper(t *testing.T, mode string, env ...string) int {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		done := make(chan struct{})
+		go func() { cmd.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			cmd.Process.Kill()
+			<-done
+		}
+	})
 	line, err := bufio.NewReader(out).ReadString('\n')
 	if err != nil || line != "ready\n" {
 		t.Fatalf("helper %s did not start: %q %v", mode, line, err)
@@ -125,6 +147,11 @@ func watchOnce(t *testing.T, pid int, s scope) []string {
 	w.start()
 	time.Sleep(300 * time.Millisecond)
 	w.halt()
+	// An exited helper stays a zombie until the test reaps it, so ask ps.
+	state, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil || strings.HasPrefix(strings.TrimSpace(string(state)), "Z") {
+		t.Fatalf("helper %d exited before the watcher finished reading it: %q %v", pid, state, err)
+	}
 	return w.violations()
 }
 
