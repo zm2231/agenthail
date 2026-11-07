@@ -182,7 +182,7 @@ func TestClaudeStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 	wantTurn(t, "interrupted", turns["u2"], claudeInterruptedTurn)
 }
 
-func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknown(t *testing.T) {
+func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextStarts(t *testing.T) {
 	path := timelineFixture(t, claudeTurnHead)
 	read, err := timelineClaude().ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 5})
 	if err != nil || len(read.Exchanges) != 1 {
@@ -215,7 +215,7 @@ func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknown(t *testing.T) 
 	if err != nil || len(read.Exchanges) != 1 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	wantTurn(t, "turn without an end before a silent turn", read.Exchanges[0].Turn, unknown)
+	wantTurn(t, "turn without an end before a silent turn", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "interrupted", Usage: &surface.TurnUsage{}, Unavailable: []string{"model", "durationMs", "usage.reasoningTokens", "contextTokens"}})
 }
 
 func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {

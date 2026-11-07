@@ -47,6 +47,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 	currentTurnID := ""
 	codexTurns := map[int]*surface.TurnMetadata{}
 	codexItems := map[int][]surface.TimelineItem{}
+	codexCutOffs := map[int][]surface.TimelineItem{}
 	callRecords := map[string]int{}
 	window := surface.CodexToolWindow{}
 	// Claude's turn state is rebuilt at start; Codex's turn and prompt state
@@ -69,6 +70,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 			if exactFrom == end && codexRecordStartsTurn(record) {
 				exactFrom = recordOffset
 			}
+			codexCutOffs[index] = meter.cutOff(record)
 			if turn := meter.observe(record); turn != nil {
 				codexTurns[index] = turn
 			}
@@ -160,6 +162,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path, source string,
 					items[itemIndex].Turn = codexTurns[index]
 				}
 			}
+			items = append(codexCutOffs[index], items...)
 			if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
 				return false, err
 			}
