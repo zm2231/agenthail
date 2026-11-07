@@ -595,10 +595,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     }
 
     var isWorking: Bool { status == "busy" }
-    /// "Working", with how long the turn has been quiet once it has been.
-    func workingLabel(now: Date) -> String {
-        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
-    }
+    func workingLabel(now: Date) -> String { activity?.workingLabel(now: now) ?? "Working" }
     var isWaitingOnYou: Bool { waitingOn != nil }
     /// The task list's progress while the session is open and has steps
     /// left. The row keeps the plan after the session closes; a session that
@@ -804,6 +801,19 @@ struct SessionActivity: Codable, Hashable {
     var lastProgressAt: String? = nil
     var tool: RunningTool? = nil
     var noProcess: Bool? = nil
+    var finishingSince: String? = nil
+
+    func workingLabel(now: Date) -> String {
+        finishingLabel(now: now) ?? quietNote(now: now).map { "Working · " + $0 } ?? "Working"
+    }
+
+    func note(now: Date) -> String? { finishingLabel(now: now) ?? quietNote(now: now) }
+
+    private func finishingLabel(now: Date) -> String? {
+        guard let raw = finishingSince, let since = SessionTree.parseTimestamp(raw) else { return nil }
+        let elapsed = now.timeIntervalSince(since)
+        return elapsed >= 60 ? "Finishing · running hooks · " + Self.duration(elapsed) : "Finishing · running hooks"
+    }
 
     /// How long a working turn stays quiet before its row says so.
     static let quietAfter: TimeInterval = 10 * 60
@@ -1598,10 +1608,7 @@ struct RawSession: Decodable {
     var activity: SessionActivity? = nil
     var runtimeKind: String? = nil
 
-    /// "Working", with how long the turn has been quiet once it has been.
-    func workingLabel(now: Date) -> String {
-        activity?.quietNote(now: now).map { "Working · " + $0 } ?? "Working"
-    }
+    func workingLabel(now: Date) -> String { activity?.workingLabel(now: now) ?? "Working" }
 }
 
 struct GoalState: Decodable {

@@ -52,6 +52,12 @@ func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surf
 		observation.Activity = nil
 		return
 	}
+	if ended := observation.Ended; ended != nil && observation.WaitingOn == nil {
+		finishing := *ended
+		finishing.Finishing(time.Now())
+		observation.Activity = &finishing
+		return
+	}
 	if changed, ok := record["statusUpdatedAt"].(float64); ok && observation.Activity != nil {
 		if at := time.UnixMilli(int64(changed)); at.After(observation.Activity.LastProgressAt) {
 			observation.Activity.LastProgressAt = at
@@ -187,6 +193,11 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 	if compactPending && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = "compact"
+	}
+	if (last.Done || last.Closing) && !last.Interrupted && last.APIError == "" && !last.TerminalAt.IsZero() && !compactPending {
+		ended := claudeTurnActivity(last)
+		ended.Tool, ended.LastProgressAt, ended.EndedAt = nil, last.TerminalAt, last.TerminalAt
+		observation.Ended = ended
 	}
 	if last.Interrupted && !last.Done {
 		observation.TerminalTurnID, observation.TerminalError = last.UserID, "turn interrupted"
