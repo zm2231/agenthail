@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -26,6 +27,50 @@ const codexCutOffTurn = `{"timestamp":"2026-11-06T15:40:30Z","type":"session_met
 {"timestamp":"2026-11-06T15:44:50.1Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":170},"last_token_usage":{"input_tokens":40,"output_tokens":10,"total_tokens":50}}}}
 {"timestamp":"2026-11-06T15:44:51Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-2","last_agent_message":"Done.","duration_ms":11000}}
 `
+
+func TestOnlyAnOpenCodexTurnWithAKnownIDIsCutOffByTheNextStart(t *testing.T) {
+	const (
+		startA  = `{"timestamp":"2026-11-06T15:40:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-a"}}` + "\n"
+		startA2 = `{"timestamp":"2026-11-06T15:41:30Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-a"}}` + "\n"
+		startNo = `{"timestamp":"2026-11-06T15:40:00Z","type":"event_msg","payload":{"type":"task_started"}}` + "\n"
+		workA   = `{"timestamp":"2026-11-06T15:40:01Z","type":"event_msg","payload":{"type":"user_message","message":"first"}}
+{"timestamp":"2026-11-06T15:40:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"working"}]}}
+`
+		endA   = `{"timestamp":"2026-11-06T15:40:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-a","duration_ms":3000}}` + "\n"
+		startB = `{"timestamp":"2026-11-06T15:42:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-b"}}
+{"timestamp":"2026-11-06T15:42:01Z","type":"event_msg","payload":{"type":"user_message","message":"second"}}
+{"timestamp":"2026-11-06T15:42:02Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-b","duration_ms":2000}}
+`
+	)
+	for _, test := range []struct {
+		name    string
+		rollout string
+		want    []string
+	}{
+		{"an open turn is cut off", startA + workA + startB, []string{"turn-a interrupted", "turn-b completed"}},
+		{"a turn that ended is not cut off again", startA + workA + endA + startB, []string{"turn-a completed", "turn-b completed"}},
+		{"a turn whose start was not seen is not cut off", workA + startB, []string{"turn-b completed"}},
+		{"a turn without an ID is not cut off", startNo + workA + startB, []string{"turn-b completed"}},
+		{"a start repeating the open turn's ID does not cut it off", startA + workA + startA2 + workA + startB, []string{"turn-a interrupted", "turn-b completed"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := timelineFixture(t, `{"timestamp":"2026-11-06T15:39:00Z","type":"session_meta","payload":{"id":"thread"}}`+"\n"+test.rollout)
+			read, err := (&Codex{desktopURL: "ws://127.0.0.1:1"}).ReadSession(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 50})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, item := range read.Items {
+				if item.Kind == "done" && item.Turn != nil {
+					got = append(got, item.TurnID+" "+item.Turn.State)
+				}
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("done items %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestACodexTurnTheNextStartCutOffEndsInterruptedWithItsUsage(t *testing.T) {
 	path := timelineFixture(t, codexCutOffTurn)

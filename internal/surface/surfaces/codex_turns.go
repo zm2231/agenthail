@@ -102,7 +102,7 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 // cutOff finishes, as interrupted, the turn a new turn's start found still
 // open: Codex wrote no end record for it.
 func (m *codexTurnMeter) cutOff(record map[string]any) []surface.TimelineItem {
-	if !m.started || m.turnID == "" || !codexRecordStartsTurn(record) || codexRecordTurnID(record) == m.turnID {
+	if m.turnID == "" || !codexRecordStartsTurn(record) || codexRecordTurnID(record) == m.turnID {
 		return nil
 	}
 	done := codexDoneItem(surface.TurnInterrupted, nil)
