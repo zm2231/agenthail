@@ -149,8 +149,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func checkEnd() -> Bool {
         guard following, let geometry = layout.geometry else { return true }
         guard resting else { return false }
-        // An offset move the action has not handled yet is a scroll, not content the end must catch up with.
-        if let seen = layout.seen, seen.contentSize == geometry.contentSize, seen.contentOffset != geometry.contentOffset { return true }
+        // The action decides a pending offset move a turn later; one the action skipped is still unhandled at the retry.
+        let unhandled = layout.seen.map { $0.contentSize == geometry.contentSize && $0.contentOffset != geometry.contentOffset } ?? false
+        if unhandled, layout.deferredOffset != geometry.contentOffset {
+            layout.deferredOffset = geometry.contentOffset
+            return false
+        }
+        layout.deferredOffset = nil
         if TranscriptEnd(geometry).distance > 2 {
             settle { $0.scrollTo(edge: .bottom) }
         }
@@ -173,6 +178,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 private final class Layout {
     var geometry: ScrollGeometry?
     var seen: ScrollGeometry?
+    var deferredOffset: CGPoint?
     var animationStart: ContinuousClock.Instant?
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
@@ -193,6 +199,7 @@ private final class Layout {
     func cancelCheck() {
         check?.cancel()
         check = nil
+        deferredOffset = nil
     }
 
     var heldFromEnd: CGFloat? {
