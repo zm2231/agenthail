@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -838,11 +839,30 @@ func requestManager(ctx context.Context, home string, request managerRequest) (*
 	if err := unixjson.Call(ctx, managerPath(home), 15*time.Second, managerReplyBytes, request, &response); err != nil {
 		var notSent *unixjson.NotSentError
 		if errors.As(err, &notSent) {
-			return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", notSent.Err))
+			return nil, surface.DeliveryUnavailable(managerUnreachable(notSent.Err))
 		}
 		return nil, managerRequestError(request, err)
 	}
 	return &response, nil
+}
+
+// A Unix connect does not wait for its listener, so a timeout here means the
+// send's own time ran out before it reached the manager.
+func managerUnreachable(err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded):
+		return fmt.Errorf("the send ran out of time before it reached the Claude peer manager; nothing was sent: %w", err)
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("the send was canceled before it reached the Claude peer manager; nothing was sent: %w", err)
+	case errors.Is(err, syscall.EAGAIN):
+		return fmt.Errorf("the Claude peer manager is not accepting connections as fast as they arrive; nothing was sent, retry shortly: %w", err)
+	case errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ECONNREFUSED) && runtime.GOOS == "linux":
+		return fmt.Errorf("Claude peer registration requires the daemon; start 'agenthail daemon start': %w", err)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		// macOS also refuses a connection its listener has no room to queue.
+		return fmt.Errorf("the Claude peer manager refused the connection: the daemon is not running, or its manager is not accepting connections as fast as they arrive; nothing was sent. If the daemon is not running, start it with 'agenthail daemon start': %w", err)
+	}
+	return fmt.Errorf("could not reach the Claude peer manager; nothing was sent: %w", err)
 }
 
 func managerRequestError(request managerRequest, err error) error {
