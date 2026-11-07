@@ -13,6 +13,7 @@ const elements = {
   "#thread-count": { textContent: "" },
   "#request-panel": { hidden: false, innerHTML: "stale" },
   "#background-panel": { hidden: false, innerHTML: "stale" },
+  "#turn-settings": { hidden: true, innerHTML: "" },
   "#chat-body": {
     innerHTML: "",
     scrollTop: 0,

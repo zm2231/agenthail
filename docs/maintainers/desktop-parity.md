@@ -90,7 +90,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Conversation name | app.js:1117, 1678-1681 | GET /api/state `alias`; POST /api/action `alias` | present | macOS/RenameSessionSheet.swift; macOS/DesktopWindow.swift:356, 1681 |
 | Observed Claude runs and subagents | app.js:1068-1075 | GET /api/session-metadata | present | macOS/ClaudeObservations.swift:3; macOS/SubagentsSection.swift |
 | Call this session by voice | app.js:1130, 1580-1581 | GET, POST /api/voice `select` then the call flow above; GET /voice-peer.js | present | The waveform button in the conversation header and Session > Call This Session open the Voice window routed to that session (macOS/DesktopWindow.swift `ConversationHeader`, macOS/SessionCommands.swift, macOS/VoiceController.swift) |
-| Codex turn effort and mode | index.html:251-256; app.js:2013-2018 | POST /api/action `send` | present | macOS/TurnSettingsMenu.swift:18-31 |
+| Session model, effort and mode chips | js/turn-settings.js | GET /api/v1/session-metadata `turnSettings`; POST /api/action `turn-setting` | present | macOS/TurnSettingChips.swift |
 | Codex per-turn service tier and output schema | index.html:254-255; app.js:2016 | POST /api/action `send` | decided | Dropped from the Mac composer in d68aada8; native/tests/session_operations_test.swift:158 asserts sends carry effort and mode only |
 | Fork, Codex native queue, Claude background lifecycle | index.html:257-267; app.js:2019-2056 | POST /api/action `session-fork`, `native-queue`, `session-lifecycle-status`, `-logs`, `-stop`, `-resume` | present | macOS/SessionOperationsSection.swift:4-290; macOS/SessionOperations.swift |
 

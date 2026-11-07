@@ -20,6 +20,7 @@ import { bindDeviceEvents } from "./devices.js";
 import { bindAuditEvents } from "./audit.js";
 import { bindProjectEvents } from "./project-dialog.js";
 import { bindSessionOperationEvents } from "./session-operations.js";
+import { bindTurnSettingEvents } from "./turn-settings.js";
 import { start as startUsage } from "./usage.js";
 import { toast } from "./feedback.js";
 import { app } from "./state.js";
@@ -42,6 +43,7 @@ bindDeviceEvents();
 bindAuditEvents();
 bindProjectEvents();
 bindSessionOperationEvents();
+bindTurnSettingEvents();
 startUsage({ document, sessions: () => app.state.sessions, open: (id) => selectSession(id, true), notify: toast });
 
 $("#refresh").addEventListener("click", async () => {

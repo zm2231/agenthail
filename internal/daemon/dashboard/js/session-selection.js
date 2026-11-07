@@ -10,12 +10,13 @@ import { resizeComposer, syncComposerAction } from "./composer.js";
 import { responseError } from "./http.js";
 import { renderChat } from "./chat.js";
 import { loadSessionMetadata } from "./session-metadata.js";
+import { renderTurnSettings } from "./turn-settings.js";
 import { leaveProject } from "./project-pane.js";
 import { findSession } from "./session-pages.js";
 import { pageHistory } from "./stream-items.js";
 
 export async function selectSession(id, focus = false) {
-  if (app.selected?.id !== id) { for (const selector of ["#turn-effort", "#turn-mode", "#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
+  if (app.selected?.id !== id) { for (const selector of ["#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
   const session = app.state.sessions.find((item) => item.id === id) || app.codexSearch.results.find((item) => item.id === id) || await findSession(id).catch(() => null);
   if (!session) return;
   if (!app.state.sessions.includes(session) && !app.codexSearch.results.includes(session)) app.state.sessions = [...app.state.sessions, session];
@@ -25,6 +26,7 @@ export async function selectSession(id, focus = false) {
   app.selected = session;
   syncSessionOperationFields();
   app.history = null;
+  renderTurnSettings();
   app.transcriptSignature = null;
   app.pendingEntryScroll = true;
   app.mobileChatOpen = mobileConversationView();

@@ -8,7 +8,7 @@ export function syncSessionOperationFields() {
   const form = $("#session-operation-form");
   const surface = app.selected?.surface;
   const lifecycle = app.selected?.capabilities?.lifecycle || {};
-  $("#turn-effort").closest("details").hidden = surface !== "codex";
+  $("#turn-tier").closest("details").hidden = surface !== "codex";
   let offered = false;
   for (const option of form.elements.operation.options) {
     const lifecycleOperation = option.value.startsWith("session-lifecycle-") ? option.value.slice("session-lifecycle-".length) : "";

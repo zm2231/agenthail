@@ -11,16 +11,6 @@ import { selectSession } from "./session-selection.js";
 import { renderQuestionCard } from "./question-pager.js";
 import { bindQuestionPager } from "./question-pager-events.js";
 
-export const permissionModes = [
-  ["", "Default (Claude settings)"],
-  ["acceptEdits", "Accept edits"],
-  ["auto", "Auto"],
-  ["plan", "Plan"],
-  ["manual", "Manual"],
-  ["dontAsk", "Don't ask"],
-  ["bypassPermissions", "Bypass permissions"],
-];
-
 export async function syncRequests() {
   const session = app.selected;
   const panel = $("#request-panel");
@@ -52,10 +42,6 @@ export async function syncRequests() {
 export function renderRequests() {
   const panel = $("#request-panel");
   const state = app.requests || { requests: [] };
-  const capabilities = app.history?.capabilities || {};
-  const mode = capabilities.permissionMode
-    ? `<form class="request-mode" data-permission-mode><label for="permission-mode">Permission mode</label><select id="permission-mode" name="permissionMode">${permissionModes.map(([value, label]) => `<option value="${value}"${value === (state.permissionMode || "") ? " selected" : ""}${value === "" ? " disabled" : ""}>${escape(label)}</option>`).join("")}</select><button class="soft-button" type="submit">Change</button></form>`
-    : "";
   const failure = state.error ? `<p role="status">Could not read this session's requests: ${escape(state.error)}</p>` : "";
 
 
@@ -63,7 +49,7 @@ export function renderRequests() {
   const cards = waiting && !waiting.answerable
     ? renderElsewhereWait(app.selected)
     : (state.requests || []).map((request) => renderReplacedNote(request) + renderRequestCard(request)).join("");
-  panel.innerHTML = cards + failure + mode;
+  panel.innerHTML = cards + failure;
   panel.hidden = panel.innerHTML === "";
 }
 
@@ -205,20 +191,5 @@ export function bindRequestEvents() {
     if (!request) return;
     form.querySelector('[type="submit"]').disabled = true;
     await respondToRequest(request.id, { behavior: "allow", content: inputContent(form, request) });
-  });
-  document.addEventListener("submit", async (event) => {
-    const form = event.target.closest("[data-permission-mode]");
-    if (!form) return;
-    event.preventDefault();
-    const permissionMode = form.elements.permissionMode.value;
-    if (!permissionMode) return;
-    try {
-      await action("permission-mode", { permissionMode });
-      toast(`Permission mode set to ${permissionMode}.`);
-    } catch (error) {
-      toast(error.message);
-    }
-    app.requestsKey = "";
-    await syncRequests();
   });
 }

@@ -198,7 +198,7 @@ export function renderSlashMenu() {
 
 export function selectedTurnOptions() {
   if (app.selected?.surface !== "codex") return {};
-  const options = { effort: $("#turn-effort").value.trim(), mode: $("#turn-mode").value, serviceTier: $("#turn-tier").value };
+  const options = { serviceTier: $("#turn-tier").value };
   if ($("#turn-schema").value.trim()) options.outputSchema = JSON.parse($("#turn-schema").value);
   return options;
 }

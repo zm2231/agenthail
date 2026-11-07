@@ -92,6 +92,18 @@ const lost = () => { throw new TypeError("network lost"); };
 
 {
   const tab = await loaded();
+  tab.context.app.selected = { id: "a", alias: "a", status: "idle", surface: "codex" };
+  tab.$("#turn-tier").value = "fast";
+  tab.$("#message").value = "codex turn";
+  tab.$("#send").dataset.mode = "send";
+  await tab.context.send();
+  const body = tab.requests[0].body;
+  assert.equal(body.serviceTier, "fast", "service tier stays a per-send option");
+  assert.ok(!("effort" in body) && !("mode" in body), "a send carries no effort or mode");
+}
+
+{
+  const tab = await loaded();
   tab.$("#message").value = "for a";
   tab.$("#send").dataset.mode = "send";
   tab.answers.push(refused("Not now."));
