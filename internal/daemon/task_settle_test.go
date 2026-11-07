@@ -189,26 +189,27 @@ func TestABusyStatusWithNoActiveTurnSettlesNothing(t *testing.T) {
 
 func TestAnActiveGoalKeepsTheTaskOpenUntilALaterTurnCompletesIt(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goal = &surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()}
+	created := time.Now()
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: created})
 	f.turn("t1", done("first idle turn"))
-	f.surface.goal.Status = surface.GoalStatusBlocked
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusBlocked, CreatedAt: created})
 	f.turn("t2", done("stuck"))
 	if task := f.stored(t); task.State != registry.TaskRunning {
 		t.Fatalf("a goal that hasn't completed settled the task: %+v", task)
 	}
-	f.surface.goal.Status = surface.GoalStatusComplete
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusComplete, CreatedAt: created})
 	f.turn("t3", done("goal met"))
 	wantTask(t, f.stored(t), registry.TaskDone, registry.TaskKindGoal, "goal met", "t3")
 }
 
 func TestAnUnreadableGoalWaitsAndIsReadAgain(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goalErr = errors.New("app server down")
+	f.surface.setGoalErr(errors.New("app server down"))
 	f.turn("t1", done("text"))
 	if task := f.stored(t); task.State != registry.TaskRunning {
 		t.Fatalf("task=%+v", task)
 	}
-	f.surface.goalErr = nil
+	f.surface.setGoalErr(nil)
 	f.pass()
 	if task := f.stored(t); task.State != registry.TaskRunning {
 		t.Fatal("the goal was read again inside its pace")
@@ -220,9 +221,9 @@ func TestAnUnreadableGoalWaitsAndIsReadAgain(t *testing.T) {
 
 func TestAGoalClearedBetweenTurnsSettlesOnTheNextRead(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goal = &surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()}
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()})
 	f.turn("t1", done("text"))
-	f.surface.goal = nil
+	f.surface.setGoal(nil)
 	if !f.d.taskGoals.due(f.session.ID, "t1", time.Now().Add(taskGoalRecheck)) {
 		t.Fatal("the goal read is not due after its pace")
 	}
@@ -233,7 +234,7 @@ func TestAGoalClearedBetweenTurnsSettlesOnTheNextRead(t *testing.T) {
 
 func TestGoalPacingEndsWithTheTaskHoweverItEnds(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goal = &surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()}
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()})
 	f.turn("t1", done("text"))
 	if _, found := f.d.taskGoals.reads[f.session.ID]; !found {
 		t.Fatal("a goal read leaves its pacing entry")
@@ -249,22 +250,22 @@ func TestGoalPacingEndsWithTheTaskHoweverItEnds(t *testing.T) {
 
 func TestACompleteGoalWaitsForTheTurnThatCompletedIt(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goal = &surface.GoalState{Status: surface.GoalStatusComplete, CreatedAt: time.Now()}
-	f.surface.onGoal = func() {
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusComplete, CreatedAt: time.Now()})
+	f.surface.setOnGoal(func() {
 		f.surface.observations[f.session.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t2", CompletedTurnID: "t1", Reply: done("the turn before")}
-	}
+	})
 	f.turn("t1", done("the turn before"))
 	if task := f.stored(t); task.State != registry.TaskRunning {
 		t.Fatalf("settled on the turn before the one that completed the goal: %+v", task)
 	}
-	f.surface.onGoal = nil
+	f.surface.setOnGoal(nil)
 	f.turn("t2", done("the goal's own turn"))
 	wantTask(t, f.stored(t), registry.TaskDone, registry.TaskKindGoal, "the goal's own turn", "t2")
 }
 
 func TestAGoneChildSettlesWithTheTurnItsGoalHeldOpen(t *testing.T) {
 	f := newTaskFixture(t)
-	f.surface.goal = &surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()}
+	f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusActive, CreatedAt: time.Now()})
 	f.turn("t1", done("the last thing it said"))
 	dropFromCatalog(t, f, map[string]struct{}{f.session.ID: {}})
 	f.surface.observeErr = errors.New("thread not found")

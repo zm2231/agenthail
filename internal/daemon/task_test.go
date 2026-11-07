@@ -16,16 +16,11 @@ import (
 
 type taskSurface struct {
 	*daemonSurface
-	goal    *surface.GoalState
-	goalErr error
-	onGoal  func()
+	fakeGoal
 }
 
 func (s *taskSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
-	if s.onGoal != nil {
-		s.onGoal()
-	}
-	return s.goal, s.goalErr
+	return s.read()
 }
 
 type taskFixture struct {

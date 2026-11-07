@@ -50,6 +50,25 @@ func (f *taskFixture) queuedFor(t *testing.T, session, key string) int {
 	return count
 }
 
+func (f *taskFixture) subscribers() int {
+	f.d.events.mu.Lock()
+	defer f.d.events.mu.Unlock()
+	return len(f.d.events.subscribers)
+}
+
+// awaitSubscribers reports whether at least n event subscribers are open
+// before stop closes.
+func (f *taskFixture) awaitSubscribers(n int, stop <-chan struct{}) bool {
+	for f.subscribers() < n {
+		select {
+		case <-stop:
+			return false
+		case <-time.After(time.Millisecond):
+		}
+	}
+	return true
+}
+
 func (f *taskFixture) dropSubscribers() {
 	f.d.events.mu.Lock()
 	defer f.d.events.mu.Unlock()
@@ -75,7 +94,7 @@ func waitArrivals(t *testing.T) []waitArrival {
 			f.see(surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "t1", WaitingOn: &surface.Waiting{Kind: surface.WaitingApproval, ID: "prompt-1"}})
 		}, "request"},
 		{"stopped goal", func(f *taskFixture) {
-			f.surface.goal = &surface.GoalState{Status: surface.GoalStatusBlocked, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+			f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusBlocked, CreatedAt: time.Now(), UpdatedAt: time.Now()})
 			f.turn("t1", done("stuck"))
 		}, "goal_stopped"},
 	}
@@ -116,11 +135,17 @@ func TestADroppedSubscriptionDoesNotLoseTheEvent(t *testing.T) {
 		t.Run(arrival.name, func(t *testing.T) {
 			f := newTaskFixture(t)
 			reads := 0
+			returned := make(chan struct{})
+			dropped := make(chan struct{})
 			f.d.taskWaitRead = func() {
 				reads++
 				if reads == 1 {
+					before := f.subscribers()
 					go func() {
-						time.Sleep(50 * time.Millisecond)
+						defer close(dropped)
+						if !f.awaitSubscribers(before+1, returned) {
+							return
+						}
 						f.dropSubscribers()
 						arrival.make(f)
 						f.dropSubscribers()
@@ -128,7 +153,10 @@ func TestADroppedSubscriptionDoesNotLoseTheEvent(t *testing.T) {
 				}
 			}
 			started := time.Now()
-			readyOf(t, f.wait(t, map[string]any{"timeoutSec": 20}), arrival.kind)
+			out := f.wait(t, map[string]any{"timeoutSec": 20})
+			close(returned)
+			<-dropped
+			readyOf(t, out, arrival.kind)
 			if reads < 2 {
 				t.Fatalf("reads=%d", reads)
 			}
@@ -190,7 +218,7 @@ func TestAGoalThatStopsAgainIsReportedAgain(t *testing.T) {
 	f := newTaskFixture(t)
 	created := time.Now()
 	stop := func(at time.Time) {
-		f.surface.goal = &surface.GoalState{Status: surface.GoalStatusBlocked, CreatedAt: created, UpdatedAt: at}
+		f.surface.setGoal(&surface.GoalState{Status: surface.GoalStatusBlocked, CreatedAt: created, UpdatedAt: at})
 	}
 	stop(created)
 	first := f.wait(t, map[string]any{"timeoutSec": 0})
