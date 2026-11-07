@@ -54,6 +54,33 @@ final class LiveHostUITests: XCTestCase {
         requireLive(reply.waitForExistence(timeout: 20), "a reply written after the host came back shows live", app)
     }
 
+    func testAFinishedTurnLeavesWorkingInTheOpenConversation() throws {
+        let control = try LiveControl()
+        let app = launchForLiveHosts()
+        let hostID = try pairLiveHost(0, control: control, in: app)
+        let prompt = "Ship release " + UUID().uuidString.prefix(8)
+        try control.startTurn(host: 0, prompt: prompt)
+        let row = liveRow(prompt, host: hostID, in: app).firstMatch
+        requireLive(row.waitForExistence(timeout: 30), "the conversation with an open turn is listed", app)
+        requireLive(waitFor(row, value: "Working", timeout: 30), "the open turn's conversation is listed as working", app)
+        row.tapWhenReady()
+        let summary = app.buttons["session-summary"]
+        requireLive(summary.waitForExistence(timeout: 20), "the conversation opens", app)
+        requireLive(waitFor(summary, labelContains: "Working", timeout: 20), "the open conversation says it is working", app)
+
+        let reply = "Released " + UUID().uuidString.prefix(8)
+        let finished = Date()
+        try control.finishTurn(host: 0, reply: reply)
+        requireLive(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", reply)).firstMatch.waitForExistence(timeout: 20), "the reply shows", app)
+        requireLive(waitFor(summary, labelLacks: "Working", timeout: 10), "the conversation stops saying Working once the turn finishes", app)
+        print("ios-live: header left Working \(String(format: "%.1f", Date().timeIntervalSince(finished))) s after the turn finished")
+    }
+
+    private func waitFor(_ element: XCUIElement, labelContains text: String? = nil, labelLacks missing: String? = nil, timeout: TimeInterval) -> Bool {
+        let predicate = text.map { NSPredicate(format: "label CONTAINS %@", $0) } ?? NSPredicate(format: "exists == true AND NOT (label CONTAINS %@)", missing ?? "")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+    }
+
     private func waitFor(_ element: XCUIElement, value: String? = nil, notValue: String? = nil, timeout: TimeInterval) -> Bool {
         let predicate = value.map { NSPredicate(format: "value == %@", $0) } ?? NSPredicate(format: "exists == true AND value != %@", notValue ?? "")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
