@@ -164,6 +164,7 @@ SOURCES=(
   TranscriptEnd.swift
   macOS/TranscriptEndCheck.swift
   macOS/TranscriptFollow.swift
+  macOS/TranscriptSelectionHold.swift
   macOS/TranscriptFeed.swift
   macOS/RevealedRow.swift
   macOS/TranscriptSlots.swift

@@ -901,6 +901,7 @@ struct TranscriptView: View {
     @State private var underfilled = false
     @State private var paneWidth: CGFloat = 0
     @State private var tailLayout = TranscriptTailLayout()
+    @State private var selectionHold = TranscriptSelectionHold()
     @State private var settledSlots = StableSlots()
     private static let bottomPadding: CGFloat = 12
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -989,6 +990,7 @@ struct TranscriptView: View {
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity)
             .coordinateSpace(.named(TranscriptRows.contentSpace))
+            .background { TranscriptSelectionAnchor(hold: selectionHold) }
             .transcriptScrimContent()
             .transcriptScrimOrigin()
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
