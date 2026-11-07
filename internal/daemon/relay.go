@@ -95,11 +95,27 @@ func backgroundHold(ctx context.Context, observed *sessionObservation, from *sur
 	return fmt.Errorf("waiting for background work to finish")
 }
 
-func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, session *surface.Session) {
-	d.syncRelaysObserved(ctx, adapter, session, observeOnce(adapter, session, observeAdapter))
+// relayScan is one scan's relay reads: each adapter that reads many sessions'
+// completions in one pass gives the scan a single reader. A nil scan reads
+// through the adapter itself.
+type relayScan map[surface.CompletionScanner]surface.CompletionReader
+
+func (s relayScan) reader(adapter surface.Surface) (surface.CompletionReader, bool) {
+	if scanner, ok := adapter.(surface.CompletionScanner); ok && s != nil {
+		if s[scanner] == nil {
+			s[scanner] = scanner.CompletionScan()
+		}
+		return s[scanner], true
+	}
+	reader, ok := adapter.(surface.CompletionReader)
+	return reader, ok
 }
 
-func (d *Daemon) syncRelaysObserved(ctx context.Context, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
+func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.syncRelaysObserved(ctx, nil, adapter, session, observeOnce(adapter, session, observeAdapter))
+}
+
+func (d *Daemon) syncRelaysObserved(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
 	routes, err := d.Registry.ListRoutes()
 	if err != nil {
 		d.log.Printf("list relays: %s", err)
@@ -114,7 +130,7 @@ func (d *Daemon) syncRelaysObserved(ctx context.Context, adapter surface.Surface
 	if len(active) == 0 {
 		return
 	}
-	reader, ok := adapter.(surface.CompletionReader)
+	reader, ok := scan.reader(adapter)
 	captureErr := error(nil)
 	if !ok {
 		captureErr = fmt.Errorf("source does not support replayable completions")

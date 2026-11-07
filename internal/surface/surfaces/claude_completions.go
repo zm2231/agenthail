@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -24,6 +25,40 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	if err != nil {
 		return surface.CompletionBatch{}, err
 	}
+	return c.readCompletions(ctx, sess, path, cursor)
+}
+
+// CompletionScan reads each session's completions through one listing of the
+// transcripts, taken at its first read.
+func (c *Claude) CompletionScan() surface.CompletionReader {
+	return &claudeCompletionScan{claude: c}
+}
+
+type claudeCompletionScan struct {
+	claude      *Claude
+	once        sync.Once
+	roots       []string
+	transcripts func(string) []string
+	err         error
+}
+
+func (s *claudeCompletionScan) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	s.once.Do(func() {
+		if s.roots, s.err = surface.ClaudeConfigRoots(s.claude.home); s.err == nil {
+			s.transcripts = s.claude.transcripts.pass(s.roots)
+		}
+	})
+	if s.err != nil {
+		return surface.CompletionBatch{}, s.err
+	}
+	path, err := sessionTranscriptIn(sess, s.roots, s.transcripts)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	return s.claude.readCompletions(ctx, sess, path, cursor)
+}
+
+func (c *Claude) readCompletions(ctx context.Context, sess *surface.Session, path, cursor string) (surface.CompletionBatch, error) {
 	var checkpoint claudeCompletionCursor
 	info, err := os.Stat(path)
 	if err != nil {

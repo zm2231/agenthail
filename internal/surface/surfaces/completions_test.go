@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 func appendCompletionTranscript(t *testing.T, path, id, text, reason string) {
@@ -235,5 +236,54 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 	}
 	if replay, err := reader.ReadCompletions(context.Background(), session, next.Cursor); err != nil || len(replay.Events) != 0 {
 		t.Fatalf("textual completion replayed: %+v %v", replay, err)
+	}
+}
+
+func TestARelayScanOfManyClaudeSourcesListsTheProjectsOnce(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	fixture := claudetest.New(t)
+	c := NewClaude(nil, fixture.Home)
+	projects := filepath.Join(fixture.Root, "projects")
+	var listings int
+	c.transcripts.readDir = func(dir string) ([]os.DirEntry, error) {
+		if dir == projects {
+			listings++
+		}
+		return os.ReadDir(dir)
+	}
+	paths := map[string]string{}
+	for i := range 5 {
+		id := fmt.Sprintf("0000000%d-0caa-4912-823f-927677775b2b", i)
+		path := filepath.Join(projects, fmt.Sprintf("project-%d", i), id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		appendCompletionTranscript(t, path, "old-"+id, "old", "end_turn")
+		paths[id] = path
+	}
+	cursors := map[string]string{}
+	scan := c.CompletionScan()
+	for id := range paths {
+		batch, err := scan.ReadCompletions(context.Background(), &surface.Session{ID: id, Surface: surface.KindClaude}, "")
+		if err != nil || batch.Cursor == "" {
+			t.Fatalf("%s: baseline=%+v err=%v", id, batch, err)
+		}
+		cursors[id] = batch.Cursor
+	}
+	if listings != 1 {
+		t.Fatalf("listed the projects %d times for %d sources in one scan", listings, len(paths))
+	}
+	for id, path := range paths {
+		appendCompletionTranscript(t, path, "new-"+id, "reply to "+id, "end_turn")
+	}
+	scan = c.CompletionScan()
+	for id := range paths {
+		batch, err := scan.ReadCompletions(context.Background(), &surface.Session{ID: id, Surface: surface.KindClaude}, cursors[id])
+		if err != nil || len(batch.Events) != 1 || batch.Events[0].Text != "reply to "+id {
+			t.Fatalf("%s: events=%+v err=%v", id, batch.Events, err)
+		}
+	}
+	if listings != 2 {
+		t.Fatalf("listed the projects %d times over two scans", listings)
 	}
 }
