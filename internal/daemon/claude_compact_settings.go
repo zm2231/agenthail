@@ -24,7 +24,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 		}
 		results := make([]surface.ClaudeCompactSettings, 0, len(roots))
 		for _, root := range roots {
-			settings, err := surface.ReadClaudeCompactSettings(root)
+			settings, err := surface.ReadClaudeCompactSettings(home, root)
 			if err != nil {
 				writeAPIError(w, http.StatusUnprocessableEntity, "invalid_request", err.Error())
 				return
@@ -34,11 +34,13 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"roots": results})
 	case http.MethodPost:
 		var request struct {
-			Root    string `json:"root"`
-			Model   string `json:"model"`
-			Window  string `json:"window"`
-			Enabled *bool  `json:"enabled"`
-			Idle    *bool  `json:"idleCompaction"`
+			Root                   string `json:"root"`
+			Model                  string `json:"model"`
+			Window                 string `json:"window"`
+			Enabled                *bool  `json:"enabled"`
+			Idle                   *bool  `json:"idleCompaction"`
+			AgenthailIdle          *bool  `json:"agenthailIdleCompaction"`
+			AgenthailIdleMinTokens *int64 `json:"agenthailIdleMinTokens"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 		decoder.DisallowUnknownFields()
@@ -51,7 +53,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		settings, err := surface.WriteClaudeCompactSettings(root, surface.ClaudeCompactChange{Model: request.Model, Window: request.Window, Enabled: request.Enabled, Idle: request.Idle})
+		settings, err := surface.WriteClaudeCompactSettings(home, root, surface.ClaudeCompactChange{Model: request.Model, Window: request.Window, Enabled: request.Enabled, Idle: request.Idle, AgenthailIdle: request.AgenthailIdle, AgenthailIdleMinTokens: request.AgenthailIdleMinTokens})
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return

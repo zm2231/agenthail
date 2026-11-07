@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/atomicfile"
 )
 
 // ClaudeConfigDir is the primary Claude config root: the one Claude Code
@@ -137,6 +139,21 @@ func ReadAgenthailConfig(home string) (map[string]json.RawMessage, error) {
 		return nil, fmt.Errorf("Agenthail config %s must be a JSON object", path)
 	}
 	return config, nil
+}
+
+func WriteAgenthailConfig(home string, config map[string]json.RawMessage) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := AgenthailConfigPath(home)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return atomicfile.Write(path, append(data, '\n'), 0o600)
 }
 
 func claudeRootIdentity(root string) string {

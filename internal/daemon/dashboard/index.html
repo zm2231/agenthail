@@ -567,7 +567,7 @@
             <section data-pane="content" class="settings-card">
               <div class="settings-card-heading">
                 <h2>Claude compaction</h2>
-                <p>When Claude compacts a conversation, per Claude config folder. Applies to Claude sessions started after the change.</p>
+                <p>When Claude compacts a conversation, per Claude config folder. Claude's own settings apply to sessions started after the change. Agenthail's idle compaction compacts a large idle conversation before its cache expires, even when the account is near its limit, and applies at once.</p>
               </div>
               <div id="claude-compact-roots" class="claude-compact-roots"><div class="empty-card">Reading Claude settings.</div></div>
               <form class="settings-form" id="claude-compact-form">
@@ -576,6 +576,8 @@
                 <label><span>Window</span><input id="claude-compact-window" name="window" placeholder="tokens, auto, or unset" autocomplete="off"></label>
                 <label><span>Autocompact</span><select id="claude-compact-enabled" name="enabled"><option value="">Leave as is</option><option value="on">On</option><option value="off">Off</option></select></label>
                 <label><span>Idle compaction</span><select id="claude-compact-idle" name="idle"><option value="">Leave as is</option><option value="on">On</option><option value="off">Off</option></select></label>
+                <label><span>Agenthail idle compaction</span><select id="claude-compact-agenthail-idle" name="agenthailIdle"><option value="">Leave as is</option><option value="on">On</option><option value="off">Off</option></select></label>
+                <label><span>From context size</span><input id="claude-compact-agenthail-idle-min" name="agenthailIdleMin" inputmode="numeric" placeholder="tokens, 200000 by default" autocomplete="off"></label>
                 <button class="soft-button" type="submit">Save</button>
               </form>
             </section>

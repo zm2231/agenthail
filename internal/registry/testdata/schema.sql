@@ -1,4 +1,4 @@
--- schemaVersion 74
+-- schemaVersion 75
 
 -- index aliases_session_id
 CREATE UNIQUE INDEX aliases_session_id ON aliases(session_id);
@@ -41,6 +41,9 @@ CREATE INDEX device_connection_drops_recent ON device_connection_drops(device_id
 
 -- index device_pairings_expires
 CREATE INDEX device_pairings_expires ON device_pairings(expires_at);
+
+-- index idle_compactions_queue
+CREATE INDEX idle_compactions_queue ON idle_compactions(queue_id) WHERE queue_id!=0;
 
 -- index ledger_events_origin
 CREATE UNIQUE INDEX ledger_events_origin ON ledger_events(project_key, actor_host_id, origin_seq) WHERE origin_seq > 0;
@@ -393,6 +396,15 @@ CREATE TABLE hosts (
 	catalog_epoch TEXT NOT NULL DEFAULT '',
 	catalog_seq INTEGER NOT NULL DEFAULT 0,
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
+);
+
+-- table idle_compactions
+CREATE TABLE idle_compactions (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	window_ms INTEGER NOT NULL,
+	queue_id INTEGER NOT NULL DEFAULT 0,
+	request_uuid TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (session_id, window_ms)
 );
 
 -- table launcher_pending

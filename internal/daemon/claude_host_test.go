@@ -148,6 +148,74 @@ func TestAPersonCompactsAHostSessionFromTheDashboard(t *testing.T) {
 	})
 }
 
+func TestAnIdleHostSessionIsCompactedAndItsNextTurnSaysTheCompactionWasIdle(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	claude := surfaces.NewClaude(nil, fixture.Home)
+	session := hostedSession(t, claude, id)
+	r := hostRegistry(t)
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestDaemon(t, r, []surface.Surface{claude})
+	ctx := context.Background()
+	if _, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "hello", "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the turn in the transcript", 15*time.Second, func() bool {
+		session = hostedSession(t, claude, id)
+		data, _ := os.ReadFile(session.Transcript)
+		return session.Transcript != "" && strings.Contains(string(data), `"type":"assistant"`)
+	})
+	now := time.Now()
+	large := fmt.Sprintf(`{"type":"assistant","uuid":%q,"timestamp":%q,"sessionId":%q,"message":{"id":"msg-large","model":"claude-fixture","role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":5000,"cache_read_input_tokens":245000,"output_tokens":5,"cache_creation":{"ephemeral_1h_input_tokens":5000,"ephemeral_5m_input_tokens":0}}}}`+"\n", uuid.NewString(), now.Add(-55*time.Minute).UTC().Format(time.RFC3339Nano), id)
+	transcript, err := os.OpenFile(session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transcript.WriteString(large); err != nil {
+		t.Fatal(err)
+	}
+	transcript.Close()
+	session.Status = surface.StatusIdle
+	raw, _ := json.Marshal(session)
+	if _, _, err := r.RecordCatalogSession(registry.CatalogSessionState{Session: session, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: now, ProjectionFingerprint: string(raw)}, registry.CatalogEvent{DedupeKey: id, Type: "session.upserted", EntityID: id, Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	d.compactIdle(ctx, now, map[string]idleTranscript{})
+	d.drainMessageQueue(ctx, claude, &session)
+	testkit.Eventually(t, "the idle compact to record its request", 20*time.Second, func() bool {
+		requests, err := r.IdleCompactionRequests(id)
+		return err == nil && len(requests) == 1
+	})
+	if _, err := d.dispatcher().DeliverWithOptions(ctx, claude, &session, "after the compaction", "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
+		t.Fatal(err)
+	}
+	var triggers []string
+	testkit.Eventually(t, "the next turn to report its compactions", 20*time.Second, func() bool {
+		page, err := d.readProviderHistoryPage(ctx, &session, claude, 0, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		triggers = nil
+		for _, item := range page.Items {
+			if item.Kind == "done" && item.Turn != nil && len(item.Turn.Compactions) > 0 {
+				triggers = triggers[:0]
+				for _, compaction := range item.Turn.Compactions {
+					triggers = append(triggers, compaction.Trigger)
+				}
+			}
+		}
+		return len(triggers) > 0
+	})
+	if !slices.Equal(triggers, []string{surface.CompactionIdle}) {
+		t.Fatalf("compactions before the next turn = %v, want the one idle compaction", triggers)
+	}
+}
+
 func TestAStoppedDaemonLeavesNoClaudeHostSupervisorRunning(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})

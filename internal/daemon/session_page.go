@@ -177,6 +177,7 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 					continue
 				}
 			}
+			item.Turn = d.sources.publishedTurn(session.ID, item.Turn)
 			page = append(page, item)
 		}
 		if result != nil && len(items)+len(page) > providerHistoryItemLimit {
