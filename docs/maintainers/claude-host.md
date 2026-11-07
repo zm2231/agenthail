@@ -107,6 +107,8 @@ past it. A failed request returns `{code, message}`:
 | `refused` | `open`: Claude exited with an error before it started, such as a workspace it does not trust | refused, held until a person fixes the cause |
 | `open_failed` | `open`: Claude could not be spawned, was killed, or did not start in time | unavailable, retried |
 | `stale` | `respond`: the request was already answered or withdrawn | a conflict; nothing is retried |
+| `busy` | `send` with `ifIdle`: a turn is running | the message is handled as for a busy target: queued or steered |
+| `busy` | `close` with `ifIdle`: the session is still working | the session keeps running; adoption checks again until its wait runs out, then refuses as busy |
 
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
@@ -367,8 +369,11 @@ runs, discovery records it as `claude-cli` again.
   goes through the host's `send` with origin `human`. Its uuid is the delivery
   intent's uuid, which Claude stores as the transcript record's uuid: the turn
   is followed exactly, and a resend of the same intent runs once, also across a
-  host restart. Steer sends with priority `now`; interrupt goes to the session's
-  query.
+  host restart. It is sent with `ifIdle`, so while a turn runs the host
+  refuses it as `busy` in the same step and the sender's `busyDelivery`
+  decides: `queue` holds it until the session is idle, `steer` sends it with
+  priority `now`. Agenthail's own turn is sent the same way. Interrupt goes to
+  the session's query.
 - Agent, relay and channel messages take `RoutePeer` over the native socket,
   where Claude records the verified sender and the reply address. Claude drops a
   peer origin given on SDK input, so the host is not used for them.

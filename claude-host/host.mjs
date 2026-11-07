@@ -788,6 +788,9 @@ function decide({ request, input, suggestions }, decision) {
   return { outcome: 'allowed', result: { behavior: 'allow', updatedInput: input } };
 }
 
+// With ifIdle, send passes the message on only while Claude is idle and
+// refuses it as busy otherwise, in the same step, so a message its sender
+// wants queued behind a running turn never joins that turn.
 async function send(params) {
   const s = session(params.sessionId);
   if (s.checker) throw new HostError('invalid', `session ${s.id} is a narrowing checker; it takes no messages`);
@@ -800,6 +803,7 @@ async function take(s, params) {
   if (!Array.isArray(images)) throw new HostError('invalid', 'images must be a list');
   if (typeof params.text !== 'string' || (params.text.trim() === '' && images.length === 0)) throw new HostError('invalid', 'text is required');
   if (s.accepted.has(params.uuid)) return { accepted: true, duplicate: true };
+  if (params.ifIdle && s.state !== 'idle') throw new HostError('busy', `Claude session ${s.id} is working`);
   const message = {
     type: 'user',
     uuid: params.uuid,
