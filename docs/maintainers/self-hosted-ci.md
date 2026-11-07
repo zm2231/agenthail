@@ -4,7 +4,7 @@ Pull requests from branches in this repository run `verify`, `native` and `ios` 
 
 A push to `main` runs the full jobs on these runners, with `ios` when iOS inputs changed since the previous push and without `ios-release`. A later push cancels the earlier run, so the newest commit is what gets a result. Pull requests don't have to be up to date with `main` to merge, so this run is what tests changes together; check it before tagging a release.
 
-On an ordinary pull request `changes`, `verify` and `verify-linux` run, and `ios-release` runs when iOS inputs change. `native`, `installer`, `package` and `ios` run only on merge-train pull requests (head branch `train/...`) or on a pull request labelled `full-ci`; `ios` still needs changed iOS inputs. Otherwise those jobs are skipped, and a skipped required check counts as passed, so on a worker pull request they prove nothing. The merge train is the gate: merge worker pull requests only through a train, never directly.
+On an ordinary pull request `changes`, `verify` and `verify-linux` run, and `ios` and `ios-release` run when iOS inputs change. `ios` runs the UI test tiers described under [iOS UI test tiers](#ios-ui-test-tiers). `native`, `installer` and `package` run only on merge-train pull requests (head branch `train/...`) or on a pull request labelled `full-ci`. Otherwise those jobs are skipped, and a skipped required check counts as passed, so on a worker pull request they prove nothing. The merge train is the gate: merge worker pull requests only through a train, never directly.
 
 `verify-linux` runs on GitHub-hosted runners as three jobs. `verify-linux-rest` runs the race tests of every package except `internal/daemon`. The two `verify-linux-daemon` jobs each run half of `internal/daemon`'s race tests; the first also runs vet and the second the Node host tests, since they finish sooner. `scripts/go-test-shard` reads the package's top-level tests from its source, as `go test` selects them, with the same build flags as the run, and assigns each to a shard by a hash of its name, so a new test always lands in exactly one shard and nothing in the package runs to list them. The first shard then compares `go test -race -list` with the union of the shards and fails on any difference, so a test the tool cannot see fails the job rather than silently not running. macOS `verify` still runs the package whole. The `verify-linux` job itself only runs `scripts/ci-needs-passed.sh`, which passes only if all three jobs succeeded: a skipped or cancelled job fails it. The required check therefore keeps its name.
 
@@ -12,9 +12,27 @@ Labels don't start runs. CI and iOS run when a pull request is opened, reopened 
 
 - If the latest run's gate is still deciding, it picks the label up by itself.
 - If the gate already skipped the full jobs, the run is rerun, cancelled first if it is still going.
-- If the run already has the full jobs, it is left alone. So is a cancelled run, such as one a merge train cancelled, and an iOS run with no iOS changes.
+- If the run already has the full jobs, it is left alone. So is a cancelled run, such as one a merge train cancelled.
+
+Adding `ui-all` reruns the latest iOS run, cancelled first if it is still going, so its `changes` job reads the label and `ios` runs every UI test tier. An iOS run with no iOS changes is left alone.
 
 Any other label changes nothing. Adding `full-ci` to a pull request from a fork reruns nothing, because its token cannot rerun workflows; rerun CI by hand after adding the label. `scripts/test-ci-full-label.sh` checks these decisions against a stub `gh`.
+
+## iOS UI test tiers
+
+`native/ui-test-tiers.txt` lists every iPhone UI test once, with the tier that runs it. `ios` always runs every unit test and adds UI tests by tier:
+
+| Run | UI test tiers |
+|---|---|
+| Pull request, including `full-ci` and `train/...` | `smoke` |
+| Pull request that changes the transcript, the preview daemon or the UI test harness | `smoke`, `main` |
+| Pull request labelled `ui-all` | `smoke`, `main`, `nightly` |
+| Push to `main` | `smoke`, `main` |
+| `iOS nightly`, every night and on `workflow_dispatch` | `smoke`, `main`, `nightly` |
+
+`scripts/ios-ui-tests.sh tiers` decides the tiers from the event, the changed files and the labels; the paths that widen a pull request to `main` are in its `wide` pattern. `scripts/ios-ui-tests.sh check` fails when a UI test is in no tier, in two, or a listed test no longer exists, so a new test cannot silently never run. `ios`, `iOS nightly` and `verify` run the check, and `scripts/test-ios-ui-tests.sh` checks the script.
+
+A failed `ios` run on a push to `main` opens the issue `iOS tests on main are failing`, assigned to the repository owner, or comments on it if it is open; the next passing push closes it. A cancelled run, such as one a later push replaced, reports nothing. `iOS nightly` does the same with `Nightly iOS tests are failing`, and also reports a run that stopped or was cancelled. Both use `scripts/ci-failure-issue.sh`, which `scripts/test-ci-failure-issue.sh` checks.
 
 ## Fork protection
 

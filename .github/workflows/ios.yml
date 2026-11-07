@@ -22,17 +22,11 @@ jobs:
       pull-requests: read
     outputs:
       ios: ${{ steps.diff.outputs.ios }}
-      full: ${{ steps.full.outputs.full }}
+      tiers: ${{ steps.tiers.outputs.tiers }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - id: full
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.head_ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: scripts/ci-full-gate.sh
       - id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -51,7 +45,7 @@ jobs:
           yq '.targets[].sources[].path' native/project.yml > "$RUNNER_TEMP/sources"
           test -s "$RUNNER_TEMP/sources"
           git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
-          inputs=(native/project.yml native/Agenthail.xcodeproj scripts/ios-simulator.sh scripts/ios-test-stall-guard.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
+          inputs=(native/project.yml native/Agenthail.xcodeproj native/ui-test-tiers.txt scripts/ios-simulator.sh scripts/ios-test-stall-guard.sh scripts/ios-ui-tests.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
           while read -r source; do inputs+=("native/$source"); done < "$RUNNER_TEMP/sources"
           ios=false
           while read -r file; do
@@ -60,14 +54,33 @@ jobs:
             done
           done < "$RUNNER_TEMP/changed"
           echo "ios=$ios" >> "$GITHUB_OUTPUT"
+      - id: tiers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          : > "$RUNNER_TEMP/labels"
+          if [ "$EVENT" = pull_request ]; then
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name' > "$RUNNER_TEMP/labels"
+          fi
+          if [ -f "$RUNNER_TEMP/changed" ]; then
+            tiers="$(scripts/ios-ui-tests.sh tiers "$EVENT" "$RUNNER_TEMP/changed" "$RUNNER_TEMP/labels")"
+          else
+            tiers="smoke main"
+          fi
+          echo "UI test tiers: $tiers"
+          echo "tiers=$tiers" >> "$GITHUB_OUTPUT"
 
   ios:
     needs: changes
-    if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.full == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
+    if: needs.changes.outputs.ios == 'true' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size)
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 45
     env:
       DERIVED: ${{ github.workspace }}/../ios-derived
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v5
       - name: Check crash reporter dialogs are off
@@ -77,6 +90,8 @@ jobs:
             echo "::error::Crash reporter dialogs are not turned off for this runner's user, so every UI test teardown can wait about 300 s on one. Run 'defaults write com.apple.CrashReporter DialogType none' as that user. See Crash reporter dialogs in docs/maintainers/self-hosted-ci.md."
             exit 1
           fi
+      - name: Every UI test is in one tier
+        run: scripts/ios-ui-tests.sh check
       - name: Boot simulator
         env:
           AGENTHAIL_SIMULATOR_NAME: ${{ runner.environment == 'self-hosted' && format('Agenthail CI {0}', runner.name) || '' }}
@@ -89,9 +104,15 @@ jobs:
       - name: Build for simulator tests
         run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
       - name: iOS simulator tests
+        env:
+          TIERS: ${{ needs.changes.outputs.tiers }}
         run: |
           rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
-          scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
+          read -r -a tiers <<< "$TIERS"
+          only=()
+          while IFS= read -r arg; do only+=("$arg"); done < <(scripts/ios-ui-tests.sh args "${tiers[@]}")
+          echo "UI test tiers: $TIERS (${#only[@]} -only-testing targets)"
+          scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" "${only[@]}" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
@@ -101,6 +122,7 @@ jobs:
           test -s "$app/Frameworks/WebRTC.framework/WebRTC"
           cmp native/iOS/WebRTC-LICENSE.txt "$app/WebRTC-LICENSE.txt"
       - name: Upload simulator test results
+        id: upload
         if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -111,6 +133,25 @@ jobs:
       - name: Clean up self-hosted job
         if: always() && runner.environment == 'self-hosted'
         run: scripts/ci-self-hosted.sh cleanup
+
+  report:
+    needs: ios
+    if: always() && github.event_name == 'push' && needs.ios.result != 'skipped' && needs.ios.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Open, update or close the main iOS issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_URL: ${{ needs.ios.outputs.artifact }}
+          ISSUE_ASSIGNEE: ${{ github.repository_owner }}
+          RESULT: ${{ needs.ios.result }}
+        run: scripts/ci-failure-issue.sh "$RESULT" "iOS tests on main are failing" "iOS test run for a push to main"
 
   ios-release:
     needs: changes

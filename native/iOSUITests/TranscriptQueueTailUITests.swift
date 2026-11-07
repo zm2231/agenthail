@@ -2,16 +2,29 @@ import XCTest
 
 @MainActor
 final class TranscriptQueueTailUITests: XCTestCase {
-    private func launch(_ rows: String = "one", theme: String = "dark", extra: [String] = []) -> XCUIApplication {
+    private func launch(_ rows: String = "one", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", rows, "--preview-theme", theme, "--preview-reading", "--preview-follow"] + extra
+        app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", rows, "--preview-theme", "dark", "--preview-reading", "--preview-follow"] + extra
         app.launch()
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 15))
-        sleep(2)
+        if rows != "none" {
+            let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'queue-computer/'")).firstMatch
+            XCTAssertTrue(first.waitForExistence(timeout: 10), "no queued row arrived")
+            XCTAssertTrue(first.waitUntilStill(), "the queued rows kept moving")
+        }
         return app
     }
 
     private func settle() { RunLoop.current.run(until: Date().addingTimeInterval(1)) }
+
+    // The preview's --preview-tail-slow and --preview-reopen-slow delays, counted from the launch or the reopen.
+    private static let lateRowDelay: TimeInterval = 5
+    private static let reopenDelay: TimeInterval = 6
+
+    private func waitPast(_ start: Date, delay: TimeInterval) {
+        let end = start.addingTimeInterval(delay + 2.5)
+        if end > Date() { Thread.sleep(until: end) }
+    }
 
     private func record(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
@@ -64,7 +77,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertFalse(row(21, app).exists, "the row hasn't arrived yet")
         assertAtLatest(app, "before the row arrived")
         XCTAssertTrue(row(21, app).waitForExistence(timeout: 10), "the row arrived")
-        settle()
+        XCTAssertTrue(row(21, app).waitUntilStill(), "the late row kept moving")
         assertNotCovered(row(21, app), app, "after it arrived late")
         assertAtLatest(app, "after a row arrived late")
     }
@@ -73,6 +86,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", "one", "--preview-theme", "dark", "--preview-reading", "--preview-follow", "--preview-tail-late", "--preview-tail-slow"]
         app.launch()
+        let launched = Date()
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 15))
         XCTAssertFalse(row(21, app).exists, "the row hasn't arrived yet")
         let timeline = app.scrollViews["session-timeline"]
@@ -80,7 +94,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2))
         let label = try midScreenText(app)
         let before = timeline.staticTexts[label].frame.minY
-        sleep(7)
+        waitPast(launched, delay: Self.lateRowDelay)
         XCTAssertEqual(timeline.staticTexts[label].frame.minY, before, accuracy: 2, "the row's arrival moved a transcript scrolled up")
         app.buttons["Jump to latest"].tapWhenReady()
         XCTAssertTrue(row(21, app).waitForExistence(timeout: 5), "the row did arrive")
@@ -93,16 +107,18 @@ final class TranscriptQueueTailUITests: XCTestCase {
         let session = app.buttons["session-computer::demo"]
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
-        sleep(2)
+        XCTAssertTrue(app.staticTexts["The latest update is visible above the composer."].waitForExistence(timeout: 10), "the first open did not load")
+        XCTAssertTrue(app.scrollViews["session-timeline"].waitUntilRowsStill(), "the first open kept moving")
         app.backToSessions()
         session.tapWhenReady()
+        let reopened = Date()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 5), "the cached transcript shows while it reloads")
         timeline.swipeDown(velocity: .slow)
         XCTAssertTrue(app.buttons["Jump to latest"].waitForExistence(timeout: 2))
         let label = try midScreenText(app)
         let before = timeline.staticTexts[label].frame.minY
-        sleep(8)
+        waitPast(reopened, delay: Self.reopenDelay)
         XCTAssertEqual(timeline.staticTexts[label].frame.minY, before, accuracy: 2, "the landing undid the reader's scroll")
         XCTAssertTrue(app.buttons["Jump to latest"].exists)
     }
@@ -111,7 +127,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         if !session.isHittable { app.backToSessions() }
         session.tapWhenReady(timeout: 15)
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10))
-        sleep(3)
+        XCTAssertTrue(app.scrollViews["session-timeline"].waitUntilRowsStill(), "the opened session kept moving")
     }
 
     private func gapAboveComposer(_ app: XCUIApplication) throws -> CGFloat {
@@ -144,8 +160,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         open(queued, in: app)
         XCTAssertTrue(row(25, app).waitForExistence(timeout: 10))
         app.buttons["queue-tail-more"].tapWhenReady()
-        settle()
-        XCTAssertTrue(row(21, app).exists, "the tall queue is open")
+        XCTAssertTrue(row(21, app).waitForExistence(timeout: 5), "the tall queue is open")
 
         open(empty, in: app)
         XCTAssertFalse(row(25, app).exists, "the rows followed to the empty session")
@@ -168,8 +183,8 @@ final class TranscriptQueueTailUITests: XCTestCase {
         assertNotCovered(row(25, app), app, "with the rest collapsed")
         assertAtLatest(app, "with the rest collapsed")
         more.tap()
-        settle()
-        XCTAssertFalse(more.exists)
+        XCTAssertTrue(more.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row(25, app).waitUntilStill(), "the open queue kept moving")
         assertNotCovered(row(25, app), app, "with the rest open")
         assertAtLatest(app, "with the rest open")
     }
@@ -193,7 +208,7 @@ final class TranscriptQueueTailUITests: XCTestCase {
         XCTAssertTrue(receipt.exists)
         receipt.tapWhenReady()
         XCTAssertTrue(row(25, app).waitForExistence(timeout: 5))
-        settle()
+        XCTAssertTrue(row(25, app).waitUntilStill(), "the receipt's row kept moving")
         assertNotCovered(row(25, app), app, "after the receipt")
         XCTAssertFalse(app.buttons["Jump to latest"].exists)
     }
@@ -226,18 +241,17 @@ final class TranscriptQueueTailUITests: XCTestCase {
         app.buttons["queue-tail-menu-21"].tapWhenReady()
         app.buttons["Cancel delivery"].tapWhenReady()
         XCTAssertTrue(bubble.waitForNonExistence(timeout: 5))
-        settle()
-        assertAtLatest(app, "after the last row left")
         let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after the last row left")
+        assertAtLatest(app, "after the last row left")
         timeline.swipeDown(velocity: .slow)
-        settle()
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after the swipe")
         app.buttons["Jump to latest"].tapWhenReady()
         XCTAssertTrue(app.buttons["Jump to latest"].waitForNonExistence(timeout: 3), "Jump didn't land after the last row left")
     }
 
     func testAFailedReloadFallsBackToTheSnapshotInsteadOfKeepingADeadRow() {
         let app = launch(extra: ["--preview-tail-late", "--preview-tail-fails-after-action"])
-        settle()
         let bubble = row(21, app)
         XCTAssertTrue(bubble.exists, "the first load shows the row")
         app.buttons["queue-tail-menu-21"].tapWhenReady()
@@ -249,35 +263,24 @@ final class TranscriptQueueTailUITests: XCTestCase {
 
     func testTheTailStaysResponsiveOverAStreamingTranscriptWithAWallpaper() {
         continueAfterFailure = false
-        for space in stride(from: 40, through: 280, by: 60) {
+        for space in stride(from: 40, through: 280, by: 30) {
             let app = XCUIApplication()
             app.launchArguments = ["--preview-session", "--preview-tail", "-preview-tail", "many", "--preview-theme", "dark", "--preview-stream", "--preview-trailing-space", "\(space)", "--preview-backdrop"]
             app.launch()
+            XCTAssertTrue(app.scrollViews["session-timeline"].waitForExistence(timeout: 10))
             let more = app.buttons["queue-tail-more"]
             XCTAssertTrue(more.waitForExistence(timeout: 15))
-            sleep(4)
-            let started = Date()
-            more.tap()
-            XCTAssertLessThan(Date().timeIntervalSince(started), 5, "a tap took too long at \(space) points short of the end")
-            sleep(2)
-            let jump = app.buttons["Jump to latest"]
-            let settled = jump.exists
-            for _ in 0..<8 {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-                XCTAssertEqual(jump.exists, settled, "Jump to latest flapped at \(space)")
+            app.waitForSteadyJump()
+            app.assertJumpHoldsStill("after opening \(space) points short of the end")
+            if (space - 40).isMultiple(of: 60) {
+                let started = Date()
+                more.tap()
+                XCTAssertLessThan(Date().timeIntervalSince(started), 5, "a tap took too long at \(space) points short of the end")
+                app.waitForSteadyJump()
+                app.assertJumpHoldsStill("after opening the queue \(space) points short of the end")
             }
             XCTAssertEqual(app.state, .runningForeground, "the app died at \(space) points short of the end")
             app.terminate()
-        }
-    }
-
-    func testShots() {
-        for theme in ["dark", "light"] {
-            for rows in ["one", "many", "peer", "dead"] {
-                let app = launch(rows, theme: theme)
-                record(app, "tail-\(rows)-\(theme)")
-                app.terminate()
-            }
         }
     }
 }

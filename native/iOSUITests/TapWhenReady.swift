@@ -12,18 +12,44 @@ extension XCUIElement {
 
     /// Taps once the element has stopped moving. A tap while a swipe is still decelerating only stops the scroll.
     func tapWhenStill(timeout: TimeInterval = 5, file: StaticString = #filePath, line: UInt = #line) {
+        guard waitUntilStill(timeout: timeout) else {
+            XCTFail("\(self) kept moving", file: file, line: line)
+            return
+        }
+        tap()
+    }
+
+    func waitUntilStill(timeout: TimeInterval = 10) -> Bool {
+        waitUntilSteady(timeout: timeout) { $0.exists ? $0.frame : nil }
+    }
+
+    func waitUntilRowsStill(timeout: TimeInterval = 10) -> Bool {
+        waitUntilSteady(timeout: timeout) { $0.middleRow() }
+    }
+
+    private func middleRow() -> String? {
+        guard let root = try? snapshot() else { return nil }
+        let middle = root.frame.midY
+        var best: XCUIElementSnapshot?
+        var pending = [root]
+        while let next = pending.popLast() {
+            if next.elementType == .staticText, !next.label.isEmpty, root.frame.contains(next.frame),
+               abs(next.frame.midY - middle) < abs((best?.frame.midY ?? .infinity) - middle) { best = next }
+            pending += next.children
+        }
+        return best.map { "\($0.label)|\($0.frame)" }
+    }
+
+    private func waitUntilSteady<Value: Equatable>(timeout: TimeInterval, _ read: (XCUIElement) -> Value?) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        var frame = self.frame
+        var last = read(self)
         repeat {
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-            let next = self.frame
-            if next == frame {
-                tap()
-                return
-            }
-            frame = next
+            let next = read(self)
+            if next != nil, next == last { return true }
+            last = next
         } while Date() < deadline
-        XCTFail("\(self) kept moving", file: file, line: line)
+        return false
     }
 
     // A row under the pinned status bar or the composer still reads as hittable.

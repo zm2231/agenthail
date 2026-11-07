@@ -31,9 +31,9 @@ final class TranscriptScrollJumpUITests: XCTestCase {
         app.launch()
         let timeline = app.scrollViews["session-timeline"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 15))
-        sleep(2)
         let probe = app.staticTexts["scroll-jumps"]
         XCTAssertTrue(probe.waitForExistence(timeout: 5))
+        XCTAssertTrue(timeline.staticTexts.matching(NSPredicate(format: "label CONTAINS 'of reply '")).firstMatch.waitForExistence(timeout: 10), "the transcript showed no reply")
         let top = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
         let bottom = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
         for round in 0..<24 {
@@ -43,7 +43,7 @@ final class TranscriptScrollJumpUITests: XCTestCase {
                 top.press(forDuration: 0.05, thenDragTo: bottom, withVelocity: round % 3 == 0 ? 400 : 1200, thenHoldForDuration: 0.1)
             }
         }
-        sleep(2)
+        XCTAssertTrue(timeline.waitUntilRowsStill(), "the transcript kept moving after the last swipe")
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "after scrolling up"
         shot.lifetime = .keepAlways

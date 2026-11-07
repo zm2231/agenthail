@@ -9,6 +9,8 @@
 # full jobs, or was cancelled at any point, is left alone.
 # With RAN set to a job name, a run where that job was skipped is left alone too:
 # iOS skips `ios` when no iOS input changed, and a rerun would skip it again.
+# With FORCE set, a run that already has the jobs is rerun too, so its gate
+# reads a label that changes what those jobs do (ui-all widens the UI tests).
 # Needs GH_TOKEN, GITHUB_REPOSITORY and HEAD_SHA. POLL_SECONDS and POLL_LIMIT
 # bound the wait for the gate and for a cancel to finish.
 set -euo pipefail
@@ -49,7 +51,7 @@ if [ -n "${RAN:-}" ] && [ "$(jq -r --arg ran "$RAN" '[.jobs[] | select(.name == 
 	exit 0
 fi
 skipped="$(jq -r '[.jobs[] | select(.name as $name | $ARGS.positional | index($name)) | select(.conclusion == "skipped")] | length' --args "$@" <<<"$jobs")"
-if [ "$skipped" = 0 ]; then
+if [ "$skipped" = 0 ] && [ -z "${FORCE:-}" ]; then
 	echo "$workflow run $run: the full jobs are already part of it"
 	exit 0
 fi

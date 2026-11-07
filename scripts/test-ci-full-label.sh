@@ -82,14 +82,14 @@ label "gate never finishes" "" "echo '{\"workflow_runs\":[{\"id\":7}]}' >$A/$RUN
 
 IOS_RUNS='repos_owner_repo_actions_workflows_ios.yml_runs_event_pull_request_head_sha_abc_per_page_1'
 ios_label() {
-	local name="$1" want="$2" release="$3"
+	local name="$1" want="$2" release="$3" ios="${4:-skipped}" ran="${5:-ios-release}" force="${6:-}"
 	rm -rf "$WORK/answers" "$WORK/calls"
 	mkdir -p "$WORK/answers"
 	touch "$WORK/calls"
 	echo '{"workflow_runs":[{"id":7}]}' >"$WORK/answers/$IOS_RUNS"
-	printf '{"jobs":[{"name":"changes","status":"completed","conclusion":"success"},{"name":"ios","status":"completed","conclusion":"skipped"},{"name":"ios-release","status":"completed","conclusion":"%s"}]}' "$release" >"$WORK/answers/$JOBS"
+	printf '{"jobs":[{"name":"changes","status":"completed","conclusion":"success"},{"name":"ios","status":"completed","conclusion":"%s"},{"name":"ios-release","status":"completed","conclusion":"%s"}]}' "$ios" "$release" >"$WORK/answers/$JOBS"
 	echo '{"status":"completed"}' >"$WORK/answers/$RUN"
-	env PATH="$WORK/bin:$PATH" ANSWERS="$WORK/answers" CALLS="$WORK/calls" GITHUB_REPOSITORY=owner/repo HEAD_SHA=abc POLL_SECONDS=0 POLL_LIMIT=3 RAN=ios-release \
+	env PATH="$WORK/bin:$PATH" ANSWERS="$WORK/answers" CALLS="$WORK/calls" GITHUB_REPOSITORY=owner/repo HEAD_SHA=abc POLL_SECONDS=0 POLL_LIMIT=3 RAN="$ran" FORCE="$force" \
 		bash "$ROOT/scripts/ci-full-label.sh" ios.yml changes ios >"$WORK/out" 2>&1 || fail "$name: $(cat "$WORK/out")"
 	local calls
 	calls="$(tr '\n' ';' <"$WORK/calls")"
@@ -97,6 +97,9 @@ ios_label() {
 }
 ios_label "iOS inputs changed" "run rerun 7 -R owner/repo;" success
 ios_label "no iOS input changed" "" skipped
+ios_label "ui-all after ios ran its smoke tier" "run rerun 7 -R owner/repo;" success success ios 1
+ios_label "ui-all with no iOS input changed" "" success skipped ios 1
+ios_label "ios ran and nothing forces a rerun" "" success success ios
 
 # gate <expected full> <head ref> <labels json> [event]: runs ci-full-gate.sh.
 gate() {
