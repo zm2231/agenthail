@@ -3,7 +3,7 @@ import SwiftUI
 struct SessionPickerField: View {
     let title: String
     @Binding var selection: String
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     var writableOnly = false
     @State private var query = ""
     @State private var found: [SessionState] = []

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GoalSection: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var editor = GoalEditorState()

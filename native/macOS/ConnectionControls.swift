@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ConnectionControls: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @EnvironmentObject private var voice: VoiceController
     @Environment(\.openWindow) private var openWindow

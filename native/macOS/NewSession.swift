@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct NewSessionView: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var draft: NewSessionDraft
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var focused = false

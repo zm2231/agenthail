@@ -76,6 +76,7 @@ let package = Package(
                 "ClaudeSubagentList.swift",
                 "SessionStore.swift",
                 "EventRetryBackoff.swift",
+                "ObservationWait.swift",
                 "ConnectionGrace.swift",
                 "CatalogBatch.swift",
                 "CatalogInbox.swift",

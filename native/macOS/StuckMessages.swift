@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct QueueItemActions: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let item: QueueState
 
     var body: some View {
@@ -15,7 +15,7 @@ struct QueueItemActions: View {
 }
 
 struct QueueItemRow: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let item: QueueState
 
     var body: some View {
@@ -49,7 +49,7 @@ struct QueueItemRow: View {
 }
 
 struct AttentionBanner: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let attention: AttentionState
 
     var body: some View {

@@ -1,10 +1,12 @@
 import AppKit
 import Foundation
+import Observation
 import os
 
 @MainActor
-final class AgenthailModel: ObservableObject {
-    @Published var snapshot: DashboardSnapshot? {
+@Observable
+final class AgenthailModel {
+    var snapshot: DashboardSnapshot? {
         didSet {
             rederive()
             trackFinishedSessions(from: oldValue)
@@ -20,66 +22,71 @@ final class AgenthailModel: ObservableObject {
             }
         }
     }
-    @Published private(set) var finishedUnseen: Set<String> = []
-    @Published private(set) var holderPicks: [String: HolderPin] = [:]
-    @Published private(set) var snapshotLoadedAt: Date?
-    @Published var paletteVisible = false
-    @Published var searchQuery = ""
-    @Published private(set) var searchResults: [SessionSearchItem] = []
-    @Published private(set) var searching = false
-    @Published private(set) var searchError: String?
-    @Published private(set) var pinnedSessions: [SessionState] = [] {
+    private(set) var finishedUnseen: Set<String> = []
+    private(set) var holderPicks: [String: HolderPin] = [:]
+    private(set) var snapshotLoadedAt: Date?
+    var paletteVisible = false
+    var searchQuery = ""
+    private(set) var searchResults: [SessionSearchItem] = []
+    private(set) var searching = false
+    private(set) var searchError: String?
+    private(set) var pinnedSessions: [SessionState] = [] {
         didSet { rederive() }
     }
     private var searchTask: Task<Void, Never>?
-    @Published var devices: [DeviceState] = []
-    @Published var signin: SigninState?
-    @Published var permissions: PermissionsState?
-    @Published var permissionsError: String?
-    @Published var signinError: String?
-    @Published var pairing: PairingResponse?
-    @Published var settings: DashboardSettingsState?
-    @Published var claudeRemoteControl: ClaudeRemoteControlState?
-    @Published var audit: [HistoryState] = []
-    @Published var auditKinds: [String] = []
-    @Published var auditHasMore = false
-    @Published var auditQuery = ""
-    @Published var auditKind = ""
-    @Published var connectionError: String?
+    var devices: [DeviceState] = []
+    var signin: SigninState?
+    var permissions: PermissionsState?
+    var permissionsError: String?
+    var signinError: String?
+    var pairing: PairingResponse?
+    var settings: DashboardSettingsState?
+    var claudeRemoteControl: ClaudeRemoteControlState?
+    var audit: [HistoryState] = []
+    var auditKinds: [String] = []
+    var auditHasMore = false
+    var auditQuery = ""
+    var auditKind = ""
+    var connectionError: String?
     /// The build of the daemon on this Mac, as it last named it.
-    @Published private(set) var daemonBuild: AgenthailBuild?
+    private(set) var daemonBuild: AgenthailBuild?
     /// Set when that daemon is another build than this app.
     var daemonBuildNotice: String? { AgenthailBuild.daemonNotice(app: .app(Bundle.main.infoDictionary), daemon: daemonBuild) }
-    @Published private(set) var daemonSlow = false
-    @Published var reconnecting = false
+    private(set) var daemonSlow = false
+    var reconnecting = false
     var grace = ConnectionGrace()
     private var streamOpen = false
     private(set) var heldByGrace = false
     private static let connectionLog = Logger(subsystem: "com.agenthail.app", category: "connection")
-    @Published var operationError: String?
-    @Published var pendingForks: Set<String> = []
-    @Published var loading = false
-    @Published var operationsVisible = false
-    @Published var sessionFilter: SessionFilter = .recent {
+    var operationError: String?
+    var pendingForks: Set<String> = []
+    var loading = false
+    var operationsVisible = false
+    var sessionFilter: SessionFilter = .recent {
         didSet {
             orderHold.release()
             listChanged()
             rederive()
         }
     }
-    @Published var sessionRefinement = SessionRefinement() {
+    var sessionRefinement = SessionRefinement() {
         didSet {
             orderHold.release()
             listChanged()
             rederive()
         }
     }
-    private(set) lazy var reader = makeReader()
-    var pages: ScopePages { reader.pages }
+    @ObservationIgnored private(set) lazy var reader = makeReader()
+    // The reader is not observed; views see its changes through this revision.
+    var readerRevision = 0
+    var pages: ScopePages {
+        _ = readerRevision
+        return reader.pages
+    }
     private(set) var currentView: ScopePage.View? {
         didSet {
             guard oldValue != currentView else { return }
-            objectWillChange.send()
+            readerRevision &+= 1
             rederive()
             scheduleListReread()
         }
@@ -90,27 +97,27 @@ final class AgenthailModel: ObservableObject {
     var listRereadTask: Task<Void, Never>?
     var findTask: Task<Void, Never>?
     var spotlightCatalog: SpotlightCatalog?
-    @Published private(set) var localSends: [String: [LocalSend]] = [:]
-    @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
-    @Published private(set) var fetchedSubagents = SubagentPageCache()
+    private(set) var localSends: [String: [LocalSend]] = [:]
+    private var turnSettingsDrafts: [String: TurnSettings] = [:]
+    private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI?
     let interface = InterfaceStore()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
-    weak var mainWindow: NSWindow?
+    @ObservationIgnored weak var mainWindow: NSWindow?
     var onSnapshotRequest: ((SnapshotRequest, AgenthailAPI) -> Void)?
     var onSnapshotClosed: ((String) -> Void)?
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
-    private var connectionTask: Task<Void, Never>?
-    private var eventTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
-    private(set) var pendingRefresh = EventRefresh()
-    private var statusRefreshTask: Task<Void, Never>?
-    private(set) var lastEventID: UInt64 = 0
+    @ObservationIgnored private var connectionTask: Task<Void, Never>?
+    @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var pendingRefresh = EventRefresh()
+    @ObservationIgnored private var statusRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var lastEventID: UInt64 = 0
     private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
-    lazy var catalogFeed = makeCatalogFeed()
+    @ObservationIgnored lazy var catalogFeed = makeCatalogFeed()
     let store = SessionStore(limits: .desktop)
     private var drafts: [String: ComposerDraft] = [:]
     private var rekeys = SessionRekeys()
@@ -154,7 +161,7 @@ final class AgenthailModel: ObservableObject {
             orderHold.hold(list: listView, current: currentView, rows: Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
         } else {
             orderHold.release()
-            objectWillChange.send()
+            readerRevision &+= 1
             rederive()
         }
     }
@@ -831,10 +838,7 @@ final class AgenthailModel: ObservableObject {
 
     private func awaitConnection(timeout: Duration) async -> Bool {
         if api != nil, snapshot != nil { return true }
-        let waiter = Task { @MainActor in
-            for await value in $snapshot.values where value != nil { return true }
-            return false
-        }
+        let waiter = Task { @MainActor in await waitUntil { self.snapshot != nil } }
         let timer = Task {
             try? await Task.sleep(for: timeout)
             waiter.cancel()
@@ -917,7 +921,7 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
+    private(set) var modelCatalog: [String: [ModelOption]] = [:]
     private var modelCatalogLoads: Set<String> = []
 
     func loadModelCatalog(for session: SessionState) async {

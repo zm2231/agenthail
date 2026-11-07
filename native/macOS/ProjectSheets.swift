@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProjectMenuButtons: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let project: ProjectState
 
@@ -31,7 +31,7 @@ struct ProjectMenuButtons: View {
 }
 
 struct ProjectSheetView: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let sheet: ProjectSheet
 
@@ -87,7 +87,7 @@ private struct ProjectFormFrame<Fields: View>: View {
 }
 
 private struct AddProjectForm: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @State var host: String
     @State var folder: String
     @State private var title = ""
@@ -139,7 +139,7 @@ private struct AddProjectForm: View {
 }
 
 private struct RenameProjectForm: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let project: ProjectState
     @State private var title: String
     @State private var saving = false
@@ -174,7 +174,7 @@ private struct RenameProjectForm: View {
 }
 
 private struct ProjectLeadForm: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let project: ProjectState
     @State private var checkout = 0
     @State private var surface = "claude"

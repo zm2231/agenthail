@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A fixed-size row here widens the split view column past its maximum and clips it in narrow windows.
 struct SessionSidebarHeader: View {
-    @ObservedObject var model: AgenthailModel
+    @Bindable var model: AgenthailModel
     let counts: [SessionFilter: Int]
     let help: (SessionFilter) -> String
     let newSessionHelp: String

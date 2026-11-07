@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct OverviewSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -31,7 +31,7 @@ struct OverviewSettings: View {
 /// The privacy grants the daemon holds, each with the System Settings pane
 /// that changes it. Agents the daemon runs, agent-hands among them, use them.
 private struct PermissionsSection: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @State private var asking = false
 
     var body: some View {
@@ -93,7 +93,7 @@ private struct PermissionsSection: View {
 }
 
 private struct SurfaceCard: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let overview: SurfaceOverview
     @State private var repairing = false
     @Environment(\.openWindow) private var openWindow

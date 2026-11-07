@@ -1,6 +1,24 @@
 @testable import AgenthailHelpers
-import Combine
 import Foundation
+import Observation
+
+@MainActor
+final class ChangeCounter {
+    private(set) var count = 0
+    private let read: @MainActor () -> Void
+
+    init(_ read: @escaping @MainActor () -> Void) {
+        self.read = read
+        arm()
+    }
+
+    private func arm() {
+        withObservationTracking { read() } onChange: { [weak self] in
+            MainActor.assumeIsolated { self?.count += 1 }
+            Task { @MainActor in self?.arm() }
+        }
+    }
+}
 
 @main
 struct CatalogBurstTest {
@@ -36,7 +54,37 @@ struct CatalogBurstTest {
         snapshotsLandingMidBatch()
         burstKeepsTheSidebarCurrent()
         overflowReloadsInsteadOfApplyingTheBacklog()
+        readerChangesReachTheViewsThatReadThem()
         print("catalog burst tests passed")
+    }
+
+    @MainActor
+    static func settle() {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    }
+
+    @MainActor
+    static func readerChangesReachTheViewsThatReadThem() {
+        let offline = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral))
+        let model = AgenthailModel(connecting: false, api: offline)
+        model.adoptRefreshed(listing([session("a", "idle")], seq: 1))
+        settle()
+
+        let current = ChangeCounter { _ = model.pages }
+        let view = ScopePage.View(counts: [:], surfaces: [], projects: [], families: [])
+        model.adoptCurrentView(ScopeSessions(sessions: [], hostEpoch: "h", catalogSeq: 2, view: view))
+        check(current.count == 1, "a new Current view reaches views that read the scope pages: \(current.count)")
+
+        let released = ChangeCounter { _ = model.pages }
+        model.holdOrder(true)
+        check(released.count == 0, "holding the order changes nothing a view reads: \(released.count)")
+        model.holdOrder(false)
+        check(released.count == 1, "releasing a held order reaches views that read the scope pages: \(released.count)")
+
+        let failed = ChangeCounter { _ = model.observedReader.pageError }
+        model.sessionFilter = .running
+        check(spin(until: { model.observedReader.pageError != nil }), "a listing read against an unreachable daemon fails")
+        check(failed.count >= 1, "a reader change reaches views that read the reader: \(failed.count)")
     }
 
     @MainActor
@@ -68,9 +116,8 @@ struct CatalogBurstTest {
         let model = AgenthailModel(connecting: false)
         model.sessionFilter = .running
         model.adoptRefreshed(listing(ids.map { session($0, "idle") }, seq: 1))
-        var changes = 0
-        let counting = model.$snapshot.dropFirst().sink { _ in changes += 1 }
-        defer { counting.cancel() }
+        let counter = ChangeCounter { _ = model.snapshot }
+        var changes: Int { counter.count }
         let inbox = model.catalogFeed.openInbox()
         var seq: UInt64 = 2
 

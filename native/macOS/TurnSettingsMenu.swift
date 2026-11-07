@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TurnSettingsMenu: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let sessionID: String
     let detail: SessionDetail?
 

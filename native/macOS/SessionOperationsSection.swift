@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct SessionOperationsSection: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
 
@@ -26,7 +26,7 @@ struct SessionOperationsSection: View {
 }
 
 struct NativeQueueSection: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let session: SessionState
     @StateObject private var queue: NativeQueueController
     @State private var editor: QueueEditor?
@@ -197,7 +197,7 @@ struct QueueEditorSheet: View {
 }
 
 struct BackgroundSessionSection: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let session: SessionState
     let lifecycle: SessionLifecycle
     @StateObject private var controller: BackgroundSessionController

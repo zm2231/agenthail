@@ -75,6 +75,7 @@ targets:
       - path: ClaudeSubagentList.swift
       - path: SessionStore.swift
       - path: EventRetryBackoff.swift
+      - path: ObservationWait.swift
       - path: ConnectionGrace.swift
       - path: SnapshotRefreshPolicy.swift
       - path: CatalogBatch.swift

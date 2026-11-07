@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct StatusTail: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var usage: UsageMonitor
     let items: [String]

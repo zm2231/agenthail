@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RenameSessionSheet: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let session: SessionState
     @Environment(\.dismiss) private var dismiss
     @State private var text: String

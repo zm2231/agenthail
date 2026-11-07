@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionCommands: Commands {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let voice: VoiceController
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @FocusedObject private var pane: SessionPane?

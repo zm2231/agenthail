@@ -4,7 +4,7 @@ import Textual
 import UniformTypeIdentifiers
 
 struct DesktopWindow: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     private let snapshot: SnapshotProbe?
 
@@ -22,7 +22,7 @@ struct DesktopWindow: View {
         .background { if let snapshot { BackdropProbe(snapshot: snapshot) } }
         .disabled(model.paletteVisible)
         .windowBackdrop(model.interface)
-        .environmentObject(model)
+        .environment(model)
         .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.adoptingSession) { AdoptSessionSheet(model: model, session: $0) }
         .sheet(item: $pane.projectSheet) { ProjectSheetView(model: model, pane: pane, sheet: $0) }
@@ -123,7 +123,7 @@ struct DesktopWindow: View {
 }
 
 private struct WindowChromeLayout<Content: View>: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @ViewBuilder let content: Content
@@ -152,7 +152,7 @@ private struct WindowChromeLayout<Content: View>: View {
 }
 
 struct SessionSidebar: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var holdsWindowButtons = false
     @Environment(\.openWindow) private var openWindow
@@ -251,7 +251,7 @@ struct SessionSidebar: View {
                             .padding(.vertical, DesktopSpace.s)
                             .task(id: model.pages.listings[model.listRequest!]?.rows.count ?? -1) { await model.listMore() }
                     }
-                    if let error = model.reader.pageError, model.listRequest != nil {
+                    if let error = model.observedReader.pageError, model.listRequest != nil {
                         Text(error)
                             .font(.system(size: DesktopType.secondary))
                             .foregroundStyle(DesktopPalette.text2)
@@ -290,7 +290,7 @@ extension SessionSidebar {
                 sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), attention: attention[session.id])
             }
             if local.isEmpty {
-                Text(model.reader.searchPending(query) ? "Searching" : "No matching sessions.")
+                Text(model.observedReader.searchPending(query) ? "Searching" : "No matching sessions.")
                     .font(.system(size: DesktopType.secondary))
                     .foregroundStyle(DesktopPalette.text2)
                     .padding(.horizontal, 14)
@@ -658,7 +658,7 @@ struct StatusIndicator: View {
 
 
 struct ConversationPane: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     var headerInset: CGFloat = 22
     var gaps: Edge.Set = []
@@ -1101,7 +1101,7 @@ struct TranscriptView: View {
 }
 
 struct AttachmentImageView: View {
-    @EnvironmentObject private var model: AgenthailModel
+    @Environment(AgenthailModel.self) private var model
     @EnvironmentObject private var pane: SessionPane
     let attachment: SessionAttachment
     @State private var image: NSImage?
@@ -1343,7 +1343,7 @@ struct AssistantReply: View {
 }
 
 struct ComposerView: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let pane: SessionPane
     let session: SessionState
     @State private var focused = false
@@ -1810,7 +1810,7 @@ struct ComposerView: View {
 
 struct DeliveryProblemBanner: View {
     let problem: DeliveryProblem
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -1851,7 +1851,7 @@ struct DeliveryProblemBanner: View {
 }
 
 struct QueueDock: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let items: [QueueState]
     let target: SessionState
     let canSteer: Bool
@@ -1953,7 +1953,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 struct SessionInspector: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @State private var tab: InspectorTab = .details
 
@@ -2034,7 +2034,7 @@ extension ContextState {
 }
 
 struct DetailsTab: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var showTokens = false
@@ -2195,7 +2195,7 @@ struct DetailsTab: View {
 }
 
 struct DeliveryTab: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     let session: SessionState
 
     var body: some View {

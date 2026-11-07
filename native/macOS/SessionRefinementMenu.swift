@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionRefinementMenu: View {
-    @ObservedObject var model: AgenthailModel
+    @Bindable var model: AgenthailModel
 
     var body: some View {
         Menu {
@@ -34,7 +34,7 @@ struct SessionRefinementMenu: View {
 }
 
 struct SessionRefinementBar: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         let refinement = model.sessionRefinement

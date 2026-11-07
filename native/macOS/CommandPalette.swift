@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct CommandPalette: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @Environment(\.openWindow) private var openWindow
     @State private var query = ""

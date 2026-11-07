@@ -3,7 +3,7 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct DesktopSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         TabView {
@@ -32,7 +32,7 @@ struct DesktopSettings: View {
 }
 
 struct SettingsError: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         if let error = model.operationError {
@@ -45,7 +45,7 @@ struct SettingsError: View {
 }
 
 struct GeneralSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var personName = ""
@@ -201,7 +201,7 @@ struct GeneralSettings: View {
 }
 
 struct DevicesSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -341,7 +341,7 @@ enum QRCodeImage {
 }
 
 struct NotificationSettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
 
     var body: some View {
         Form {
@@ -385,7 +385,7 @@ struct NotificationSettings: View {
 }
 
 struct DeliverySettings: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @State private var relayFrom = ""
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
@@ -509,7 +509,7 @@ struct DeliverySettings: View {
 }
 
 struct ActivitySettings: View {
-    @ObservedObject var model: AgenthailModel
+    @Bindable var model: AgenthailModel
 
     var body: some View {
         Form {

@@ -47,7 +47,7 @@ struct SidebarToggle: View {
 }
 
 struct TitleBarStrip: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @ObservedObject private var shortcuts = ShortcutStore.shared
@@ -165,7 +165,7 @@ struct ArchivedTabNotice: View {
 }
 
 struct SessionTabView: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let tab: SessionTabs.Tab
     let label: String
@@ -284,7 +284,7 @@ private struct NeedsYouPill: View {
 }
 
 struct StatusStrip: View {
-    @ObservedObject var model: AgenthailModel
+    var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     @ObservedObject var interface: InterfaceStore
     @StateObject private var usage = UsageMonitor()
