@@ -35,7 +35,7 @@ func (d *Daemon) readCatalogPresentation(ctx context.Context, request sessionVie
 		load = d.Registry.ReadCatalogPresentation
 	}
 	if d.presentation.uncached {
-		read, err := load(registry.WithoutReadCaches(ctx), func(string, uint64) bool { return true })
+		read, err := load(ctx, func(string, uint64) bool { return true })
 		if err != nil {
 			return read, err
 		}
