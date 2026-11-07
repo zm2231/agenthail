@@ -27,6 +27,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var layout = Layout()
 
     static var bottomSlack: CGFloat { 70 }
+    static var readerReach: CGFloat { 4 }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
 
@@ -44,8 +45,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(following ? .bottom : nil, for: .sizeChanges)
-            .onScrollPhaseChange { _, new in
+            .onScrollPhaseChange { old, new in
                 phase = new
+                if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
+                    // The slack is for layout settling; a reader who stops short of the end stops following.
+                    following = TranscriptEnd(geometry).distance < Self.readerReach
+                    layout.readerGap = 0
+                }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
@@ -83,7 +89,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                         settle { $0.scrollTo(edge: .bottom) }
                     } else if !animating {
                         // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        if !following || old.contentOffset != new.contentOffset { layout.readerContent = new.contentSize.height }
+                        if !following || old.contentOffset != new.contentOffset { layout.readerGap = TranscriptEnd(new).distance }
                         following = Self.atBottom(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
@@ -96,7 +102,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 } else if !following, resting, Self.atBottom(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
-                    layout.readerContent = new.contentSize.height
+                    layout.readerGap = TranscriptEnd(new).distance
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
@@ -106,10 +112,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
             }
+            .onDisappear { layout.cancelCheck() }
             .onChange(of: transcript) {
                 generation &+= 1
                 layout.releaseHold()
-                layout.readerContent = nil
+                layout.cancelCheck()
+                layout.readerGap = 0
                 placedLeadingRow = leadingRow
                 following = true
                 position.scrollTo(edge: .bottom)
@@ -140,7 +148,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func checkEnd() -> Bool {
         guard following, let geometry = layout.geometry else { return true }
         guard resting else { return false }
-        if geometry.contentSize.height > layout.readerContent ?? 0, TranscriptEnd(geometry).distance > 2 {
+        if TranscriptEnd(geometry).distance > layout.readerGap + 2 {
             settle { $0.scrollTo(edge: .bottom) }
         }
         return true
@@ -165,17 +173,23 @@ private final class Layout {
     private(set) var resized = false
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     var revealed: RevealedRow?
-    var readerContent: CGFloat?
-    private var checkDue = false
+    var readerGap: CGFloat = 0
+    private var check: Task<Void, Never>?
 
     // Not pushed back by later changes, so a steady stream is still checked.
-    func scheduleCheck(_ check: @escaping @MainActor () -> Bool) {
-        guard !checkDue else { return }
-        checkDue = true
-        Task { @MainActor in
-            repeat { try? await Task.sleep(for: .milliseconds(150)) } while !check()
-            checkDue = false
+    func scheduleCheck(_ run: @escaping @MainActor () -> Bool) {
+        guard check == nil else { return }
+        check = Task { @MainActor in
+            repeat {
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            } while !run()
+            check = nil
         }
+    }
+
+    func cancelCheck() {
+        check?.cancel()
+        check = nil
     }
 
     var heldFromEnd: CGFloat? {

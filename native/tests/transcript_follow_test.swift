@@ -488,6 +488,19 @@ struct TranscriptFollowTest {
         }
         spin(0.6)
         expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
+
+        feed.transcript = "N"
+        feed.rows = rows("N", 60)
+        spin(0.6)
+        expectBottom(scroll, "a fresh transcript before a short scroll up opens at the live edge")
+        drag(scroll, to: offset(scroll) - 40)
+        let nearPlace = offset(scroll)
+        expect(!feed.following, "a reader who scrolls to just short of the end stops following")
+        for index in 0..<10 { feed.rows += rows("Ns\(index)-", 1); spin(0.05) }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - nearPlace) < 1, "a reader who stops just short of the end keeps that place as rows stream, offset \(nearPlace) became \(offset(scroll))")
+        drag(scroll, to: bottomOffset(scroll))
+        expect(feed.following, "a reader who scrolls back to the end follows again, \(Int(gap(scroll))) points short")
     }
 
     @MainActor
@@ -506,6 +519,24 @@ struct TranscriptFollowTest {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         spin(0.3)
+    }
+
+    // A live scroll, as a trackpad or wheel gesture reports it, so the transcript sees a reader's scroll phases.
+    @MainActor
+    private static func drag(_ scroll: NSScrollView, to y: CGFloat) {
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        spin(0.05)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        spin(0.05)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        spin(0.3)
+    }
+
+    @MainActor
+    private static func bottomOffset(_ scroll: NSScrollView) -> CGFloat {
+        offset(scroll) + gap(scroll)
     }
 
     @MainActor
