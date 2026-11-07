@@ -51,6 +51,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	d.retainTaskRequestsRead(taskChildren)
 	d.deliverTaskWakes()
 	d.pruneObservationFailures(watched)
+	scan := relayScan{}
 	for _, watchedSession := range watched {
 		gone, isTask := taskChildren[watchedSession.ID]
 		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask {
@@ -81,7 +82,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		// one may have no PID left to tell whether its process exited.
 		resumable := claudeProcessExited(session) || (session.Surface == surface.KindClaude && relayTargetInactive(session))
 		if !isTask && ((resumable && queueCounts[session.ID] == 0) || (!resumable && relayTargetInactive(session))) {
-			d.syncRelays(ctx, adapter, session)
+			d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
 			continue
 		}
 		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
@@ -90,7 +91,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			}
 			continue
 		}
-		d.observeSession(ctx, adapter, session)
+		d.observeInScan(ctx, scan, adapter, session)
 		if gone {
 			d.settleGoneTask(session)
 		}
@@ -155,10 +156,14 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.observeInScan(ctx, nil, adapter, session)
+}
+
+func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session) {
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
-	d.syncRelaysObserved(ctx, adapter, session, observed)
+	d.syncRelaysObserved(ctx, scan, adapter, session, observed)
 	source, transport := session.Source, session.Transport
 	if err != nil {
 		d.recordObservationFailure(session.ID)

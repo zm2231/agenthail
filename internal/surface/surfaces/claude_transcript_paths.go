@@ -58,7 +58,11 @@ func (c *Claude) sessionTranscript(sess *surface.Session) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	paths := c.transcripts.pass(roots)(sess.ID)
+	return sessionTranscriptIn(sess, roots, c.transcripts.pass(roots))
+}
+
+func sessionTranscriptIn(sess *surface.Session, roots []string, transcripts func(string) []string) (string, error) {
+	paths := transcripts(sess.ID)
 	if _, err := claudeHoldingRoot(sess.ID, roots, map[string]bool{}, paths); err != nil {
 		return "", err
 	}

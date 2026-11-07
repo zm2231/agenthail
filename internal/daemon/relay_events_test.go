@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -552,4 +553,47 @@ func TestTurnFinishedRelayWaitsForBackgroundWork(t *testing.T) {
 			t.Fatalf("delivered %v while background work ran", got)
 		}
 	})
+}
+
+type scanningSurface struct {
+	*daemonSurface
+	scans atomic.Int32
+	reads atomic.Int32
+}
+
+func (f *scanningSurface) CompletionScan() surface.CompletionReader {
+	f.scans.Add(1)
+	return scanReader{f}
+}
+
+type scanReader struct{ f *scanningSurface }
+
+func (r scanReader) ReadCompletions(ctx context.Context, session *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	r.f.reads.Add(1)
+	return r.f.daemonSurface.ReadCompletions(ctx, session, cursor)
+}
+
+func TestARelayScanReadsAllItsSourcesThroughOneScan(t *testing.T) {
+	d, r, base, _, to := daemonFixture(t)
+	fake := &scanningSurface{daemonSurface: base}
+	d.Surfaces = []surface.Surface{fake}
+	for _, source := range []surface.Session{
+		{ID: "busy", Status: surface.StatusBusy},
+		{ID: "idle", Status: surface.StatusIdle},
+		{ID: "offline", Status: surface.StatusOffline},
+	} {
+		source.Surface, source.RuntimeKind, source.Source, source.Transport = surface.KindCodex, surface.RuntimeCodexDesktop, "vscode", "desktop"
+		if err := r.RegisterSession(source); err != nil {
+			t.Fatal(err)
+		}
+		base.sessions[source.ID] = source
+		base.observations[source.ID] = &surface.TurnObservation{Status: source.Status}
+		if _, err := r.AddRoute(source.ID, to.ID, ".*"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.scanAndRelay(t.Context())
+	if reads, scans := fake.reads.Load(), fake.scans.Load(); reads != 3 || scans != 1 {
+		t.Fatalf("read %d sources through %d scans, want 3 through 1", reads, scans)
+	}
 }
