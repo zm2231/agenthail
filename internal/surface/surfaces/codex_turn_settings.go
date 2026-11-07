@@ -132,7 +132,7 @@ func codexThreadSettingsError(err error) error {
 	if errors.As(err, &rpc) && strings.Contains(rpc.Message, "unknown variant `thread/settings/update`") {
 		return &surface.RuntimeVersionError{Runtime: "Codex", Feature: "Changing a thread's model, effort or mode", Minimum: CodexThreadSettingsVersion}
 	}
-	return err
+	return classifyCodexWrite(err)
 }
 
 // readCodexThreadSettings reads the settings the newest turn ran with, or a

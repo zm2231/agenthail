@@ -20,4 +20,3 @@ export function conversationMeta(session, model = "") {
   if (configRoot?.name && (configRoot.name !== "default" || configRoot.signedInAs)) parts.push(configRoot.signedInAs ? `config folder ${configRoot.name} · currently signed in as ${configRoot.signedInAs}` : `config folder ${configRoot.name}`);
   return parts.join(" · ");
 }
-

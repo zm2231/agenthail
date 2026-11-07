@@ -140,6 +140,17 @@ func TestCodexTurnSettingsOnAnAppServerWithoutTheMethodNameTheVersion(t *testing
 	}
 }
 
+func TestCodexTurnSettingsLostToAnotherWriterAreAnOwnershipConflict(t *testing.T) {
+	taken := func(method string, params map[string]any) map[string]any {
+		if method == "thread/settings/update" {
+			return map[string]any{"error": map[string]any{"code": -32600, "message": "thread " + settingsThreadID + " already has an active writer"}}
+		}
+		return settingsModels(method, params)
+	}
+	_, codex, session := settingsThread(t, taken)
+	requireOwnershipConflict(t, codex.SetTurnSetting(context.Background(), session, surface.TurnSettingEffort, "high"))
+}
+
 func TestCodexThreadSettingsComeFromTheNewestRecord(t *testing.T) {
 	path := t.TempDir() + "/rollout.jsonl"
 	appendLine(t, path, `{"type":"turn_context","payload":{"model":"gpt-luna","effort":"low","collaboration_mode":{"mode":"plan"}}}`)
