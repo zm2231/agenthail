@@ -9,7 +9,8 @@ slots="${AGENTHAIL_CI_VM_SLOTS:-2}"
 cpu="${AGENTHAIL_CI_VM_CPU:-4}"
 memory_mb="${AGENTHAIL_CI_VM_MEMORY_MB:-8192}"
 hooks="${AGENTHAIL_CI_HOOKS_DIR:-$HOME/actions-runner-agenthail-hooks}"
-min_free_gb=25
+min_free_gb=15
+disk_issue_minutes=30
 max_vm_minutes=50
 idle_minutes=5
 poll_seconds=20
@@ -20,7 +21,12 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
-free_gb() { df -g "$HOME" | awk 'NR == 2 { print $4 }'; }
+free_gb() {
+	local free
+	free="$(df -g "$HOME" | awk 'NR == 2 { print $4 }')" || return 1
+	case "$free" in '' | *[!0-9]*) return 1 ;; esac
+	echo "$free"
+}
 
 image() {
 	tart list --source local --format json |
@@ -98,7 +104,46 @@ remove_lost_runners() {
 	done
 }
 
+disk_issue_body() {
+	jq -n --arg body "$1" '{body: $body}'
+}
+
+open_disk_issue() {
+	local token number title text issue_state noted now
+	now="$(date +%s)"
+	noted="$(cat "$state/disk-issue-noted" 2>/dev/null || true)"
+	case "$noted" in '' | *[!0-9]*) noted=0 ;; esac
+	[ $((now - noted)) -ge $((disk_issue_minutes * 60)) ] || return 0
+	token="$(installation_token '{"issues":"write"}')" || return 1
+	number="$(cat "$state/disk-issue" 2>/dev/null || true)"
+	text="$(date -u +%FT%TZ): the macOS VM runners refused to start a job with $1 GB free on the runner host; they need $min_free_gb GB. Jobs labelled \`$label\` stay queued until space is freed."
+	if [ -n "$number" ]; then
+		issue_state="$(github "$token" GET "/repos/$repo/issues/$number" | jq -er .state)" || return 1
+		if [ "$issue_state" = open ]; then
+			github "$token" POST "/repos/$repo/issues/$number/comments" "$(disk_issue_body "$text")" >/dev/null || return 1
+			echo "$now" >"$state/disk-issue-noted"
+			return
+		fi
+	fi
+	title="macOS VM runners are out of disk space"
+	number="$(github "$token" POST "/repos/$repo/issues" \
+		"$(jq -n --arg title "$title" --arg body "$text This issue closes when a VM starts again." '{title: $title, body: $body}')" | jq -er .number)" || return 1
+	echo "$number" >"$state/disk-issue"
+	echo "$now" >"$state/disk-issue-noted"
+}
+
+close_disk_issue() {
+	local token number
+	number="$(cat "$state/disk-issue" 2>/dev/null)" || return 0
+	token="$(installation_token '{"issues":"write"}')" || return 1
+	github "$token" POST "/repos/$repo/issues/$number/comments" \
+		"$(disk_issue_body "$(date -u +%FT%TZ): a VM started with $1 GB free.")" >/dev/null || return 1
+	github "$token" PATCH "/repos/$repo/issues/$number" '{"state":"closed","state_reason":"completed"}' >/dev/null || return 1
+	rm -f "$state/disk-issue" "$state/disk-issue-noted"
+}
+
 finish_slot() {
+	[ -z "$free_at_clone" ] || log "slot $slot: $free_at_clone GB free at clone, lowest $lowest_free GB while the VM ran"
 	tart exec "$vm" /bin/bash -c 'tail -n 200 ~/actions-runner/_diag/*.log' >"$logs/slot-$slot-diag.log" 2>&1 || true
 	discard_vm "$vm"
 	if [ -n "$runner_id" ]; then
@@ -108,7 +153,7 @@ finish_slot() {
 }
 
 run_slot() {
-	local base response jit hook_sha started exec_pid run_pid phase=waiting
+	local base response jit hook_sha started exec_pid run_pid free phase=waiting
 	base="$(image)"
 	[ -n "$base" ] || { log "slot $slot: no agenthail-ci-YYYYMMDD image"; exit 1; }
 	if ! hook_sha="$(shasum -a 256 "$hooks/job-started.sh" 2>/dev/null | cut -d' ' -f1)" || [ -z "$hook_sha" ]; then
@@ -117,6 +162,8 @@ run_slot() {
 	fi
 	echo booting >"$state/slot-$slot.phase"
 	discard_vm "$vm"
+	free_at_clone="$(free_gb)" || free_at_clone=""
+	lowest_free="$free_at_clone"
 	tart clone "$base" "$vm"
 	tart set "$vm" --cpu "$cpu" --memory "$memory_mb"
 	tart run --no-graphics --net-softnet --net-softnet-block=192.168.0.0/16 --dir="hooks:$hooks:ro" "$vm" >/dev/null 2>&1 &
@@ -157,6 +204,9 @@ run_slot() {
 	unset jit
 	started="$(date +%s)"
 	while kill -0 "$exec_pid" 2>/dev/null && kill -0 "$run_pid" 2>/dev/null; do
+		if [ -n "$lowest_free" ] && free="$(free_gb)" && [ "$free" -lt "$lowest_free" ]; then
+			lowest_free="$free"
+		fi
 		if [ "$phase" = waiting ] && tart exec "$vm" pgrep -q Runner.Worker 2>/dev/null; then
 			phase=busy
 			echo busy >"$state/slot-$slot.phase"
@@ -187,6 +237,8 @@ if [ "${1:-}" = run-slot ]; then
 	vm="agenthail-ci-slot-$slot"
 	token=""
 	runner_id=""
+	free_at_clone=""
+	lowest_free=""
 	trap finish_slot EXIT
 	trap 'exit 143' TERM INT
 	run_slot
@@ -297,9 +349,17 @@ while true; do
 			want=$((queued - unclaimed))
 			for slot in $free_slots; do
 				[ "$want" -gt 0 ] || break
-				if [ "$(free_gb)" -lt "$min_free_gb" ]; then
-					log "refusing to clone: $(free_gb) GB free, need $min_free_gb"
+				if ! free="$(free_gb)"; then
+					log "could not read the free disk space, not cloning"
 					break
+				fi
+				if [ "$free" -lt "$min_free_gb" ]; then
+					log "refusing to clone: $free GB free, need $min_free_gb"
+					open_disk_issue "$free" || log "could not report the refusal in an issue"
+					break
+				fi
+				if [ -f "$state/disk-issue" ]; then
+					close_disk_issue "$free" || log "could not close the disk space issue"
 				fi
 				"$self" run-slot "$slot" &
 				worker_pid[slot]=$!

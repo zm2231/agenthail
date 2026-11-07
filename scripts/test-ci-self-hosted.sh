@@ -41,11 +41,11 @@ fill "$tools/agenthail-cache/go-build"
 real="$(cd "$tools" && pwd -P)/agenthail-cache/go-build"
 
 : >"$calls"
-trim "$tools" 8388609 || fail "an oversized cache was not trimmed"
+trim "$tools" 3145729 || fail "an oversized cache was not trimmed"
 [ "$(cat "$calls")" = "$real clean -cache" ] || fail "go was called as: $(cat "$calls")"
 
 : >"$calls"
-trim "$tools" 8388608 || fail "a cache under the limit failed"
+trim "$tools" 3145728 || fail "a cache under the limit failed"
 [ ! -s "$calls" ] || fail "a cache under the limit was trimmed"
 
 outside="$work/outside"
@@ -54,7 +54,7 @@ linked="$work/linked-build"
 mkdir -p "$linked/agenthail-cache"
 ln -s "$outside" "$linked/agenthail-cache/go-build"
 : >"$calls"
-! trim "$linked" 8388609 || fail "a symlinked go-build directory was accepted"
+! trim "$linked" 3145729 || fail "a symlinked go-build directory was accepted"
 [ ! -s "$calls" ] && [ -f "$outside/entry" ] || fail "a symlinked go-build directory was trimmed"
 
 linked="$work/linked-cache"
@@ -62,22 +62,22 @@ mkdir -p "$linked" "$work/elsewhere/go-build"
 fill "$work/elsewhere/go-build"
 ln -s "$work/elsewhere" "$linked/agenthail-cache"
 : >"$calls"
-! trim "$linked" 8388609 || fail "a symlinked agenthail-cache directory was accepted"
+! trim "$linked" 3145729 || fail "a symlinked agenthail-cache directory was accepted"
 [ ! -s "$calls" ] && [ -f "$work/elsewhere/go-build/entry" ] || fail "a symlinked agenthail-cache directory was trimmed"
 
 : >"$calls"
 mkdir -p "$work/empty"
-trim "$work/empty" 8388609 || fail "a runner without a Go cache failed"
+trim "$work/empty" 3145729 || fail "a runner without a Go cache failed"
 [ ! -s "$calls" ] || fail "a missing cache was trimmed"
 
 ln -s "$tools" "$work/tools-link"
 : >"$calls"
-trim "$work/tools-link" 8388609 || fail "a tool cache reached through a symlink was refused"
+trim "$work/tools-link" 3145729 || fail "a tool cache reached through a symlink was refused"
 [ "$(cat "$calls")" = "$real clean -cache" ] || fail "go was called as: $(cat "$calls")"
 
 for bad in "tools" "$work/tools/../tools" "$work/./tools"; do
 	: >"$calls"
-	! trim "$bad" 8388609 || fail "RUNNER_TOOL_CACHE=$bad was accepted"
+	! trim "$bad" 3145729 || fail "RUNNER_TOOL_CACHE=$bad was accepted"
 	[ ! -s "$calls" ] || fail "RUNNER_TOOL_CACHE=$bad was trimmed"
 done
 
