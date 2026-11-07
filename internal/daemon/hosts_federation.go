@@ -53,6 +53,9 @@ type federation struct {
 	wg        sync.WaitGroup
 	running   bool
 	downGrace time.Duration
+	// ledgerSyncEvery bounds how long a change on a project's owner waits to
+	// reach this host, which pulls it.
+	ledgerSyncEvery time.Duration
 }
 
 type pairedHost struct {
@@ -80,7 +83,7 @@ type pairedHost struct {
 }
 
 func newFederation() *federation {
-	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace}
+	return &federation{hosts: map[string]*pairedHost{}, downGrace: hostDownGrace, ledgerSyncEvery: ledgerSyncInterval}
 }
 
 func (h *pairedHost) status() (string, string) {
@@ -397,6 +400,9 @@ func (d *Daemon) setHostState(host *pairedHost, state, detail string, contacted 
 	}
 	if changed {
 		d.publishEvent("host.state", host.record.ID, map[string]any{"host": host.ref(), "detail": detail})
+	}
+	if changed && state == hostStateConnected {
+		d.wakeLedgerSync(host)
 	}
 }
 

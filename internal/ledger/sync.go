@@ -134,6 +134,7 @@ func (s *Store) syncWrite(projectKey string, reorders bool, fn func(tx *sql.Tx) 
 	if err != nil {
 		return err
 	}
+	tx.synced = true
 	defer tx.Rollback()
 	if err := fn(tx.Tx); err != nil {
 		return err

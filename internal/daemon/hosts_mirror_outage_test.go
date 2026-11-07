@@ -45,7 +45,7 @@ func awaitMirroredName(t *testing.T, local, remote *federationNode, hostID, name
 }
 
 func TestABriefHostOutageKeepsItsRowsAvailable(t *testing.T) {
-	local, remote, record := pairedFederationWithGrace(t, time.Hour)
+	local, remote, record := pairedFederationWith(t, func(f *federation) { f.downGrace = time.Hour })
 	remote.gate.proxyDown.Store(true)
 	remote.server.CloseClientConnections()
 	assertRowsAvailableFor(t, local, record.ID, 3*time.Second)
@@ -69,7 +69,7 @@ func awaitNewStream(t *testing.T, remote *federationNode, after int64) {
 }
 
 func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
-	local, remote, record := pairedFederationWithGrace(t, time.Hour)
+	local, remote, record := pairedFederationWith(t, func(f *federation) { f.downGrace = time.Hour })
 	devices, err := remote.reg.ListDevices(false)
 	if err != nil || len(devices) != 1 {
 		t.Fatalf("devices=%+v err=%v", devices, err)
@@ -85,7 +85,7 @@ func TestARevokedTokenIsShownWithoutWaitingForTheGrace(t *testing.T) {
 }
 
 func TestALocalRegistryErrorNeverMarksTheHostDown(t *testing.T) {
-	local, _, record := pairedFederationWithGrace(t, 0)
+	local, _, record := pairedFederationWith(t, func(f *federation) { f.downGrace = 0 })
 	host, _ := local.daemon.pairedHost(record.ID)
 	var outage hostOutage
 	local.daemon.hostFailed(host, &outage, localMirror(errors.New("database is locked")))

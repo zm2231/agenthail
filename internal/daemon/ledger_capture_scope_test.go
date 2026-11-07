@@ -32,7 +32,8 @@ func TestTheLeadOfAGitProjectIsCapturedAndAskedToAttach(t *testing.T) {
 }
 
 func TestEnablingTheLedgerOnOneHostEnablesItWhereverItIsKept(t *testing.T) {
-	mac, owner, record := widgetOnTwoHosts(t)
+	// The owner's disable reaches the mac only when the mac next pulls.
+	mac, owner, record := widgetOnTwoHostsWith(t, func(f *federation) { f.ledgerSyncEvery = 100 * time.Millisecond })
 	var assigned ledgerOwnerResponse
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, &assigned)
 	if assigned.Owner != record.ID {

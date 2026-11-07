@@ -9,11 +9,25 @@ type changeTx struct {
 	*sql.Tx
 	store      *Store
 	projectKey string
+	synced     bool
 }
 
 // OnChange runs fn with the project key after every write this store commits for that project.
 func (s *Store) OnChange(fn func(projectKey string)) {
 	s.changed.Store(&fn)
+}
+
+// OnRecord runs fn with the project key after every write this host makes to
+// that project itself, leaving out what syncing with the project's owner
+// writes.
+func (s *Store) OnRecord(fn func(projectKey string)) {
+	s.recorded.Store(&fn)
+}
+
+func (s *Store) notifyRecorded(projectKey string) {
+	if fn := s.recorded.Load(); fn != nil {
+		(*fn)(projectKey)
+	}
 }
 
 func (s *Store) notify(projectKey string) {
@@ -51,5 +65,8 @@ func (tx *changeTx) Commit() error {
 		return err
 	}
 	tx.store.notify(tx.projectKey)
+	if !tx.synced {
+		tx.store.notifyRecorded(tx.projectKey)
+	}
 	return nil
 }
