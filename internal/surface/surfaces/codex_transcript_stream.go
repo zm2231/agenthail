@@ -77,6 +77,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if turnID := codexRecordTurnID(record); turnID != "" {
 				currentTurnID = turnID
 			}
+			cutOff := meter.cutOff(record)
 			turn := meter.observe(record)
 			items := codexRecordItems(&session.CodexToolWindow, record, currentTurnID)
 			effectiveTurnID := currentTurnID
@@ -88,6 +89,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 					items[index].Turn = turn
 				}
 			}
+			items = append(cutOff, items...)
 			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
 			if projection.consume(record, items, effectiveTurnID) {
 				session.CodexPendingEventUser = projection.pending
@@ -123,7 +125,10 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 }
 
 func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[string]any, line []byte, offset int64, index int, item surface.TimelineItem, currentTurnID string, onEvent func(surface.StreamEvent)) {
-	turnID := codexRecordTurnID(record)
+	turnID := item.TurnID
+	if turnID == "" {
+		turnID = codexRecordTurnID(record)
+	}
 	if turnID == "" {
 		turnID = currentTurnID
 	}
