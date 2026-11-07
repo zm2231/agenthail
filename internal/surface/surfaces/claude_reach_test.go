@@ -65,21 +65,25 @@ func hostResume(t *testing.T) (*claudetest.Fixture, *claudehosttest.Fixture, *Cl
 	return fixture, host, NewClaude(nil, fixture.Home)
 }
 
+// A person's turn to a host session runs only while Claude is idle, so of two
+// sent together the one that finds the other's turn running comes back not
+// accepted, for its sender to queue.
 func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.T) {
 	fixture, host, c := hostResume(t)
 	var wait sync.WaitGroup
 	errs := make([]error, 2)
+	accepted := make([]bool, 2)
 	ids := []string{uuid.NewString(), uuid.NewString()}
 	for index, message := range []string{"first", "second"} {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			session := exitedSession(fixture)
-			_, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), ids[index]), &session, message, nil)
+			sent, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), ids[index]), &session, message, nil)
 			if err == nil && (session.RuntimeKind != surface.RuntimeClaudeHost || session.ID != fixtureConversation || session.Bridge != "") {
 				t.Errorf("session=%+v", session)
 			}
-			errs[index] = err
+			errs[index], accepted[index] = err, sent != nil && sent.Accepted
 		}()
 	}
 	wait.Wait()
@@ -89,10 +93,19 @@ func TestClaudeConcurrentTurnsToAnExitedSessionResumeItOnceInTheHost(t *testing.
 	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 || !slices.Contains(spawns[0].Argv, "--resume") && !slices.Contains(spawns[0].Argv, "--resume="+fixtureConversation) {
 		t.Fatalf("spawns=%+v, want one resume", spawns)
 	}
-	testkit.Eventually(t, "both turns", 15*time.Second, func() bool { return len(host.Turns(t, fixtureConversation)) == 2 })
+	var want []string
+	for index, id := range ids {
+		if accepted[index] {
+			want = append(want, id)
+		}
+	}
+	if len(want) == 0 {
+		t.Fatal("neither turn was accepted")
+	}
+	testkit.Eventually(t, "the accepted turns", 15*time.Second, func() bool { return len(host.Turns(t, fixtureConversation)) == len(want) })
 	for _, turn := range host.Turns(t, fixtureConversation) {
-		if !slices.Contains(ids, turn.UUID) || string(turn.Origin) != `{"kind":"human"}` {
-			t.Fatalf("turn=%+v, want a person's turn under its intent uuid", turn)
+		if !slices.Contains(want, turn.UUID) || string(turn.Origin) != `{"kind":"human"}` {
+			t.Fatalf("turn=%+v, want a person's accepted turn under its intent uuid %v", turn, want)
 		}
 	}
 }

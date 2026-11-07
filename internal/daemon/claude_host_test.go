@@ -132,6 +132,9 @@ func TestAPersonCompactsAHostSessionFromTheDashboard(t *testing.T) {
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(fixture.Turns(t, id)) == 1 })
+	// Claude writes the conversation's transcript, which the compact reads,
+	// after the turn starts; the host is idle once the turn has ended.
+	testkit.Eventually(t, "the turn to end", 15*time.Second, func() bool { return hostState(t, client, id) == "idle" })
 
 	result, err := d.doSessionAction(ctx, principal{Kind: principalPerson}, dashboardActionRequest{SessionID: id, Action: "compact"})
 	if err != nil {
