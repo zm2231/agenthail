@@ -100,7 +100,7 @@ the local session record only shows the session was attached at some point.
 | steer | user event | `transport_accepted` with the posted event uuid |
 | context, usage, effort, rename | slash command | `reply_observed` when a `local_command` record with the same `commandRun` is joined to the request by `parentUuid`, or by a cloud event after it; a competing prompt first makes it `unknown` |
 | status | none | `reply_observed`; the model comes from `external_metadata` |
-| compact | `/compact` | `delivered` when a `compact_boundary` follows the exact request |
+| compact | `/compact` | `delivered` when a `compact_boundary` follows the exact request; `failed` when a stderr record answers it |
 
 Responses are read from `GET /v1/sessions/<session id>/events?after_id=<uuid>`,
 starting at the posted event. An accepted request whose response or effect is not

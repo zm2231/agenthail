@@ -107,6 +107,8 @@ export function renderDeliveryProblems() {
   $("#delivery-problems-list").innerHTML = problems.map(item => {
     const session = app.state.sessions.find(session => session.id === item.sessionId);
     const target = session ? displayName(session) : item.sessionId;
-    return `<article class="attention-item"><div><div class="attention-target">${escape(target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button></div></article>`;
+    return `<article class="attention-item"><div><div class="attention-target">${escape(target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions">${item.deletable
+      ? `<button class="soft-button" data-delivery-delete="${escape(item.deliveryId)}" type="button">Delete</button>`
+      : `<button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button>`}</div></article>`;
   }).join("");
 }
