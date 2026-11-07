@@ -66,6 +66,7 @@ type dashboardActionRequest struct {
 	Until           time.Time                  `json:"until"`
 	Wake            string                     `json:"wake"`
 	ChangedBy       string                     `json:"changedBy"`
+	Successor       string                     `json:"successor"`
 	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 	Task            bool                       `json:"task,omitempty"`
 }
