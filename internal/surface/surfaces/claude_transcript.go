@@ -57,13 +57,17 @@ type claudeRecord struct {
 		Command string `json:"command"`
 		Args    string `json:"args"`
 	} `json:"commandRun"`
-	Subtype           string `json:"subtype"`
-	Content           string `json:"content"`
-	Timestamp         string `json:"timestamp"`
-	IsAPIErrorMessage bool   `json:"isApiErrorMessage"`
-	Error             string `json:"error"`
-	APIError          string `json:"apiError"`
-	QuotaLimits       struct {
+	Subtype               string `json:"subtype"`
+	IsSidechain           bool   `json:"isSidechain"`
+	IsMeta                bool   `json:"isMeta"`
+	PreventedContinuation bool   `json:"preventedContinuation"`
+	HookErrors            []any  `json:"hookErrors"`
+	Content               string `json:"content"`
+	Timestamp             string `json:"timestamp"`
+	IsAPIErrorMessage     bool   `json:"isApiErrorMessage"`
+	Error                 string `json:"error"`
+	APIError              string `json:"apiError"`
+	QuotaLimits           struct {
 		ResetsAt float64 `json:"resetsAt"`
 	} `json:"quotaLimits"`
 	APIErrorParams struct {
@@ -246,6 +250,12 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			return turns
 		}
 		startedAt, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
+		if n := len(turns); n > 0 && !turns[n-1].Done && !turns[n-1].Interrupted && turns[n-1].MessageID != "" {
+			if record.IsMeta && isClaudeStopHookFeedback(strings.TrimSpace(text)) {
+				return turns
+			}
+			endClaudeTurn(&turns[n-1], turns[n-1].LastAt)
+		}
 		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text), StartedAt: startedAt})
 	case "assistant":
 		if len(turns) == 0 {
@@ -296,16 +306,24 @@ func foldClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 		}
 	case "system":
-		if record.Subtype == "turn_duration" && len(turns) > 0 {
-			turn := &turns[len(turns)-1]
-			turn.Closing = false
-			turn.Done = true
-			if turn.TerminalAt.IsZero() {
-				turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
-			}
+		if claudeRecordEndsTurn(record) && len(turns) > 0 {
+			at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
+			endClaudeTurn(&turns[len(turns)-1], at)
 		}
 	}
 	return turns
+}
+
+func claudeRecordEndsTurn(record claudeRecord) bool {
+	return record.Type == "system" && (record.Subtype == "turn_duration" || claudeStopHooksEndTurn(record.Subtype, record.IsSidechain, record.PreventedContinuation, len(record.HookErrors)))
+}
+
+func endClaudeTurn(turn *claudeTurn, at time.Time) {
+	turn.Closing = false
+	turn.Done = true
+	if turn.TerminalAt.IsZero() {
+		turn.TerminalAt = at
+	}
 }
 
 // claudeRecordContinuesMessage reports whether a record is another content

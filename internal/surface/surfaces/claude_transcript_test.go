@@ -476,6 +476,37 @@ func TestClaudeObserveDerivesTurnStateFromTranscript(t *testing.T) {
 			},
 		},
 		{
+			name: "stop hooks close a turn whose last reply was empty",
+			transcript: `
+{"type":"user","uuid":"u1","message":{"content":"work"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"text","text":"done"},{"type":"tool_use","id":"tool1","name":"mcp__agenthail__agenthail_end_turn","input":{}}]}}
+{"type":"user","uuid":"tool-result","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}
+{"type":"api-request","timestamp":"2026-07-19T01:29:39.000Z"}
+{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":[],"preventedContinuation":false,"timestamp":"2026-07-19T01:29:40.594Z"}`,
+			session: surface.Session{Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.CompletedTurnID != "m1" || o.Reply == nil || o.Reply.Text != "done" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "a blocking stop hook keeps the turn going",
+			transcript: `
+{"type":"user","uuid":"u1","message":{"content":"work"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"text","text":"checking"},{"type":"tool_use","id":"tool1","name":"Bash","input":{}}]}}
+{"type":"user","uuid":"tool-result","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}
+{"type":"user","uuid":"feedback","isMeta":true,"message":{"content":"Stop hook feedback:\nfix the type errors before stopping"}}
+{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":["fix the type errors before stopping"],"preventedContinuation":false}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"text","text":"fixing"},{"type":"tool_use","id":"tool2","name":"Bash","input":{}}]}}`,
+			session: surface.Session{PID: live, Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusBusy || o.CompletedTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
 			name: "completion older than bridge activity does not clear a new busy turn",
 			transcript: `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}

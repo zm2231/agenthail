@@ -60,6 +60,10 @@ type claudeTurnMeter struct {
 	compactions      []surface.TurnCompaction
 	compactionsKnown bool
 	finished         bool
+	// answered holds once Claude replied in the turn, and endBlock once a
+	// reply ended it; a turn answered without an end block is still open.
+	answered bool
+	endBlock bool
 }
 
 func newClaudeTurnTracker(current string, closing surface.ClaudeClosingTurn) *claudeTurnTracker {
@@ -78,7 +82,10 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		}
 		t.closing = surface.ClaudeClosingTurn{}
 	}
-	if claudeRecordStartsTurn(record) {
+	if claudeRecordStartsTurn(record) && !(claudeRecordIsStopHookFeedback(record) && t.answeredWithoutEnd(t.current)) {
+		if t.answeredWithoutEnd(t.current) {
+			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount), "")
+		}
 		t.current = str(record, "uuid")
 		t.meter = claudeTurnMeter{turnID: t.current, usage: map[string]surface.TurnUsage{}, compactions: t.between, compactionsKnown: t.betweenKnown}
 		t.between, t.betweenKnown = nil, false
@@ -87,6 +94,9 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	t.observeCompaction(record)
 	if turnID != "" && turnID == t.meter.turnID && !t.meter.finished {
 		t.meter.observe(record)
+	}
+	if t.answeredWithoutEnd(turnID) && claudeRecordStopsAfterHooks(record) {
+		return turnID, t.finish(ended, turnID, stableTimelineItemID(offset, line, itemCount), ""), false
 	}
 	done, ending, interrupted := claudeStreamTerminal(record)
 	if interrupted {
@@ -132,8 +142,14 @@ func (t *claudeTurnTracker) settle(settled func(time.Time) bool) []claudeTurnEnd
 	return ended
 }
 
+// answeredWithoutEnd reports a turn Claude replied in whose last reply was
+// empty, so no end_turn block or turn_duration will end it.
+func (t *claudeTurnTracker) answeredWithoutEnd(turnID string) bool {
+	return turnID != "" && turnID == t.meter.turnID && !t.meter.finished && t.meter.answered && !t.meter.endBlock
+}
+
 func (t *claudeTurnTracker) finish(ended []claudeTurnEnd, turnID, key, status string) []claudeTurnEnd {
-	if t.terminal[turnID] {
+	if t.terminal[turnID] || (turnID == t.meter.turnID && t.meter.finished) {
 		return ended
 	}
 	t.terminal[turnID] = true
@@ -226,6 +242,9 @@ func (m *claudeTurnMeter) observe(record map[string]any) {
 		return
 	}
 	message, _ := record["message"].(map[string]any)
+	apiError, _ := record["isApiErrorMessage"].(bool)
+	m.answered = true
+	m.endBlock = m.endBlock || apiError || str(message, "stop_reason") == "end_turn"
 	model := str(message, "model")
 	if model == claudeSyntheticModel {
 		return
@@ -302,7 +321,9 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 }
 
 func newClaudeTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(claudeLineMayStartTurn, claudeRecordStartsTurn)
+	return newTurnStartSearch(claudeLineMayStartTurn, func(record map[string]any) bool {
+		return claudeRecordStartsTurn(record) && !claudeRecordIsStopHookFeedback(record)
+	})
 }
 
 func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*claudeTurnTracker, error) {

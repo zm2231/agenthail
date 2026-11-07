@@ -78,7 +78,14 @@ item ended `running` (the newest exchange of a busy session) or `unknown`.
   "Compacted after an hour idle", which Claude writes just after the boundary,
   makes it `idle`. The compaction summary Claude writes as a user record
   neither starts a turn nor is a prompt; it shows as a `Compaction summary`
-  event.
+  event. A turn ends at `turn_duration`, or at the first record after its
+  `end_turn` block that is not another block of the same message. When
+  Claude's last reply in a turn is empty it writes no block, and the turn
+  ends at the main thread's `stop_hook_summary` if the Stop hooks let Claude
+  stop; a blocking Stop hook leaves its feedback in `hookErrors` and the turn
+  goes on, its "Stop hook feedback" record staying inside that turn rather
+  than starting another. A turn Claude replied in that is still open when the next prompt
+  starts ends at that prompt, with its usage and compactions.
 - Codex compactions: a `compacted` record is one compaction. `preTokens` is the
   size of the request before it and `postTokens` the next `token_count` that is
   smaller; `contextTokens` is the last `token_count`'s `total_tokens`. Two

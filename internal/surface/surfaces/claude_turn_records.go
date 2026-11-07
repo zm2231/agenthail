@@ -52,6 +52,34 @@ func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool
 	}
 }
 
+// claudeStopHooksEndTurn reports a main-thread stop_hook_summary after which
+// Claude stopped. A turn whose last reply was empty has no end_turn block, so
+// this is its only end. A blocking Stop hook leaves its feedback in hookErrors
+// and the turn goes on.
+func claudeStopHooksEndTurn(subtype string, sidechain, prevented bool, hookErrors int) bool {
+	return subtype == "stop_hook_summary" && !sidechain && (prevented || hookErrors == 0)
+}
+
+func claudeRecordIsStopHookFeedback(record map[string]any) bool {
+	meta, _ := record["isMeta"].(bool)
+	message, _ := record["message"].(map[string]any)
+	return meta && str(record, "type") == "user" && isClaudeStopHookFeedback(transcriptText(message["content"]))
+}
+
+func isClaudeStopHookFeedback(text string) bool {
+	return strings.HasPrefix(text, "Stop hook feedback:")
+}
+
+func claudeRecordStopsAfterHooks(record map[string]any) bool {
+	if str(record, "type") != "system" {
+		return false
+	}
+	sidechain, _ := record["isSidechain"].(bool)
+	prevented, _ := record["preventedContinuation"].(bool)
+	hookErrors, _ := record["hookErrors"].([]any)
+	return claudeStopHooksEndTurn(str(record, "subtype"), sidechain, prevented, len(hookErrors))
+}
+
 func claudeLineMayStartTurn(line []byte) bool {
 	if gjson.GetBytes(line, "type").Str != "user" || gjson.GetBytes(line, "message.tool_use_id").Exists() {
 		return false

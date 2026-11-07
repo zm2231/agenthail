@@ -91,6 +91,77 @@ func TestClaudeCatchUpPageCarriesTheLiveTurnsAndDoneKeys(t *testing.T) {
 	}
 }
 
+const claudeTurnsWithoutEndBlocks = `{"type":"assistant","uuid":"a1","timestamp":"2026-11-07T07:48:35Z","message":{"id":"m1","model":"claude-fixture","stop_reason":"tool_use","content":[{"type":"text","text":"sent"},{"type":"tool_use","id":"t1","name":"mcp__agenthail__agenthail_end_turn","input":{}}],"usage":{"input_tokens":3,"cache_read_input_tokens":200000,"output_tokens":40}}}
+{"type":"user","uuid":"r1","timestamp":"2026-11-07T07:48:38Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"api-request","timestamp":"2026-11-07T07:48:38Z"}
+{"type":"system","subtype":"stop_hook_summary","hookCount":2,"hookErrors":[],"preventedContinuation":false,"timestamp":"2026-11-07T07:48:44Z"}
+{"type":"user","uuid":"u2","timestamp":"2026-11-07T08:00:00Z","message":{"content":"second"}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-11-07T08:00:01Z","message":{"id":"m2","model":"claude-fixture","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{}}],"usage":{"input_tokens":5,"output_tokens":7}}}
+{"type":"user","uuid":"r2","timestamp":"2026-11-07T08:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]}}
+{"type":"user","uuid":"u3","timestamp":"2026-11-07T08:10:00Z","message":{"content":"third"}}
+{"type":"assistant","uuid":"a3","timestamp":"2026-11-07T08:10:01Z","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"three"}]}}
+{"type":"user","uuid":"f3","isMeta":true,"timestamp":"2026-11-07T08:10:02Z","message":{"content":"Stop hook feedback: fix the type errors before stopping"}}
+{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":["fix the type errors before stopping"],"preventedContinuation":false,"timestamp":"2026-11-07T08:10:02Z"}
+{"type":"assistant","uuid":"a4","timestamp":"2026-11-07T08:10:05Z","message":{"id":"m4","stop_reason":"end_turn","content":[{"type":"text","text":"fixed"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-11-07T08:10:06Z","durationMs":6000}
+{"type":"user","uuid":"u4","timestamp":"2026-11-07T08:20:00Z","message":{"content":"fourth"}}
+{"type":"assistant","uuid":"a5","timestamp":"2026-11-07T08:20:01Z","message":{"id":"m5","model":"claude-fixture","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t5","name":"Bash","input":{}}],"usage":{"input_tokens":5,"output_tokens":11}}}
+{"type":"user","uuid":"r5","timestamp":"2026-11-07T08:20:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t5","content":"ok"}]}}
+{"type":"user","uuid":"f4","isMeta":true,"timestamp":"2026-11-07T08:20:03Z","message":{"content":"Stop hook feedback:\nfix the type errors before stopping"}}
+{"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookErrors":["fix the type errors before stopping"],"preventedContinuation":false,"timestamp":"2026-11-07T08:20:03Z"}
+{"type":"assistant","uuid":"a6","timestamp":"2026-11-07T08:20:05Z","message":{"id":"m6","model":"claude-fixture","stop_reason":"end_turn","content":[{"type":"text","text":"fixed"}],"usage":{"input_tokens":5,"output_tokens":13}}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-11-07T08:20:06Z","durationMs":6000}
+`
+
+func TestATurnWhoseLastReplyWasEmptyEndsOnceWithItsUsage(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-11-07T07:48:04Z","message":{"content":"first"}}`)
+	session := seededClaudeStreamSession(t, path, "")
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(claudeTurnsWithoutEndBlocks); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	liveDone := map[string]string{}
+	liveTurns := map[string]int{}
+	measured := map[string]*surface.TurnMetadata{}
+	err = NewClaude(nil, t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Kind != "done" {
+			return
+		}
+		liveDone[event.ID] = event.TurnID
+		liveTurns[event.TurnID]++
+		measured[event.TurnID] = event.Turn
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream err=%v", err)
+	}
+	if want := map[string]int{"u1": 1, "u2": 1, "u3": 1, "f3": 1, "u4": 1}; !reflect.DeepEqual(liveTurns, want) {
+		t.Fatalf("turns ended %v, want each once %v", liveTurns, want)
+	}
+	if first := measured["u1"]; first == nil || first.Usage == nil || first.Usage.OutputTokens != 40 || first.Model != "claude-fixture" {
+		t.Fatalf("the turn ended by its stop hooks lost its measure: %+v", first)
+	}
+	if blocked := measured["u4"]; blocked == nil || blocked.Usage == nil || blocked.Usage.OutputTokens != 24 {
+		t.Fatalf("a turn a Stop hook sent back did not keep both replies: %+v", blocked)
+	}
+	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageDone := map[string]string{}
+	for _, item := range page.Items {
+		if item.Kind == "done" {
+			pageDone[item.ID] = item.TurnID
+		}
+	}
+	if !reflect.DeepEqual(pageDone, liveDone) {
+		t.Fatalf("page done %v, live done %v", pageDone, liveDone)
+	}
+}
+
 func TestClaudeTranscriptItemsMatchThePageFromAnOffset(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"first"}}`+"\n"+claudeCatchUpTurns)
 	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
