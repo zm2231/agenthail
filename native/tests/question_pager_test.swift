@@ -79,6 +79,26 @@ struct QuestionPagerTest {
         check(drafts.pager(for: request).step == 0, "the oldest draft goes past the limit")
         let changed = SessionRequest(id: "r3", kind: "question", tool: "AskUserQuestion", questions: [targets])
         check(drafts.pager(for: changed).questions == [targets], "a draft for different questions is not reused")
+
+        var ask = drafts.pager(for: SessionRequest(id: "turn-end-1", kind: "ask", tool: "", questions: [scope]))
+        check(ask.ask && !ask.isOneTap && ask.isSingle, "an ask is never answered on one tap")
+        check(ask.choose(1) == nil && ask.step == 0 && ask.answer(at: 0) == "No", "picking an ask's option waits for submit")
+        check(ask.decision(ask.next()!) == RequestDecision(behavior: "allow", answers: ["Which scope?": "No"]), "an empty note is left out")
+        ask.note = "  After lunch.  "
+        check(ask.decision(ask.answers!) == RequestDecision(behavior: "allow", message: "After lunch.", answers: ["Which scope?": "No"]), "the note is sent trimmed as the message")
+        var question = QuestionPager(questions: [scope, targets])
+        question.note = "ignored"
+        check(question.decision(["Which scope?": "Yes"]) == .answers(["Which scope?": "Yes"]), "a question never carries a note")
+        var typedAsk = QuestionPager(questions: [scope], ask: true)
+        _ = typedAsk.choose(0)
+        typedAsk.chooseOther()
+        check(typedAsk.isOtherPicked(at: 0) && !typedAsk.isPicked(0, at: 0) && typedAsk.answers == nil, "picking Other clears the option and waits for text")
+        typedAsk.type("Tomorrow")
+        check(typedAsk.submit() == RequestDecision(behavior: "allow", answers: ["Which scope?": "Tomorrow"]), "Other sends the typed answer")
+        _ = typedAsk.choose(1)
+        check(!typedAsk.isOtherPicked(at: 0) && typedAsk.answers == ["Which scope?": "No"], "an option after Other replaces it")
+        var askPair = QuestionPager(questions: [scope, targets], ask: true)
+        check(askPair.choose(0) == nil && askPair.step == 1, "a pick in a several-question ask still pages on")
         print("question pager ok")
     }
 

@@ -1,0 +1,49 @@
+import XCTest
+@testable import Agenthail
+
+@MainActor
+final class AskCardTests: XCTestCase {
+    private func row(respond: Bool = false, endTurn: String) throws -> SessionState {
+        let json = #"{"id":"s1","surface":"codex","name":"builder","alias":"builder","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false,"respond":"# + "\(respond)" + #"},"endTurn":"# + endTurn + "}"
+        return try JSONDecoder().decode(SessionState.self, from: Data(json.utf8))
+    }
+
+    func testRowDecodesTheWaitingAskAndKeysOnIt() throws {
+        let waiting = try row(endTurn: #"{"headline":"Ready to ship","needs":"you","asks":[{"question":"Deploy it now?","options":[{"label":"Deploy"}]}],"endedAt":"2026-11-06T04:52:30Z","requestId":"turn-end-1"}"#)
+        XCTAssertEqual(waiting.pendingAskID, "turn-end-1")
+        XCTAssertTrue(RequestSync.lists(waiting), "an ask is listed though the provider answers nothing through Agenthail")
+        let newer = try row(endTurn: #"{"headline":"Next","needs":"you","endedAt":"2026-11-06T05:00:00Z","requestId":"turn-end-2"}"#)
+        XCTAssertNotEqual(RequestSync.cacheKey(waiting), RequestSync.cacheKey(newer), "a new ask refetches")
+        let answered = try row(endTurn: #"{"headline":"Ready to ship","needs":"you","endedAt":"2026-11-06T04:52:30Z","requestId":"turn-end-1","answeredAt":"2026-11-06T04:55:02Z"}"#)
+        XCTAssertNil(answered.pendingAskID)
+        XCTAssertFalse(RequestSync.lists(answered), "an answered ask is not fetched")
+    }
+
+    func testRequestDecodesAndIsNeverOfferedOnceAnswered() throws {
+        let json = #"{"permissionMode":"","requests":[{"id":"turn-end-1","kind":"ask","tool":"","title":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"label":"Deploy","description":""},{"label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com"}]}],"actions":[{"id":"o0","title":"Deploy"}],"alwaysAllow":false,"createdAt":"2026-11-06T04:52:30Z"}]}"#
+        let requests = try JSONDecoder().decode(SessionRequests.self, from: Data(json.utf8))
+        let ask = try XCTUnwrap(requests.requests.first)
+        XCTAssertTrue(ask.isAsk && ask.usesPager)
+        XCTAssertEqual(ask.questions?.first?.suggested, 0)
+        XCTAssertEqual(ask.questions?.first?.links, [SessionRequest.Link(title: "Runbook", url: "https://example.com")])
+        XCTAssertEqual(RequestCard.heading(ask, asker: "@builder"), "@builder asks: Ready to ship")
+        XCTAssertEqual(requests.offered(pendingAsk: "turn-end-1").map(\.id), ["turn-end-1"])
+        XCTAssertTrue(requests.offered(pendingAsk: nil).isEmpty, "an answered ask is never offered")
+        XCTAssertTrue(requests.offered(pendingAsk: "turn-end-1", retired: "turn-end-1").isEmpty, "an ask answered here is not offered while the row catches up")
+    }
+
+    func testPagerWaitsForSubmitAndSendsTheNote() throws {
+        let question = SessionRequest.Question(question: "Deploy it now?", header: "", multiSelect: false, options: [.init(label: "Deploy", description: ""), .init(label: "Wait", description: "")])
+        var pager = QuestionPager(questions: [question], ask: true)
+        XCTAssertNil(pager.choose(1), "a pick never sends an ask")
+        pager.note = " After lunch. "
+        let answers = try XCTUnwrap(pager.next())
+        XCTAssertEqual(pager.decision(answers), RequestDecision(behavior: "allow", message: "After lunch.", answers: ["Deploy it now?": "Wait"]))
+    }
+
+    func testFailuresDropTheCardOnlyWhenTheAnswerMayHaveLanded() {
+        XCTAssertTrue(RequestAnswerFailure(AgenthailAPIError.requestStale("x")).dropsCard)
+        XCTAssertTrue(RequestAnswerFailure(AgenthailAPIError.request(502, "the answer may have reached the session, so it is not sent again: x")).dropsCard)
+        XCTAssertFalse(RequestAnswerFailure(AgenthailAPIError.request(502, "session is gone")).dropsCard)
+    }
+}

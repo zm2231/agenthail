@@ -579,6 +579,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtimeKind: String? = nil
     var placement: String? = nil
     var registeredAt: String? = nil
+    var endTurn: SessionEndTurn? = nil
     /// The turn notice, with the app's own remedy when it can adopt the session.
     var composerTurnNotice: String {
         let notice = capabilities.turnNotice
@@ -2169,11 +2170,18 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         let description: String
     }
 
+    struct Link: Decodable, Hashable {
+        let title: String
+        let url: String
+    }
+
     struct Question: Decodable, Hashable {
         let question: String
         let header: String
         let multiSelect: Bool
         let options: [Option]
+        var suggested: Int? = nil
+        var links: [Link]? = nil
     }
 
     let id: String
@@ -2192,6 +2200,8 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
     var replacedBy: String? = nil
 
     var isQuestion: Bool { kind == "question" }
+    var isAsk: Bool { kind == "ask" }
+    var usesPager: Bool { isQuestion || isAsk }
     var summary: String { [title, displayName].compactMap { $0 }.first { !$0.isEmpty } ?? tool }
 
     private enum CodingKeys: String, CodingKey {

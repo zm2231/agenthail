@@ -7,10 +7,9 @@ enum RequestAnswer {
         do {
             _ = try await api().respond(sessionID: sessionID, requestID: requestID, decision: RequestDecision(choice: choice, message: text))
             return
-        } catch AgenthailAPIError.requestStale {
-            failure = "That request was already answered or has expired."
         } catch {
-            failure = "Agenthail could not send your answer: \(error.localizedDescription) Open the session to answer it."
+            let answer = RequestAnswerFailure(error)
+            failure = answer.dropsCard ? answer.message : "Agenthail could not send your answer: \(answer.message) Open the session to answer it."
         }
         if let text, !text.isEmpty {
             failure += " You wrote: \(text)"

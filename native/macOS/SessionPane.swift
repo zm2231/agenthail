@@ -54,6 +54,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var controlPending = false
     @Published private(set) var requests: SessionRequests?
     @Published private(set) var answeringRequest: String?
+    @Published private(set) var retiredAsks = RetiredAsks()
     @Published var requestError: String?
     private var requestsKey: String?
     @Published private(set) var composerDraft = ComposerDraft() {
@@ -803,20 +804,15 @@ final class SessionPane: ObservableObject, Identifiable {
         model.store.update(id) { $0.detail = merged }
     }
 
-    /// Changes whenever syncRequests could reach a different result, so the
-    /// view resyncs when requests become unavailable as well as when they move.
-    static func requestSyncKey(_ session: SessionState) -> String {
-        "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)"
-    }
-
     func syncRequests(for session: SessionState) async {
-        guard session.capabilities.respond, !session.isReadOnly else {
+        if retiredAsks.settles(session) { retiredAsks.settle(session) }
+        guard RequestSync.lists(session) else {
             if requests != nil { requests = nil }
             requestsKey = nil
             if requestError != nil { requestError = nil }
             return
         }
-        let key = "\(session.id)|\(session.waitingOn?.id ?? "")"
+        let key = RequestSync.cacheKey(session)
         guard requestsKey != key else { return }
         if requestsKey?.hasPrefix(session.id + "|") != true, requests != nil { requests = nil }
         requestsKey = key
@@ -843,16 +839,19 @@ final class SessionPane: ObservableObject, Identifiable {
         guard let api = model.api, let id = selectedSessionID, answeringRequest == nil else { return }
         answeringRequest = request.id
         defer { answeringRequest = nil }
+        var failure: RequestAnswerFailure?
         do {
             _ = try await api.respond(sessionID: id, requestID: request.id, decision: decision)
             if requestError != nil { requestError = nil }
-        } catch AgenthailAPIError.requestStale {
-            requests = requests?.removing(request.id)
-            requestError = "That request was already answered or has expired."
         } catch {
-            requestError = error.localizedDescription
+            failure = RequestAnswerFailure(error)
+            if failure?.dropsCard == true { requests = requests?.removing(request.id) }
+        }
+        if RequestAnswerFailure.retires(request, failure: failure) {
+            retiredAsks.retire(request.id, in: id, receipt: failure == nil ? AnswerReceipt(request, decision) : nil)
         }
         await fetchRequests(id, key: requestsKey)
+        if let failure { requestError = failure.message }
         await loadSession(id)
     }
 

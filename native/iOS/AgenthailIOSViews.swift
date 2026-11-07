@@ -734,7 +734,7 @@ struct SessionScreen: View {
         }
         .onAppear { olderPlace.scroll = { [position = $position] in position.wrappedValue = $0 } }
         .refreshable { await model.refreshSession(session.id) }
-        .task(id: "\(session.id)|\(session.waitingOn?.id ?? "")|\(session.capabilities.respond)|\(session.isReadOnly)") { await model.syncRequests(for: session) }
+        .task(id: RequestSync.viewKey(liveSession)) { await model.syncRequests(for: liveSession) }
         // Not in the bottom bar: growing the bar would move the transcript and flip atLatest, which hides it again.
         .overlay(alignment: .bottom) {
             if detail != nil { JumpToLatestControl(edge: edge, following: followingLatest, action: goToLatest) }
@@ -757,14 +757,19 @@ struct SessionScreen: View {
                         .id(waiting.id)
                         .padding(.horizontal)
                         .padding(.top, 6)
-                } else if let detail, !detail.readOnly, let request = model.sessionRequests?.requests.first {
+                } else if let detail, !detail.readOnly, let request = model.sessionRequests?.offered(pendingAsk: liveSession.pendingAskID, retired: model.retiredAsks.retired(in: liveSession.id)).first {
                     RequestCard(request: request, answering: model.answeringRequest != nil, accent: AnyShapeStyle(PhonePalette.accentText),
                                 respond: { decision in Task { await model.respond(to: request, sessionID: session.id, decision: decision) } },
                                 leadNow: request.replacedBy.map { model.leadName($0, requestFrom: session.id) },
-                                withdraw: request.replacedBy == nil ? nil : { Task { await model.withdraw(request, sessionID: session.id) } })
+                                withdraw: request.replacedBy == nil ? nil : { Task { await model.withdraw(request, sessionID: session.id) } },
+                                asker: liveSession.displayName, attention: AnyShapeStyle(PhonePalette.attention), actionTint: AnyShapeStyle(PhonePalette.accent))
                     .id(request.id)
                     .padding(.horizontal)
                     .padding(.top, 6)
+                } else if let receipt = model.retiredAsks.receipt(for: liveSession) {
+                    AnswerReceiptRow(receipt: receipt)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                 }
                 if let detail {
                     if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {

@@ -37,8 +37,14 @@ RESPONSES = {
         "codexRecentHours": 24, "busyDelivery": "queue",
     },
 }
+ANSWER_REPLIES = {
+    "stale": (409, {"ok": False, "error": {"code": "stale", "message": "this request was already answered or has expired"}}),
+    "maybe": (502, {"ok": False, "error": {"code": "bad_gateway", "message": "the answer may have reached the session, so it is not sent again: delivery timed out"}}),
+    "failed": (502, {"ok": False, "error": {"code": "bad_gateway", "message": "the session is not running"}}),
+}
 HELD_STREAMS = set()
 ACTIONS_LOG = os.environ.get("AGENTHAIL_FIXTURE_ACTIONS_LOG", "")
+REQUESTS_LOG = os.environ.get("AGENTHAIL_FIXTURE_REQUESTS_LOG", "")
 
 
 class Server(ThreadingHTTPServer):
@@ -52,6 +58,9 @@ class Server(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if REQUESTS_LOG:
+            with open(REQUESTS_LOG, "a") as log:
+                log.write(self.path + "\n")
         if self.path.split("?", 1)[0] in HELD_STREAMS:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -61,6 +70,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Event().wait()
         body = RESPONSES.get(self.path.split("?", 1)[0])
         if body is None:
+            if REQUESTS_LOG:
+                with open(REQUESTS_LOG, "a") as log:
+                    log.write("404 " + self.path + "\n")
             self.send_error(404)
             return
         data = json.dumps(body).encode()
@@ -75,8 +87,14 @@ class Handler(BaseHTTPRequestHandler):
         if ACTIONS_LOG and self.path.split("?", 1)[0] == "/api/v1/actions":
             with open(ACTIONS_LOG, "ab") as log:
                 log.write(body + b"\n")
-        data = json.dumps({"ok": True, "result": {"outcome": "answered"}}).encode()
-        self.send_response(200)
+        status, reply = 200, {"ok": True, "result": {"outcome": "answered"}}
+        if SESSION.get("endTurn") and json.loads(body or b"{}").get("requestId") == SESSION["endTurn"].get("requestId"):
+            status, reply = ANSWER_REPLIES.get(os.environ.get("AGENTHAIL_FIXTURE_ANSWER", ""), (status, reply))
+            if status != 502 or "may have reached" in reply["error"]["message"]:
+                SESSION["endTurn"]["answeredAt"] = NOW
+                RESPONSES["/api/v1/requests"] = {"permissionMode": "", "requests": []}
+        data = json.dumps(reply).encode()
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -109,6 +127,40 @@ if __name__ == "__main__":
             RESPONSES["/api/v1/requests"] = json.load(requests)
         RESPONSES["/api/v1/session"] = {
             "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd", "waitingOn")},
+            "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
+            "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
+        }
+        theme = sys.argv[2] if len(sys.argv) > 2 else "system"
+        RESPONSES["/api/v1/ui"] = {"rev": "", "problems": [], "chosen": {}, "overrides": {}, "values": {"theme": theme}}
+        HELD_STREAMS.add("/api/v1/events")
+    if sys.argv[1:2] in (["ask"], ["ask-several"]):
+        # An idle session whose ended turn asks the person, from a provider that answers nothing through Agenthail.
+        SESSION["status"] = "idle"
+        SESSION["capabilities"] = {**CAPABILITIES, "respond": False}
+        with open(os.path.join(os.path.dirname(__file__), sys.argv[1] + "-requests.json")) as requests:
+            RESPONSES["/api/v1/requests"] = json.load(requests)
+        ask = RESPONSES["/api/v1/requests"]["requests"][0]
+        SESSION["endTurn"] = {"headline": ask["title"], "needs": "you", "endedAt": NOW, "requestId": ask["id"]}
+        SESSION["attention"] = {"kind": "ask", "reason": ask["title"]}
+        one = {"families": 1, "sessions": 1}
+        RESPONSES["/api/v1/snapshot"]["view"] = {
+            "counts": {"running": {"families": 0, "sessions": 0}, "current": one, "recent": one, "all": one, "archived": {"families": 0, "sessions": 0}},
+            "surfaces": [],
+            "projects": [{"id": SESSION["project"]["id"], "name": SESSION["project"]["displayName"], "counts": one, "collapsedFamilyIds": [SESSION["id"]]}],
+            "families": [{"id": SESSION["id"], "rootId": SESSION["id"], "projectId": SESSION["project"]["id"], "checkoutId": SESSION["checkout"]["id"],
+                          "members": [{"id": SESSION["id"], "depth": 0, "contextOnly": False, "pinned": False}], "pinned": False, "workingSubagents": 0}],
+        }
+        RESPONSES["/api/v1/history"] = {"items": [], "hasMore": False, "nextBefore": 0, "kinds": []}
+        RESPONSES["/api/v1/projects/activity"] = {"projects": []}
+        RESPONSES["/api/v1/session-options"] = {"surfaces": [{"id": "claude", "workspace": True}], "projects": [], "claudeConfigRoots": []}
+        RESPONSES["/api/v1/usage"] = {"sets": []}
+        RESPONSES["/api/v1/session-commands"] = {"commands": [], "unavailable": ""}
+        RESPONSES["/api/v1/session-metadata"] = {}
+        RESPONSES["/api/v1/prompts"] = {"prompts": [], "nextBefore": None}
+        RESPONSES["/api/v1/models"] = {"models": []}
+        HELD_STREAMS.update({"/api/v1/catalog-events", "/api/v1/session-stream"})
+        RESPONSES["/api/v1/session"] = {
+            "session": {k: SESSION[k] for k in ("id", "surface", "name", "status", "lastActive", "cwd")},
             "exchanges": [], "capabilities": SESSION["capabilities"], "readOnly": False, "readOnlyReason": "",
             "timeline": {"source": "claude", "truncated": False, "nextBefore": 0, "items": []},
         }

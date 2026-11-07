@@ -4,14 +4,16 @@ struct QuestionPagerView: View {
     let request: SessionRequest
     let answering: Bool
     let accent: AnyShapeStyle
+    let actionTint: AnyShapeStyle?
     let respond: (RequestDecision) -> Void
     @State private var pager: QuestionPager
     @FocusState private var focused: Bool
 
-    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, respond: @escaping (RequestDecision) -> Void) {
+    init(request: SessionRequest, answering: Bool, accent: AnyShapeStyle, actionTint: AnyShapeStyle? = nil, respond: @escaping (RequestDecision) -> Void) {
         self.request = request
         self.answering = answering
         self.accent = accent
+        self.actionTint = actionTint
         self.respond = respond
         _pager = State(initialValue: QuestionPagerDrafts.shared.pager(for: request))
     }
@@ -48,7 +50,7 @@ struct QuestionPagerView: View {
         HStack(spacing: 6) {
             ForEach(pager.questions.indices, id: \.self) { index in
                 chip(pager.questions[index].header.isEmpty ? "Question \(index + 1)" : pager.questions[index].header,
-                     systemImage: pager.isAnswered(index) ? "checkmark.square.fill" : "square",
+                     systemImage: pager.isAnswered(index) ? "checkmark.circle.fill" : (index < 50 ? "\(index + 1).circle" : "circle"),
                      step: index)
             }
             chip("Submit", systemImage: "paperplane", step: pager.reviewStep)
@@ -65,19 +67,20 @@ struct QuestionPagerView: View {
             focused = true
         } label: {
             Label {
-                Text(title).underline(selected).lineLimit(1).truncationMode(.tail)
+                Text(title).lineLimit(1).truncationMode(.tail)
             } icon: {
                 Image(systemName: systemImage)
             }
             .font(.caption.weight(selected ? .semibold : .regular))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .foregroundStyle(selected ? accent : AnyShapeStyle(RoleStyle(.muted)))
-            .background(selected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(Color.clear), in: Capsule())
-            .overlay(Capsule().strokeBorder(.quaternary, lineWidth: selected ? 2 : 1))
+            .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(RoleStyle(.muted)))
+            .background(selected ? AnyShapeStyle(.background.opacity(0.6)) : AnyShapeStyle(Color.clear), in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? AnyShapeStyle(.separator) : AnyShapeStyle(.quaternary), lineWidth: 1))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityValue(step < pager.reviewStep ? (pager.isAnswered(step) ? "Answered" : "Not answered") : "")
     }
@@ -88,17 +91,32 @@ struct QuestionPagerView: View {
                 Text(question.header).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             Text(question.question).font(.body.weight(.medium))
-            ForEach(question.options.indices, id: \.self) { index in
-                optionRow(question.options[index], index: index, multiSelect: question.multiSelect)
+            if let links = question.links {
+                PagerLinks(links: links, accent: accent)
             }
-            TextField("Other answer", text: Binding(get: { pager.typedAnswer(at: pager.step) }, set: { pager.type($0) }))
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { advance() }
-                .disabled(answering)
+            ForEach(question.options.indices, id: \.self) { index in
+                optionRow(question.options[index], index: index, multiSelect: question.multiSelect, suggested: question.suggested == index)
+            }
+            if pager.ask {
+                PagerOtherRow(picked: pager.isOtherPicked(at: pager.step), text: typedBinding, disabled: answering,
+                              choose: { pager.chooseOther() }, submit: advance)
+            } else {
+                TextField("Other answer", text: typedBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { advance() }
+                    .disabled(answering)
+            }
+            if pager.ask, pager.isSingle {
+                PagerNoteField(note: $pager.note, disabled: answering)
+            }
         }
     }
 
-    private func optionRow(_ option: SessionRequest.Option, index: Int, multiSelect: Bool) -> some View {
+    private var typedBinding: Binding<String> {
+        Binding(get: { pager.typedAnswer(at: pager.step) }, set: { pager.type($0) })
+    }
+
+    private func optionRow(_ option: SessionRequest.Option, index: Int, multiSelect: Bool, suggested: Bool) -> some View {
         let picked = pager.isPicked(index, at: pager.step)
         let number = index + 1
         return Button {
@@ -111,7 +129,12 @@ struct QuestionPagerView: View {
                 #endif
                 Image(systemName: picked ? (multiSelect ? "checkmark.square.fill" : "largecircle.fill.circle") : (multiSelect ? "square" : "circle"))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(option.label)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(option.label)
+                        if suggested {
+                            SuggestedMark()
+                        }
+                    }
                     if !option.description.isEmpty {
                         Text(option.description).font(.caption).foregroundStyle(RoleStyle(.muted))
                     }
@@ -154,12 +177,21 @@ struct QuestionPagerView: View {
             if !pager.canSubmit {
                 Text("Answer every question to submit.").font(.caption).foregroundStyle(RoleStyle(.muted))
             }
+            if pager.ask {
+                PagerNoteField(note: $pager.note, disabled: answering)
+            }
         }
     }
 
     private var actions: some View {
         HStack {
-            if pager.onReview || (pager.isSingle && !pager.isOneTap) {
+            if pager.ask, pager.onReview || pager.isSingle {
+                let ready = !answering && pager.canSubmit
+                PagerActionButton(title: pager.isSingle ? "Submit" : "Submit answers", prominent: ready, enabled: ready, tint: actionTint, action: advance)
+            } else if pager.ask {
+                let answered = pager.isAnswered(pager.step)
+                PagerActionButton(title: answered ? "Next" : "Skip", prominent: answered, enabled: !answering, tint: actionTint, action: advance)
+            } else if pager.onReview || (pager.isSingle && !pager.isOneTap) {
                 Button(pager.isSingle ? "Submit" : "Submit answers") { advance() }
                     .buttonStyle(.borderedProminent)
                     .disabled(answering || !pager.canSubmit)
@@ -175,19 +207,21 @@ struct QuestionPagerView: View {
                     .disabled(answering)
             }
             Spacer()
-            Button("Decline", role: .destructive) { respond(.deny) }
-                .disabled(answering)
+            if !pager.ask {
+                Button("Decline", role: .destructive) { respond(.deny) }
+                    .disabled(answering)
+            }
         }
     }
 
     private func choose(_ option: Int) {
         focused = true
-        if let answers = pager.choose(option) { respond(.answers(answers)) }
+        if let decision = pager.pick(option) { respond(decision) }
     }
 
     private func advance() {
         guard !answering else { return }
-        if let answers = pager.next() { respond(.answers(answers)) }
+        if let decision = pager.submit() { respond(decision) }
     }
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {

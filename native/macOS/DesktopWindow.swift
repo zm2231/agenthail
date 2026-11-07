@@ -677,7 +677,7 @@ struct ConversationPane: View {
                 .solidContentPane(gaps: gaps)
         } else if let session = pane.displayedSession {
             TranscriptView(pane: pane, session: session, sends: model.localSends[session.id] ?? [])
-                .task(id: SessionPane.requestSyncKey(session)) { await pane.syncRequests(for: session) }
+                .task(id: RequestSync.viewKey(session)) { await pane.syncRequests(for: session) }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), context: pane.detail?.context, inspectorVisible: Binding(get: { pane.inspectorShown }, set: { _ in pane.toggleInspector() }), leadingInset: band ? WindowButtons.headerInset(toggle: showsSidebarToggle) : headerInset, showsTitle: chromeTop == 0, onFocusTerminal: { model.focusInTerminal(session) }, onCall: pane.removedSession?.id == session.id || !session.canCallByVoice ? nil : {
                         voice.route(to: session.id)
@@ -701,16 +701,27 @@ struct ConversationPane: View {
                                     .frame(maxWidth: DesktopColumns.reading)
                                     .padding(.horizontal, DesktopColumns.gutter)
                                     .padding(.top, DesktopSpace.s)
-                            } else if let request = pane.requests?.requests.first, !session.isReadOnly {
+                            } else if let request = pane.requests?.offered(pendingAsk: session.pendingAskID, retired: pane.retiredAsks.retired(in: session.id)).first, !session.isReadOnly {
                                 RequestCard(request: request, answering: pane.answeringRequest != nil, accent: AnyShapeStyle(DesktopPalette.accentText),
                                             respond: { decision in Task { await pane.respond(to: request, decision: decision) } },
                                             leadNow: request.replacedBy.map { model.sessionName($0) },
-                                            withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } })
+                                            withdraw: request.replacedBy == nil ? nil : { Task { await pane.withdraw(request) } },
+                                            asker: session.displayName, attention: AnyShapeStyle(DesktopPalette.attention), surface: nil, actionTint: AnyShapeStyle(DesktopPalette.accent))
                                 .id(request.id)
+                                .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
                                 .scrimSurface(radius: 12)
+                                .floatingEdge(RoundedRectangle(cornerRadius: 12))
                                 .frame(maxWidth: DesktopColumns.reading)
                                 .padding(.horizontal, DesktopColumns.gutter)
                                 .padding(.top, DesktopSpace.s)
+                            } else if let receipt = pane.retiredAsks.receipt(for: session) {
+                                AnswerReceiptRow(receipt: receipt)
+                                    .floatingGlass(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 12))
+                                    .scrimSurface(radius: 12)
+                                    .floatingEdge(RoundedRectangle(cornerRadius: 12))
+                                    .frame(maxWidth: DesktopColumns.reading)
+                                    .padding(.horizontal, DesktopColumns.gutter)
+                                    .padding(.top, DesktopSpace.s)
                             }
                             if let error = pane.requestError {
                                 Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, DesktopSpace.l).padding(.top, DesktopSpace.xs)
