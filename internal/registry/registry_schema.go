@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
+	failed_from TEXT NOT NULL DEFAULT '',
 	dismissed_at TEXT,
 	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	retries INTEGER NOT NULL DEFAULT 0,

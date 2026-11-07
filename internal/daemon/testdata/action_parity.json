@@ -587,6 +587,18 @@
     },
     "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
   },
+  "api/action delivery-delete": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery not found\"}}\n"
+  },
   "api/action delivery-dismiss": {
     "status": 404,
     "header": {
@@ -1653,7 +1665,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
   },
   "api/action send from session": {
     "status": 200,
@@ -2457,7 +2469,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
   },
   "api/action steer from session": {
     "status": 200,
@@ -2481,7 +2493,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
   },
   "api/action steer unknown source": {
     "status": 400,
@@ -3130,6 +3142,18 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"no session ghost on this host\"}}\n"
+  },
+  "api/v1/actions delivery-delete": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"delivery not found\"}}\n"
   },
   "api/v1/actions delivery-dismiss": {
     "status": 404,
@@ -4197,7 +4221,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"bad_gateway\",\"message\":\"the desktop app closed\"}}\n"
   },
   "api/v1/actions send from session": {
     "status": 200,
@@ -5001,7 +5025,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"bad_gateway\",\"message\":\"the runtime broke\"}}\n"
   },
   "api/v1/actions steer from session": {
     "status": 200,
@@ -5025,7 +5049,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
+    "body": "{\"deletable\":true,\"deliveryId\":1,\"error\":{\"code\":\"invalid_request\",\"message\":\"delivery rejected [invalid request]: steer needs a running turn\"}}\n"
   },
   "api/v1/actions steer unknown source": {
     "status": 400,

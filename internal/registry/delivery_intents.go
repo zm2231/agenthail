@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -165,8 +166,14 @@ type DeliveryProblem struct {
 	Message            string               `json:"message"`
 	Reason             string               `json:"reason"`
 	Status             DeliveryIntentStatus `json:"status"`
+	Deletable          bool                 `json:"deletable,omitempty"`
 	At                 time.Time            `json:"at"`
 }
+
+// deletableFailure is a failure recorded before the target took the message:
+// a send refused while its intent was only submitted, or a queue row that
+// failed before any attempt left it unconfirmed.
+const deletableFailure = `di.status='failed' AND di.failed_from IN ('submitted','queued')`
 
 // settledDeliveryFailure matches a failure that no longer needs anyone: a
 // later message from the same sender reached the same target, or it is more
@@ -178,7 +185,7 @@ const settledDeliveryFailure = `di.status='failed' AND (di.updated_at<datetime('
 
 func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
-		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered'
+		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered',(`+deletableFailure+`)
 		FROM delivery_intents di LEFT JOIN message_queue mq ON mq.id=di.notification_queue_id
 		WHERE di.status IN (?,?) AND COALESCE(di.dismissed_at,'')='' AND NOT (`+settledDeliveryFailure+`)
 		ORDER BY di.updated_at DESC, di.id DESC
@@ -190,7 +197,7 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 		var problem DeliveryProblem
 		var status, updatedAt string
 		var notified bool
-		if err := row.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified); err != nil {
+		if err := row.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified, &problem.Deletable); err != nil {
 			return problem, err
 		}
 		problem.AttentionSessionID = deliveryAttentionSession(problem.SourceSessionID, notified)
@@ -304,6 +311,68 @@ func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+func (r *Registry) DeliveryDeletable(id int64) (bool, error) {
+	var deletable bool
+	err := r.db.QueryRow(`SELECT (`+deletableFailure+`) FROM delivery_intents di WHERE di.id=?`, id).Scan(&deletable)
+	return deletable, err
+}
+
+var ErrDeliveryNotDeletable = errors.New("only a message that never reached its session can be deleted")
+
+// DeleteFailedDelivery removes a failure the target never took from every
+// view: the problem is dismissed and its dead queue row canceled, so neither
+// a retry nor the queue brings it back. The delivery history keeps it.
+func (r *Registry) DeleteFailedDelivery(id int64) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var targetSessionID, message string
+	var queueID int64
+	var retries int
+	var deletable, dismissed bool
+	err = tx.QueryRow(`SELECT di.target_session_id,di.message,di.queue_id,di.retries,(`+deletableFailure+`),COALESCE(di.dismissed_at,'')!='' FROM delivery_intents di WHERE di.id=?`, id).Scan(&targetSessionID, &message, &queueID, &retries, &deletable, &dismissed)
+	if err != nil {
+		return false, err
+	}
+	if !deletable {
+		return false, ErrDeliveryNotDeletable
+	}
+	canceledQueue := false
+	if queueID != 0 {
+		res, err := tx.Exec(`UPDATE message_queue SET refused=0,status='canceled',updated_at=datetime('now') WHERE id=? AND status='dead'`, queueID)
+		if err != nil {
+			return false, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		canceledQueue = n == 1
+	}
+	if !dismissed {
+		if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=?`, id); err != nil {
+			return false, err
+		}
+		payload, err := json.Marshal(map[string]any{"deliveryId": id})
+		if err != nil {
+			return false, err
+		}
+		if _, _, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.deleted:%d:%d", id, retries), Type: "delivery.dismissed", EntityID: targetSessionID, Payload: payload, CreatedAt: time.Now().UTC()}); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if !canceledQueue {
+		return !dismissed, nil
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: targetSessionID, QueueID: queueID, Message: message, Result: "deleted after it failed"})
+	return true, r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryIntent, error) {
@@ -504,7 +573,7 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (boo
 	if strings.TrimSpace(failure) == "" {
 		return false, fmt.Errorf("delivery failure reason is required")
 	}
-	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
+	res, err := q.Exec(`UPDATE delivery_intents SET failed_from=status,status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown, DeliveryIntentHeld)
 	if err != nil {
 		return false, err
 	}

@@ -347,7 +347,7 @@ func (d Dispatcher) steer(ctx context.Context, adapter surface.Surface, session 
 			if surface.IsDeliveryOutcomeUnknown(err) {
 				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, MessageID: intent.UUID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 			}
-			d.failIntent(intent, session.ID, err)
+			err = d.failIntent(intent, session.ID, err)
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, SourceSessionID: sourceID, Message: label, Error: err.Error()})
 		return nil, err
@@ -503,7 +503,7 @@ func (d Dispatcher) send(ctx context.Context, adapter surface.Surface, session *
 			return receipt, nil
 		}
 		if intent != nil {
-			d.failIntent(intent, session.ID, err)
+			err = d.failIntent(intent, session.ID, err)
 		}
 		record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error()})
 		return nil, err
@@ -678,18 +678,34 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 // failIntent publishes a durable problem and sender notice only when the
 // provider may have seen the delivery; a refusal before anything started is
 // already returned synchronously and leaves only the history audit.
-func (d Dispatcher) failIntent(intent *registry.DeliveryIntent, sessionID string, failure error) {
+func (d Dispatcher) failIntent(intent *registry.DeliveryIntent, sessionID string, failure error) error {
 	if surface.IsDeliveryUnavailable(failure) {
 		d.discardIntent(intent, sessionID)
-		return
+		return failure
 	}
-	if _, err := d.Registry.FailDeliveryIntentWithNotice(intent.ID, failure.Error()); err != nil {
+	recorded, err := d.Registry.FailDeliveryIntentWithNotice(intent.ID, failure.Error())
+	if err != nil {
 		d.record(registry.HistoryEntry{Kind: "runtime-error", Error: fmt.Sprintf("record delivery %d failure: %s", intent.ID, err)})
 	}
 	if d.ProblemCommitted != nil {
 		d.ProblemCommitted()
 	}
+	if !recorded {
+		return failure
+	}
+	return FailedDeliveryError{DeliveryID: intent.ID, Err: failure}
 }
+
+// FailedDeliveryError is a send refused after its delivery was recorded; the
+// delivery stays as a problem under DeliveryID.
+type FailedDeliveryError struct {
+	DeliveryID int64
+	Err        error
+}
+
+func (e FailedDeliveryError) Error() string { return e.Err.Error() }
+
+func (e FailedDeliveryError) Unwrap() error { return e.Err }
 
 func (d Dispatcher) discardIntent(intent *registry.DeliveryIntent, sessionID string) {
 	if intent == nil {
