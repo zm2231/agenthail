@@ -28,7 +28,11 @@ final class SessionPane: ObservableObject, Identifiable {
         didSet { if archivedTab?.id != oldValue?.id { archivedTabError = nil } }
     }
     @Published private(set) var archivedTabError: String?
-    @Published private(set) var detail: SessionDetail?
+    @Published private(set) var detail: SessionDetail? {
+        didSet { live = nil }
+    }
+    let transcript = TranscriptFeed()
+    private var live: SessionDetail?
     @Published private(set) var detailStale = false
     @Published private(set) var detailRefreshFailed = false
     @Published private(set) var removedSession: SessionState?
@@ -186,7 +190,10 @@ final class SessionPane: ObservableObject, Identifiable {
         clearSelection()
         shownProjectID = id
     }
-    var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
+    var timelineItems: [TimelineItem] {
+        _ = transcript.revision
+        return olderItems + ((live ?? detail)?.timeline?.items ?? [])
+    }
 
     /// Shows a session. With tabs, it opens in the preview tab unless kept,
     /// or switches to the tab it is already in.
@@ -428,7 +435,7 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true, waitForCatchUp: false)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
-            let shown = unpublishedDetail ?? detail
+            let shown = unpublishedDetail ?? live ?? detail
             let previous = shown?.session.id == id ? shown?.timeline : nil
             let fresh = Set(loaded.timeline?.items.map(\.id) ?? [])
             if let previous, let shared = previous.items.firstIndex(where: { fresh.contains($0.id) }) {
@@ -789,7 +796,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func applyMetadata(to id: String) {
-        guard let current = unpublishedDetail ?? detail, current.session.id == id else { return }
+        guard let current = unpublishedDetail ?? live ?? detail, current.session.id == id else { return }
         let merged = metadata.apply(to: current)
         dropUnpublishedDetail()
         detail = merged
@@ -981,7 +988,7 @@ final class SessionPane: ObservableObject, Identifiable {
         // A row that leaves the earlier pages alone must not publish them, or
         // every row re-renders the window.
         var older = olderItems
-        guard removedSession == nil, let current = unpublishedDetail ?? detail, current.session.id == event.sessionId,
+        guard removedSession == nil, let current = unpublishedDetail ?? live ?? detail, current.session.id == event.sessionId,
               let updated = Self.applying(event, to: current, older: &older) else { return false }
         if older != olderItems { olderItems = older }
         if pageReadsInFlight > 0 {
@@ -996,7 +1003,8 @@ final class SessionPane: ObservableObject, Identifiable {
             publishTask = nil
             guard let pending = unpublishedDetail else { return }
             unpublishedDetail = nil
-            detail = pending
+            live = pending
+            transcript.streamed()
             model.detailLoaded(warm(pending), for: pending.session.id)
         }
         return true
