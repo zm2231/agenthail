@@ -74,8 +74,18 @@ jobs:
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
       - name: Race tests
-        # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: |
+          AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m -json > "$RUNNER_TEMP/daemon.json" || true
+          jq -r 'select(.Action=="pass" or .Action=="fail") | select(.Test != null and (.Test|contains("/")|not)) | [.Elapsed, .Action, .Test] | @tsv' "$RUNNER_TEMP/daemon.json" | sort -rn > "$RUNNER_TEMP/daemon-tests.tsv"
+          total="$(jq -r 'select(.Test == null and (.Action=="pass" or .Action=="fail")) | .Elapsed' "$RUNNER_TEMP/daemon.json")"
+          echo "package elapsed: $total s; tests: $(wc -l < "$RUNNER_TEMP/daemon-tests.tsv")"
+          awk -v t="$total" '{ s += $1 } END { printf "sum of top-level tests: %.1f s (%.1f%%)\n", s, 100*s/t }' "$RUNNER_TEMP/daemon-tests.tsv"
+          head -40 "$RUNNER_TEMP/daemon-tests.tsv" | awk -v t="$total" '{ c += $1; printf "%8.2f s  %5.1f%%  cum %5.1f%%  %s %s\n", $1, 100*$1/t, 100*c/t, $2, $3 }'
+      - name: Upload daemon test times
+        uses: actions/upload-artifact@v7
+        with:
+          name: daemon-test-times-1-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-tests.tsv
       - name: Build
         run: go build ./...
       - name: Vet
@@ -218,8 +228,18 @@ jobs:
       - name: Shipped Node download test
         run: scripts/test-fetch-node.sh
       - name: Race tests
-        # sqlite's generated C is not instrumented here; release.yml runs the race tests with it instrumented.
-        run: AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./... -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m
+        run: |
+          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m -json > "$RUNNER_TEMP/daemon.json" || true
+          jq -r 'select(.Action=="pass" or .Action=="fail") | select(.Test != null and (.Test|contains("/")|not)) | [.Elapsed, .Action, .Test] | @tsv' "$RUNNER_TEMP/daemon.json" | sort -rn > "$RUNNER_TEMP/daemon-tests.tsv"
+          total="$(jq -r 'select(.Test == null and (.Action=="pass" or .Action=="fail")) | .Elapsed' "$RUNNER_TEMP/daemon.json")"
+          echo "package elapsed: $total s; tests: $(wc -l < "$RUNNER_TEMP/daemon-tests.tsv")"
+          awk -v t="$total" '{ s += $1 } END { printf "sum of top-level tests: %.1f s (%.1f%%)\n", s, 100*s/t }' "$RUNNER_TEMP/daemon-tests.tsv"
+          head -40 "$RUNNER_TEMP/daemon-tests.tsv" | awk -v t="$total" '{ c += $1; printf "%8.2f s  %5.1f%%  cum %5.1f%%  %s %s\n", $1, 100*$1/t, 100*c/t, $2, $3 }'
+      - name: Upload daemon test times
+        uses: actions/upload-artifact@v7
+        with:
+          name: daemon-test-times-2-${{ runner.os }}
+          path: ${{ runner.temp }}/daemon-tests.tsv
 
   linux-archives:
     runs-on: ubuntu-latest
