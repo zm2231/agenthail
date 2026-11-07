@@ -224,6 +224,63 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testAHostStoppingTheCallEndsTheSystemCallWithoutAnotherStop() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let diagnostics = VoiceCallDiagnostics(file: nil)
+        let model = VoiceOperatorModel(api: api, audio: audio, diagnostics: diagnostics); model.ready = true
+        model.screenAppeared()
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
+        audio.onMessage?("connection", "connected")
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        api.snapshot = try voiceState(phase: "stopping", attempt: start.attemptId)
+        await model.refresh()
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertFalse(model.hasLocalCall)
+        XCTAssertEqual(diagnostics.attempts.last?.terminalCause, "host_stopping")
+        XCTAssertNotNil(model.error)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertFalse(api.actions.contains { $0.action == "stop" })
+        model.close()
+    }
+
+    @MainActor
+    func testAHeartbeatThatFindsTheCallStoppingEndsTheSystemCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        api.heartbeatReply = { try voiceState(phase: "stopping", attempt: $0.attemptId) }
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where audio.ends == 0 { await Task.yield() }
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertFalse(model.hasLocalCall)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(api.actions.filter { $0.action == "heartbeat" }.count, 1)
+        XCTAssertFalse(api.actions.contains { $0.action == "stop" })
+        model.close()
+    }
+
+    @MainActor
+    func testLosingTheHostEndsTheSystemCallAfterTheGrace() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        model.heartbeatInterval = .milliseconds(10); model.heartbeatGrace = .seconds(60)
+        api.heartbeatReply = { _ in throw URLError(.notConnectedToInternet) }
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        audio.onMessage?("connection", "connected")
+        for _ in 0..<500 where api.actions.filter({ $0.action == "heartbeat" }).count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThanOrEqual(api.actions.filter { $0.action == "heartbeat" }.count, 3)
+        XCTAssertEqual(audio.ends, 0, "failed heartbeats inside the grace keep the call")
+        model.heartbeatGrace = .zero
+        for _ in 0..<300 where audio.ends == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertFalse(model.hasLocalCall)
+        model.close()
+    }
+
+    @MainActor
     func testSystemMuteAndEndUpdateTheSameCallModel() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
@@ -626,6 +683,10 @@ final class VoiceTests: XCTestCase {
 }
 
 @MainActor
+private func voiceState(phase: String, attempt: String?) throws -> VoiceState {
+    try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"\#(phase)","attemptId":"\#(attempt ?? "")","events":[],"occupied":false,"truncated":false}"#.utf8))
+}
+
 private final class VoiceFixtureAPI: VoiceServiceClient {
     var holdPrepare = false
     var holdStart = false
@@ -640,6 +701,7 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     var selectError: Error?
     var startError: Error?
     var holdSelect = false
+    var heartbeatReply: ((VoiceAction) throws -> VoiceState)?
     private var ready: VoiceState { try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","events":[],"occupied":false,"truncated":false}"#.utf8)) }
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     var stateCalls = 0
@@ -651,6 +713,7 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
         if action.action == "prepare", let prepareError { throw prepareError }
         if action.action == "select", let selectError { throw selectError }
         if action.action == "start", let startError { throw startError }
+        if action.action == "heartbeat", let heartbeatReply { return try heartbeatReply(action) }
         if action.action == "select" && holdSelect { return await withCheckedContinuation { pending = $0 } }
         if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "stop" && holdStop) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }

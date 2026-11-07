@@ -124,14 +124,19 @@ func sessionEnded(session surface.Session) bool {
 // unretired row loses part of its rollup, and a row that comes back or
 // appears brings its whole family back.
 // Each statement retires one more level of a family.
+// catalogRetireQuery looks each unretired row's session up by id. Its test
+// holds the plan to that: a session subquery that is not keyed by the row's
+// id runs once per row and scans every session each time.
+const catalogRetireQuery = `UPDATE catalog_sessions INDEXED BY catalog_sessions_unretired SET retired=1 WHERE retired=0 AND current=0
+	AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=catalog_sessions.session_id AND s.ended=1 AND s.last_active_ms<?
+		AND (s.host_id<>'' OR (s.surface=? AND (catalog_sessions.misses=0 OR catalog_sessions.misses>=?)))
+		AND CASE WHEN s.parent_session_id='' THEN s.source NOT IN ('subAgent','exec')
+			ELSE NOT EXISTS (SELECT 1 FROM catalog_sessions p WHERE p.session_id=s.parent_session_id AND p.retired=0) END)
+	AND session_id NOT IN (` + catalogNeededSessions + `)`
+
 func retireCatalogRowsTx(tx *sql.Tx, kind surface.SurfaceKind, threshold int, now time.Time) error {
 	for {
-		result, err := tx.Exec(`UPDATE catalog_sessions INDEXED BY catalog_sessions_unretired SET retired=1 WHERE retired=0 AND current=0
-			AND session_id IN (SELECT s.id FROM sessions s WHERE s.ended=1 AND s.last_active_ms<?
-				AND (s.host_id<>'' OR (s.surface=? AND (catalog_sessions.misses=0 OR catalog_sessions.misses>=?)))
-				AND CASE WHEN s.parent_session_id='' THEN s.source NOT IN ('subAgent','exec')
-					ELSE NOT EXISTS (SELECT 1 FROM catalog_sessions p WHERE p.session_id=s.parent_session_id AND p.retired=0) END)
-			AND session_id NOT IN (`+catalogNeededSessions+`)`, now.Add(-catalogRetiredRecency).UnixMilli(), string(kind), threshold)
+		result, err := tx.Exec(catalogRetireQuery, now.Add(-catalogRetiredRecency).UnixMilli(), string(kind), threshold)
 		if err != nil {
 			return err
 		}

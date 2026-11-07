@@ -223,6 +223,43 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testStartAgainAfterAnUnknownOrHaltedCreateSendsANewKey() async throws {
+        let cases: [(reply: (Int, String), offers: Bool)] = [
+            ((502, #"{"error":{"code":"create_unknown","message":"no answer"}}"#), true),
+            ((502, #"{"error":{"code":"initial_turn_failed","message":"first turn rejected"},"session":{"id":"s1","surface":"codex","name":"","status":"idle","lastActive":"2026-10-23T00:00:00Z"}}"#), true),
+            ((502, #"{"error":{"code":"create_failed","message":"launcher refused"}}"#), false),
+        ]
+        for entry in cases {
+            ParityProtocol.state.reset(create: entry.reply)
+            let model = makeModel()
+            _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+            XCTAssertEqual(model.creationCanStartAgain, entry.offers, entry.reply.1)
+            guard entry.offers else { continue }
+            model.startCreationAgain()
+            XCTAssertFalse(model.creationCanStartAgain)
+            XCTAssertNil(model.creationError)
+            _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+            XCTAssertTrue(model.creationCanStartAgain, entry.reply.1)
+            _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+            let keys = ParityProtocol.state.actionIdempotencyKeys
+            XCTAssertEqual(keys.count, 3)
+            XCTAssertNotEqual(keys[0], keys[1], entry.reply.1)
+            XCTAssertEqual(keys[1], keys[2], entry.reply.1)
+        }
+    }
+
+    @MainActor
+    func testANewSessionFormForgetsStartAgain() async throws {
+        ParityProtocol.state.reset(create: (502, #"{"error":{"code":"create_unknown","message":"no answer"}}"#))
+        let model = makeModel()
+        _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+        XCTAssertTrue(model.creationCanStartAgain)
+        model.prepareNewSessionForm()
+        XCTAssertFalse(model.creationCanStartAgain)
+        XCTAssertNil(model.creationError)
+    }
+
+    @MainActor
     func testAnAcceptedLaunchShowsWhatTheLauncherDidNotKeep() async throws {
         let warning = "Submitted to cmux. Its name @x wasn't kept; name it once it appears in the sidebar."
         ParityProtocol.state.reset(create: (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"cmux","warning":"\#(warning)"}"#))

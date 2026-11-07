@@ -101,6 +101,7 @@ final class AgenthailModel {
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     @ObservationIgnored weak var mainWindow: NSWindow?
+    @ObservationIgnored weak var mainBackdrop: WindowBackdrop?
     var onSnapshotRequest: ((SnapshotRequest, AgenthailAPI) -> Void)?
     var onSnapshotClosed: ((String) -> Void)?
     private var panes: [SessionPane] = []

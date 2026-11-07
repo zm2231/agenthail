@@ -77,7 +77,7 @@ func TestReadingTheLimitOfAnExitedSessionAsksNoClaudeCommand(t *testing.T) {
 	fixture, c, sess := usageLimitedFixture(t)
 	transcript := sess.Transcript
 	sess.Transcript, sess.PID, sess.RuntimeKind = "", exitedPID, surface.RuntimeClaudeCLI
-	if found := c.UsageLimitTranscript(sess); found != transcript {
+	if found := c.UsageLimitTranscripts()(sess); found != transcript {
 		t.Fatalf("transcript=%q, want %q", found, transcript)
 	}
 	evidence, err := c.ReadUsageLimit(context.Background(), sess, transcript)
@@ -253,5 +253,40 @@ func TestATurnThatSucceedsAfterTheLimitEndsTheStop(t *testing.T) {
 	}
 	if observation.LimitStop != nil || !observation.SettledAt.Equal(time.Date(2026, 10, 9, 12, 0, 5, 0, time.UTC)) {
 		t.Fatalf("stop=%+v settled=%s", observation.LimitStop, observation.SettledAt)
+	}
+}
+
+func TestASweepOfManySessionsListsTheProjectsOnce(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	fixture := claudetest.New(t)
+	c := NewClaude(nil, fixture.Home)
+	projects := filepath.Join(fixture.Root, "projects")
+	var listings int
+	c.transcripts.readDir = func(dir string) ([]os.DirEntry, error) {
+		if dir == projects {
+			listings++
+		}
+		return os.ReadDir(dir)
+	}
+	want := map[string]string{}
+	for i := range 5 {
+		id := "0000000" + strconv.Itoa(i) + "-0caa-4912-823f-927677775b2b"
+		path := filepath.Join(projects, "project-"+strconv.Itoa(i), id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		want[id] = path
+	}
+	transcript := c.UsageLimitTranscripts()
+	for id, path := range want {
+		if found := transcript(&surface.Session{ID: id, Surface: surface.KindClaude}); found != path {
+			t.Fatalf("%s: transcript=%q, want %q", id, found, path)
+		}
+	}
+	if listings != 1 {
+		t.Fatalf("listed the projects %d times for %d sessions", listings, len(want))
 	}
 }

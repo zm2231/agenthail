@@ -936,9 +936,10 @@ type TurnObservation struct {
 // UsageLimitReader reads what a session's transcript alone says about its
 // usage limits, asking no process that may hold the session.
 type UsageLimitReader interface {
-	// UsageLimitTranscript is the session's transcript, or "" while it has
-	// none.
-	UsageLimitTranscript(*Session) string
+	// UsageLimitTranscripts returns a lookup of a session's transcript, or
+	// "" while it has none, over one listing of the transcripts, so a sweep
+	// lists them once however many sessions it reads.
+	UsageLimitTranscripts() func(*Session) string
 	ReadUsageLimit(ctx context.Context, sess *Session, transcript string) (UsageLimitEvidence, error)
 }
 
