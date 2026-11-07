@@ -350,8 +350,8 @@ func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) 
 		}
 	}
 	if IsCode(err, "held") {
-		// The Claude the refusal named has exited since, and its host has
-		// forgotten the conversation, so the current host may open it now.
+		// The Claude the refusal named may have exited since and its host
+		// forgotten the conversation; the current host answers as it is now.
 		var reopened Session
 		err = c.call(ctx, "open", request, &reopened)
 		return reopened, err
