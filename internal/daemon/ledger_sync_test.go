@@ -406,7 +406,9 @@ func TestABurstOfCapturesReachesTheOwnerWithOneMoreSyncAtMost(t *testing.T) {
 }
 
 func TestWordsCapturedWhileTheOwnerIsDownReachItWhenItIsBack(t *testing.T) {
-	mac, owner, record := widgetOnTwoHostsWith(t, func(f *federation) { f.ledgerSyncEvery = time.Hour })
+	mac, owner, record := widgetOnTwoHostsWith(t, func(f *federation) {
+		f.ledgerSyncEvery, f.retryMin = time.Hour, 50*time.Millisecond
+	})
 	mustLedger(t, mac, "/api/v1/ledger/owner", ledgerOwnerRequest{ProjectKey: widgetKey, Host: "vps"}, nil)
 	sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	owner.gate.proxyDown.Store(true)

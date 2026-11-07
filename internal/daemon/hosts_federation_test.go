@@ -158,8 +158,10 @@ type actionGate struct {
 	drops     atomic.Int32
 	truncate  atomic.Int32
 	proxyDown atomic.Bool
-	older     atomic.Bool
-	streams   atomic.Int64
+	// proxyRefusals counts the requests refused while proxyDown is set.
+	proxyRefusals atomic.Int32
+	older         atomic.Bool
+	streams       atomic.Int64
 	// rootlessPrepare answers a move's prepare as a host that ignores its root.
 	rootlessPrepare atomic.Bool
 	// legacyMetadata, when set, is the session metadata body a host from
@@ -254,6 +256,7 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	t.Helper()
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if n.gate.proxyDown.Load() {
+			n.gate.proxyRefusals.Add(1)
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
 		}
