@@ -508,7 +508,7 @@ struct SessionPaneTest {
 
         var pageRequests = 0
         var requestReads = 0
-        let turnPageJSON = pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":104"#)
+        let turnPageJSON = pageJSON.replacingOccurrences(of: #""journalSeq":100"#, with: #""journalSeq":104,"context":{"usedTokens":5000,"contextWindow":10000,"compacting":false,"compactionCount":0}"#)
             .replacingOccurrences(of: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a1","truncated":false},{"id":"b","kind":"message","role":"assistant","title":"message","text":"b1","truncated":false}"#, with: #"{"id":"a","kind":"message","role":"assistant","title":"message","text":"a2","truncated":false},{"id":"c","kind":"message","role":"assistant","title":"message","text":"c1","truncated":false},{"id":"d","kind":"done","role":"assistant","title":"done","text":"","truncated":false}"#)
         func frame(_ seq: Int, _ json: String) -> String { "id: \(seq)\nevent: item\ndata: \(json)\n\n" }
         let turnRows = [frame(101, row(101, "c", text: "c1")), frame(102, row(102, "a", text: "a2")), frame(103, row(103, "b", op: "remove"))]
@@ -542,6 +542,8 @@ struct SessionPaneTest {
         check(olderPublishes <= 3, "rows that leave the earlier pages alone do not publish them: \(olderPublishes) publishes")
         shownTimelines.stop()
         olderShown.cancel()
+        var completionChanges = 0
+        let completionWatch = streamingPane.objectWillChange.sink { completionChanges += 1 }
         streamingServer.push(frame(104, row(104, "d", kind: "done", text: "")), to: "session-stream")
         let turnDeadline = Date().addingTimeInterval(5)
         while pageRequests < 2, Date() < turnDeadline { try? await Task.sleep(for: .milliseconds(20)) }
@@ -553,6 +555,8 @@ struct SessionPaneTest {
         check(pageRequests == 2, "a streamed turn reloads the page once, when it finishes, not per row: \(pageRequests) page reads")
         check(streamingPane.timelineItems.map(\.id) == ["a", "c", "d", "e"] && streamingPane.timelineItems[0].text == "a2", "a row streamed while the reload was in flight survives it, in the order a reload would show: \(streamingPane.timelineItems.map(\.id))")
         check(streamingPane.streamedRows.isEmpty, "the rows kept for a page read are dropped once it lands: \(streamingPane.streamedRows.count)")
+        check(streamingPane.detail?.context?.usedTokens == 5000 && completionChanges > 0, "a streamed turn's completion still reaches readers outside the transcript: context \(streamingPane.detail?.context?.usedTokens ?? -1), pane changes \(completionChanges)")
+        completionWatch.cancel()
 
         func pageAt(_ seq: Int, _ items: [(String, String)]) -> String {
             let rows = items.map { #"{"id":"\#($0.0)","kind":"message","role":"assistant","title":"message","text":"\#($0.1)","truncated":false}"# }.joined(separator: ",")
