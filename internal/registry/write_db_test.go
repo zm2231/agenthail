@@ -85,7 +85,7 @@ func TestABoundWriteWaitsForTheLockUntilItsDeadline(t *testing.T) {
 
 func TestATransactionStartedBeforeItsDeadlineCommitsAfterIt(t *testing.T) {
 	r := openTestRegistry(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	release, err := r.WriteWithin(ctx)
 	if err != nil {
@@ -95,6 +95,9 @@ func TestATransactionStartedBeforeItsDeadlineCommitsAfterIt(t *testing.T) {
 	tx, err := r.db.Begin()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the transaction did not begin before its deadline, so this run proves nothing")
 	}
 	if _, err := tx.Exec(`CREATE TABLE deadline_mid_transaction (x INTEGER)`); err != nil {
 		t.Fatal(err)
