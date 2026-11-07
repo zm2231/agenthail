@@ -111,6 +111,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	d.registerPermissionsAPI(mux, dashboard)
 	d.registerWebPushAPI(mux, dashboard)
 	d.registerMoveAPI(mux, dashboard)
+	d.registerCoordinatorRelaysAPI(mux, dashboard)
 	d.registerUIAPI(mux, dashboard)
 	d.registerLedgerRoutes(mux, dashboard)
 	mux.HandleFunc(MCPClaimPath, d.apiV1Guard(dashboard, "control", d.apiMCPClaimHandler))

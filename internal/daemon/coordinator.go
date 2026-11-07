@@ -99,7 +99,6 @@ type coordinatorRequest struct {
 	Replace         bool
 	ChangedAt       time.Time
 	ChangedBy       string
-	Successor       string
 	Message         string
 	Author          surface.Author
 	PersonName      string
@@ -360,7 +359,7 @@ func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coo
 		if current.HostID == "" {
 			continue
 		}
-		if err := d.clearPeerCoordinator(ctx, current, changedBy, sessionID); err != nil {
+		if err := d.clearPeerCoordinator(ctx, current, changedBy); err != nil {
 			message := fmt.Sprintf("cannot replace %s: %s", d.coordinatorRef(ctx, current), err)
 			if cleared > 0 {
 				return actionResult{}, actionFailed(http.StatusConflict, "coordinator_conflict", message+fmt.Sprintf("; @%s now coordinates the project here alongside it, and replacing again resolves it", stored.Name))
@@ -383,6 +382,11 @@ func (d *Daemon) assignCoordinator(ctx context.Context, p principal, request coo
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", fmt.Sprintf("@%s now coordinates the project, but the relays of %s stay on it: %s", stored.Name, d.resolveDisplay(previous), err))
 		}
 		d.publishEvent("state.changed", sessionID, map[string]string{"source": "relay"})
+	}
+	for _, current := range existing {
+		if current.HostID != "" {
+			d.handOverPeerRelays(ctx, current, sessionID)
+		}
 	}
 	d.flushCatalog("coordinator " + spec.ProjectID)
 	return actionOK(map[string]any{"ok": true, "coordinator": stored, "replaced": existing}), nil
@@ -420,7 +424,7 @@ func (d *Daemon) clearCoordinator(ctx context.Context, p principal, request coor
 	if request.ProjectID == "" {
 		return actionResult{}, invalidRequest("projectId is required")
 	}
-	requester, fromHost := requestingHost(ctx)
+	_, fromHost := requestingHost(ctx)
 	if fromHost {
 		if !d.coordinatorMu.TryLock() {
 			return actionResult{}, actionFailed(http.StatusConflict, "coordinator_busy", fmt.Sprintf("%s is changing a coordinator; try again", d.hostIdentity().Name))
@@ -444,9 +448,6 @@ func (d *Daemon) clearCoordinator(ctx context.Context, p principal, request coor
 		if err != nil {
 			return actionResult{}, d.coordinatorError(ctx, err)
 		}
-		if fromHost && request.Successor != "" {
-			d.followPeerLead(current, requester, request.Successor)
-		}
 		d.flushCatalog("coordinator " + request.ProjectID)
 		return actionOK(map[string]any{"ok": true, "cleared": cleared}), nil
 	}
@@ -459,7 +460,7 @@ func (d *Daemon) clearCoordinator(ctx context.Context, p principal, request coor
 	if len(remote) > 1 {
 		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_conflict", fmt.Sprintf("the project has coordinators %s; clear it on one of those hosts", d.coordinatorRefs(ctx, remote)))
 	}
-	if err := d.clearPeerCoordinator(ctx, remote[0], changedBy, ""); err != nil {
+	if err := d.clearPeerCoordinator(ctx, remote[0], changedBy); err != nil {
 		return actionResult{}, actionFailed(http.StatusConflict, "coordinator_not_cleared", fmt.Sprintf("cannot clear %s: %s", d.coordinatorRef(ctx, remote[0]), err))
 	}
 	return actionOK(map[string]any{"ok": true, "cleared": remote[0]}), nil
@@ -481,9 +482,8 @@ func sameCoordinator(current, spec registry.CoordinatorSpec, sessionID string) b
 
 // clearPeerCoordinator asks the paired host that owns a coordinator to clear
 // it, provided it has not changed since this host mirrored it, then drops it
-// from the mirror. A successor, this host's session that replaces it, lets
-// that host hand the relays of its lead to it.
-func (d *Daemon) clearPeerCoordinator(ctx context.Context, current registry.CoordinatorSpec, changedBy, successor string) error {
+// from the mirror.
+func (d *Daemon) clearPeerCoordinator(ctx context.Context, current registry.CoordinatorSpec, changedBy string) error {
 	host, found := d.pairedHost(current.HostID)
 	if !found {
 		return fmt.Errorf("its host %s is no longer paired", current.HostID)
@@ -495,11 +495,7 @@ func (d *Daemon) clearPeerCoordinator(ctx context.Context, current registry.Coor
 	if _, raw, qualified := hosts.Split(projectID); qualified {
 		projectID = raw
 	}
-	request := map[string]any{"action": "coordinator-clear", "projectId": projectID, "changedAt": current.ChangedAt, "changedBy": changedBy}
-	if successor != "" {
-		request["successor"] = successor
-	}
-	body, err := json.Marshal(request)
+	body, err := json.Marshal(map[string]any{"action": "coordinator-clear", "projectId": projectID, "changedAt": current.ChangedAt, "changedBy": changedBy})
 	if err != nil {
 		return err
 	}
@@ -526,25 +522,6 @@ func (d *Daemon) leadSession(spec registry.CoordinatorSpec) (string, bool) {
 	_, id, _ := hosts.Split(spec.SessionID)
 	owner, err := d.Registry.SessionHost(id)
 	return id, err == nil && owner == spec.HostID
-}
-
-// followPeerLead hands the relays of this host's former lead to the paired
-// host's session that replaced it. The clear has already happened, so a
-// failure here is logged and the relays stay on the former lead.
-func (d *Daemon) followPeerLead(previous registry.CoordinatorSpec, hostID, successor string) {
-	if previous.SessionID == "" {
-		return
-	}
-	owner, err := d.Registry.SessionHost(successor)
-	if err != nil || owner != hostID {
-		d.log.Printf("coordinator %s: the relays of %s stay on it: this host has no session %s from host %s", previous.ProjectID, previous.SessionID, successor, hostID)
-		return
-	}
-	if err := d.Registry.MoveRelayRoutes(previous.SessionID, successor); err != nil {
-		d.log.Printf("coordinator %s: the relays of %s stay on it: %s", previous.ProjectID, previous.SessionID, err)
-		return
-	}
-	d.publishEvent("state.changed", successor, map[string]string{"source": "relay"})
 }
 
 func (d *Daemon) flushCatalog(what string) {
