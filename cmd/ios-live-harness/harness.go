@@ -21,6 +21,11 @@ type harness struct {
 	scratch    []string
 	trap       net.Listener
 
+	forbidden      []string
+	executables    map[string]bool
+	executableDirs []string
+	probes         probeSet
+
 	// closing refuses control commands once shutdown begins; ops counts the
 	// ones still running, which shutdown waits for before stopping hosts.
 	mu      sync.Mutex
@@ -75,17 +80,22 @@ func newHarness(binary string, count int) (*harness, error) {
 			return nil, fmt.Errorf("seed %s: %w", host.name, err)
 		}
 	}
-	forbidden := []string{home, "/tmp/cc-socks", "/private/tmp/cc-socks"}
+	h.forbidden = []string{home, "/tmp/cc-socks", "/private/tmp/cc-socks"}
+	h.executables, h.executableDirs = executables, executableDirs
 	h.watch = newWatcher(newBackend(), 250*time.Millisecond, func() map[int]scope {
-		roots := map[int]scope{}
+		roots := h.probes.roots()
 		for _, host := range h.hosts {
 			if pid := host.pid(); pid != 0 {
-				roots[pid] = scope{name: host.name, root: host.root, port: host.port, trap: trapPort, forbidden: forbidden, executables: executables, executableDirs: executableDirs}
+				roots[pid] = h.scope(host)
 			}
 		}
 		return roots
 	})
 	return h, nil
+}
+
+func (h *harness) scope(host *host) scope {
+	return scope{name: host.name, root: host.root, port: host.port, trap: host.trap, forbidden: h.forbidden, executables: h.executables, executableDirs: h.executableDirs}
 }
 
 func (h *harness) start(ctx context.Context, control string) error {
@@ -107,6 +117,9 @@ func (h *harness) start(ctx context.Context, control string) error {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "ios-live-harness: %s pid %d on %s, scratch %s\n", host.name, host.pid(), host.endpoint(), host.root)
+	}
+	if err := h.probeTools(); err != nil {
+		return err
 	}
 	fmt.Fprintf(os.Stderr, "ios-live-harness: control %s\n", h.controlURL)
 	return nil
@@ -158,6 +171,7 @@ type hostStatus struct {
 //
 //	GET  /hosts             every host and whether it is running
 //	POST /hosts/{i}/link    a new pairing link for host i
+//	POST /hosts/{i}/reply   append an assistant reply to one of host i's seeded conversations
 //	POST /hosts/{i}/stop    stop host i's daemon
 //	POST /hosts/{i}/start   start host i's daemon again on the same port
 func (h *harness) controlHandler(ctx context.Context) http.Handler {
@@ -199,6 +213,24 @@ func (h *harness) controlHandler(ctx context.Context) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"url": link})
 	}))
+	mux.HandleFunc("POST /hosts/{i}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Conversation int    `json:"conversation"`
+			Text         string `json:"text"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.Text == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send {\"conversation\": n, \"text\": \"...\"}"})
+			return
+		}
+		withHost(func(w http.ResponseWriter, host *host) {
+			id, err := host.appendReply(body.Conversation, body.Text)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"session": id})
+		})(w, r)
+	})
 	mux.HandleFunc("POST /hosts/{i}/stop", withHost(func(w http.ResponseWriter, host *host) {
 		host.stop()
 		writeJSON(w, http.StatusOK, status(host))

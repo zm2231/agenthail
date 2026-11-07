@@ -16,7 +16,7 @@ Each host gets a new directory under the system temp directory, or under `/tmp` 
 - browser sign-in turned off for Claude and Notion;
 - the host name `live-a`, `live-b` and so on;
 - `dashboard.json` serving on `127.0.0.1` at a free port;
-- two ended Claude conversations, with their transcripts. They show under the `recent` and `all` scopes.
+- two ended Claude conversations, with their transcripts. They show under the `recent` and `all` scopes. The second one's folder is a git repository with an ignored `build.log`, so a file list that came from git leaves that file out.
 
 It writes no Claude session records with process IDs, so the daemon has no live process to attach to.
 
@@ -53,6 +53,8 @@ Each violation is printed when it is first seen and again at exit. If the harnes
 
 So that a clean run shows the check looked, the harness also prints each distinct descriptor the first time it sees a host hold it, as `ios-live-harness: saw <host>: <descriptor>`. A client's ephemeral port is left out, and files under system directories such as `/usr/lib/` are listed once per directory. At exit it prints how many samples it took. A run that would otherwise pass fails with exit 3 if the watcher took no samples, or never saw a host's own dashboard listener. When the test command or the setup already failed, that failure's status stands, and the reason is printed beside it. An isolation violation still exits 3 whatever else happened.
 
+A host's own daemon may never run `git` or `sleep` while the watcher looks, because each run lasts milliseconds. So once the hosts are up, the harness runs each of them from every host's `<dir>/bin`, with the host's environment, in a form that waits: `git hash-object --stdin` and `sleep 30`. It treats each one as part of that host until the watcher has seen its program, then stops it. On macOS this checks the `/usr/bin` shims and the developer-directory copies they run. If the watcher never sees one of them, the run fails as if the watcher saw nothing.
+
 What the check cannot see:
 
 - A connection, file or child process that opens and closes between two reads.
@@ -67,6 +69,7 @@ The test command gets the control address in `AGENTHAIL_LIVE_CONTROL`. It also g
 |---|---|
 | `GET /hosts` | `[{"index", "name", "endpoint", "running"}]` |
 | `POST /hosts/{i}/link` | `{"url": "agenthail://pair?..."}`: a new pairing for host `i`, valid for 10 minutes |
+| `POST /hosts/{i}/reply` with `{"conversation": n, "text": "..."}` | appends an assistant reply to host `i`'s seeded conversation `n`, as Claude would, and answers `{"session": id}` |
 | `POST /hosts/{i}/stop` | stops host `i`'s daemon by the process ID the harness recorded |
 | `POST /hosts/{i}/start` | starts it again on the same port and waits until it answers |
 
@@ -86,7 +89,15 @@ The Debug app's `Info.plist` gets `NSAllowsLocalNetworking` from a build phase, 
 
 ## Live UI tests
 
-Live tests are in the `live` tier of `native/ui-test-tiers.txt`, which no pull request, push or `ui-all` run includes. They act on hosts only through the control port. `LiveHostUITests` pairs with `Live A` through the pairing form and checks its two ended conversations are listed under All.
+Live tests are in the `live` tier of `native/ui-test-tiers.txt`, which no pull request, push or `ui-all` run includes. They act on hosts only through the control port, and each pairs through the pairing form:
+
+| Test | Checks |
+|---|---|
+| `LiveHostUITests` pairing | `Live A`'s two ended conversations are listed under All, each once |
+| `LiveHostUITests` reply | a reply written on the host shows in the open conversation without a reload |
+| `LiveHostUITests` down and back | a stopped host's conversation is marked unavailable; once it starts again the conversation is available and a new reply shows live, without relaunching the app |
+| `LiveHostsUITests` two hosts | each host lists its own conversation; stopping one marks only its conversation unavailable |
+| `LiveHostsUITests` file suggestions | typing `@` in the git checkout's conversation lists its files from git on the host, not the ignored one |
 
 To run them on a Mac:
 
@@ -96,7 +107,7 @@ go build -o "$T/ios-live-harness" ./cmd/ios-live-harness
 "$T/ios-live-harness" -agenthail "$T/agenthail" -hosts 2 -- \
   scripts/ios-simulator.sh iphone run xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS \
     -destination "platform=iOS Simulator,name=Agenthail iPhone" -derivedDataPath ~/Library/Developer/Xcode/DerivedData/<name> \
-    -only-testing:AgenthailIOSUITests/LiveHostUITests
+    -only-testing:AgenthailIOSUITests/LiveHostUITests -only-testing:AgenthailIOSUITests/LiveHostsUITests
 ```
 
 ## Nightly run
