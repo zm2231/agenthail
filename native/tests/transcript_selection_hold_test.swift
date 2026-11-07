@@ -63,6 +63,12 @@ struct TranscriptSelectionHoldTest {
 
         expect(!hold.held(over: [row], buttons: 0), "a hold with no anchor holds nothing")
         expect(hold.held(over: [], buttons: 1), "a pressed left button holds the tail")
+        let loose = TranscriptSelectionAnchor.Anchor(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let detached = SelectableText(frame: NSRect(x: 0, y: 200, width: 200, height: 50))
+        detached.hasSelectedText = true
+        loose.addSubview(detached)
+        hold.anchor = loose
+        expect(!hold.held(over: [.infinite], buttons: 0), "an anchor outside any window holds nothing")
         hold.anchor = anchor
         expect(!hold.held(over: [row], buttons: 2), "a right button alone holds nothing")
 
