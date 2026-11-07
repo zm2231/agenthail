@@ -59,11 +59,16 @@ struct SessionPreview: View {
     static var previewAppearance: UIConfig? {
         let arguments = ProcessInfo.processInfo.arguments
         let theme = arguments.firstIndex(of: "--preview-theme").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
-        var values = ["theme": theme ?? "system"]
+        var values: [String: Any] = ["theme": theme ?? "system"]
         if let index = arguments.firstIndex(of: "--preview-backdrop") {
-            values["background"] = index + 1 < arguments.count ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
+            values["background"] = index + 1 < arguments.count && !arguments[index + 1].hasPrefix("--") ? arguments[index + 1] : "mesh: 3x3, #2e1972, #182c58, #0e5671, #2d1655, #386870, #2e3340, #591948, #8a3049, #682e2c"
         } else if theme == nil {
             return nil
+        }
+        for (flag, setting) in zip(arguments, arguments.dropFirst()) where flag == "--preview-value" {
+            let parts = setting.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            values[parts[0]] = Double(parts[1]) ?? parts[1]
         }
         guard let json = try? JSONSerialization.data(withJSONObject: ["rev": "", "problems": [], "chosen": [:], "overrides": [:], "values": values]) else { return nil }
         return try? JSONDecoder().decode(UIConfig.self, from: json)

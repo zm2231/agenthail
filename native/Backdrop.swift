@@ -87,6 +87,14 @@ struct BackdropSpec: Equatable, Sendable {
         var color: BackdropRGB
         var roles: [BackdropRGB]
     }
+
+    var textBoundary: Float {
+        ScrimField.boundary(roles: roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }, polarity: polarity, target: target)
+    }
+
+    var reachablePaneTint: (Float, Float, Float) {
+        ScrimField.reachable((paneTint.x, paneTint.y, paneTint.z), polarity: polarity, boundary: textBoundary)
+    }
 }
 
 struct BackdropStop: Equatable, Sendable {
@@ -139,9 +147,8 @@ enum BackdropRenderer {
             analysis = pooled
         }
 
-        let roles = spec.roles.map { ScrimField.luminance($0.x, $0.y, $0.z) }
-        let boundary = ScrimField.boundary(roles: roles, polarity: spec.polarity, target: spec.target)
-        let paneTint = ScrimField.reachable((spec.paneTint.x, spec.paneTint.y, spec.paneTint.z), polarity: spec.polarity, boundary: boundary)
+        let boundary = spec.textBoundary
+        let paneTint = spec.reachablePaneTint
         var scrimMode = spec.scrimTint
         if case .color(let r, let g, let b) = scrimMode {
             let moved = ScrimField.reachable((r, g, b), polarity: spec.polarity, boundary: boundary)

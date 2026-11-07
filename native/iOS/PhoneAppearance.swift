@@ -307,6 +307,12 @@ final class PhoneAppearance: ObservableObject {
         )
     }
 
+    func solidPaneColor(dark: Bool, target: Float) -> Color {
+        guard active else { return Color(uiColor: .systemBackground) }
+        let tint = spec(Key(surface: .transcript, size: .zero, scale: 1, dark: dark, solid: true, target: target)).reachablePaneTint
+        return Color(.sRGB, red: Double(tint.0), green: Double(tint.1), blue: Double(tint.2))
+    }
+
     private func wallpaperSpec(dark: Bool) -> BackdropSpec.Wallpaper? {
         func rgb(_ c: UIConfig.RGBColor) -> BackdropRGB { BackdropRGB(Float(c.red), Float(c.green), Float(c.blue)) }
         switch config.background(dark: dark) {
