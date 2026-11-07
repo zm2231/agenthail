@@ -31,10 +31,32 @@ type viewFixture struct {
 	fill     func()
 }
 
-func (f *viewFixture) read(t *testing.T, request sessionViewRequest, uncached bool) (string, SessionViewSnapshot) {
+// storedView builds views only from what is stored: a second Registry on the
+// fixture's file and empty daemon caches of registry data, so no cache the
+// served side holds can make both sides agree. Close it before the next write.
+type storedView struct {
+	reg   *registry.Registry
+	moves *limitMoves
+}
+
+func (s *storedView) Close() { s.reg.Close() }
+
+func (f *viewFixture) stored(t *testing.T) *storedView {
 	t.Helper()
-	f.d.presentation.uncached = uncached
-	defer func() { f.d.presentation.uncached = false }()
+	reg, err := registry.OpenCurrent(f.reg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &storedView{reg: reg, moves: newLimitMoves()}
+}
+
+func (f *viewFixture) read(t *testing.T, request sessionViewRequest, stored *storedView) (string, SessionViewSnapshot) {
+	t.Helper()
+	if stored != nil {
+		reg, moves := f.d.Registry, f.d.limitResumes.moves
+		f.d.Registry, f.d.limitResumes.moves, f.d.presentation.uncached = stored.reg, stored.moves, true
+		defer func() { f.d.Registry, f.d.limitResumes.moves, f.d.presentation.uncached = reg, moves, false }()
+	}
 	state, err := f.d.readSessionView(f.ctx, request)
 	if err != nil {
 		return "error: " + err.Error(), state
@@ -371,7 +393,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		}},
 		{"a restart", func(*rand.Rand) { d.presentation.epoch = uuid.NewString() }},
 		{"the clock passing a refresh deadline", func(rng *rand.Rand) {
-			_, state := f.read(t, sessionViewRequest{Scope: "current", Limit: 1}, false)
+			_, state := f.read(t, sessionViewRequest{Scope: "current", Limit: 1}, nil)
 			if state.View != nil && state.View.RefreshAt != nil && rng.Intn(2) == 0 {
 				f.clock = state.View.RefreshAt.Add(time.Second)
 			} else {

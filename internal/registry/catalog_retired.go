@@ -227,9 +227,6 @@ type catalogRetiredCache struct {
 
 // Cached: grouping parses every retired row's project on the current-view path.
 func (r *Registry) catalogRetiredCounts(ctx context.Context, tx *sql.Tx) ([]CatalogRetiredCount, error) {
-	if readCachesBypassed(ctx) {
-		return readRetiredCounts(ctx, tx)
-	}
 	var version int64
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM catalog_retired_version WHERE id=1`).Scan(&version); err != nil {
 		return nil, err

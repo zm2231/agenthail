@@ -61,7 +61,7 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseline := sessionViewSweepRender(t, f, true)
+	baseline := sessionViewStoredRender(t, f)
 	for shard := range sessionViewSweepShards {
 		path := filepath.Join(t.TempDir(), "registry.db")
 		if err := os.WriteFile(path, stored, 0o600); err != nil {
@@ -78,7 +78,7 @@ func TestEveryRegistryValueThatChangesASessionViewMovesItsCacheKey(t *testing.T)
 			copied.d.presentation.clock = func() time.Time { return copied.clock }
 			copied.d.presentation.epoch = f.d.presentation.epoch
 			copied.d.setHostIdentity(f.d.hostIdentity())
-			if sessionViewSweepRender(t, copied, true) != baseline {
+			if sessionViewStoredRender(t, copied) != baseline {
 				t.Fatal("a copy of the fixture's registry renders different session views than the fixture")
 			}
 			sweepSessionViewShard(t, copied, shard, tables)
@@ -92,13 +92,19 @@ const sessionViewSweepShards = 4
 
 var sessionViewSweepRequests = []sessionViewRequest{{Scope: "all", Limit: 200, Members: true}, {Scope: "current", Limit: 200, Members: true}, {Scope: "archived", Limit: 200, Members: true}}
 
-func sessionViewSweepRender(t *testing.T, f *viewFixture, uncached bool) string {
+func sessionViewSweepRender(t *testing.T, f *viewFixture, stored *storedView) string {
 	var out strings.Builder
 	for _, request := range sessionViewSweepRequests {
-		encoded, _ := f.read(t, request, uncached)
+		encoded, _ := f.read(t, request, stored)
 		out.WriteString(encoded)
 	}
 	return out.String()
+}
+
+func sessionViewStoredRender(t *testing.T, f *viewFixture) string {
+	stored := f.stored(t)
+	defer stored.Close()
+	return sessionViewSweepRender(t, f, stored)
 }
 
 func openSweepDB(t *testing.T, path string) *sql.DB {
@@ -119,10 +125,10 @@ func sweepSessionViewShard(t *testing.T, f *viewFixture, shard int, tables []str
 	for _, parent := range queryStrings(t, db, `SELECT DISTINCT f."table" FROM sqlite_schema m, pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f.on_delete='CASCADE'`) {
 		cascades[parent] = true
 	}
-	read := func(uncached bool) string { return sessionViewSweepRender(t, f, uncached) }
-	render := func() string { return read(true) }
+	read := func(stored *storedView) string { return sessionViewSweepRender(t, f, stored) }
+	render := func() string { return sessionViewStoredRender(t, f) }
 	served := func(change string, stored string) {
-		if read(false) != stored {
+		if read(nil) != stored {
 			t.Errorf("after %s, a session view served through the caches differs from one built from the stored data", change)
 		}
 	}
@@ -172,7 +178,7 @@ func sweepSessionViewShard(t *testing.T, f *viewFixture, shard int, tables []str
 				t.Fatalf("after %s, %s could not be written back as the sweep began with it", restored, table)
 			}
 		}
-		if masked(read(false)) != baseline {
+		if masked(read(nil)) != baseline {
 			t.Errorf("after %s, a session view served through the caches differs from one built from the stored data", restored)
 		}
 	}

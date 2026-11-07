@@ -473,7 +473,12 @@ func TestTheRetiredCountsFollowAMovedProject(t *testing.T) {
 	if err := r.read.QueryRow(`SELECT COUNT(*) FROM projects WHERE id='key-b'`).Scan(&moved); err != nil || moved != 1 {
 		t.Fatalf("the archived project did not move: %d %v", moved, err)
 	}
-	stored, err := r.ReadCurrentCatalogPresentation(WithoutReadCaches(context.Background()), func(string, uint64) bool { return false })
+	fresh, err := OpenCurrent(r.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	stored, err := fresh.ReadCurrentCatalogPresentation(context.Background(), func(string, uint64) bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}

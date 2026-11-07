@@ -16,9 +16,11 @@ func TestCachedSessionViewsMatchUncachedAfterEveryKindOfWrite(t *testing.T) {
 	f := newViewFixture(t)
 	compare := func(step string) {
 		t.Helper()
+		stored := f.stored(t)
+		defer stored.Close()
 		for _, request := range f.requests {
-			cached, state := f.read(t, request, false)
-			plain, _ := f.read(t, request, true)
+			cached, state := f.read(t, request, nil)
+			plain, _ := f.read(t, request, stored)
 			if cached != plain {
 				t.Fatalf("after %s, %s %+v differs:\ncached   %s\nuncached %s", step, request.Scope, request.Filters, cached, plain)
 			}
@@ -29,7 +31,7 @@ func TestCachedSessionViewsMatchUncachedAfterEveryKindOfWrite(t *testing.T) {
 					t.Fatal("bad cursor")
 				}
 				next.After = &cursor.After
-				if cachedPage, _ := f.read(t, next, false); cachedPage != first(f.read(t, next, true)) {
+				if cachedPage, _ := f.read(t, next, nil); cachedPage != first(f.read(t, next, stored)) {
 					t.Fatalf("after %s, the next page differs", step)
 				}
 			}
