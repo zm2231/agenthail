@@ -178,10 +178,12 @@ func TestAGoalStoppedAgainAfterResumingIsNoticedAgain(t *testing.T) {
 	f, goals, desktop := goalSweepFixture(t)
 	now := time.Now()
 	f.d.sweepStoppedGoals(context.Background(), now)
-	goals.goal.Status, goals.goal.UpdatedAt = surface.GoalStatusActive, now.Add(time.Second)
+	goals.changeGoal(func(g *surface.GoalState) { g.Status, g.UpdatedAt = surface.GoalStatusActive, now.Add(time.Second) })
 	f.touch(t, now.Add(time.Second))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(time.Second))
-	goals.goal.Status, goals.goal.UpdatedAt = surface.GoalStatusUsageLimited, now.Add(2*time.Second)
+	goals.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusUsageLimited, now.Add(2*time.Second)
+	})
 	f.touch(t, now.Add(2*time.Second))
 	f.d.sweepStoppedGoals(context.Background(), now.Add(2*time.Second))
 	if notices := f.notices(t); len(notices) != 2 || !strings.Contains(notices[1].Message, "usage limit") {

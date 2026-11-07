@@ -48,7 +48,9 @@ func queuedTo(t *testing.T, r *registry.Registry, sessionID string) []registry.Q
 
 func TestABlockedGoalOnAGoalCompletedRouteIsReportedOnceWithHowToResume(t *testing.T) {
 	d, r, fake, from, to := goalRelayFixture(t, false)
-	fake.goal.Status, fake.goal.Reason, fake.goal.UpdatedAt = surface.GoalStatusBlocked, "needs the staging password", time.Now()
+	fake.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.Reason, g.UpdatedAt = surface.GoalStatusBlocked, "needs the staging password", time.Now()
+	})
 	finishTurn(d, fake, &from, "stuck")
 	finishTurn(d, fake, &from, "still-stuck")
 	reports := queuedTo(t, r, to.ID)
@@ -65,11 +67,15 @@ func TestABlockedGoalOnAGoalCompletedRouteIsReportedOnceWithHowToResume(t *testi
 func TestAGoalThatIsBlockedThenResumedAndCompletedReportsTheStopThenTheResultOnAOnceRoute(t *testing.T) {
 	d, r, fake, from, to := goalRelayFixture(t, true)
 	finishTurn(d, fake, &from, "working")
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusUsageLimited, time.Now()
+	fake.changeGoal(func(g *surface.GoalState) { g.Status, g.UpdatedAt = surface.GoalStatusUsageLimited, time.Now() })
 	finishTurn(d, fake, &from, "limited")
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusActive, time.Now().Add(time.Second)
+	fake.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusActive, time.Now().Add(time.Second)
+	})
 	finishTurn(d, fake, &from, "resumed")
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusComplete, time.Now().Add(2*time.Second)
+	fake.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusComplete, time.Now().Add(2*time.Second)
+	})
 	finishTurn(d, fake, &from, "done")
 	finishTurn(d, fake, &from, "after")
 	reports := queuedTo(t, r, to.ID)
@@ -84,11 +90,15 @@ func TestAGoalThatIsBlockedThenResumedAndCompletedReportsTheStopThenTheResultOnA
 
 func TestAGoalStoppedAgainAfterResumingIsReportedAgain(t *testing.T) {
 	d, r, fake, from, to := goalRelayFixture(t, false)
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusBudgetLimited, time.Now()
+	fake.changeGoal(func(g *surface.GoalState) { g.Status, g.UpdatedAt = surface.GoalStatusBudgetLimited, time.Now() })
 	finishTurn(d, fake, &from, "first-stop")
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusActive, time.Now().Add(time.Second)
+	fake.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusActive, time.Now().Add(time.Second)
+	})
 	finishTurn(d, fake, &from, "resumed")
-	fake.goal.Status, fake.goal.UpdatedAt = surface.GoalStatusBudgetLimited, time.Now().Add(2*time.Second)
+	fake.changeGoal(func(g *surface.GoalState) {
+		g.Status, g.UpdatedAt = surface.GoalStatusBudgetLimited, time.Now().Add(2*time.Second)
+	})
 	finishTurn(d, fake, &from, "second-stop")
 	reports := queuedTo(t, r, to.ID)
 	if len(reports) != 2 || !strings.Contains(reports[1].Message, "agenthail goal from budget <tokens>") {

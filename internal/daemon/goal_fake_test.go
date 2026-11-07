@@ -43,3 +43,11 @@ func (g *fakeGoal) read() (*surface.GoalState, error) {
 	}
 	return goal, err
 }
+
+func (g *fakeGoal) changeGoal(change func(*surface.GoalState)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	next := *g.goal
+	change(&next)
+	g.goal = &next
+}
