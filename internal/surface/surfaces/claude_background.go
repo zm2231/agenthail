@@ -28,7 +28,9 @@ func (c *Claude) claudeBackground(ctx context.Context, sess *surface.Session) *s
 }
 
 // hostBackground reads the tasks Claude last reported to the host. A host that
-// predates task listing reports none, and ok is false.
+// predates task listing reports none, and ok is false. A task that has ended
+// still runs until the turn that tells the model starts, since Claude is idle
+// with no task in between and the session's work is not done.
 func (c *Claude) hostBackground(ctx context.Context, sess *surface.Session) (*surface.BackgroundTasks, bool) {
 	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
 	if !ok || listed.Tasks == nil {
@@ -38,7 +40,14 @@ func (c *Claude) hostBackground(ctx context.Context, sess *surface.Session) (*su
 	for _, task := range listed.Tasks {
 		tasks = append(tasks, surface.BackgroundTask{ID: task.ID, Kind: claudeTaskKind(task.Type), Description: task.Description, ParentID: task.ParentID, Ambient: task.Ambient, Since: task.Since.UTC()})
 	}
-	return backgroundOf(tasks, surface.BackgroundSourceHost), true
+	background := backgroundOf(tasks, surface.BackgroundSourceHost)
+	if listed.TaskTurnOwed && !surface.BackgroundRunning(background) {
+		if background == nil {
+			background = &surface.BackgroundTasks{Source: surface.BackgroundSourceHost}
+		}
+		background.Running = true
+	}
+	return background, true
 }
 
 // claudeTaskKind names Claude's task types by what they are.

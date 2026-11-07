@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -46,6 +48,51 @@ func TestAHostSessionReportsTheBackgroundTasksItsHostLists(t *testing.T) {
 	}
 	testkit.Eventually(t, "the tasks to end", 15*time.Second, func() bool {
 		return listedSession(t, c, id).BackgroundTasks == nil
+	})
+}
+
+func TestAHostSessionWhoseTaskEndedIsNotDoneUntilTheTurnThatReportsItRuns(t *testing.T) {
+	release := filepath.Join(t.TempDir(), "notify")
+	t.Setenv("FAKE_CLAUDE_NOTIFY_RELEASE", release)
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	fixture.Open(t, client, id)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "BACKGROUND 200"}); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the task to end on the host", 15*time.Second, func() bool {
+		listing, err := client.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, listed := range listing.Sessions {
+			if listed.SessionID == id {
+				return listed.State == "idle" && len(listed.Tasks) == 0 && listed.TaskTurnOwed
+			}
+		}
+		return false
+	})
+	sess := listedSession(t, c, id)
+	observation, err := c.Observe(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Status != surface.StatusIdle || !surface.BackgroundRunning(observation.BackgroundTasks) {
+		t.Fatalf("between the task ending and the turn that reports it: status=%s background=%+v", observation.Status, observation.BackgroundTasks)
+	}
+	ended := observation.CompletedTurnID
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the turn that reports the task to finish the work", 15*time.Second, func() bool {
+		observation, err := c.Observe(ctx, listedSession(t, c, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return observation.CompletedTurnID != ended && observation.ActiveTurnID == "" && !surface.BackgroundRunning(observation.BackgroundTasks)
 	})
 }
 

@@ -288,13 +288,28 @@ function finish(id, { turn = true } = {}) {
   if (!process.env.FAKE_CLAUDE_LEVEL_FIRST) setTasks();
   if (!turn) return;
   const gap = Number(process.env.FAKE_CLAUDE_NOTIFY_AFTER_MS ?? 100);
-  turns = turns.then(() => new Promise((resolve) => setTimeout(resolve, gap))).then(() => notified(id));
+  turns = turns.then(() => new Promise((resolve) => setTimeout(resolve, gap))).then(notifyReleased).then(() => notified(id));
+}
+
+// notifyReleased holds the notification turn until FAKE_CLAUDE_NOTIFY_RELEASE
+// exists, when it is set.
+function notifyReleased() {
+  const release = process.env.FAKE_CLAUDE_NOTIFY_RELEASE;
+  if (!release) return undefined;
+  return new Promise((resolve) => {
+    const poll = setInterval(() => {
+      if (!fs.existsSync(release)) return;
+      clearInterval(poll);
+      resolve();
+    }, 20);
+  });
 }
 
 function notified(id) {
   state('running');
   const reply = `notified:${id}`;
   fs.appendFileSync(transcript, JSON.stringify({ uuid: null, text: '<task-notification>', reply, origin: { kind: 'task-notification' }, priority: null, pid: process.pid, inputClosed }) + '\n');
+  claudeTranscript(crypto.randomUUID(), `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n</task-notification>`, reply);
   write({ type: 'assistant', uuid: crypto.randomUUID(), session_id: sessionId, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, uuid: crypto.randomUUID(), session_id: sessionId, duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, modelUsage: modelUsage() });
   state('idle');
