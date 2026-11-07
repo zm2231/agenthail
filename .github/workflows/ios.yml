@@ -51,7 +51,7 @@ jobs:
           yq '.targets[].sources[].path' native/project.yml > "$RUNNER_TEMP/sources"
           test -s "$RUNNER_TEMP/sources"
           git diff --name-only --no-renames "$BASE" HEAD > "$RUNNER_TEMP/changed"
-          inputs=(native/project.yml native/Agenthail.xcodeproj scripts/ios-simulator.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
+          inputs=(native/project.yml native/Agenthail.xcodeproj scripts/ios-simulator.sh scripts/ios-test-stall-guard.sh scripts/test-xcodegen-project.sh .github/workflows/ios.yml)
           while read -r source; do inputs+=("native/$source"); done < "$RUNNER_TEMP/sources"
           ios=false
           while read -r file; do
@@ -70,6 +70,13 @@ jobs:
       DERIVED: ${{ github.workspace }}/../ios-derived
     steps:
       - uses: actions/checkout@v5
+      - name: Check crash reporter dialogs are off
+        if: runner.environment == 'self-hosted'
+        run: |
+          if [ "$(defaults read com.apple.CrashReporter DialogType 2>/dev/null)" != none ]; then
+            echo "::error::Crash reporter dialogs are not turned off for this runner's user, so every UI test teardown can wait about 300 s on one. Run 'defaults write com.apple.CrashReporter DialogType none' as that user. See Crash reporter dialogs in docs/maintainers/self-hosted-ci.md."
+            exit 1
+          fi
       - name: Boot simulator
         env:
           AGENTHAIL_SIMULATOR_NAME: ${{ runner.environment == 'self-hosted' && format('Agenthail CI {0}', runner.name) || '' }}
@@ -84,7 +91,7 @@ jobs:
       - name: iOS simulator tests
         run: |
           rm -rf "$RUNNER_TEMP/ios-tests.xcresult"
-          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
+          scripts/ios-test-stall-guard.sh xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO -collect-test-diagnostics never -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your computer, or take a photo to send to an agent."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
